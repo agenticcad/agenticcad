@@ -7,6 +7,8 @@ features, patch bumps fix things. The version shown in the UI header comes from 
 ### Changed
 - Renamed the app to **AgenticCAD** (repository `agenticcad/agenticcad`); identifiers, env vars
   (`AGENTICCAD_*`) and paths follow. Added `requirements.txt` and install notes.
+### Added
+- Licence: PolyForm Noncommercial 1.0.0 (free for non-commercial use; commercial licensing on request).
 
 ## [0.9.0] — 2026-09-22
 ### Added

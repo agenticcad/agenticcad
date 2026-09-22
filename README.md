@@ -11,6 +11,8 @@ browser (three.js viewer + chat)  <-- websocket -->  server.py (FastAPI)
                                                         `-- workspace/   model.py (current script), history/, exports/
 ```
 
+> Free for non-commercial use under the PolyForm Noncommercial 1.0.0 licence. Commercial use requires a licence — see [Licence](#licence).
+
 ## Run
 
 ```bash
@@ -258,3 +260,12 @@ Pre-1.0: minor bump for features, patch bump for fixes. `/api/version` serves bo
 - Face ids are renumbered on every rebuild (OCCT explorer order); the agent re-inspects instead of tracking identity.
 - No edge/vertex picking yet; no sketch UI (agent-native by design).
 - CAM not started.
+
+## Licence
+
+AgenticCAD is **free for non-commercial use** under the
+[PolyForm Noncommercial License 1.0.0](LICENSE): personal projects, research, education, hobby making,
+and use by charities, schools and public institutions. See the LICENSE file for the exact terms.
+
+**Commercial use** (using it in a business, in products or services, or as part of paid work) needs a
+commercial licence. Contact **morzel@prodevelop.com.au** for licensing options and costs.
