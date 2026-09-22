@@ -1,0 +1,37 @@
+[
+ {
+  "id": "first-part",
+  "title": "Your first part",
+  "minutes": 3,
+  "intro": "Describe a part in plain words. The agent writes build123d code, the exact kernel builds it, and the viewer updates. You never see a sketch unless you want one.",
+  "steps": 11
+ },
+ {
+  "id": "select-face",
+  "title": "Point at a face and ask",
+  "minutes": 2,
+  "intro": "Click geometry in the viewer to talk about it. The selection travels with your message as exact type, centre and normal, so the agent picks the same face in code.",
+  "steps": 10
+ },
+ {
+  "id": "sketch-to-boss",
+  "title": "Sketch by hand, build with the agent",
+  "minutes": 3,
+  "intro": "Fusion-style sketches on any flat face: draw rectangles, circles, polygons and slots, and they become a real Sketch variable in the script that either of you can extrude, cut or revolve.",
+  "steps": 8
+ },
+ {
+  "id": "ribbon",
+  "title": "Tweak it by hand \u2014 still code",
+  "minutes": 3,
+  "intro": "The ribbon works like a desktop CAD tool: pick a face or edges, type a number, OK. Under the hood every operation is written into the script, so hand edits and agent edits live in the same file.",
+  "steps": 8
+ },
+ {
+  "id": "cam",
+  "title": "CAM in five minutes",
+  "minutes": 4,
+  "intro": "Ask for a program and get real toolpaths: facing, constant-engagement adaptive roughing, drilling, a tabbed outline, and GRBL G-code with arcs and tool changes \u2014 checked against your machine's limits.",
+  "steps": 10
+ }
+]

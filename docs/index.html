@@ -1,0 +1,294 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Documentation — AgenticCAD</title>
+<meta name="description" content="AgenticCAD documentation: install, the workspace, design as script, chat and selection, ribbon tools, sketches, threads, parameters, measure, drawings, library, CAM, settings, agent tools, tests and evals.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M16 3 28 9.5v13L16 29 4 22.5v-13L16 3Z' fill='none' stroke='%234ea1ff' stroke-width='2'/%3E%3Ccircle cx='16' cy='16' r='4' fill='%23ff8c42'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../assets/site.css?v=0.9.1">
+<style>
+  .docs{display:grid;grid-template-columns:250px 1fr;gap:56px;padding:44px 0 80px}
+  .toc{position:sticky;top:76px;align-self:start;max-height:calc(100vh - 100px);overflow:auto;font-size:13px;padding-right:8px}
+  .toc .g{font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--dim);margin:16px 0 6px}
+  .toc a{display:block;color:var(--muted);padding:4px 10px;border-left:2px solid transparent;border-radius:0 6px 6px 0}
+  .toc a:hover{color:var(--text);text-decoration:none;background:rgba(255,255,255,.03)}
+  .toc a.on{color:var(--text);border-left-color:var(--accent)}
+  .doc{min-width:0;max-width:820px}
+  .doc h1{font-size:clamp(30px,4vw,44px);margin-bottom:10px}
+  .doc h2{font-size:26px;margin:64px 0 14px;padding-top:18px;border-top:1px solid var(--line);scroll-margin-top:80px}
+  .doc h3{font-size:17px;margin:28px 0 8px;scroll-margin-top:80px}
+  .doc p,.doc li{color:#cfd6df;font-size:15px}
+  .doc ul{padding-left:20px}.doc li{margin:4px 0}
+  .doc .lead{font-size:17px;color:var(--muted)}
+  .doc pre{font-size:12.5px}
+  .kbdt td:first-child{white-space:nowrap}
+  .fig{border:1px solid var(--line);border-radius:12px;overflow:hidden;margin:14px 0 22px}
+  .fig img{display:block;width:100%}
+  .fig figcaption{padding:8px 12px;font-size:12px;color:var(--muted);border-top:1px solid var(--line);background:var(--bg2)}
+  @media(max-width:900px){.docs{grid-template-columns:1fr;gap:20px}.toc{position:static;max-height:none;display:flex;flex-wrap:wrap;gap:2px}.toc .g{width:100%}}
+</style>
+</head>
+<body>
+<script type="module">import { nav } from '../assets/nav.js'; nav('../', 'docs');</script>
+<div class="wrap docs">
+  <aside class="toc" id="toc">
+    <div class="g">Start</div><a href="#overview">Overview</a><a href="#install">Install and run</a><a href="#workspace">The workspace</a>
+    <div class="g">Design</div><a href="#script">Design as script</a><a href="#chat">Chat and selection</a><a href="#images">Reference images</a><a href="#bodies">Bodies and the Browser</a><a href="#ribbon">Ribbon tools</a><a href="#sketches">Sketches</a><a href="#threads">Threads</a><a href="#params">Parameters</a><a href="#measure">Measure</a><a href="#drawings">Shop drawings</a><a href="#library">Part library</a><a href="#step">STEP import and export</a><a href="#fidelity">Fidelity</a>
+    <div class="g">CAM</div><a href="#cam">CAM overview</a><a href="#machines">Machines and tools</a><a href="#ops">Operations</a><a href="#adaptive">Adaptive clearing</a><a href="#post">Post and G-code</a>
+    <div class="g">Agent</div><a href="#settings">Settings and MCP</a><a href="#tools">Agent tools reference</a>
+    <div class="g">Reference</div><a href="#shortcuts">Keyboard shortcuts</a><a href="#files">Files and API</a><a href="#versioning">Versioning</a><a href="#tests">Tests and evals</a><a href="#gaps">Known gaps and roadmap</a><a href="#licence">Licence</a>
+  </aside>
+  <main class="doc">
+    <div class="eyebrow">Documentation · v0.9.x</div>
+    <h1>AgenticCAD documentation</h1>
+    <p class="lead">Everything the app does, how it stores it, and how to drive it by chat, by hand, or from the agent's tools. For a guided walk-through, start with the <a href="../tutorials/">tutorials</a>.</p>
+
+    <h2 id="overview">Overview</h2>
+    <p>AgenticCAD is a browser CAD/CAM workspace with a Claude agent inside it. A <b>design is a Python script</b> written against <a href="https://build123d.readthedocs.io">build123d</a>; the exact OCCT kernel executes it and the three.js viewer shows the result. The agent edits that script through tools; you edit it through chat, through the Fusion-style ribbon, the parameters panel and the sketch editor, or directly in the Code tab. All routes end in the same file.</p>
+<pre><code>browser (three.js viewer · ribbon · sketch editor · chat)  ⇄ websocket ⇄  server.py (FastAPI)
+                                                                    ├─ agent.py       Claude Agent SDK session + in-process MCP tools
+                                                                    ├─ cad_kernel.py  build123d exec, exact B-rep, display meshing, export
+                                                                    ├─ cam_kernel.py  2.5D / 3D toolpaths, GRBL post
+                                                                    ├─ drawing.py · threads.py · library.py · script_edit.py
+                                                                    └─ workspace/     designs, library, machines, tools, history, exports</code></pre>
+    <div class="callout">Single machine, single user. One design and one agent session per server process. See <a href="#gaps">known gaps</a>.</div>
+
+    <h2 id="install">Install and run</h2>
+    <p>Requirements: Python 3.12, a Claude Code login (the Agent SDK's bundled binary uses it) or an <code>ANTHROPIC_API_KEY</code>, and a modern browser.</p>
+<pre><code>git clone https://github.com/agenticcad/agenticcad.git
+cd agenticcad
+python3 -m venv .venv &amp;&amp; .venv/bin/pip install -r requirements.txt
+.venv/bin/python server.py            # http://127.0.0.1:8765</code></pre>
+    <table class="table"><tr><th>Variable</th><th>Effect</th></tr>
+      <tr><td><code>PORT</code></td><td>Listen port (default 8765).</td></tr>
+      <tr><td><code>ANTHROPIC_API_KEY</code></td><td>Use an API key instead of the Claude Code login.</td></tr>
+      <tr><td><code>AGENTICCAD_MODEL</code></td><td>Model id override (the Settings dialog is the usual way).</td></tr>
+      <tr><td><code>AGENTICCAD_WORKSPACE</code></td><td>Workspace directory (default <code>./workspace</code>).</td></tr>
+      <tr><td><code>AGENTICCAD_NO_AGENT=1</code></td><td>Run the server without a Claude session (used by the tests).</td></tr></table>
+
+    <h2 id="workspace">The workspace</h2>
+    <figure class="fig"><img src="../assets/img/hero.png" alt="The AgenticCAD workspace"><figcaption>Side panel (Chat, Code, CAM, Design, Library) on the left; viewer with the ribbon, Browser tree, ViewCube and bottom toolbar on the right.</figcaption></figure>
+    <ul>
+      <li><b>Side panel</b>: Chat (the conversation with selection chips and images), Code (the script with syntax highlighting; edit and Run with <kbd>⌘↩</kbd> to rebuild without the agent; switch between <code>design.py</code> and <code>cam.py</code>), CAM (setup, operations, warnings, libraries, feeds calculator, G-code), Design (parameters, measure, drawings, import), Library. Drag the divider to resize, double-click to reset, <kbd>⌘B</kbd> to hide.</li>
+      <li><b>Viewer</b>: orbit, pan and zoom with the mouse; the <b>ViewCube</b> snaps to faces, edges and corners and its <code>⌂</code> is the home view. Bottom toolbar: Fit, Edges, display-mesh quality (draft / normal / fine), Undo, Toolpaths and Stock toggles.</li>
+      <li><b>Browser</b>: the body tree with visibility dots, context menus (rename, delete, hide, zoom, export, save to library, move/rotate) and a Sketches section. <b>+ Body</b> and <b>+ Part</b> add primitives and library parts.</li>
+      <li><b>File menu</b>: New, Open, Save, Save as, Import .py, Download .py, Import STEP, Export STEP, Export STL (resolution dialog), Shop drawings.</li>
+      <li><b>Header</b>: design name (with <code>•</code> when unsaved), version badge (click for the changelog), Settings <code>⚙</code>.</li>
+    </ul>
+
+    <h2 id="script">Design as script</h2>
+    <p>A design is one build123d script that assigns <code>result</code>. The kernel executes it in a namespace that also provides <code>import_step</code>, <code>from_library</code> and the thread helpers.</p>
+<pre><code><span class="hl-c"># Mounting plate with a bossed bore</span>
+plate_l, plate_w, plate_t = <span class="hl-n">60</span>, <span class="hl-n">40</span>, <span class="hl-n">8</span>
+boss_d, boss_h, bore_d = <span class="hl-n">20</span>, <span class="hl-n">15</span>, <span class="hl-n">8</span>
+<span class="hl-k">with</span> <span class="hl-t">BuildPart</span>() <span class="hl-k">as</span> plate:
+    <span class="hl-t">Box</span>(plate_l, plate_w, plate_t)
+    <span class="hl-k">with</span> <span class="hl-t">Locations</span>((<span class="hl-n">0</span>, <span class="hl-n">0</span>, plate_t / <span class="hl-n">2</span>)):
+        <span class="hl-t">Cylinder</span>(boss_d / <span class="hl-n">2</span>, boss_h, align=(Align.CENTER, Align.CENTER, Align.MIN))
+    <span class="hl-t">Hole</span>(bore_d / <span class="hl-n">2</span>)                 <span class="hl-c"># note: Hole takes a radius</span>
+result = {<span class="hl-s">"Plate"</span>: plate.part}</code></pre>
+    <ul>
+      <li><code>result</code> may be a single shape, a dict of named bodies, or nested dicts for components: <code>{"Base": {"Bracket": b, "Washer": w}, "Pin": pin}</code>. A shape with disjoint solids is split into bodies automatically.</li>
+      <li>Top-level <code>name = number</code> lines are <b>parameters</b> (see <a href="#params">Parameters</a>).</li>
+      <li>Every successful build is saved to <code>workspace/history/&lt;ms&gt;.py</code>; <b>Undo</b> steps back through them.</li>
+      <li>Manual operations rewrite the script with an AST-based editor (<code>script_edit.py</code>): rename/delete bodies, add bodies, set parameters, sketch blocks, and <em>wrap the body expression</em> for ribbon operations, hoisting <code>_plate = plate.part</code> before <code>result</code> when the body is referenced more than once.</li>
+      <li>The agent receives a <code>[Note]</code> whenever you change the script out of band (open, import, undo, hand edit, ribbon operation), so it re-reads the code before editing.</li>
+    </ul>
+
+    <h2 id="chat">Chat and selection</h2>
+    <p>Click a face, an edge or a body in the viewer (or a row in the Browser) and it becomes a chip on the composer. <kbd>⇧</kbd>-click for several. The sent message keeps its chips and the server expands them into a <code>[Selected geometry]</code> block: face id, body, analytic type, centre, normal, size, radius and the clicked point. Because face ids are renumbered on every rebuild, the agent is told to reference faces by geometry (<code>faces().sort_by_distance((x, y, z))[0]</code>) and to re-inspect after building. Hover a chip later to see a marker where that face was; click it to reselect the matching face by type and centre.</p>
+    <p>Selected faces stay lit (dimmer orange) while the agent works, until the next rebuild or click. Sketches are selectable as chips too.</p>
+
+    <h2 id="images">Reference images</h2>
+    <p>Attach photos, napkin sketches or old drawings with 📎, by dragging onto the composer or viewer, or by pasting. Images are downscaled in the browser (≤1600 px JPEG), sent inline so the agent sees them directly, kept as thumbnails in the bubble and saved to <code>workspace/images/</code>. Dimensions you type override what it estimates from the picture.</p>
+
+    <h2 id="bodies">Bodies and the Browser</h2>
+    <ul>
+      <li>Click a body to select it (chip); the dot toggles visibility (kept across rebuilds by path); double-click zooms to it.</li>
+      <li>Right-click or <code>⋯</code>: <b>Rename…</b>, <b>Delete</b>, Hide/Show, Zoom to, Export STEP/STL of that body, <b>Save to library…</b>, <b>Move / rotate…</b> (wraps the body expression in <code>Pos(...) * Rot(...) * (...)</code>).</li>
+      <li>Rename and Delete rewrite the script directly when the body is a literal key in <code>result = {...}</code>; otherwise the request is handed to the agent. Deleting the last body at a level is refused.</li>
+      <li><b>+ Body</b>: box, cylinder or sphere with dimensions and centre. <b>+ Part</b>: insert from the library.</li>
+      <li>Sketches ▸ <code>⋯</code> ▸ <b>Extrude…</b>: distance, direction, and new body / join / cut.</li>
+    </ul>
+
+    <h2 id="ribbon">Ribbon tools</h2>
+    <p>The ribbon at the top of the viewer gives you Fusion-style manual modelling without an agent turn. A tool opens a <b>command dialog</b> under the ViewCube that walks you through it: step indicator, a live prompt (“Click a face…”), chips for what you picked (× to drop), fields with units (<kbd>↑</kbd><kbd>↓</kbd> ±1, <kbd>⇧</kbd> ±10, <kbd>⌥</kbd> ±0.1), <kbd>↵</kbd> OK, <kbd>⌫</kbd> removes the last pick, <kbd>Esc</kbd> cancels.</p>
+    <table class="table"><tr><th>Tool</th><th>Key</th><th>Picks</th><th>Written to the script</th></tr>
+      <tr><td>Box / Cylinder / Sphere</td><td><kbd>B</kbd> <kbd>C</kbd> <kbd>O</kbd></td><td>a face (or the grid)</td><td>a new body placed with its base on the face along its normal</td></tr>
+      <tr><td>Sketch</td><td><kbd>K</kbd></td><td>a planar face, or none for a base plane</td><td>a sketch block (see <a href="#sketches">Sketches</a>)</td></tr>
+      <tr><td>Press/Pull</td><td><kbd>Q</kbd></td><td>a planar face; drag the handle or type</td><td><code>body + extrude(face_at(pt), amount, dir)</code>, or <code>-</code> to cut</td></tr>
+      <tr><td>Hole</td><td><kbd>H</kbd></td><td>a point on a face</td><td><code>hole(body, d, at, depth|through)</code> with counterbore/countersink, or <code>tap(body, "M4", …)</code></td></tr>
+      <tr><td>Fillet / Chamfer</td><td><kbd>F</kbd> <kbd>X</kbd></td><td>edges, or a face for all its edges</td><td><code>body.fillet(r, [...])</code> / <code>body.chamfer(l, None, [...])</code></td></tr>
+      <tr><td>Shell</td><td><kbd>L</kbd></td><td>faces to open</td><td><code>offset(body, amount=-t, openings=[...])</code></td></tr>
+      <tr><td>Move</td><td><kbd>V</kbd></td><td>a body</td><td><code>Pos(...) * Rot(...) * (body)</code></td></tr>
+      <tr><td>Measure</td><td><kbd>I</kbd></td><td>vertices, edges, faces</td><td>nothing; see <a href="#measure">Measure</a></td></tr></table>
+    <p>Face references use the point you clicked (<code>faces().sort_by_distance((x, y, z))[0]</code>), never face centres, so they survive most later edits. Every operation is undoable and the agent is notified.</p>
+
+    <h2 id="sketches">Sketches</h2>
+    <p>Select a planar face (or none for XY/XZ/YZ plus an offset) and press <kbd>K</kbd>. The camera squares up to the plane; draw <b>rectangles, circles, polygons and slots</b> by clicking (grid snap; <kbd>⌥</kbd> for free placement), toggle <b>Subtract</b>, edit numbers in the item list, then <b>Finish</b>. The sketch is stored in the script as a block:</p>
+<pre><code><span class="hl-c"># sketch:sketch1 {"plane": {...}, "items": [...]}</span>
+<span class="hl-k">with</span> <span class="hl-t">BuildSketch</span>(<span class="hl-t">Plane</span>(origin=(<span class="hl-n">0</span>, <span class="hl-n">0</span>, <span class="hl-n">4</span>), x_dir=(<span class="hl-n">1</span>, <span class="hl-n">0</span>, <span class="hl-n">0</span>), z_dir=(<span class="hl-n">0</span>, <span class="hl-n">0</span>, <span class="hl-n">1</span>))) <span class="hl-k">as</span> _sketch1:
+    <span class="hl-k">with</span> <span class="hl-t">Locations</span>((-<span class="hl-n">18</span>, <span class="hl-n">0</span>)):
+        <span class="hl-t">Rectangle</span>(<span class="hl-n">14</span>, <span class="hl-n">20</span>)
+    <span class="hl-k">with</span> <span class="hl-t">Locations</span>((-<span class="hl-n">18</span>, <span class="hl-n">0</span>)):
+        <span class="hl-t">Circle</span>(<span class="hl-n">3</span>, mode=Mode.SUBTRACT)
+sketch1 = _sketch1.sketch
+<span class="hl-c"># /sketch:sketch1</span></code></pre>
+    <p>So <code>sketch1</code> is a normal build123d <code>Sketch</code> that you or the agent can <code>extrude</code>, cut with (<code>part - extrude(sketch1, amount=-h)</code>) or <code>revolve</code>. The JSON header lets the editor reopen it (Browser ▸ Sketches ▸ double-click). Sketches render as cyan outlines. The agent edits sketches only through its <code>sketch</code> tool, in the same item format, so anything it draws stays editable by you.</p>
+
+    <h2 id="threads">Threads</h2>
+    <p><code>threads.py</code> carries ISO metric tables (pitch, tap drill, clearance fine/medium/coarse, hex and socket head sizes, nuts, washers) and helpers available in every script:</p>
+    <table class="table"><tr><th>Helper</th><th>What it does</th></tr>
+      <tr><td><code>iso("M4")</code>, <code>tap_drill</code>, <code>clearance_dia</code></td><td>table lookups</td></tr>
+      <tr><td><code>tap(part, "M4", at=(x, y, z), depth=6 | through=True, real=False, axis=(0, 0, -1))</code></td><td>cuts the tap-drill hole from the surface point along the axis and registers the thread; <code>real=True</code> models the helix via bd_warehouse</td></tr>
+      <tr><td><code>hole(part, d, at, depth | through, counterbore=(D, h), countersink=D)</code></td><td>plain hole with optional counterbore or 90° countersink</td></tr>
+      <tr><td><code>tapped_hole(size, depth, at)</code></td><td>a cosmetic cutter you subtract yourself</td></tr>
+      <tr><td><code>bolt(size, length, head="hex"|"socket"|"none")</code>, <code>nut</code>, <code>washer</code></td><td>fasteners as bodies</td></tr></table>
+    <p>Registered threads appear in the model summary and in shop drawings as callouts such as <b>M4×0.7 ↧6</b> or <b>M4×0.7 THRU</b> instead of Ø3.3.</p>
+
+    <h2 id="params">Parameters</h2>
+    <p>Every top-level <code>name = number</code> in the script is a field in the Design tab (<kbd>↑</kbd><kbd>↓</kbd> ±1, <kbd>⇧</kbd> ±10, <kbd>⌥</kbd> ±0.1). Changing one rewrites that literal and rebuilds. Library parts saved as designs keep their parameters, so <code>from_library("bracket", width=30)</code> works. Agent tools: <code>get_parameters</code>, <code>set_parameters</code>. API: <code>GET/POST /api/params</code>.</p>
+
+    <h2 id="measure">Measure</h2>
+    <p>Press <kbd>I</kbd> (or 📐 in the Design tab). The cursor snaps <b>vertex &gt; edge &gt; face point</b> with a live readout: line length, arc radius and sweep, circle Ø. Two picks give the distance with the closest points drawn and labelled, Δxyz, and the angle (line–line, line–plane, plane–plane) with parallel and perpendicular flags; two circles give centre spacing; two planes give the gap. Click bodies in the Browser for volume, mass and centre of mass (material names or g/cm³), two bodies for clearance or interference volume. <kbd>⌫</kbd> or right-click removes the last pick, <kbd>Esc</kbd> clears. Agent tools: <code>measure</code> (faces, edges, points, bodies), <code>mass_properties</code>.</p>
+
+    <h2 id="drawings">Shop drawings</h2>
+    <p>Design tab or File ▸ Shop drawings…: third-angle front, top and right views plus an isometric, with hidden lines (OCCT HLR projection), overall dimensions, hole callouts (n× Ø, THRU or depth, thread labels), lettered holes with a coordinate table, and a title block with size, mass, scale and date. One SVG per body plus an assembly sheet, and a DXF of the view geometry, written to <code>workspace/drawings/</code>. Agent tool: <code>make_drawings</code>.</p>
+    <figure class="fig" style="background:#fff"><img src="../assets/img/drawing.svg" alt="Generated drawing"><figcaption>A generated sheet.</figcaption></figure>
+
+    <h2 id="library">Part library</h2>
+    <p>Parts live in <code>workspace/library/&lt;part&gt;/</code> as either a <b>parametric script</b> (a whole design saved with its parameters) or an <b>exact STEP body</b>, with description, tags and a thumbnail.</p>
+    <ul>
+      <li>Browser ▸ <b>+ Part</b> inserts one as a new body: <code>from_library("name", param=value)</code> is added to the script.</li>
+      <li>Body ▸ <code>⋯</code> ▸ <b>Save to library…</b> saves that body (exact STEP).</li>
+      <li>Library tab: search by name, description and tags; insert; delete; <b>+ Design</b> (save the current design as a parametric part); <b>+ STEP</b>.</li>
+      <li>The agent sees the part names in every turn and has the <code>library</code> tool (list, search, get, insert, save_design, save_body, delete). It is instructed to check the library before modelling standard or reusable parts.</li>
+    </ul>
+
+    <h2 id="step">STEP import and export</h2>
+    <p>File ▸ Import STEP… (or drop a <code>.step</code> on the viewer) adds it as a new body (<code>import_step("file.step")</code> is added to the script, the file is copied to <code>workspace/imports/</code>), as a new design, or straight into the library. Export: File ▸ Export STEP (exact, bodies stay separate solids) and Export STL (dialog: resolution and all-or-one body). Agent: <code>export_model(name, formats, tolerance, angular_tolerance, body)</code>. API: <code>/api/export/{step|stl}</code>.</p>
+
+    <h2 id="fidelity">Fidelity</h2>
+    <ul>
+      <li>The <b>kernel geometry is exact B-rep</b>: planes, cylinders, cones, spheres, tori, B-splines. <code>inspect_model</code> reports the analytic type and radius of each face.</li>
+      <li>The <b>viewer mesh is display-only</b>, generated from the exact shape with exact per-vertex surface normals at a preset chordal and angular deviation (Mesh: draft / normal / fine re-tessellates without rebuilding). Picking maps triangles back to B-rep faces.</li>
+      <li><b>STEP export is exact</b>. <b>STL is tessellated only at export</b>, at the deviation you choose; it never reuses the display mesh.</li>
+    </ul>
+
+    <h2 id="cam">CAM overview</h2>
+    <p>CAM is a second script per design, <code>cam.py</code> (saved as <code>&lt;name&gt;.cam.py</code>), written against <code>cam_kernel.py</code> and built with the <code>build_cam</code> tool or the Code tab. It must assign <code>program</code>. The namespace provides <code>model</code>, <code>part</code>, <code>bodies</code>, <code>tools</code> and <code>machines</code>.</p>
+<pre><code>part = bodies[<span class="hl-s">"Plate"</span>]
+stock = Stock.<span class="hl-f">from_model</span>(part, margin=<span class="hl-n">3</span>, top=<span class="hl-n">1.0</span>)
+setup = <span class="hl-t">Setup</span>(machines[<span class="hl-s">"Generic 3018"</span>], stock, origin=<span class="hl-s">"stock-top-left"</span>)
+t6 = <span class="hl-f">apply_feeds</span>(tools[<span class="hl-n">1</span>], <span class="hl-s">"aluminium"</span>, setup.machine)
+program = <span class="hl-t">Program</span>(setup, name=<span class="hl-s">"plate"</span>)
+program.<span class="hl-f">add</span>(<span class="hl-f">face</span>(setup, t6, z_top=stock.top, z_bottom=<span class="hl-n">19</span>))
+program.<span class="hl-f">add</span>(<span class="hl-f">adaptive</span>(setup, t6, <span class="hl-f">stock_minus</span>(setup, part, <span class="hl-n">0.0</span>, expand=<span class="hl-n">6</span>), z_top=<span class="hl-n">19</span>, z_bottom=<span class="hl-n">4</span>, stepover=<span class="hl-n">0.15</span>))
+program.<span class="hl-f">add</span>(<span class="hl-f">drill</span>(setup, tools[<span class="hl-n">5</span>], [h <span class="hl-k">for</span> h <span class="hl-k">in</span> <span class="hl-f">holes</span>(part) <span class="hl-k">if</span> h.diameter &lt; <span class="hl-n">6</span>], peck=<span class="hl-s">"auto"</span>))
+program.<span class="hl-f">add</span>(<span class="hl-f">contour</span>(setup, t6, <span class="hl-f">section</span>(part, <span class="hl-n">0.0</span>), z_top=<span class="hl-n">4</span>, z_bottom=-<span class="hl-n">4.5</span>, tabs=<span class="hl-n">4</span>))</code></pre>
+    <p>Geometry comes from the exact B-rep: <code>section(part, z)</code>, <code>silhouette(part)</code>, <code>stock_minus(setup, part, z, expand)</code>, <code>holes(part)</code> (vertical round holes from concave cylindrical faces, with through detection), <code>face_polygon(model.get_face(id))</code> for a clicked face, plus <code>circle</code> and <code>rect</code>. The CAM tab shows the setup, the operations with colour and visibility toggles, warnings, the machine and tool libraries, a feeds and speeds calculator and the G-code preview. Toolpaths, stock and the WCS origin are drawn in the viewer (rapids red), with a simulation slider and tool marker.</p>
+
+    <h2 id="machines">Machines and tools</h2>
+    <p><code>workspace/machines/*.json</code>: travel, max feeds per axis, rapid, spindle range, safe and clearance Z, tool-change policy (<code>pause</code>, <code>none</code>, <code>split</code>), arcs on/off and arc tolerance, start and end G-code. <code>workspace/tools.json</code>: flat, ball, V-bit and drill tools with diameter, flutes, flute length, feed, plunge, rpm, stepdown, stepover. Defaults: a Generic 3018 and a Shapeoko-class router, tools T1–T7. Edit them in the CAM tab or ask the agent (<code>save_machine</code>, <code>save_tool</code>). <code>feeds(tool, material, machine)</code> and <code>apply_feeds(...)</code> compute feeds for 13 materials with spindle and feed clamping and radial chip thinning; the CAM tab has a calculator with “Apply to tool”.</p>
+
+    <h2 id="ops">Operations</h2>
+    <table class="table"><tr><th>Op</th><th>Purpose</th><th>Notable parameters</th></tr>
+      <tr><td><code>face</code></td><td>surface the stock top down to a level with zigzag passes</td><td><code>region</code>, <code>stepover</code>, <code>angle</code></td></tr>
+      <tr><td><code>contour</code></td><td>profile around polygons, outside / inside / on</td><td>depth passes, <code>tabs</code>, <code>tab_height</code>, <code>climb</code>, <code>lead</code> (tangential quarter arcs), <code>stock_to_leave</code></td></tr>
+      <tr><td><code>pocket</code></td><td>concentric clearing with islands</td><td><code>rest_from</code> (previous tool, 2.5D rest)</td></tr>
+      <tr><td><code>adaptive</code></td><td>constant-engagement HSM roughing</td><td><code>stepover</code> (fraction of Ø), <code>helix_diameter</code>, <code>rest_from</code>, <code>chip_thinning</code></td></tr>
+      <tr><td><code>drill</code></td><td>drill at Hole objects or points</td><td><code>peck</code> (depth or <code>"auto"</code>), <code>retract</code></td></tr>
+      <tr><td><code>parallel3d</code></td><td>heightmap raster finishing, ball or flat</td><td><code>region</code>, <code>stepover</code>, <code>rest_from</code> (3D tip-map difference)</td></tr>
+      <tr><td><code>rest_region</code></td><td>material a previous tool could not reach</td><td>morphological opening by the tool radius</td></tr></table>
+    <p>All operations work in model coordinates; the post translates to the WCS origin you chose: <code>stock-top-left</code>, <code>stock-top-center</code>, <code>stock-bottom-left</code>, <code>stock-bottom-center</code>, <code>model-origin</code>, or an (x, y, z).</p>
+
+    <h2 id="adaptive">Adaptive clearing</h2>
+    <p>The adaptive op is constant-engagement <em>by construction</em>. It keeps a polygon of the region cleared so far; each pass is the boundary of that region offset inward by (radius − stepover), intersected with the cut region, so the tool's leading arc never exceeds the target engagement angle in open material. It starts with a helix entry, morphs spirals outward, links passes with short retracts, and slows the feed where geometry forces a higher engagement (concave corners, which the summary and G-code warn about). A fine-grid sweep audit in the test suite measures the leading-half contact angle along every pass. Rest machining removes what a larger previous tool could not reach.</p>
+
+    <h2 id="post">Post and G-code</h2>
+    <p><code>Program.gcode()</code> writes the GRBL dialect: header comments (machine, stock, origin, time, warnings), <code>G21 G90 G94 G17</code>, <code>G54</code>, <code>M3 S</code>, <code>G0</code>/<code>G1</code> with F on change, <b>G2/G3 arcs</b> fitted to circular runs (chord-sagitta checked, ≤180° per arc, collinear moves merged), <code>M6</code>/<code>M0</code> tool-change pauses, <code>M30</code>. Checks: machine travel, spindle range, feeds clamped, cutting below the stock bottom, multiple tools with <code>tool_change: none</code>. Download from the CAM tab or <code>/api/gcode</code>; the agent's <code>export_gcode</code> writes to <code>workspace/exports/</code> and reports line, move, arc and tool-change counts. Not yet: 4-axis, canned drilling cycles (GRBL has none), thread milling.</p>
+
+    <h2 id="settings">Settings and MCP</h2>
+    <p><code>⚙</code> in the panel header: Claude model (any model id, or the Claude Code default), effort (low … max), max steps per turn, thinking summaries, web tools, extra standing instructions, and <b>MCP servers</b> (stdio, http or sse configs as JSON with enable toggles and live connection status from the session). Saved to <code>workspace/settings.json</code>; “Save &amp; restart agent” starts a fresh session with the new options and tells the agent its earlier history is gone. API: <code>GET/POST /api/settings</code>, <code>GET /api/agent/status</code>, <code>POST /api/agent/restart</code>.</p>
+
+    <h2 id="tools">Agent tools reference</h2>
+    <p>The agent runs in a Claude Agent SDK session with an in-process MCP server named <code>cad</code>. It has no shell; everything it knows about the model comes back from these tools.</p>
+    <table class="table"><tr><th>Tool</th><th>Purpose</th></tr>
+      <tr><td><code>build_model(code)</code></td><td>replace the script, rebuild, return the summary (bodies, bbox, volume, sketches, threads) or the traceback</td></tr>
+      <tr><td><code>inspect_model(kind?, near?, body?, limit?)</code></td><td>faces with id, type, area, centre, normal, size, radius</td></tr>
+      <tr><td><code>screenshot(view, highlight_faces?, show_edges?)</code></td><td>the browser renders a view and returns it as an image</td></tr>
+      <tr><td><code>export_model(name?, formats?, tolerance?, body?)</code></td><td>STEP / STL into <code>workspace/exports/</code></td></tr>
+      <tr><td><code>get_code()</code>, <code>save_design(name?)</code></td><td>read the script; save the design (only when asked)</td></tr>
+      <tr><td><code>get_parameters()</code>, <code>set_parameters({...})</code></td><td>read and rewrite top-level numeric parameters</td></tr>
+      <tr><td><code>measure(...)</code>, <code>mass_properties(...)</code></td><td>distances, angles, hole spacing; volume, mass, centre of mass, clearance</td></tr>
+      <tr><td><code>make_drawings(material?)</code></td><td>shop drawings (SVG + DXF)</td></tr>
+      <tr><td><code>library(action, ...)</code></td><td>list, search, get, insert, save_design, save_body, delete</td></tr>
+      <tr><td><code>sketch(action, ...)</code></td><td>list, get, set, delete sketch blocks in the editor's item format</td></tr>
+      <tr><td><code>cam_context()</code></td><td>machines, tools, model facts, holes, current program</td></tr>
+      <tr><td><code>build_cam(code)</code>, <code>get_cam_code()</code></td><td>build the CAM program from a script; read it</td></tr>
+      <tr><td><code>export_gcode(name?)</code></td><td>write the .nc file and report counts</td></tr>
+      <tr><td><code>feeds_speeds(tool, material, ...)</code></td><td>the feeds calculator</td></tr>
+      <tr><td><code>save_machine(...)</code>, <code>save_tool(...)</code></td><td>edit the CAM libraries</td></tr></table>
+    <div class="callout tip">Tool results are size-capped (screenshots are JPEG) because the SDK drops results over 1 MB. If you add a tool, return the numbers the agent needs rather than raw data.</div>
+
+    <h2 id="shortcuts">Keyboard shortcuts</h2>
+    <table class="table kbdt"><tr><th>Keys</th><th>Action</th></tr>
+      <tr><td><kbd>B</kbd> <kbd>C</kbd> <kbd>O</kbd> <kbd>K</kbd></td><td>Box, Cylinder, Sphere, Sketch</td></tr>
+      <tr><td><kbd>Q</kbd> <kbd>H</kbd> <kbd>F</kbd> <kbd>X</kbd> <kbd>L</kbd> <kbd>V</kbd></td><td>Press/Pull, Hole, Fillet, Chamfer, Shell, Move</td></tr>
+      <tr><td><kbd>I</kbd></td><td>Measure</td></tr>
+      <tr><td><kbd>↵</kbd> / <kbd>Esc</kbd> / <kbd>⌫</kbd></td><td>OK / cancel / drop last pick in a command dialog</td></tr>
+      <tr><td><kbd>↑</kbd><kbd>↓</kbd>, <kbd>⇧</kbd>, <kbd>⌥</kbd></td><td>nudge a numeric field by 1, 10, 0.1</td></tr>
+      <tr><td><kbd>⇧</kbd>-click</td><td>add to the selection</td></tr>
+      <tr><td><kbd>⌘B</kbd></td><td>hide / show the side panel</td></tr>
+      <tr><td><kbd>⌘↩</kbd></td><td>run the script in the Code tab</td></tr>
+      <tr><td><kbd>⏎</kbd> / <kbd>⇧⏎</kbd></td><td>send / newline in chat</td></tr></table>
+
+    <h2 id="files">Files and API</h2>
+    <table class="table"><tr><th>Path</th><th>Contents</th></tr>
+      <tr><td><code>workspace/designs/*.py</code>, <code>*.cam.py</code></td><td>designs and their CAM scripts; <code>state.json</code> remembers the open one</td></tr>
+      <tr><td><code>workspace/history/</code></td><td>every successful build (Undo)</td></tr>
+      <tr><td><code>workspace/library/&lt;part&gt;/</code></td><td>library parts (script or STEP, metadata, thumbnail)</td></tr>
+      <tr><td><code>workspace/machines/*.json</code>, <code>workspace/tools.json</code></td><td>CAM libraries</td></tr>
+      <tr><td><code>workspace/exports/</code>, <code>drawings/</code>, <code>imports/</code>, <code>images/</code>, <code>screenshots/</code></td><td>outputs and inputs</td></tr>
+      <tr><td><code>workspace/settings.json</code></td><td>agent settings and MCP servers</td></tr></table>
+    <p>HTTP endpoints: <code>/api/designs</code>, <code>/api/design/{save,open,new,import,download}</code>, <code>/api/export/{fmt}</code>, <code>/api/import/step</code>, <code>/api/params</code>, <code>/api/measure</code>, <code>/api/drawings</code>, <code>/api/library/*</code>, <code>/api/sketches</code>, <code>/api/cam/{library,machine,tool}</code>, <code>/api/gcode</code>, <code>/api/gcode/preview</code>, <code>/api/settings</code>, <code>/api/agent/{status,restart}</code>, <code>/api/version</code>. The WebSocket carries chat, builds, undo, quality, screenshots, and the manual operations (<code>op</code>, <code>rename_body</code>, <code>set_sketch</code>, <code>add_primitive</code>, <code>transform_body</code>, …).</p>
+
+    <h2 id="versioning">Versioning</h2>
+    <p><code>version.py</code> holds the version (badge in the header, click for the changelog) and <code>CHANGELOG.md</code> follows Keep a Changelog. Pre-1.0: minor bump for features, patch bump for fixes; a release is a bump plus a git tag. <code>/api/version</code> serves both.</p>
+
+    <h2 id="tests">Tests and evals</h2>
+<pre><code>.venv/bin/python -m pytest -q            <span class="hl-c"># unit / API tests, seconds, no Claude calls</span>
+.venv/bin/python evals/run.py            <span class="hl-c"># agent evals: real agent, headless, graded; ~$5 per run</span>
+.venv/bin/python evals/run.py --filter cam --model claude-sonnet-5 --repeat 3</code></pre>
+    <ul>
+      <li><b>Unit tests</b> cover the kernel (bodies, ids, exact normals, exports, measurement), script editing, CAM (holes, sections, every op, arc post, machine checks, feeds, and an independent engagement audit of the adaptive op), drawings, the library, threads, sketches, and the FastAPI/WebSocket API with the Claude session disabled.</li>
+      <li><b>Evals</b> run the real agent in a throwaway workspace, one fresh session per case, graded by deterministic geometry, program and answer checks (bbox, bodies, holes, volume, parameters, script contents, op parameters, G-code validity, tools used, answer regex). Results land in <code>evals/results/&lt;stamp&gt;.json|md</code> with pass rate, cost, steps and time per case. Add a case by appending to <code>evals/cases.py</code>.</li>
+    </ul>
+
+    <h2 id="gaps">Known gaps and roadmap</h2>
+    <ul>
+      <li>One project and one session per server; chat history is not persisted across restarts.</li>
+      <li>No stock simulation or collision checking in CAM; time estimates ignore acceleration.</li>
+      <li>Adaptive corners rely on feed reduction; no trochoidal slotting, no 3D rest, no Z-level finishing.</li>
+      <li>Sketches have no lines or arcs with constraints, no driven dimensions, no snapping to model edges.</li>
+      <li>Manual tools are typed, not dragged (except Press/Pull); no mates or joints, patterns, mirror, loft or sweep by hand.</li>
+      <li>Drawings have overall dimensions and hole tables only; no section views or PDF.</li>
+      <li>Face and edge ids change on every rebuild.</li>
+    </ul>
+    <p>Roadmap, roughly in order: projects and sessions; CAM stock simulation and collision checks; assembly positioning and a standard-parts library; sketch upgrades; drag handles everywhere; a WebSerial G-code sender; drawing and import upgrades; deployment (Docker, auth, multi-user); other posts and 3D-printing exports. Issues and contributions: <a href="https://github.com/agenticcad/agenticcad">github.com/agenticcad/agenticcad</a>.</p>
+
+    <h2 id="licence">Licence</h2>
+    <p>AgenticCAD is free for <b>non-commercial use</b> under the <a href="https://github.com/agenticcad/agenticcad/blob/main/LICENSE">PolyForm Noncommercial License 1.0.0</a>: personal projects, research, education, hobby making, charities, schools and public institutions. <b>Commercial use</b> (in a business, in products or services, or as part of paid work) needs a commercial licence: contact <a href="mailto:morzel@prodevelop.com.au">morzel@prodevelop.com.au</a>.</p>
+  </main>
+</div>
+<footer><div class="wrap"><span>© 2026 AgenticCAD · PolyForm Noncommercial 1.0.0</span><a href="https://github.com/agenticcad/agenticcad">GitHub</a><a href="../tutorials/">Tutorials</a><a href="../index.html">Home</a></div></footer>
+<script src="../assets/site.js?v=0.9.1"></script>
+<script>
+  const links = [...document.querySelectorAll('.toc a')], heads = links.map(a => document.querySelector(a.getAttribute('href')));
+  const io = new IntersectionObserver(() => { let cur = 0; heads.forEach((h, i) => { if (h && h.getBoundingClientRect().top < 120) cur = i; }); links.forEach((a, i) => a.classList.toggle('on', i === cur)); }, { rootMargin: '-100px 0px -70% 0px', threshold: [0, 1] });
+  heads.forEach(h => h && io.observe(h)); window.addEventListener('scroll', () => io.takeRecords(), { passive: true });
+</script>
+</body>
+</html>
