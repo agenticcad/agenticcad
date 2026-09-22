@@ -8,6 +8,8 @@ chat, or use the Fusion-style ribbon to model by hand — every manual operation
 script, so the design is always one reproducible Python file. Then generate GRBL toolpaths (adaptive
 clearing, contours with tabs, drilling, 3D finishing), shop drawings, STEP/STL and G-code.
 
+> Website, docs and simulated tutorials: **https://agenticcad.github.io/agenticcad/**
+
 > Free for non-commercial use under the PolyForm Noncommercial 1.0.0 licence. Commercial use requires a licence — see [Licence](#licence).
 
 ```
