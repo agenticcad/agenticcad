@@ -1,0 +1,12 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "agentcad",
+      "runtimeExecutable": "/Users/mike/projects/agentcad/.venv/bin/python",
+      "runtimeArgs": ["server.py"],
+      "cwd": "/Users/mike/projects/agentcad",
+      "port": 8765
+    }
+  ]
+}

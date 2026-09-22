@@ -1,0 +1,54 @@
+# Changelog
+
+All notable changes to AgentCAD. Versions follow [SemVer](https://semver.org): pre-1.0, minor bumps add
+features, patch bumps fix things. The version shown in the UI header comes from `version.py`.
+
+## [0.9.0] — 2026-09-22
+### Added
+- Modelling ribbon: Create (Box, Cylinder, Sphere, Sketch), Modify (Press/Pull, Hole, Fillet, Chamfer,
+  Shell, Move), Inspect (Measure) with SVG icons, tooltips and keyboard shortcuts; command dialog with
+  step indicator, live prompt, pick chips and unit fields. Every operation is written into the script.
+- Press/Pull drag handle with a ghost preview of the extrusion.
+- Agent `sketch` tool (list/get/set/delete) so the agent edits UI sketches in the editor's own format.
+- Manual body operations without an agent turn: primitives on faces, sketch extrude (new/join/cut),
+  move/rotate, plain / counterbored / tapped holes.
+- Version number in the header with this changelog behind it; `/api/version`.
+
+## [0.8.0] — 2026-09-22
+### Added
+- Settings (⚙): model, effort, max steps, thinking summary, web tools, extra instructions, MCP servers
+  (stdio/http/sse) with live status; save & restart the agent session.
+- 2D sketch editor on faces or base planes (rect, circle, polygon, slot; subtract; snap) stored as
+  editable `# sketch:` blocks in the script; sketches drawn in the viewer and listed in the Browser.
+- ISO metric threads: `tap`, `tapped_hole`, `bolt`, `nut`, `washer`, tables; cosmetic or real (bd_warehouse);
+  thread callouts on shop drawings.
+- Unit test suite (pytest, 70+ tests) and agent evals (`evals/run.py`, 13 graded cases with cost tracking).
+### Fixed
+- Script namespace (`import_step`, `from_library`) is bound per run instead of process globals.
+- Arc fitting in the GRBL post ran after collinear merging and lost circles; now fits arcs first.
+
+## [0.7.0] — 2026-09-05
+### Added
+- Design tab: parameters panel, measure tool (vertex/edge/face snapping, distances, angles, relations),
+  shop drawings (third-angle views, hidden lines, dimensions, hole table, title block; SVG + DXF),
+  STEP import, part library (parametric scripts and STEP parts, thumbnails, insert with parameters).
+- Library as a first-class citizen: Library tab, Browser "+ Part", body "Save to library…", agent tools.
+- Reference images in chat (attach, drop, paste) for modelling from sketches and photos.
+- Constant-engagement adaptive clearing (front-offset), rest machining, lead-in/out, feeds & speeds
+  calculator, G2/G3 arcs in the post.
+
+## [0.6.0] — 2026-09-04
+### Added
+- CAM: machines and tool libraries, facing, contour with tabs, pocket, drill, 3D parallel finishing,
+  GRBL post with checks, CAM tab with toolpath rendering and simulation.
+
+## [0.5.0] — 2026-09-04
+### Added
+- Multi-body designs with a Fusion-style Browser tree, design files (new/open/save/import), undo history,
+  ViewCube navigation, resizable side panel, selection chips that stay with the question, rename/delete
+  bodies from the tree, Code tab with syntax highlighting.
+
+## [0.1.0] — 2026-09-04
+### Added
+- First prototype: Claude Agent SDK session writing build123d scripts, exact B-rep kernel with display
+  meshing, three.js viewer with face picking, STEP/STL export, screenshot tool for the agent.

@@ -1,0 +1,2040 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>AgentCAD</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root { --bg:#14171c; --panel:#1c2027; --panel2:#232830; --line:#2e343d; --text:#e6e9ee; --muted:#8b94a1; --accent:#ff8c42; --accent2:#4ea1ff; --err:#ff5c5c; --ok:#4cd37a; }
+  * { box-sizing:border-box; }
+  html,body { margin:0; height:100%; background:var(--bg); color:var(--text); font:13px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Inter,sans-serif; }
+  #app { display:flex; height:100%; }
+  #viewer { flex:1; position:relative; min-width:0; overflow:hidden; }
+  #viewer > canvas { display:block; position:absolute; inset:0; }
+  #toolbar { position:absolute; z-index:4; top:10px; left:10px; display:flex; gap:6px; flex-wrap:wrap; align-items:center; }
+  .btn { background:var(--panel); border:1px solid var(--line); color:var(--text); padding:5px 9px; border-radius:6px; cursor:pointer; font-size:12px; }
+  .btn:hover { background:var(--panel2); }
+  .btn.active { border-color:var(--accent2); color:var(--accent2); }
+  .btn.primary { background:var(--accent2); border-color:var(--accent2); color:#08111d; font-weight:600; }
+  .btn.danger { background:var(--err); border-color:var(--err); color:#fff; }
+  .btn:disabled { opacity:.5; cursor:default; }
+  .btn select { background:transparent; color:var(--text); border:0; font-size:12px; }
+  .sep { width:1px; height:20px; background:var(--line); margin:0 2px; }
+  .menu { position:relative; }
+  .menu .dd { display:none; position:absolute; top:30px; left:0; background:var(--panel); border:1px solid var(--line); border-radius:8px; min-width:170px; padding:4px; z-index:5; box-shadow:0 8px 24px rgba(0,0,0,.4); }
+  .menu.open .dd { display:block; }
+  .dd div { padding:6px 10px; border-radius:5px; cursor:pointer; font-size:12px; }
+  .dd div:hover { background:var(--panel2); }
+  .dd div span { float:right; color:var(--muted); }
+  .dd hr { border:0; border-top:1px solid var(--line); margin:4px 0; }
+  #cubewrap { position:absolute; z-index:3; top:8px; right:12px; width:110px; display:flex; flex-direction:column; align-items:center; gap:2px; }
+  #cube { width:110px; height:110px; cursor:pointer; display:block; position:static; }
+  #home { padding:2px 8px; font-size:13px; line-height:1.2; }
+  #bottombar { position:absolute; z-index:3; bottom:10px; left:50%; transform:translateX(-50%); display:flex; gap:6px; align-items:center; white-space:nowrap; background:rgba(28,32,39,.85); border:1px solid var(--line); border-radius:8px; padding:4px; }
+  #bottombar .btn { border:0; background:transparent; } #bottombar .btn:hover { background:var(--panel2); }
+  #bottombar .btn.active { color:var(--accent2); }
+  .modal-field { display:flex; align-items:center; gap:10px; margin:6px 0; } .modal-field label { width:90px; color:var(--muted); font-size:12px; }
+  .modal-field select { flex:1; background:var(--bg); color:var(--text); border:1px solid var(--line); border-radius:6px; padding:6px; font:inherit; }
+  #tree { position:absolute; z-index:2; top:118px; left:10px; width:230px; max-height:55%; overflow:auto; background:rgba(28,32,39,.92); border:1px solid var(--line); border-radius:8px; padding:6px 4px; font-size:12px; }
+  #tree .hd { color:var(--muted); font-size:11px; padding:2px 8px 6px; letter-spacing:.3px; text-transform:uppercase; }
+  .node { display:flex; align-items:center; gap:6px; padding:3px 6px; border-radius:5px; cursor:pointer; user-select:none; }
+  .node:hover { background:var(--panel2); }
+  .node.sel { background:#3a2a1f; color:var(--accent); }
+  .node .eye { width:16px; text-align:center; color:var(--muted); cursor:pointer; }
+  .node.hidden { opacity:.45; }
+  .node .sw { width:9px; height:9px; border-radius:2px; flex:none; }
+  .node .nm { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .node .meta { color:var(--muted); font-size:10px; }
+  .node .tw { width:10px; color:var(--muted); font-size:10px; }
+  .node .more { color:var(--muted); visibility:hidden; padding:0 3px; }
+  .node:hover .more { visibility:visible; }
+  #ctx { position:fixed; z-index:20; display:none; background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:4px; min-width:160px; box-shadow:0 8px 24px rgba(0,0,0,.4); }
+  #ctx div { padding:6px 10px; border-radius:5px; cursor:pointer; font-size:12px; }
+  #ctx div:hover { background:var(--panel2); } #ctx div.danger:hover { background:#4a2020; color:var(--err); }
+  #ctx hr { border:0; border-top:1px solid var(--line); margin:4px 0; }
+  #hover { position:absolute; z-index:2; left:10px; bottom:10px; max-width:32%; background:rgba(20,23,28,.85); border:1px solid var(--line); padding:4px 8px; border-radius:6px; color:var(--muted); pointer-events:none; }
+  #stats { position:absolute; z-index:2; right:10px; bottom:10px; max-width:30%; color:var(--muted); font-size:11px; text-align:right; pointer-events:none; }
+  #side { width:var(--side-w, 440px); min-width:280px; max-width:70vw; flex:none; display:flex; flex-direction:column; border-left:1px solid var(--line); background:var(--panel); }
+  body.side-hidden #side, body.side-hidden #splitter { display:none; }
+  #splitter { width:6px; flex:none; cursor:col-resize; background:transparent; position:relative; z-index:3; margin-left:-3px; }
+  #splitter:hover, #splitter.drag { background:var(--accent2); opacity:.6; }
+  body.dragging { cursor:col-resize; user-select:none; }
+  body.dragging #viewer > canvas { pointer-events:none; }
+  #side-collapse { margin-left:auto; margin-right:6px; }
+  #side-show { position:absolute; z-index:4; top:50%; right:0; transform:translateY(-50%); display:none; border-radius:8px 0 0 8px; padding:14px 6px; }
+  body.side-hidden #side-show { display:inline-block; }
+  #tabs { display:flex; border-bottom:1px solid var(--line); align-items:center; }
+  #tabs .tab { flex:1; padding:10px; text-align:center; cursor:pointer; color:var(--muted); border-bottom:2px solid transparent; }
+  #tabs .tab.active { color:var(--text); border-bottom-color:var(--accent); }
+  #tabs .title { padding:10px 12px; font-weight:700; letter-spacing:.3px; white-space:nowrap; }
+  #tabs .title span { color:var(--accent); }
+  #tabs .title small { font-weight:400; color:var(--muted); margin-left:6px; }
+  #tabs .title .ver { margin-left:8px; font:10.5px ui-monospace,Menlo,monospace; color:#7f8a99; background:#1a1f27; border:1px solid #2c333d; border-radius:10px; padding:1px 7px; cursor:pointer; vertical-align:1px; } #tabs .title .ver:hover { color:#dde3ea; border-color:#4ea1ff; }
+  #modal .md h1 { font-size:15px; margin:0 0 8px; } #modal .md h2 { font-size:13px; margin:14px 0 4px; color:#8cc2ff; } #modal .md h3 { font-size:11px; text-transform:uppercase; letter-spacing:.5px; color:var(--muted); margin:8px 0 2px; } #modal .md ul { margin:2px 0; padding-left:18px; } #modal .md li { margin:2px 0; font-size:12px; } #modal .md p { font-size:12px; color:var(--muted); }
+  .pane { flex:1; display:none; flex-direction:column; min-height:0; }
+  .pane.active { display:flex; }
+  #messages { flex:1; overflow-y:auto; padding:12px; display:flex; flex-direction:column; gap:10px; }
+  .msg { max-width:100%; padding:8px 11px; border-radius:10px; white-space:normal; word-wrap:break-word; }
+  .msg.user { background:#2b3a52; align-self:flex-end; white-space:pre-wrap; }
+  .msg.assistant { background:var(--panel2); align-self:flex-start; }
+  .msg.assistant p { margin:0 0 6px; } .msg.assistant p:last-child { margin:0; }
+  .msg.assistant ul,.msg.assistant ol { margin:4px 0; padding-left:20px; }
+  .msg.assistant code { background:#0f1216; padding:1px 4px; border-radius:4px; font-size:12px; }
+  .msg.assistant pre { background:#0f1216; padding:8px; border-radius:6px; overflow-x:auto; }
+  .msg.assistant pre code { padding:0; }
+  .msg.system { color:var(--muted); font-size:12px; align-self:center; text-align:center; }
+  .msg.error { color:var(--err); font-size:12px; }
+  .tool { border:1px solid var(--line); border-radius:8px; font-size:12px; overflow:hidden; }
+  .tool summary { padding:6px 10px; cursor:pointer; color:var(--muted); list-style:none; display:flex; gap:8px; align-items:center; }
+  .tool summary::before { content:"▸"; font-size:10px; } .tool[open] summary::before { content:"▾"; }
+  .tool .name { color:var(--accent2); font-family:ui-monospace,Menlo,monospace; }
+  .tool .state { margin-left:auto; } .tool .state.ok { color:var(--ok);} .tool .state.err { color:var(--err);} .tool .state.run { color:var(--accent); }
+  .tool pre { margin:0; padding:8px 10px; background:#0f1216; max-height:260px; overflow:auto; font-size:11px; white-space:pre-wrap; border-top:1px solid var(--line); }
+  .tool img { display:block; max-width:100%; border-top:1px solid var(--line); }
+  #thinking { color:var(--muted); font-size:12px; padding:0 12px 6px; display:none; }
+  #composer { border-top:1px solid var(--line); padding:10px 12px; display:flex; flex-direction:column; gap:8px; }
+  #chips { display:flex; gap:6px; flex-wrap:wrap; min-height:0; }
+  .chip { background:#3a2a1f; border:1px solid var(--accent); color:var(--accent); padding:2px 8px; border-radius:12px; font-size:11px; display:flex; gap:6px; align-items:center; }
+  .chip.body { background:#1f2e3a; border-color:var(--accent2); color:var(--accent2); }
+  .chip b { cursor:pointer; }
+  .chip.ref { cursor:pointer; }
+  .chip.ref:hover { filter:brightness(1.25); }
+  .msg.user .sel { display:flex; gap:6px; flex-wrap:wrap; margin-top:7px; }
+  .msg.user .sel .lbl { color:#9fb4d3; font-size:11px; align-self:center; }
+  #chips .hint { color:var(--muted); font-size:11px; }
+  #attach { display:flex; gap:6px; flex-wrap:wrap; }
+  .thumb { position:relative; width:64px; height:64px; border:1px solid var(--line); border-radius:6px; overflow:hidden; background:#0f1216; }
+  .thumb img { width:100%; height:100%; object-fit:cover; display:block; }
+  .thumb b { position:absolute; top:1px; right:4px; color:#fff; cursor:pointer; text-shadow:0 0 3px #000; }
+  .msg.user .imgs { display:flex; gap:6px; flex-wrap:wrap; margin-top:6px; }
+  .msg.user .imgs img { max-height:120px; max-width:200px; border-radius:6px; border:1px solid var(--line); cursor:zoom-in; }
+  #composer.drop { outline:2px dashed var(--accent2); outline-offset:-4px; }
+  #attach-btn { padding:5px 8px; }
+  #input { width:100%; resize:none; background:var(--bg); border:1px solid var(--line); color:var(--text); border-radius:8px; padding:8px; font:inherit; min-height:60px; }
+  #input:focus { outline:none; border-color:var(--accent2); }
+  #composer .row { display:flex; gap:8px; align-items:center; }
+  #status { color:var(--muted); font-size:11px; flex:1; }
+  #status .dot { display:inline-block; width:8px; height:8px; border-radius:50%; background:var(--muted); margin-right:6px; vertical-align:middle; }
+  #status.ready .dot { background:var(--ok); } #status.busy .dot { background:var(--accent); animation:pulse 1s infinite; }
+  @keyframes pulse { 50% { opacity:.3; } }
+  #code { flex:1; width:100%; resize:none; background:#0f1216; color:#dfe5ec; border:0; padding:12px; font:12px/1.5 ui-monospace,Menlo,monospace; tab-size:4; }
+  #code:focus { outline:none; }
+  /* editor theme: VS Code Dark+ palette (defined inline so it never depends on a CDN theme file) */
+  #pane-code .CodeMirror { flex:1; height:auto; min-height:0; font:12.5px/1.55 ui-monospace,Menlo,"SF Mono",monospace; }
+  .cm-s-agentcad.CodeMirror { background:#0f1216; color:#d4d4d4; }
+  .cm-s-agentcad .CodeMirror-gutters { background:#0f1216; border-right:1px solid var(--line); }
+  .cm-s-agentcad .CodeMirror-linenumber { color:#5a6270; }
+  .cm-s-agentcad .CodeMirror-cursor { border-left:1.5px solid #e6e9ee; }
+  .cm-s-agentcad .CodeMirror-selected, .cm-s-agentcad .CodeMirror-focused .CodeMirror-selected { background:#264f78; }
+  .cm-s-agentcad .CodeMirror-activeline-background { background:#161b22; }
+  .cm-s-agentcad .CodeMirror-activeline .CodeMirror-linenumber { color:#c6c6c6; }
+  .cm-s-agentcad .CodeMirror-matchingbracket { color:#ffd700 !important; outline:1px solid #888; background:transparent; }
+  .cm-s-agentcad .cm-comment { color:#6a9955; font-style:italic; }
+  .cm-s-agentcad .cm-keyword { color:#c586c0; }
+  .cm-s-agentcad .cm-atom { color:#569cd6; }
+  .cm-s-agentcad .cm-number { color:#b5cea8; }
+  .cm-s-agentcad .cm-string, .cm-s-agentcad .cm-string-2 { color:#ce9178; }
+  .cm-s-agentcad .cm-builtin { color:#dcdcaa; }
+  .cm-s-agentcad .cm-def { color:#dcdcaa; }
+  .cm-s-agentcad .cm-variable { color:#9cdcfe; }
+  .cm-s-agentcad .cm-variable-2 { color:#9cdcfe; }
+  .cm-s-agentcad .cm-variable-3, .cm-s-agentcad .cm-type { color:#4ec9b0; }
+  .cm-s-agentcad .cm-property { color:#dcdcaa; }
+  .cm-s-agentcad .cm-operator { color:#d4d4d4; }
+  .cm-s-agentcad .cm-meta { color:#c586c0; }
+  .cm-s-agentcad .cm-error { color:#f44747; text-decoration:none; }
+  .cm-s-agentcad .cm-call { color:#dcdcaa; }
+  #codebar { display:flex; gap:8px; padding:8px 12px; border-top:1px solid var(--line); align-items:center; }
+  #cam-body { flex:1; overflow:auto; padding:10px 12px; }
+  .cam-sec { border:1px solid var(--line); border-radius:8px; padding:8px 10px; margin-bottom:10px; }
+  .cam-sec h4 { margin:0 0 6px; font-size:12px; text-transform:uppercase; letter-spacing:.4px; color:var(--muted); display:flex; align-items:center; gap:8px; }
+  .cam-sec h4 .btn { margin-left:auto; }
+  .btn.small { padding:2px 7px; font-size:11px; }
+  .muted { color:var(--muted); font-size:11px; font-weight:400; }
+  .kv { display:grid; grid-template-columns:110px 1fr; gap:2px 8px; font-size:12px; } .kv div:nth-child(odd) { color:var(--muted); }
+  .oprow { display:flex; align-items:center; gap:8px; padding:4px 2px; border-bottom:1px solid var(--line); font-size:12px; }
+  .oprow:last-child { border-bottom:0; } .oprow .sw { width:10px; height:10px; border-radius:2px; flex:none; }
+  .oprow .nm { flex:1; } .oprow .meta { color:var(--muted); font-size:11px; white-space:nowrap; }
+  .librow { display:flex; align-items:center; gap:8px; padding:4px 2px; border-bottom:1px solid var(--line); font-size:12px; }
+  .librow:last-child { border-bottom:0; } .librow .nm { flex:1; } .librow .meta { color:var(--muted); font-size:11px; }
+  .librow .btn { padding:1px 6px; font-size:11px; }
+  #cam-warn { color:#ffd166; font-size:11px; margin-top:6px; white-space:pre-wrap; }
+  #gcode-pre { background:#0f1216; padding:8px; border-radius:6px; font:11px/1.4 ui-monospace,Menlo,monospace; max-height:240px; overflow:auto; margin:8px 0 0; white-space:pre; }
+  #cam-sim { display:flex; align-items:center; gap:8px; padding:8px 12px; border-top:1px solid var(--line); }
+  #cam-sim input { flex:1; }
+  .modal textarea, #modal textarea { width:100%; min-height:260px; background:#0f1216; color:var(--text); border:1px solid var(--line); border-radius:6px; font:12px/1.4 ui-monospace,Menlo,monospace; padding:8px; }
+  .prow { display:flex; align-items:center; gap:8px; padding:3px 0; font-size:12px; }
+  .prow label { flex:1; font-family:ui-monospace,Menlo,monospace; color:#9cdcfe; } .prow .c { color:var(--muted); font-size:11px; flex:1.2; }
+  .prow input { width:90px; background:var(--bg); color:var(--text); border:1px solid var(--line); border-radius:6px; padding:4px 6px; font:inherit; text-align:right; }
+  body.measuring #viewer > canvas { cursor:crosshair; }
+  #measure-label { position:absolute; z-index:3; transform:translate(-50%, -100%); background:rgba(20,23,28,.92); border:1px solid #ffd166; color:#ffd166; padding:2px 7px; border-radius:6px; font:12px ui-monospace,Menlo,monospace; pointer-events:none; white-space:nowrap; }
+  #measure-btn.active { color:var(--accent); }
+  .librow img { width:44px; height:44px; object-fit:cover; border-radius:4px; border:1px solid var(--line); background:#0f1216; }
+  .libcard { display:flex; gap:10px; align-items:center; padding:8px 6px; border-bottom:1px solid var(--line); }
+  .libcard img, .libcard .noimg { width:56px; height:56px; object-fit:cover; border-radius:6px; border:1px solid var(--line); background:#0f1216; flex:none; }
+  .libcard .nm { flex:1; min-width:0; } .libcard .nm b { display:block; } .libcard .meta { color:var(--muted); font-size:11px; white-space:normal; }
+  .libcard .acts { display:flex; flex-direction:column; gap:4px; } .libcard .acts .btn { padding:2px 8px; font-size:11px; }
+  #sketch-panel { position:absolute; z-index:4; top:8px; left:50%; transform:translateX(-50%); background:rgba(28,32,39,.95); border:1px solid var(--accent2); border-radius:8px; padding:6px 8px; display:none; gap:6px; align-items:center; flex-wrap:wrap; max-width:70%; }
+  body.sketching #sketch-panel { display:flex; }
+  #sketch-panel .btn.tool.active { color:var(--accent2); border-color:var(--accent2); }
+  #sketch-panel input[type=text] { width:80px; background:var(--bg); color:var(--text); border:1px solid var(--line); border-radius:6px; padding:4px 6px; font:inherit; }
+  #sketch-items { position:absolute; z-index:4; right:12px; top:150px; width:250px; max-height:50%; overflow:auto; background:rgba(28,32,39,.95); border:1px solid var(--line); border-radius:8px; padding:6px 8px; display:none; font-size:12px; }
+  body.sketching #sketch-items { display:block; }
+  .skrow { display:flex; gap:4px; align-items:center; padding:2px 0; border-bottom:1px solid var(--line); flex-wrap:wrap; }
+  .skrow input { width:46px; background:var(--bg); color:var(--text); border:1px solid var(--line); border-radius:4px; padding:2px 3px; font:inherit; font-size:11px; }
+  .skrow .k { color:var(--muted); font-size:10px; } .skrow b { cursor:pointer; margin-left:auto; color:var(--err); }
+  #sketch-svg { position:absolute; inset:0; z-index:3; pointer-events:none; display:none; }
+  body.sketching #sketch-svg { display:block; }
+  body.sketching #viewer > canvas { cursor:crosshair; }
+  #settings-btn { margin-right:4px; }
+  .set-grid { display:grid; grid-template-columns:120px 1fr; gap:8px 10px; align-items:center; font-size:12px; }
+  .set-grid label { color:var(--muted); }
+  .set-grid textarea { min-height:70px !important; }
+  .set-grid input, .set-grid select, .set-grid textarea { width:100%; background:var(--bg); color:var(--text); border:1px solid var(--line); border-radius:6px; padding:6px; font:inherit; }
+  .mcp-row { display:flex; gap:8px; align-items:center; padding:4px 0; border-bottom:1px solid var(--line); font-size:12px; }
+  .mcp-row .nm { flex:1; } .mcp-row .st { font-size:11px; padding:1px 6px; border-radius:10px; background:var(--panel2); color:var(--muted); }
+  .mcp-row .st.connected { color:var(--ok); } .mcp-row .st.failed, .mcp-row .st.needs-auth { color:var(--err); }
+  /* ---- modelling ribbon */
+  #ribbon { position:absolute; z-index:4; top:8px; left:74px; display:flex; flex-wrap:wrap; gap:2px; padding:4px 6px 3px; background:linear-gradient(180deg, rgba(34,39,47,.96), rgba(26,30,36,.96)); border:1px solid #333a45; border-radius:10px; box-shadow:0 6px 24px rgba(0,0,0,.35), inset 0 1px 0 rgba(255,255,255,.04); max-width:calc(100% - 205px); }
+  #ribbon .rg { display:flex; flex-direction:column; align-items:center; padding:0 5px; border-right:1px solid #2c333d; } #ribbon .rg:last-child { border-right:0; }
+  #cmd input[type=number]::-webkit-outer-spin-button, #cmd input[type=number]::-webkit-inner-spin-button { -webkit-appearance:none; margin:0; } #cmd input[type=number] { -moz-appearance:textfield; }
+  #ribbon .rgl { font-size:9.5px; letter-spacing:.6px; text-transform:uppercase; color:#6f7a88; margin-top:1px; order:2; }
+  #ribbon .rgb { display:flex; gap:2px; }
+  #ribbon .rb { width:50px; height:50px; border:0; border-radius:8px; background:transparent; color:#c9d1dc; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:3px; cursor:pointer; transition:background .12s, color .12s, transform .08s; }
+  #ribbon .rb .ic { display:flex; } #ribbon .rb .lb { font-size:10.5px; letter-spacing:.1px; color:#98a3b1; }
+  #ribbon .rb:hover { background:rgba(255,255,255,.06); color:#fff; } #ribbon .rb:hover .lb { color:#dde3ea; }
+  #ribbon .rb:active { transform:translateY(1px); }
+  #ribbon .rb.active { background:linear-gradient(180deg, rgba(78,161,255,.22), rgba(78,161,255,.12)); color:#8cc2ff; box-shadow:inset 0 0 0 1px rgba(78,161,255,.45); } #ribbon .rb.active .lb { color:#8cc2ff; }
+  #tip { position:fixed; z-index:30; width:260px; padding:8px 10px; background:#0f1216; border:1px solid #3a4250; border-radius:8px; box-shadow:0 8px 24px rgba(0,0,0,.5); font-size:12px; pointer-events:none; opacity:0; transform:translateY(-4px); transition:opacity .12s, transform .12s; }
+  #tip.on { opacity:1; transform:none; }
+  #tip .tt { display:flex; align-items:center; gap:8px; margin-bottom:3px; } #tip kbd, #cmd .kbd { margin-left:auto; font:11px ui-monospace,Menlo,monospace; color:#9fb0c2; background:#1c2027; border:1px solid #333a45; border-bottom-width:2px; border-radius:4px; padding:0 5px; }
+  #tip .th { color:#98a3b1; line-height:1.4; }
+  /* ---- command dialog */
+  #cmd { position:absolute; z-index:5; top:150px; right:12px; width:272px; background:linear-gradient(180deg, #1e232b, #191d24); border:1px solid #333a45; border-radius:12px; box-shadow:0 12px 40px rgba(0,0,0,.45); font-size:12.5px; display:none; overflow:hidden; }
+  #cmd.on { display:block; animation:cmdin .14s ease-out; } @keyframes cmdin { from { opacity:0; transform:translateY(-6px); } to { opacity:1; transform:none; } }
+  #cmd .hd { display:flex; align-items:center; gap:8px; padding:10px 10px 8px 12px; border-bottom:1px solid #2c333d; } #cmd .hd .ic { color:#8cc2ff; display:flex; } #cmd .hd .nm { font-weight:600; font-size:13px; }
+  #cmd .hd .x { margin-left:6px; border:0; background:transparent; color:#6f7a88; cursor:pointer; display:flex; padding:4px; border-radius:6px; } #cmd .hd .x:hover { background:rgba(255,255,255,.06); color:#fff; }
+  #cmd .steps { display:flex; align-items:center; gap:6px; padding:8px 12px 0; font-size:11px; color:#6f7a88; }
+  #cmd .st { display:flex; align-items:center; gap:5px; } #cmd .st i { font-style:normal; width:16px; height:16px; border-radius:50%; border:1px solid #3a4250; display:inline-flex; align-items:center; justify-content:center; font-size:10px; }
+  #cmd .st.cur { color:#dde3ea; } #cmd .st.cur i { border-color:#4ea1ff; color:#8cc2ff; } #cmd .st.done i { background:#2b3a52; border-color:#2b3a52; color:#8cc2ff; }
+  #cmd .stl { flex:1; height:1px; background:#2c333d; }
+  #cmd .prompt { display:flex; align-items:center; gap:8px; margin:8px 12px 0; padding:7px 10px; border-radius:8px; background:rgba(255,140,66,.08); color:#ffb27a; }
+  #cmd .prompt i { width:7px; height:7px; border-radius:50%; background:#ff8c42; animation:pulse 1.2s infinite; } #cmd .prompt.ok { background:rgba(76,211,122,.08); color:#8fe0ac; } #cmd .prompt.ok i { background:#4cd37a; animation:none; }
+  #cmd .chips { display:flex; flex-wrap:wrap; gap:4px; padding:8px 12px 0; } #cmd .pk { background:#2b3a52; color:#cfe0ff; border-radius:12px; padding:2px 8px; font-size:11px; display:flex; gap:6px; align-items:center; } #cmd .pk b { cursor:pointer; color:#8fa5c8; } #cmd .pk b:hover { color:#fff; }
+  #cmd .fields { padding:8px 12px 4px; display:flex; flex-direction:column; gap:6px; }
+  #cmd .row { display:grid; grid-template-columns:1fr 128px; align-items:center; gap:8px; } #cmd .row label { color:#98a3b1; }
+  #cmd .in { position:relative; display:flex; align-items:center; } #cmd .in input[type=number] { width:100%; background:#0f1216; color:#e6e9ee; border:1px solid #333a45; border-radius:7px; padding:6px 30px 6px 9px; font:12.5px ui-monospace,Menlo,monospace; text-align:right; transition:border-color .12s; }
+  #cmd .in input[type=number]:focus { outline:none; border-color:#4ea1ff; box-shadow:0 0 0 3px rgba(78,161,255,.18); } #cmd .in .u { position:absolute; right:9px; color:#6f7a88; font-size:11px; pointer-events:none; }
+  #cmd .in.sel select { width:100%; background:#0f1216; color:#e6e9ee; border:1px solid #333a45; border-radius:7px; padding:6px 9px; font:inherit; } #cmd .in.sel select:focus { outline:none; border-color:#4ea1ff; }
+  #cmd .sw { position:relative; width:36px; height:20px; display:inline-block; cursor:pointer; } #cmd .sw input { opacity:0; width:0; height:0; } #cmd .sw span { position:absolute; inset:0; background:#2c333d; border-radius:20px; transition:.15s; } #cmd .sw span:before { content:""; position:absolute; width:14px; height:14px; left:3px; top:3px; background:#98a3b1; border-radius:50%; transition:.15s; } #cmd .sw input:checked + span { background:#4ea1ff; } #cmd .sw input:checked + span:before { transform:translateX(16px); background:#fff; }
+  #cmd .ft { display:flex; align-items:center; gap:6px; padding:8px 12px 10px; border-top:1px solid #2c333d; margin-top:4px; } #cmd .ft .hint { flex:1; color:#6f7a88; font-size:10.5px; } #cmd .ft .btn.primary { display:flex; align-items:center; gap:4px; }
+  body.sketching #ribbon, body.sketching #cmd { display:none; }
+  body.tooling #viewer > canvas { cursor:crosshair; }
+  #codeerr { color:var(--err); font-size:11px; white-space:pre-wrap; max-height:120px; overflow:auto; padding:0 12px 8px; }
+  /* modal */
+  #modal { position:fixed; inset:0; background:rgba(0,0,0,.5); display:none; align-items:center; justify-content:center; z-index:10; }
+  #modal.open { display:flex; }
+  #modal .box { background:var(--panel); border:1px solid var(--line); border-radius:10px; width:420px; max-height:70vh; display:flex; flex-direction:column; }
+  #modal h3 { margin:0; padding:12px 14px; font-size:14px; border-bottom:1px solid var(--line); }
+  #modal .body { padding:10px 14px; overflow:auto; flex:1; }
+  #modal .row { display:flex; gap:8px; padding:10px 14px; border-top:1px solid var(--line); justify-content:flex-end; }
+  #modal input { width:100%; background:var(--bg); border:1px solid var(--line); color:var(--text); border-radius:6px; padding:8px; font:inherit; }
+  .design { padding:8px 10px; border-radius:6px; cursor:pointer; display:flex; justify-content:space-between; }
+  .design:hover { background:var(--panel2); } .design span { color:var(--muted); font-size:11px; }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="viewer">
+    <div id="toolbar">
+      <div class="menu" id="filemenu"><button class="btn">File ▾</button>
+        <div class="dd">
+          <div data-act="new">New</div>
+          <div data-act="open">Open…</div>
+          <div data-act="save">Save <span>⌘S</span></div>
+          <div data-act="saveas">Save as…</div>
+          <hr>
+          <div data-act="import">Import .py…</div>
+          <div data-act="importstep">Import STEP…</div>
+          <div data-act="download">Download .py</div>
+          <hr>
+          <div data-act="step" title="Exact B-rep, all bodies">Export STEP</div>
+          <div data-act="stl">Export STL…</div>
+          <hr>
+          <div data-act="drawings">Shop drawings…</div>
+        </div></div>
+    </div>
+    <div id="cubewrap" title="Click a face, edge or corner to look from there · drag to orbit"><canvas id="cube" width="220" height="220"></canvas>
+      <button class="btn" id="home" title="Home view (fit)">⌂</button></div>
+    <div id="bottombar">
+      <button class="btn" id="fit" title="Fit to view">⛶ Fit</button>
+      <button class="btn active" id="edges" title="Show edges">Edges</button>
+      <span class="btn" style="padding:0 4px 0 9px;display:flex;align-items:center;gap:4px" title="Display mesh only — the model is exact B-rep">Mesh
+        <select id="quality"><option value="draft">draft</option><option value="normal" selected>normal</option><option value="fine">fine</option></select></span>
+      <button class="btn" id="undo" title="Revert to previous build">↶ Undo</button>
+      <button class="btn" id="measure-btn" style="display:none">Measure</button>
+      <button class="btn" id="sketch-btn" style="display:none">Sketch</button>
+      <span class="sep" id="cam-sep" style="display:none"></span>
+      <button class="btn active" id="tp-toggle" title="Show toolpaths" style="display:none">Toolpaths</button>
+      <button class="btn active" id="stock-toggle" title="Show stock" style="display:none">Stock</button>
+    </div>
+    <div id="tree"><div class="hd" style="display:flex;align-items:center">Browser<button class="btn small" id="tree-addbody" style="display:none">+ Body</button><button class="btn small" id="tree-addpart" style="margin-left:auto;padding:1px 6px" title="Insert a part from the library">+ Part</button></div><div id="treebody"></div><div id="sketchtree"></div></div>
+    <div id="ribbon">
+      <div class="rg"><div class="rgl">Create</div><div class="rgb" id="rg-create"></div></div>
+      <div class="rg"><div class="rgl">Modify</div><div class="rgb" id="rg-modify"></div></div>
+      <div class="rg"><div class="rgl">Inspect</div><div class="rgb" id="rg-inspect"></div></div>
+    </div>
+    <div id="tip"></div>
+    <div id="cmd"></div>
+    <svg id="sketch-svg"></svg>
+    <div id="sketch-panel">
+      <span class="muted">Sketch</span><input type="text" id="sk-name" value="sketch1" title="variable name">
+      <span class="muted" id="sk-plane"></span>
+      <button class="btn tool active" data-tool="rect" title="Rectangle: two corners">▭ Rect</button>
+      <button class="btn tool" data-tool="circle" title="Circle: centre then radius">◯ Circle</button>
+      <button class="btn tool" data-tool="polygon" title="Polygon: click points, click the first point to close">⬠ Poly</button>
+      <button class="btn tool" data-tool="slot" title="Slot: two end centres, width below">⬭ Slot</button>
+      <label class="muted" style="display:flex;gap:4px;align-items:center"><input type="checkbox" id="sk-sub"> subtract</label>
+      <label class="muted" style="display:flex;gap:4px;align-items:center">snap <input type="text" id="sk-snap" value="1" style="width:34px"></label>
+      <label class="muted" style="display:flex;gap:4px;align-items:center">slot w <input type="text" id="sk-slotw" value="6" style="width:34px"></label>
+      <button class="btn primary" id="sk-finish">Finish</button><button class="btn" id="sk-cancel">Cancel</button>
+    </div>
+    <div id="sketch-items"><div class="hd muted" style="font-size:11px;text-transform:uppercase">Items · Esc cancels shape · ⌫ deletes last</div><div id="sk-list"></div></div>
+
+    <div id="hover">click a face to reference it in chat · shift-click for multiple</div>
+    <div id="stats"></div>
+    <input type="file" id="filepick" accept=".py,text/x-python" style="display:none">
+    <input type="file" id="steppick" accept=".step,.stp,.STEP,.STP" style="display:none">
+    <button class="btn" id="side-show" title="Show panel (⌘B)">⟨</button>
+  </div>
+  <div id="splitter" title="Drag to resize · double-click to reset"></div>
+  <div id="side">
+    <div id="tabs">
+      <div class="title">Agent<span>CAD</span><small id="designname">untitled</small><button class="ver" id="verbtn" title="What's new">v—</button></div>
+      <div class="tab active" data-pane="chat">Chat</div>
+      <div class="tab" data-pane="code">Code</div>
+      <div class="tab" data-pane="cam">CAM</div>
+      <div class="tab" data-pane="design">Design</div>
+      <div class="tab" data-pane="library">Library</div>
+      <button class="btn" id="settings-btn" title="Agent settings: model, effort, MCP servers">⚙</button>
+      <button class="btn" id="side-collapse" title="Hide panel (⌘B)">⟩</button>
+    </div>
+    <div class="pane active" id="pane-chat">
+      <div id="messages"></div>
+      <div id="thinking">thinking…</div>
+      <div id="composer">
+        <div id="chips"><span class="hint">no selection</span></div>
+        <div id="attach"></div>
+        <textarea id="input" placeholder="Describe the part or a change… drop / paste images for reference (Enter to send, Shift+Enter for newline)"></textarea>
+        <div class="row">
+          <button class="btn" id="attach-btn" title="Attach images (or drag & drop / paste)">📎</button>
+          <input type="file" id="imgpick" accept="image/*" multiple style="display:none">
+          <div id="status"><span class="dot"></span><span id="status-text">connecting…</span></div>
+          <button class="btn danger" id="stop" style="display:none">Stop</button>
+          <button class="btn primary" id="send">Send</button>
+        </div>
+      </div>
+    </div>
+    <div class="pane" id="pane-design">
+      <div id="design-body" style="flex:1;overflow:auto;padding:10px 12px">
+        <div class="cam-sec"><h4>Parameters <span class="muted" id="params-hint"></span></h4><div id="params-body" class="muted">no numeric parameters in the script</div></div>
+        <div class="cam-sec"><h4>Measure <button class="btn small" id="measure-toggle">Start</button></h4>
+          <div class="muted" id="measure-hint">Hover snaps to vertices and edges, otherwise a point on a face. Click two things for distance and angle. Click body rows for mass, two for clearance. ⌫ / right-click removes the last pick, Esc clears.</div>
+          <div id="measure-out" class="kv" style="margin-top:6px"></div>
+          <div class="modal-field" style="margin-top:6px"><label>Density</label><select id="measure-density"></select></div>
+        </div>
+        <div class="cam-sec"><h4>Shop drawings <button class="btn small primary" id="draw-make">Generate</button></h4>
+          <div class="modal-field"><label>Material</label><input id="draw-material" placeholder="e.g. Aluminium 6061" style="flex:1;background:var(--bg);color:var(--text);border:1px solid var(--line);border-radius:6px;padding:6px;font:inherit"></div>
+          <div class="modal-field"><label>Sheet</label><select id="draw-sheet"><option>A4</option><option>A3</option></select></div>
+          <div id="draw-files" class="muted">no drawings yet</div>
+        </div>
+      </div>
+    </div>
+    <div class="pane" id="pane-library">
+      <div style="padding:10px 12px;border-bottom:1px solid var(--line);display:flex;gap:6px;align-items:center">
+        <input id="lib-search" placeholder="search parts (name, description, tags)" style="flex:1;background:var(--bg);color:var(--text);border:1px solid var(--line);border-radius:6px;padding:6px;font:inherit">
+        <button class="btn small" id="lib-add" title="Save the whole design as a parametric part">+ Design</button>
+        <button class="btn small" id="lib-import" title="Import a STEP file into the library">+ STEP</button>
+      </div>
+      <div id="lib-list" class="muted" style="flex:1;overflow:auto;padding:10px 12px">empty — save a design or body here, or import a STEP into the library</div>
+    </div>
+    <div class="pane" id="pane-cam">
+      <div id="cam-body">
+        <div id="cam-empty" class="cam-sec" style="color:var(--muted)">No CAM program yet. Ask the agent, e.g. <i>"Make a CAM program for the Generic 3018: face the stock, drill the holes, pocket the bore and cut the outline with 4 tabs."</i> The agent writes <code>cam.py</code> (see the Code tab) against the machine and tool libraries below.</div>
+        <div class="cam-sec" id="cam-setup" style="display:none"><h4>Setup</h4><div id="cam-setup-body"></div></div>
+        <div class="cam-sec" id="cam-ops" style="display:none"><h4>Operations</h4><div id="cam-ops-body"></div><div id="cam-warn"></div></div>
+        <div class="cam-sec" id="cam-gcode" style="display:none"><h4>G-code <span class="muted" id="cam-gcode-meta"></span></h4>
+          <div class="row"><button class="btn primary" id="gcode-dl">⬇ Download .nc</button><button class="btn" id="gcode-preview">Preview</button></div>
+          <pre id="gcode-pre" style="display:none"></pre></div>
+        <div class="cam-sec"><h4>Feeds &amp; speeds</h4>
+          <div class="modal-field"><label>Tool</label><select id="fs-tool"></select></div>
+          <div class="modal-field"><label>Material</label><select id="fs-material"></select></div>
+          <div class="modal-field"><label>Machine</label><select id="fs-machine"></select></div>
+          <div class="modal-field"><label>Aggression</label><input type="range" id="fs-aggr" min="0" max="1" step="0.05" value="0.5" style="flex:1"><span id="fs-aggr-v" class="muted">50%</span></div>
+          <div class="modal-field"><label>Engagement</label><input type="range" id="fs-ae" min="0.05" max="1" step="0.05" value="0.4" style="flex:1"><span id="fs-ae-v" class="muted">40% of Ø</span></div>
+          <div id="fs-out" class="kv" style="margin-top:6px"></div>
+          <div id="fs-notes" class="muted" style="margin-top:4px;white-space:pre-wrap"></div>
+          <div class="row" style="margin-top:6px"><button class="btn primary small" id="fs-apply">Apply to tool</button></div>
+        </div>
+        <div class="cam-sec"><h4>Machines <button class="btn small" id="machine-add">+ New</button></h4><div id="cam-machines"></div></div>
+        <div class="cam-sec"><h4>Tools <button class="btn small" id="tool-add">+ New</button></h4><div id="cam-tools"></div></div>
+      </div>
+      <div id="cam-sim" style="display:none">
+        <button class="btn" id="sim-play" title="Play / pause">▶</button>
+        <input type="range" id="sim-range" min="0" max="0" value="0" step="1">
+        <span id="sim-info" class="muted">—</span>
+      </div>
+    </div>
+    <div class="pane" id="pane-code">
+      <textarea id="code" spellcheck="false"></textarea>
+      <div id="codeerr"></div>
+      <div id="codebar">
+        <select id="code-which" class="btn" style="padding:4px 6px"><option value="design">design.py</option><option value="cam">cam.py</option></select>
+        <span id="code-hint" style="color:var(--muted);font-size:11px;flex:1">build123d · <code>result</code> = shape or {name: shape} · ⌘↩ runs</span>
+        <button class="btn" id="code-reload">Reload</button>
+        <button class="btn primary" id="code-run">Run</button>
+      </div>
+    </div>
+  </div>
+</div>
+<div id="ctx"></div>
+<div id="modal"><div class="box"><h3 id="modal-title"></h3><div class="body" id="modal-body"></div><div class="row" id="modal-row"></div></div></div>
+
+<script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/python/python.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/edit/matchbrackets.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/selection/active-line.min.js"></script>
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+               "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/" } }
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+// ------------------------------------------------------------------ viewer
+const viewerEl = document.getElementById('viewer');
+const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+renderer.setPixelRatio(window.devicePixelRatio);
+viewerEl.appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x14171c);
+const camera = new THREE.PerspectiveCamera(40, 1, 0.1, 10000);
+camera.up.set(0, 0, 1);
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true; controls.dampingFactor = 0.12;
+
+scene.add(new THREE.HemisphereLight(0xffffff, 0x334455, 0.9));
+const key = new THREE.DirectionalLight(0xffffff, 1.1); key.position.set(60, -80, 120); scene.add(key);
+const fill = new THREE.DirectionalLight(0xffffff, 0.4); fill.position.set(-80, 60, 40); scene.add(fill);
+
+let grid = null, axes = null;
+function makeHelpers(size) {
+  if (grid) scene.remove(grid); if (axes) scene.remove(axes);
+  const s = Math.max(50, Math.ceil(size * 2 / 10) * 10);
+  grid = new THREE.GridHelper(s, s / 10, 0x3a4250, 0x262c36); grid.rotation.x = Math.PI / 2; scene.add(grid);
+  axes = new THREE.AxesHelper(s / 4); scene.add(axes);
+}
+makeHelpers(60);
+
+// body base tints (Fusion keeps everything grey; a light tint per body helps tell them apart)
+const BODY_TINTS = [0x9fb0c2, 0xb7b09a, 0x9fc0b0, 0xb0a0c0, 0xc0a89a, 0x9ab5c8, 0xb8c09a, 0xc09aa8];
+const COLORS = { hover: new THREE.Color(0xd2e0ee), selected: new THREE.Color(0xff8c42), highlight: new THREE.Color(0xff8c42), bodySel: new THREE.Color(0xffb27a), ghost: new THREE.Color(0xc8783c), ghostBody: new THREE.Color(0xd9a07a) };
+// marker shown when hovering a selection chip in the chat history (works even after the face ids were renumbered)
+const marker = new THREE.Group(); marker.visible = false; scene.add(marker);
+const markerDot = new THREE.Mesh(new THREE.SphereGeometry(1, 24, 16), new THREE.MeshBasicMaterial({ color: 0xff8c42, depthTest: false, transparent: true, opacity: 0.9 }));
+const markerRing = new THREE.Mesh(new THREE.RingGeometry(1.6, 2.1, 48), new THREE.MeshBasicMaterial({ color: 0xff8c42, side: THREE.DoubleSide, depthTest: false, transparent: true, opacity: 0.8 }));
+const markerLine = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3(0, 0, 4)]), new THREE.LineBasicMaterial({ color: 0xff8c42, depthTest: false }));
+marker.add(markerDot, markerRing, markerLine); markerDot.renderOrder = markerRing.renderOrder = markerLine.renderOrder = 10;
+function showMarker(center, normal) {
+  const sz = (bbox ? bbox.getSize(new THREE.Vector3()).length() : 60) * 0.012;
+  marker.position.set(...center); marker.scale.setScalar(sz);
+  const n = new THREE.Vector3(...(normal || [0, 0, 1])).normalize();
+  marker.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), n.lengthSq() ? n : new THREE.Vector3(0, 0, 1));
+  markerLine.visible = !!normal; marker.visible = true;
+}
+function hideMarker() { marker.visible = false; }
+const material = new THREE.MeshStandardMaterial({ vertexColors: true, metalness: 0.15, roughness: 0.55, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 });
+const edgeMat = new THREE.LineBasicMaterial({ color: 0x0c0f13, transparent: true, opacity: 0.85 });
+
+let model = null;           // { bodies: Map(id -> {mesh, lines, faceOfTri, ranges, colors, base, name, path}), faces: Map, tree }
+let selFaces = new Set();   // global face ids
+let selBodies = new Set();  // body ids
+let ghostFaces = new Set();  // faces sent with the last question — stay lit until the model changes or you click
+let ghostBodies = new Set();
+let hidden = new Set();     // hidden body ids (kept across rebuilds by path)
+let hiddenPaths = new Set();
+let hovered = -1;
+let bbox = null;
+let firstLoad = true;
+let showEdges = true;
+
+function loadMesh(data) {
+  if (model) for (const b of model.bodies.values()) { scene.remove(b.mesh); scene.remove(b.lines); b.mesh.geometry.dispose(); b.lines.geometry.dispose(); }
+  const faces = new Map(data.faces.map(f => [f.id, f]));
+  const bodies = new Map();
+  data.bodies.forEach((bd, i) => {
+    const geo = new THREE.BufferGeometry();
+    const pos = new Float32Array(bd.positions);
+    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    geo.setIndex(bd.indices);
+    if (bd.normals && bd.normals.length === pos.length) geo.setAttribute('normal', new THREE.BufferAttribute(new Float32Array(bd.normals), 3));
+    else geo.computeVertexNormals();
+    const colors = new Float32Array(pos.length);
+    geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    const faceOfTri = new Int32Array(bd.indices.length / 3).fill(-1);
+    const ranges = new Map();
+    for (const [fid, start, count] of bd.faceRanges) { ranges.set(fid, [start, count]); for (let t = start / 3; t < (start + count) / 3; t++) faceOfTri[t] = fid; }
+    const mesh = new THREE.Mesh(geo, material); mesh.userData.body = bd.id;
+    const segs = [];
+    for (const pl of bd.edges) for (let k = 0; k + 5 < pl.length; k += 3) segs.push(pl[k], pl[k+1], pl[k+2], pl[k+3], pl[k+4], pl[k+5]);
+    const lgeo = new THREE.BufferGeometry(); lgeo.setAttribute('position', new THREE.Float32BufferAttribute(segs, 3));
+    const lines = new THREE.LineSegments(lgeo, edgeMat);
+    scene.add(mesh); scene.add(lines);
+    const edgeLines = (bd.edgeInfo || []).map((info, k) => { const pl = bd.edges[k] || []; const pts = []; for (let q = 0; q + 2 < pl.length; q += 3) pts.push([pl[q], pl[q+1], pl[q+2]]); return { info, pts }; });
+    bodies.set(bd.id, { id: bd.id, name: bd.name, path: bd.path, mesh, lines, faceOfTri, ranges, colors, base: new THREE.Color(BODY_TINTS[i % BODY_TINTS.length]), faceIds: bd.faceRanges.map(r => r[0]), bboxMin: bd.bboxMin, bboxMax: bd.bboxMax, edgeLines });
+  });
+  model = { bodies, faces, tree: data.tree };
+  // carry body visibility across rebuilds by path
+  hidden = new Set([...bodies.values()].filter(b => hiddenPaths.has(b.path)).map(b => b.id));
+  bbox = new THREE.Box3(new THREE.Vector3(...data.bboxMin), new THREE.Vector3(...data.bboxMax));
+  makeHelpers(bbox.getSize(new THREE.Vector3()).length());
+  selFaces.clear(); selBodies.clear(); ghostFaces.clear(); ghostBodies.clear(); hideMarker(); renderChips();
+  applyVisibility();
+  applyColors();
+  if (firstLoad) { setView('iso'); firstLoad = false; }
+  const kinds = {}; for (const f of data.faces) kinds[f.kind] = (kinds[f.kind] || 0) + 1;
+  const tris = data.bodies.reduce((n, b) => n + b.indices.length / 3, 0);
+  document.getElementById('stats').textContent = `exact B-rep: ${data.bodies.length} bod${data.bodies.length === 1 ? 'y' : 'ies'}, ${Object.entries(kinds).map(([k, n]) => `${n} ${k.toLowerCase()}`).join(', ')} · ${(bbox.max.x-bbox.min.x).toFixed(1)} × ${(bbox.max.y-bbox.min.y).toFixed(1)} × ${(bbox.max.z-bbox.min.z).toFixed(1)} mm · display mesh ${data.quality || ''} ${tris} tris`;
+  if (data.quality) document.getElementById('quality').value = data.quality;
+  renderTree();
+}
+
+function paintFace(b, fid, color) {
+  const r = b.ranges.get(fid); if (!r) return;
+  const idx = b.mesh.geometry.index.array, col = b.colors;
+  for (let i = r[0]; i < r[0] + r[1]; i++) { const v = idx[i] * 3; col[v] = color.r; col[v+1] = color.g; col[v+2] = color.b; }
+}
+function applyColors(extraHighlight = []) {
+  if (!model) return;
+  for (const b of model.bodies.values()) {
+    const col = b.colors, base = selBodies.has(b.id) ? COLORS.bodySel : ghostBodies.has(b.id) ? COLORS.ghostBody : b.base;
+    for (let i = 0; i < col.length; i += 3) { col[i] = base.r; col[i+1] = base.g; col[i+2] = base.b; }
+    if (hovered >= 0 && b.ranges.has(hovered) && !selFaces.has(hovered)) paintFace(b, hovered, COLORS.hover);
+    for (const f of ghostFaces) paintFace(b, f, COLORS.ghost);
+    for (const f of selFaces) paintFace(b, f, COLORS.selected);
+    for (const f of extraHighlight) paintFace(b, f, COLORS.highlight);
+    b.mesh.geometry.attributes.color.needsUpdate = true;
+  }
+}
+function applyVisibility() {
+  for (const b of model.bodies.values()) { const vis = !hidden.has(b.id); b.mesh.visible = vis; b.lines.visible = vis && showEdges; }
+}
+
+const VIEW_DIRS = { iso: [1, -1, 0.8], iso_back: [-1, 1, 0.8], front: [0, -1, 0], back: [0, 1, 0], left: [-1, 0, 0], right: [1, 0, 0], top: [0, -0.0001, 1], bottom: [0, -0.0001, -1] };
+function setView(name) { fitCamera(new THREE.Vector3(...(VIEW_DIRS[name] || VIEW_DIRS.iso)).normalize()); }
+// rotate the camera to look from `dir` keeping the current distance (animated) — used by the ViewCube
+let camTween = null;
+function orientCamera(dir) {
+  dir = dir.clone().normalize();
+  if (Math.abs(dir.x) < 1e-6 && Math.abs(dir.y) < 1e-6) dir.y = -1e-4;   // straight top/bottom: keep 'up' well defined
+  const target = controls.target.clone();
+  const from = camera.position.clone().sub(target); const dist = from.length() || 100; from.normalize();
+  camTween = { from, to: dir, dist, target, t0: performance.now(), dur: 350 };
+}
+function tickTween() {
+  if (!camTween) return;
+  const k = Math.min(1, (performance.now() - camTween.t0) / camTween.dur), e = k < .5 ? 2*k*k : -1 + (4 - 2*k)*k;
+  const q = new THREE.Quaternion().setFromUnitVectors(camTween.from, camTween.to);
+  const d = camTween.from.clone().applyQuaternion(new THREE.Quaternion().slerp(q, e)).normalize();
+  camera.position.copy(camTween.target).addScaledVector(d, camTween.dist); camera.lookAt(camTween.target);
+  if (k >= 1) camTween = null;
+}
+function fitCamera(dir) {
+  if (!bbox) return;
+  const center = bbox.getCenter(new THREE.Vector3());
+  const radius = bbox.getSize(new THREE.Vector3()).length() / 2 || 10;
+  let dist = radius / Math.sin(THREE.MathUtils.degToRad(camera.fov / 2));
+  dir = dir || camera.position.clone().sub(controls.target).normalize();
+  const corners = [];
+  for (const x of [bbox.min.x, bbox.max.x]) for (const y of [bbox.min.y, bbox.max.y]) for (const z of [bbox.min.z, bbox.max.z]) corners.push(new THREE.Vector3(x, y, z));
+  const place = () => {
+    camera.position.copy(center).addScaledVector(dir, dist);
+    camera.near = dist / 100; camera.far = dist * 100; camera.lookAt(center); camera.updateProjectionMatrix(); camera.updateMatrixWorld();
+  };
+  place();
+  // shrink-wrap: scale the distance so the projected bbox corners fill ~88% of the frame (sphere fit is loose for flat parts)
+  for (let it = 0; it < 3; it++) {
+    let ext = 0;
+    for (const c of corners) { const p = c.clone().project(camera); ext = Math.max(ext, Math.abs(p.x), Math.abs(p.y)); }
+    if (ext > 0) dist *= ext / 0.88;
+    place();
+  }
+  controls.target.copy(center); controls.update();
+}
+function resize() {
+  const w = viewerEl.clientWidth, h = viewerEl.clientHeight;
+  renderer.setSize(w, h, true); camera.aspect = w / h; camera.updateProjectionMatrix();
+}
+window.addEventListener('resize', resize); resize();
+function placeTree() { const rb = document.getElementById('ribbon'); if (!rb) return; const y = rb.offsetTop + rb.offsetHeight + 10; document.getElementById('tree').style.top = y + 'px'; document.getElementById('cmd').style.top = Math.max(150, y) + 'px'; }
+window.addEventListener('resize', placeTree); setTimeout(placeTree, 0);
+new ResizeObserver(() => resize()).observe(viewerEl);   // panel resize / collapse also resizes the viewer
+
+// ---- side panel: resizable + collapsible (remembered per browser)
+const sideEl = document.getElementById('side'), splitter = document.getElementById('splitter');
+function setSideWidth(w) { w = Math.round(Math.max(280, Math.min(w, innerWidth * 0.7))); document.documentElement.style.setProperty('--side-w', w + 'px'); try { localStorage.setItem('agentcad.sideWidth', w); } catch {} }
+function setSideHidden(h) { document.body.classList.toggle('side-hidden', h); try { localStorage.setItem('agentcad.sideHidden', h ? '1' : '0'); } catch {} if (!h) setTimeout(() => window.cm && cm.refresh(), 0); }
+try { const w = +localStorage.getItem('agentcad.sideWidth'); if (w) setSideWidth(w); if (localStorage.getItem('agentcad.sideHidden') === '1') setSideHidden(true); } catch {}
+splitter.addEventListener('pointerdown', ev => {
+  ev.preventDefault(); splitter.setPointerCapture(ev.pointerId); splitter.classList.add('drag'); document.body.classList.add('dragging');
+  const move = e => setSideWidth(innerWidth - e.clientX);
+  const up = () => { splitter.classList.remove('drag'); document.body.classList.remove('dragging'); splitter.removeEventListener('pointermove', move); splitter.removeEventListener('pointerup', up); if (window.cm) cm.refresh(); };
+  splitter.addEventListener('pointermove', move); splitter.addEventListener('pointerup', up);
+});
+splitter.addEventListener('dblclick', () => setSideWidth(440));
+document.getElementById('side-collapse').onclick = () => setSideHidden(true);
+document.getElementById('side-show').onclick = () => setSideHidden(false);
+document.addEventListener('keydown', e => { if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'b') { e.preventDefault(); setSideHidden(!document.body.classList.contains('side-hidden')); } });
+
+// ---------------- ViewCube (Fusion-style navigation widget)
+const cubeCanvas = document.getElementById('cube');
+const cubeRenderer = new THREE.WebGLRenderer({ canvas: cubeCanvas, alpha: true, antialias: true }); cubeRenderer.setPixelRatio(2); cubeRenderer.setSize(110, 110, false);
+const cubeScene = new THREE.Scene();
+const cubeCam = new THREE.OrthographicCamera(-1.35, 1.35, 1.35, -1.35, 0.1, 20); cubeCam.up.set(0, 0, 1);
+function faceTex(label) {
+  const c = document.createElement('canvas'); c.width = c.height = 128; const g = c.getContext('2d');
+  g.fillStyle = '#2b323c'; g.fillRect(0, 0, 128, 128); g.strokeStyle = '#586274'; g.lineWidth = 4; g.strokeRect(2, 2, 124, 124);
+  g.fillStyle = '#dfe6ee'; g.font = 'bold 26px -apple-system, Segoe UI, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(label, 64, 66);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
+}
+// BoxGeometry material order: +X -X +Y -Y +Z -Z  (Z up: -Y is the front)
+const cubeMats = ['RIGHT', 'LEFT', 'BACK', 'FRONT', 'TOP', 'BOTTOM'].map(l => new THREE.MeshBasicMaterial({ map: faceTex(l) }));
+const cubeMesh = new THREE.Mesh(new THREE.BoxGeometry(1.6, 1.6, 1.6), cubeMats); cubeScene.add(cubeMesh);
+cubeScene.add(new THREE.LineSegments(new THREE.EdgesGeometry(cubeMesh.geometry), new THREE.LineBasicMaterial({ color: 0x8a96a8 })));
+const cubeAxes = new THREE.AxesHelper(1.25); cubeAxes.position.set(-0.8, -0.8, -0.8); cubeScene.add(cubeAxes);
+let cubeHover = -1;
+function renderCube() {
+  const d = camera.position.clone().sub(controls.target).normalize();
+  cubeCam.position.copy(d.multiplyScalar(6)); cubeCam.up.copy(camera.up); cubeCam.lookAt(0, 0, 0);
+  cubeMats.forEach((m, i) => m.color.set(i === cubeHover ? 0xffb27a : 0xffffff));
+  cubeRenderer.render(cubeScene, cubeCam);
+}
+const cubeRay = new THREE.Raycaster();
+function cubePick(ev) {
+  const r = cubeCanvas.getBoundingClientRect();
+  cubeRay.setFromCamera(new THREE.Vector2(((ev.clientX - r.left) / r.width) * 2 - 1, -((ev.clientY - r.top) / r.height) * 2 + 1), cubeCam);
+  return cubeRay.intersectObject(cubeMesh, false)[0] || null;
+}
+cubeCanvas.addEventListener('pointermove', ev => { if (cubeDrag) return; const h = cubePick(ev); cubeHover = h ? Math.floor(h.faceIndex / 2) : -1; });
+cubeCanvas.addEventListener('pointerleave', () => { cubeHover = -1; });
+let cubeDrag = null;
+cubeCanvas.addEventListener('pointerdown', ev => { cubeDrag = { x: ev.clientX, y: ev.clientY, moved: false }; cubeCanvas.setPointerCapture(ev.pointerId); });
+cubeCanvas.addEventListener('pointermove', ev => {
+  if (!cubeDrag) return;
+  const dx = ev.clientX - cubeDrag.x, dy = ev.clientY - cubeDrag.y; cubeDrag.x = ev.clientX; cubeDrag.y = ev.clientY;
+  if (Math.abs(dx) + Math.abs(dy) > 0) cubeDrag.moved = true;
+  // orbit the main camera around the target (spherical coords, Z up)
+  const off = camera.position.clone().sub(controls.target); const rad = off.length();
+  let theta = Math.atan2(off.y, off.x), phi = Math.acos(Math.max(-1, Math.min(1, off.z / rad)));
+  theta -= dx * 0.012; phi = Math.max(0.02, Math.min(Math.PI - 0.02, phi - dy * 0.012));
+  camera.position.set(controls.target.x + rad * Math.sin(phi) * Math.cos(theta), controls.target.y + rad * Math.sin(phi) * Math.sin(theta), controls.target.z + rad * Math.cos(phi));
+  camera.lookAt(controls.target); camTween = null;
+});
+cubeCanvas.addEventListener('pointerup', ev => {
+  const wasClick = cubeDrag && !cubeDrag.moved; cubeDrag = null;
+  if (!wasClick) return;
+  const h = cubePick(ev); if (!h) return;
+  // snap: face, edge or corner depending on where on the cube you clicked
+  const p = h.point, dir = new THREE.Vector3();
+  for (const a of ['x', 'y', 'z']) dir[a] = Math.abs(p[a]) > 0.45 ? Math.sign(p[a]) : 0;
+  if (dir.lengthSq() === 0) return;
+  orientCamera(dir);
+});
+document.getElementById('home').onclick = () => setView('iso');
+
+// measurement annotation state (filled by the measure tool below; read by the render loop)
+const measureState = { mid: null, text: '' };
+const measureLabelEl = document.createElement('div'); measureLabelEl.id = 'measure-label'; measureLabelEl.style.display = 'none'; viewerEl.appendChild(measureLabelEl);
+function tickMeasureLabel() {
+  if (!measureState.mid) { measureLabelEl.style.display = 'none'; return; }
+  const v = new THREE.Vector3(...measureState.mid).project(camera);
+  const r = renderer.domElement.getBoundingClientRect();
+  measureLabelEl.style.display = ''; measureLabelEl.textContent = measureState.text;
+  const lx = Math.max(90, Math.min(r.width - 90, (v.x + 1) / 2 * r.width)), ly = Math.max(40, Math.min(r.height - 20, (1 - v.y) / 2 * r.height - 14));
+  measureLabelEl.style.left = lx + 'px'; measureLabelEl.style.top = ly + 'px';
+}
+
+// render loop (started after the ViewCube exists)
+(function animate() { requestAnimationFrame(animate); tickTween(); controls.update(); renderer.render(scene, camera); renderCube(); tickMeasureLabel(); drawSketchOverlay(); })();
+
+
+// picking
+const ray = new THREE.Raycaster(); const ptr = new THREE.Vector2();
+function pick(ev) {
+  if (!model) return null;
+  const rect = renderer.domElement.getBoundingClientRect();
+  ptr.x = ((ev.clientX - rect.left) / rect.width) * 2 - 1; ptr.y = -((ev.clientY - rect.top) / rect.height) * 2 + 1;
+  ray.setFromCamera(ptr, camera);
+  const meshes = [...model.bodies.values()].filter(b => b.mesh.visible).map(b => b.mesh);
+  const hit = ray.intersectObjects(meshes, false)[0];
+  if (!hit) return null;
+  const b = model.bodies.get(hit.object.userData.body);
+  return { face: b.faceOfTri[hit.faceIndex], body: b, point: [hit.point.x, hit.point.y, hit.point.z] };
+}
+const hoverEl = document.getElementById('hover');
+renderer.domElement.addEventListener('pointermove', ev => {
+  if (tool) { toolHover(ev); return; }
+  if (measuring) { measureHover(ev); return; }
+  const h = pick(ev); const f = h ? h.face : -1;
+  if (f !== hovered) { hovered = f; applyColors(); }
+  if (h) { const fi = model.faces.get(f); hoverEl.textContent = `${h.body.path} · ${fi.label} · centre (${fi.center.join(', ')})` + (fi.normal ? ` · n (${fi.normal.join(', ')})` : ''); }
+  else hoverEl.textContent = 'click a face to reference it in chat · shift-click for multiple · click a body in the Browser';
+});
+let downAt = null;
+renderer.domElement.addEventListener('pointerdown', ev => { downAt = [ev.clientX, ev.clientY]; });
+renderer.domElement.addEventListener('contextmenu', ev => { if (measuring) { ev.preventDefault(); measureUndo(); } });
+renderer.domElement.addEventListener('pointerup', ev => {
+  if (!downAt || Math.hypot(ev.clientX - downAt[0], ev.clientY - downAt[1]) > 4) return; // it was a drag
+  if (sk) return;
+  if (tool) { if (ev.button === 2) return; toolPick(snapPick(ev)); return; }
+  if (measuring) { if (ev.button === 2) return; measurePick(snapPick(ev)); return; }
+  const h = pick(ev);
+  ghostFaces.clear(); ghostBodies.clear();
+  if (!h) { if (!ev.shiftKey) { selFaces.clear(); selBodies.clear(); } }
+  else if (ev.shiftKey) { selFaces.has(h.face) ? selFaces.delete(h.face) : selFaces.add(h.face); }
+  else { selBodies.clear(); selFaces = selFaces.has(h.face) && selFaces.size === 1 ? new Set() : new Set([h.face]); }
+  applyColors(); renderChips(); renderTree();
+});
+
+// browser tree
+const collapsed = new Set();
+function renderTree() {
+  const el = document.getElementById('treebody'); el.innerHTML = '';
+  if (!model) return;
+  const nodes = model.tree, byParent = {};
+  for (const n of nodes) (byParent[n.parent || ''] ||= []).push(n);
+  const bodyOfFace = f => { for (const b of model.bodies.values()) if (b.ranges.has(f)) return b.id; return -1; };
+  const facesByBody = {}; for (const f of selFaces) { const b = bodyOfFace(f); (facesByBody[b] ||= []).push(f); }
+  const walk = (parent, depth) => {
+    for (const n of byParent[parent] || []) {
+      const row = document.createElement('div'); row.className = 'node'; row.style.paddingLeft = (6 + depth * 14) + 'px';
+      if (n.kind === 'component') {
+        const open = !collapsed.has(n.id);
+        row.innerHTML = `<span class="tw">${open ? '▾' : '▸'}</span><span class="nm">📁 ${n.name}</span><span class="more" title="more">⋯</span>`;
+        row.onclick = () => { collapsed.has(n.id) ? collapsed.delete(n.id) : collapsed.add(n.id); renderTree(); };
+        row.oncontextmenu = ev => { ev.preventDefault(); openCtx(ev.clientX, ev.clientY, n); };
+        row.querySelector('.more').onclick = ev => { ev.stopPropagation(); openCtx(ev.clientX, ev.clientY, n); };
+        el.appendChild(row);
+        if (open) walk(n.id, depth + 1);
+      } else {
+        const b = model.bodies.get(n.body); const isHidden = hidden.has(n.body);
+        row.classList.toggle('sel', selBodies.has(n.body)); row.classList.toggle('hidden', isHidden);
+        const nsel = (facesByBody[n.body] || []).length;
+        row.innerHTML = `<span class="eye" title="show/hide">${isHidden ? '○' : '●'}</span><span class="sw" style="background:#${b.base.getHexString()}"></span><span class="nm">${n.name}</span><span class="meta">${nsel ? nsel + ' face' + (nsel > 1 ? 's' : '') + ' · ' : ''}${n.faces} f</span><span class="more" title="more">⋯</span>`;
+        row.querySelector('.eye').onclick = ev => { ev.stopPropagation(); toggleBody(n.body); };
+        row.oncontextmenu = ev => { ev.preventDefault(); openCtx(ev.clientX, ev.clientY, n); };
+        row.querySelector('.more').onclick = ev => { ev.stopPropagation(); openCtx(ev.clientX, ev.clientY, n); };
+        row.onclick = ev => {
+          if (measuring) { mBodies = ev.shiftKey ? [...mBodies, n.body].slice(-2) : [n.body]; measureBodies(mBodies); return; }
+          if (!ev.shiftKey) { selFaces.clear(); if (selBodies.has(n.body) && selBodies.size === 1) selBodies.clear(); else selBodies = new Set([n.body]); }
+          else selBodies.has(n.body) ? selBodies.delete(n.body) : selBodies.add(n.body);
+          applyColors(); renderChips(); renderTree();
+        };
+        row.ondblclick = () => { const bb = new THREE.Box3().setFromObject(b.mesh); const saved = bbox; bbox = bb; fitCamera(); bbox = saved; };
+        el.appendChild(row);
+      }
+    }
+  };
+  walk('', 0);
+}
+// context menu for tree rows (bodies and components)
+const ctx = document.getElementById('ctx');
+function openCtx(x, y, n) {
+  const isBody = n.kind === 'body';
+  const items = [
+    ['Rename…', async () => { const name = await promptBox(`Rename ${isBody ? 'body' : 'component'}`, n.name); if (name && name !== n.name) send({ type: 'rename_body', path: n.path, name }); }],
+    ...(isBody ? [['Move / rotate…', () => transformDialog(n.path)]] : []),
+    ['Delete', async () => { if (await confirmBox(`Delete ${isBody ? 'body' : 'component'} '${n.path}'? (Undo restores it)`)) send({ type: 'delete_body', path: n.path }); }, 'danger'],
+    null,
+  ];
+  if (isBody) items.push(
+    [hidden.has(n.body) ? 'Show' : 'Hide', () => toggleBody(n.body)],
+    ['Zoom to', () => { const b = model.bodies.get(n.body); const bb = new THREE.Box3().setFromObject(b.mesh); const saved = bbox; bbox = bb; fitCamera(); bbox = saved; }],
+    ['Save to library…', () => saveBodyToLibrary(n.path)],
+    null,
+    ['Export STEP (this body)', () => window.open(`/api/export/step?body=${encodeURIComponent(n.path)}`)],
+    ['Export STL (this body)…', () => exportStlBox(n.path)],
+  );
+  ctx.innerHTML = '';
+  for (const it of items) {
+    if (!it) { ctx.appendChild(document.createElement('hr')); continue; }
+    const d = document.createElement('div'); d.textContent = it[0]; if (it[2]) d.className = it[2];
+    d.onclick = () => { closeCtx(); it[1](); }; ctx.appendChild(d);
+  }
+  ctx.style.left = Math.min(x, innerWidth - 180) + 'px'; ctx.style.top = Math.min(y, innerHeight - 220) + 'px'; ctx.style.display = 'block';
+}
+function closeCtx() { ctx.style.display = 'none'; }
+document.addEventListener('pointerdown', ev => { if (!ctx.contains(ev.target)) closeCtx(); });
+document.addEventListener('keydown', ev => { if (ev.key === 'Escape') { closeCtx(); if (modal.classList.contains('open') && modal.__close) modal.__close(null); } });
+
+function toggleBody(id) {
+  const b = model.bodies.get(id);
+  if (hidden.has(id)) { hidden.delete(id); hiddenPaths.delete(b.path); } else { hidden.add(id); hiddenPaths.add(b.path); }
+  applyVisibility(); renderTree();
+}
+
+// screenshot for the agent
+async function renderScreenshot(spec) {
+  const W = 1024, H = 768;
+  const savedPos = camera.position.clone(), savedTarget = controls.target.clone(), savedEdges = showEdges;
+  const savedPR = renderer.getPixelRatio();
+  try {
+    renderer.setPixelRatio(1); renderer.setSize(W, H, false); renderer.domElement.style.width = ''; renderer.domElement.style.height = ''; camera.aspect = W / H; camera.updateProjectionMatrix();
+    if (spec.only && model) { for (const b of model.bodies.values()) { b.mesh.visible = spec.only.includes(b.path); b.lines.visible = b.mesh.visible && spec.showEdges !== false; }
+      const bb = new THREE.Box3(); for (const b of model.bodies.values()) if (b.mesh.visible) bb.expandByObject(b.mesh); const saved = bbox; bbox = bb.isEmpty() ? bbox : bb; setView(spec.view || 'iso'); bbox = saved; }
+    else { setView(spec.view || 'iso'); showEdges = spec.showEdges !== false; applyVisibility(); }
+    applyColors(spec.highlight || []);
+    controls.update(); renderer.render(scene, camera);
+    // JPEG keeps the agent's tool result well under the SDK's 1 MB message limit even with dense toolpaths
+    let q = 0.85, url = renderer.domElement.toDataURL('image/jpeg', q);
+    while (url.length > 600000 && q > 0.4) { q -= 0.15; url = renderer.domElement.toDataURL('image/jpeg', q); }
+    return url;
+  } finally {
+    renderer.setPixelRatio(savedPR); resize();
+    camera.position.copy(savedPos); controls.target.copy(savedTarget); controls.update();
+    showEdges = savedEdges; applyVisibility(); applyColors();
+  }
+}
+
+window.agentcad = { renderScreenshot, get model() { return model; }, scene, camera, renderer, send: (o) => send(o) };
+
+// toolbar
+document.getElementById('fit').onclick = () => fitCamera();
+document.getElementById('edges').onclick = e => { showEdges = !showEdges; applyVisibility(); e.currentTarget.classList.toggle('active', showEdges); };
+document.getElementById('quality').onchange = e => send({ type: 'set_quality', quality: e.target.value });
+document.getElementById('undo').onclick = () => send({ type: 'undo' });
+
+// file menu
+const fileMenu = document.getElementById('filemenu');
+fileMenu.querySelector('button').onclick = ev => { ev.stopPropagation(); fileMenu.classList.toggle('open'); };
+document.addEventListener('click', () => fileMenu.classList.remove('open'));
+fileMenu.querySelectorAll('.dd div').forEach(d => d.onclick = () => fileAction(d.dataset.act));
+document.addEventListener('keydown', e => { if ((e.metaKey || e.ctrlKey) && e.key === 's') { e.preventDefault(); fileAction('save'); } });
+let design = { name: null, dirty: false };
+let stlRes = '0.01,0.05'; try { stlRes = localStorage.getItem('agentcad.stlRes') || stlRes; } catch {}
+const STL_OPTS = [['0.002,0.02', '0.002 mm / 1° (very fine)'], ['0.01,0.05', '0.01 mm / 3° (fine, default)'], ['0.05,0.1', '0.05 mm / 6° (medium)'], ['0.2,0.3', '0.2 mm / 17° (coarse)']];
+async function exportStlBox(bodyPath) {
+  const d = document.createElement('div');
+  const bodies = model ? [...model.bodies.values()] : [];
+  d.innerHTML = `<div class="modal-field"><label>Resolution</label><select id="x-res">${STL_OPTS.map(([v, l]) => `<option value="${v}" ${v === stlRes ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
+    <div class="modal-field"><label>Body</label><select id="x-body"><option value="">All bodies</option>${bodies.map(b => `<option value="${b.path}" ${b.path === bodyPath ? 'selected' : ''}>${b.path}</option>`).join('')}</select></div>
+    <div style="color:var(--muted);font-size:11px;margin-top:8px">STL is tessellated at export from the exact B-rep: max chordal deviation / max angular deviation. STEP export is exact and needs no settings.</div>`;
+  const ok = await openModal('Export STL', d, [['Cancel', null], ['Export', () => ({ res: d.querySelector('#x-res').value, body: d.querySelector('#x-body').value }), true]]);
+  if (!ok) return;
+  stlRes = ok.res; try { localStorage.setItem('agentcad.stlRes', stlRes); } catch {}
+  const [tol, ang] = stlRes.split(',');
+  window.open(`/api/export/stl?tol=${tol}&ang=${ang}${ok.body ? '&body=' + encodeURIComponent(ok.body) : ''}`);
+}
+async function api(path, body) {
+  const r = await fetch(path, body ? { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) } : {});
+  const j = await r.json(); if (!r.ok) throw new Error(j.error || r.statusText); return j;
+}
+async function fileAction(act) {
+  try {
+    if (act === 'new') { if (design.dirty && !await confirmBox('Discard unsaved changes and start a new design?')) return; await api('/api/design/new', {}); }
+    else if (act === 'save') { if (design.name) await api('/api/design/save', { name: design.name }); else await fileAction('saveas'); }
+    else if (act === 'saveas') { const name = await promptBox('Save design as', design.name || 'my-part'); if (name) { await api('/api/design/save', { name }); addMsg('system', `saved as ${name}`); } }
+    else if (act === 'open') { const { designs } = await api('/api/designs'); const name = await pickBox('Open design', designs); if (name) { if (design.dirty && !await confirmBox('Discard unsaved changes?')) return; await api('/api/design/open', { name }); } }
+    else if (act === 'download') { window.open('/api/design/download'); }
+    else if (act === 'import') { document.getElementById('filepick').click(); }
+    else if (act === 'step') { window.open('/api/export/step'); }
+    else if (act === 'importstep') { document.getElementById('steppick').click(); }
+    else if (act === 'drawings') { document.querySelector('[data-pane=design]').click(); await makeDrawings(); }
+    else if (act === 'stl') { await exportStlBox(); }
+  } catch (e) { addMsg('error', e.message); }
+}
+document.getElementById('filepick').onchange = async ev => {
+  const f = ev.target.files[0]; if (!f) return;
+  try { const code = await f.text(); await api('/api/design/import', { name: f.name, code }); addMsg('system', `imported ${f.name}`); } catch (e) { addMsg('error', 'import failed: ' + e.message); }
+  ev.target.value = '';
+};
+function setDesign(d) {
+  design = d; const el = document.getElementById('designname');
+  el.textContent = (d.name || 'untitled') + (d.dirty ? ' •' : ''); document.title = `AgentCAD · ${d.name || 'untitled'}${d.dirty ? ' •' : ''}`;
+}
+// modal helpers
+const modal = document.getElementById('modal'), mTitle = document.getElementById('modal-title'), mBody = document.getElementById('modal-body'), mRow = document.getElementById('modal-row');
+function openModal(title, bodyEl, buttons) {
+  return new Promise(res => {
+    mTitle.textContent = title; mBody.innerHTML = ''; mBody.appendChild(bodyEl); mRow.innerHTML = '';
+    const close = v => { modal.classList.remove('open'); res(v); };
+    for (const [label, value, primary] of buttons) { const b = document.createElement('button'); b.className = 'btn' + (primary ? ' primary' : ''); b.textContent = label; b.onclick = () => close(typeof value === 'function' ? value() : value); mRow.appendChild(b); }
+    modal.onclick = e => { if (e.target === modal) close(null); };
+    modal.__close = close;
+    modal.classList.add('open'); bodyEl.__close = close;
+    const inp = bodyEl.querySelector?.('input'); if (inp) { inp.focus(); inp.select(); inp.onkeydown = e => { if (e.key === 'Enter') close(inp.value.trim() || null); if (e.key === 'Escape') close(null); }; }
+  });
+}
+function promptBox(title, def) { const d = document.createElement('div'); d.innerHTML = `<input value="${def || ''}">`; return openModal(title, d, [['Cancel', null], ['OK', () => d.querySelector('input').value.trim() || null, true]]); }
+function confirmBox(text) { const d = document.createElement('div'); d.textContent = text; return openModal('Confirm', d, [['Cancel', false], ['OK', true, true]]); }
+function pickBox(title, designs) {
+  const d = document.createElement('div');
+  if (!designs.length) d.innerHTML = '<div style="color:var(--muted)">No saved designs yet. Use File ▸ Save as…</div>';
+  for (const x of designs) { const r = document.createElement('div'); r.className = 'design'; r.innerHTML = `<b>${x.name}</b><span>${new Date(x.modified * 1000).toLocaleString()} · ${x.size} B</span>`; r.onclick = () => d.__close(x.name); d.appendChild(r); }
+  return openModal(title, d, [['Cancel', null]]);
+}
+
+// ------------------------------------------------------------------ chat UI
+const messagesEl = document.getElementById('messages');
+const inputEl = document.getElementById('input');
+const statusEl = document.getElementById('status'), statusText = document.getElementById('status-text');
+const stopBtn = document.getElementById('stop'), sendBtn = document.getElementById('send');
+const thinkingEl = document.getElementById('thinking');
+let currentBubble = null, currentText = '';
+const toolEls = new Map();
+marked.setOptions({ breaks: true });
+
+function addMsg(cls, text) {
+  const el = document.createElement('div'); el.className = 'msg ' + cls;
+  if (cls === 'assistant') el.innerHTML = marked.parse(text || ''); else el.textContent = text;
+  messagesEl.appendChild(el); scroll(); return el;
+}
+function scroll() { messagesEl.scrollTop = messagesEl.scrollHeight; }
+// user message that keeps the selection it was asked about
+function addUserMsg(text, snap, images = []) {
+  const el = document.createElement('div'); el.className = 'msg user';
+  const t = document.createElement('div'); t.textContent = text; el.appendChild(t);
+  if (images.length) {
+    const row = document.createElement('div'); row.className = 'imgs';
+    for (const im of images) { const img = document.createElement('img'); img.src = im.data; img.title = im.name; img.onclick = () => window.open(im.data); row.appendChild(img); }
+    el.appendChild(row);
+  }
+  if (snap.faces.length || snap.bodies.length) {
+    const row = document.createElement('div'); row.className = 'sel';
+    const lbl = document.createElement('span'); lbl.className = 'lbl'; lbl.textContent = 'with'; row.appendChild(lbl);
+    for (const b of snap.bodies) row.appendChild(refChip('body: ' + b.path, 'chip body ref', () => showMarker(b.center, null), () => reselect({ body: b })));
+    for (const f of snap.faces) row.appendChild(refChip(`${f.body} · ${f.label}`, 'chip ref', () => { showMarker(f.center, f.normal); const id = findFace(f); if (id >= 0) { hovered = id; applyColors(); } }, () => reselect({ face: f })));
+    el.appendChild(row);
+  }
+  messagesEl.appendChild(el); scroll(); return el;
+}
+function refChip(label, cls, onHover, onClick) {
+  const c = document.createElement('span'); c.className = cls; c.textContent = label; c.title = 'hover: show where · click: select again';
+  c.onmouseenter = onHover; c.onmouseleave = () => { hideMarker(); hovered = -1; applyColors(); }; c.onclick = onClick; return c;
+}
+// find the same geometric face in the current model (ids are renumbered on every rebuild)
+function findFace(snapFace) {
+  if (!model) return -1;
+  let best = -1, bestD = Infinity;
+  const tol = (bbox ? bbox.getSize(new THREE.Vector3()).length() : 60) * 1e-4 + 1e-3;
+  for (const f of model.faces.values()) {
+    if (f.kind !== snapFace.kind) continue;
+    const d = Math.hypot(f.center[0] - snapFace.center[0], f.center[1] - snapFace.center[1], f.center[2] - snapFace.center[2]);
+    if (d < bestD) { bestD = d; best = f.id; }
+  }
+  return bestD <= tol ? best : -1;
+}
+function reselect({ face, body }) {
+  if (!model) return;
+  ghostFaces.clear(); ghostBodies.clear();
+  if (face) { const id = findFace(face); if (id < 0) { addMsg('system', `that face (${face.label}) no longer exists in the current model`); return; } selFaces.add(id); }
+  if (body) { const b = [...model.bodies.values()].find(x => x.path === body.path); if (!b) { addMsg('system', `body '${body.path}' no longer exists`); return; } selBodies.add(b.id); }
+  applyColors(); renderChips(); renderTree();
+}
+function finishBubble() { if (currentBubble && currentText) currentBubble.innerHTML = marked.parse(currentText); currentBubble = null; currentText = ''; }
+function onDelta(t) {
+  if (!currentBubble) { currentBubble = addMsg('assistant', ''); currentText = ''; }
+  currentText += t; currentBubble.innerHTML = marked.parse(currentText); scroll();
+}
+function toolChip(id, name) {
+  let el = toolEls.get(id);
+  if (el) return el;
+  el = document.createElement('details'); el.className = 'tool';
+  el.innerHTML = `<summary><span class="name">${name}</span><span class="args"></span><span class="state run">running…</span></summary>`;
+  messagesEl.appendChild(el); toolEls.set(id, el); scroll(); return el;
+}
+function summarizeInput(name, input) {
+  if (name === 'build_model') return `${(input.code || '').split('\n').length} lines`;
+  if (name === 'screenshot') return `${input.view || 'iso'}${input.highlight_faces?.length ? ' · faces ' + input.highlight_faces.join(',') : ''}`;
+  return Object.entries(input || {}).map(([k, v]) => `${k}=${JSON.stringify(v)}`).join(' ').slice(0, 80);
+}
+
+// selection chips
+const chipsEl = document.getElementById('chips');
+function renderChips() {
+  chipsEl.innerHTML = '';
+  for (const name of selSketches) { const c = document.createElement('span'); c.className = 'chip body'; c.style.borderColor = '#3ee6c6'; c.style.color = '#3ee6c6'; c.innerHTML = `sketch: ${name} <b>×</b>`; c.querySelector('b').onclick = () => { selSketches.delete(name); loadSketches(modelSketches); renderChips(); }; chipsEl.appendChild(c); }
+  if (!selFaces.size && !selBodies.size && !selSketches.size) { chipsEl.innerHTML = '<span class="hint">no selection — click a face in the viewer or a body in the Browser to reference it</span>'; return; }
+  for (const id of selBodies) {
+    const b = model.bodies.get(id); const c = document.createElement('span'); c.className = 'chip body';
+    c.innerHTML = `body: ${b ? b.path : id} <b>×</b>`; c.querySelector('b').onclick = () => { selBodies.delete(id); applyColors(); renderChips(); renderTree(); };
+    chipsEl.appendChild(c);
+  }
+  for (const f of selFaces) {
+    const fi = model.faces.get(f); const c = document.createElement('span'); c.className = 'chip';
+    c.innerHTML = `${fi ? fi.label : '#' + f} <b>×</b>`; c.querySelector('b').onclick = () => { selFaces.delete(f); applyColors(); renderChips(); renderTree(); };
+    chipsEl.appendChild(c);
+  }
+}
+
+// ------------------------------------------------------------------ CAM: toolpaths, stock, simulation, library
+const camGroup = new THREE.Group(); scene.add(camGroup);
+let program = null, camCode = '', library = { machines: [], tools: [] };
+let camOps = [];          // [{op, cut: LineSegments, rapid: LineSegments, visible, cutCounts: Int32Array, rapidCounts: Int32Array}]
+let stockObj = null, originObj = null, toolObj = null, showTp = true, showStock = true;
+const camMatCut = c => new THREE.LineBasicMaterial({ color: c, transparent: true, opacity: 0.95 });
+const rapidMat = new THREE.LineDashedMaterial({ color: 0xff5c5c, dashSize: 1.5, gapSize: 1.0, transparent: true, opacity: 0.55 });
+function clearCam() {
+  for (const c of camOps) { camGroup.remove(c.cut, c.rapid); c.cut.geometry.dispose(); c.rapid.geometry.dispose(); }
+  camOps = [];
+  if (stockObj) { camGroup.remove(stockObj); stockObj = null; }
+  if (originObj) { camGroup.remove(originObj); originObj = null; }
+  if (toolObj) { camGroup.remove(toolObj); toolObj = null; }
+}
+function loadProgram(p) {
+  clearCam(); program = p;
+  const has = !!p;
+  for (const id of ['cam-sep', 'tp-toggle', 'stock-toggle']) document.getElementById(id).style.display = has ? '' : 'none';
+  if (!has) { renderCamTab(); return; }
+  for (const op of p.ops) {
+    const cutPos = [], rapPos = []; const cutCounts = new Int32Array(op.moves.length + 1), rapidCounts = new Int32Array(op.moves.length + 1);
+    let prev = null, nc = 0, nr = 0;
+    op.moves.forEach((m, i) => {
+      if (prev) { if (m[0] === 0) { rapPos.push(prev[1], prev[2], prev[3], m[1], m[2], m[3]); nr++; } else { cutPos.push(prev[1], prev[2], prev[3], m[1], m[2], m[3]); nc++; } }
+      cutCounts[i + 1] = nc; rapidCounts[i + 1] = nr; prev = m;
+    });
+    const cg = new THREE.BufferGeometry(); cg.setAttribute('position', new THREE.Float32BufferAttribute(cutPos, 3));
+    const rg = new THREE.BufferGeometry(); rg.setAttribute('position', new THREE.Float32BufferAttribute(rapPos, 3));
+    const cut = new THREE.LineSegments(cg, camMatCut(op.color)); const rapid = new THREE.LineSegments(rg, rapidMat); rapid.computeLineDistances();
+    cut.renderOrder = rapid.renderOrder = 5;
+    camGroup.add(cut, rapid);
+    camOps.push({ op, cut, rapid, visible: true, cutCounts, rapidCounts });
+  }
+  const st = p.stock, sx = st.xmax - st.xmin, sy = st.ymax - st.ymin, sz = st.zmax - st.zmin;
+  stockObj = new THREE.Group();
+  const sm = new THREE.Mesh(new THREE.BoxGeometry(sx, sy, sz), new THREE.MeshBasicMaterial({ color: 0xffd166, transparent: true, opacity: 0.07, depthWrite: false }));
+  const se = new THREE.LineSegments(new THREE.EdgesGeometry(sm.geometry), new THREE.LineBasicMaterial({ color: 0xffd166, transparent: true, opacity: 0.6 }));
+  stockObj.add(sm, se); stockObj.position.set((st.xmin + st.xmax) / 2, (st.ymin + st.ymax) / 2, (st.zmin + st.zmax) / 2); camGroup.add(stockObj);
+  originObj = new THREE.Group(); originObj.add(new THREE.AxesHelper(Math.max(6, Math.min(sx, sy) * 0.15)));
+  const od = new THREE.Mesh(new THREE.SphereGeometry(Math.max(0.6, Math.min(sx, sy) * 0.012), 16, 12), new THREE.MeshBasicMaterial({ color: 0xffffff }));
+  originObj.add(od); originObj.position.set(...p.origin); camGroup.add(originObj);
+  applyCamVisibility(); renderCamTab(); setupSim();
+}
+function applyCamVisibility() {
+  for (const c of camOps) { c.cut.visible = c.rapid.visible = showTp && c.visible; }
+  if (stockObj) stockObj.visible = showStock; if (originObj) originObj.visible = showStock || showTp;
+}
+document.getElementById('tp-toggle').onclick = e => { showTp = !showTp; e.currentTarget.classList.toggle('active', showTp); applyCamVisibility(); };
+document.getElementById('stock-toggle').onclick = e => { showStock = !showStock; e.currentTarget.classList.toggle('active', showStock); applyCamVisibility(); };
+
+function renderCamTab() {
+  const has = !!program;
+  document.getElementById('cam-empty').style.display = has ? 'none' : '';
+  for (const id of ['cam-setup', 'cam-ops', 'cam-gcode']) document.getElementById(id).style.display = has ? '' : 'none';
+  document.getElementById('cam-sim').style.display = has ? '' : 'none';
+  if (has) {
+    const st = program.stock, o = program.origin;
+    document.getElementById('cam-setup-body').innerHTML = `<div class="kv">
+      <div>Machine</div><div>${program.machine}</div>
+      <div>Stock</div><div>${(st.xmax - st.xmin).toFixed(1)} × ${(st.ymax - st.ymin).toFixed(1)} × ${(st.zmax - st.zmin).toFixed(1)} mm · top z ${st.zmax.toFixed(2)}</div>
+      <div>WCS origin</div><div>model (${o.map(v => v.toFixed(2)).join(', ')})</div>
+      <div>Safe Z</div><div>${program.safe_z.toFixed(2)} (model) · ${(program.safe_z - o[2]).toFixed(2)} (WCS)</div>
+      <div>Est. time</div><div>${program.time.toFixed(1)} min</div></div>`;
+    const ops = document.getElementById('cam-ops-body'); ops.innerHTML = '';
+    program.ops.forEach((op, i) => {
+      const r = document.createElement('div'); r.className = 'oprow';
+      r.innerHTML = `<input type="checkbox" ${camOps[i]?.visible ? 'checked' : ''}><span class="sw" style="background:${op.color}"></span><span class="nm">${i + 1}. ${op.name} <span class="muted">${op.kind}</span></span><span class="meta">T${op.tool.number} Ø${op.tool.diameter} · ${op.time.toFixed(1)} min</span>`;
+      r.querySelector('input').onchange = e => { camOps[i].visible = e.target.checked; applyCamVisibility(); setupSim(); };
+      r.title = Object.entries(op.params || {}).map(([k, v]) => `${k}=${Array.isArray(v) ? v.join('×') : (typeof v === 'number' ? +v.toFixed(3) : v)}`).join('  ');
+      ops.appendChild(r);
+    });
+    document.getElementById('cam-warn').textContent = (program.warnings || []).map(w => '⚠ ' + w).join('\n');
+    document.getElementById('cam-gcode-meta').textContent = lastGcodeLines ? `${lastGcodeLines} lines` : '';
+  }
+  // libraries
+  const mEl = document.getElementById('cam-machines'); mEl.innerHTML = '';
+  for (const m of library.machines) {
+    const r = document.createElement('div'); r.className = 'librow';
+    r.innerHTML = `<span class="nm">${m.name} <span class="meta">${m.travel.x}×${m.travel.y}×${m.travel.z} mm · ${m.spindle.min}–${m.spindle.max} rpm · ${m.tool_change}</span></span><button class="btn" data-a="edit">Edit</button><button class="btn" data-a="del">✕</button>`;
+    r.querySelector('[data-a=edit]').onclick = () => editJson('Machine', m, obj => api('/api/cam/machine', { machine: obj }));
+    r.querySelector('[data-a=del]').onclick = async () => { if (await confirmBox(`Delete machine '${m.name}'?`)) fetch('/api/cam/machine/' + encodeURIComponent(m.name), { method: 'DELETE' }); };
+    mEl.appendChild(r);
+  }
+  const tEl = document.getElementById('cam-tools'); tEl.innerHTML = '';
+  for (const t of library.tools) {
+    const r = document.createElement('div'); r.className = 'librow';
+    r.innerHTML = `<span class="nm">T${t.number} ${t.name} <span class="meta">${t.type} Ø${t.diameter} · ${t.rpm} rpm · F${t.feed}/${t.plunge} · ↓${t.stepdown} ↔${t.stepover}</span></span><button class="btn" data-a="edit">Edit</button><button class="btn" data-a="del">✕</button>`;
+    r.querySelector('[data-a=edit]').onclick = () => editJson('Tool', t, obj => api('/api/cam/tool', { tool: obj }));
+    r.querySelector('[data-a=del]').onclick = async () => { if (await confirmBox(`Delete tool T${t.number} ${t.name}?`)) fetch('/api/cam/tool/' + t.number, { method: 'DELETE' }); };
+    tEl.appendChild(r);
+  }
+}
+document.getElementById('machine-add').onclick = () => editJson('New machine', { name: 'My router', controller: 'grbl', units: 'mm', travel: { x: 300, y: 300, z: 60 }, max_feed: { x: 3000, y: 3000, z: 600 }, rapid: 3000, spindle: { min: 5000, max: 24000 }, tool_change: 'pause', coolant: false, safe_z: 5, clearance_z: 15, program_start: [], program_end: [], notes: '' }, obj => api('/api/cam/machine', { machine: obj }));
+document.getElementById('tool-add').onclick = () => editJson('New tool', { number: (Math.max(0, ...library.tools.map(t => t.number)) + 1), name: '4 mm flat endmill', type: 'flat', diameter: 4, flutes: 2, flute_length: 15, rpm: 12000, feed: 900, plunge: 250, stepdown: 1.5, stepover: 0.45, angle: 0, notes: '' }, obj => api('/api/cam/tool', { tool: obj }));
+async function editJson(title, obj, save) {
+  const d = document.createElement('div'); d.innerHTML = `<textarea spellcheck="false"></textarea><div class="muted" id="json-err"></div>`;
+  const ta = d.querySelector('textarea'); ta.value = JSON.stringify(obj, null, 2);
+  const res = await openModal(title + ' (JSON)', d, [['Cancel', null], ['Save', () => { try { return JSON.parse(ta.value); } catch (e) { d.querySelector('#json-err').textContent = e.message; return undefined; } }, true]]);
+  if (res === undefined) return editJson(title, safeParse(ta.value, obj), save);
+  if (res) { try { await save(res); addMsg('system', `${title.toLowerCase()} saved`); } catch (e) { addMsg('error', e.message); } }
+}
+function safeParse(t, fb) { try { return JSON.parse(t); } catch { return fb; } }
+document.getElementById('gcode-dl').onclick = () => window.open('/api/gcode');
+document.getElementById('gcode-preview').onclick = async () => { const pre = document.getElementById('gcode-pre'); pre.textContent = await fetch('/api/gcode/preview').then(r => r.text()); pre.style.display = pre.style.display === 'none' ? '' : 'none'; };
+
+// simulation: slider over all visible moves, tool marker, draw range
+let sim = { total: 0, index: [], playing: false, timer: null };
+const simRange = document.getElementById('sim-range'), simInfo = document.getElementById('sim-info');
+function setupSim() {
+  sim.index = []; let n = 0;
+  camOps.forEach((c, oi) => { if (!c.visible) return; for (let i = 0; i < c.op.moves.length; i++) sim.index.push([oi, i]); n += c.op.moves.length; });
+  sim.total = n; simRange.max = n; simRange.value = n; applySim(n);
+}
+function applySim(k) {
+  k = Math.max(0, Math.min(k, sim.total));
+  // per op: how many moves are included
+  const counts = new Map(); for (const c of camOps) counts.set(c, c.visible ? 0 : 0);
+  for (let i = 0; i < k; i++) { const [oi] = sim.index[i]; counts.set(camOps[oi], (counts.get(camOps[oi]) || 0) + 1); }
+  for (const c of camOps) {
+    const m = c.visible ? (k >= sim.total ? c.op.moves.length : (counts.get(c) || 0)) : 0;
+    c.cut.geometry.setDrawRange(0, c.cutCounts[m] * 2); c.rapid.geometry.setDrawRange(0, c.rapidCounts[m] * 2);
+  }
+  if (toolObj) { camGroup.remove(toolObj); toolObj = null; }
+  if (k > 0 && k < sim.total) {
+    const [oi, mi] = sim.index[k - 1]; const c = camOps[oi]; const mv = c.op.moves[mi]; const t = c.op.tool;
+    const h = Math.max(t.diameter * 4, 12); const g = new THREE.CylinderGeometry(t.diameter / 2, t.type === 'ball' ? t.diameter / 2 : t.diameter / 2, h, 24); g.rotateX(Math.PI / 2); g.translate(0, 0, h / 2);
+    toolObj = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color: 0xffffff, transparent: true, opacity: 0.7, metalness: 0.4, roughness: 0.3 }));
+    toolObj.position.set(mv[1], mv[2], mv[3]); camGroup.add(toolObj);
+    simInfo.textContent = `${c.op.name} · move ${mi + 1}/${c.op.moves.length} · ${mv[0] === 0 ? 'rapid' : 'F' + mv[4]} · (${mv[1].toFixed(1)}, ${mv[2].toFixed(1)}, ${mv[3].toFixed(2)})`;
+  } else simInfo.textContent = k === 0 ? 'start' : `complete · ${program ? program.time.toFixed(1) : 0} min`;
+}
+simRange.oninput = () => applySim(+simRange.value);
+document.getElementById('sim-play').onclick = e => {
+  sim.playing = !sim.playing; e.currentTarget.textContent = sim.playing ? '❚❚' : '▶';
+  if (sim.playing) { if (+simRange.value >= sim.total) simRange.value = 0; sim.timer = setInterval(() => { const v = +simRange.value + Math.max(1, Math.round(sim.total / 600)); simRange.value = v; applySim(v); if (v >= sim.total) { clearInterval(sim.timer); sim.playing = false; e.currentTarget.textContent = '▶'; } }, 30); }
+  else clearInterval(sim.timer);
+};
+let lastGcodeLines = 0;
+
+// feeds & speeds calculator
+let fsResult = null;
+const fsEls = Object.fromEntries(['tool', 'material', 'machine', 'aggr', 'ae', 'out', 'notes', 'apply'].map(k => [k, document.getElementById('fs-' + k)]));
+async function fsInit() {
+  try { const { materials } = await fetch('/api/cam/materials').then(r => r.json()); fsEls.material.innerHTML = materials.map(m => `<option ${m === 'aluminium' ? 'selected' : ''}>${m}</option>`).join(''); } catch {}
+}
+function fsFillLibs() {
+  const tv = fsEls.tool.value, mv = fsEls.machine.value;
+  fsEls.tool.innerHTML = library.tools.map(t => `<option value="${t.number}" ${String(t.number) === tv ? 'selected' : ''}>T${t.number} ${t.name}</option>`).join('');
+  fsEls.machine.innerHTML = library.machines.map(m => `<option ${m.name === mv || (!mv && program && program.machine === m.name) ? 'selected' : ''}>${m.name}</option>`).join('');
+}
+async function fsCalc() {
+  if (!fsEls.tool.value || !fsEls.material.value) return;
+  fsEls['aggr-v'] = document.getElementById('fs-aggr-v'); fsEls['ae-v'] = document.getElementById('fs-ae-v');
+  fsEls['aggr-v'].textContent = Math.round(fsEls.aggr.value * 100) + '%'; fsEls['ae-v'].textContent = Math.round(fsEls.ae.value * 100) + '% of Ø';
+  try {
+    const r = await fetch(`/api/cam/feeds?tool=${fsEls.tool.value}&material=${encodeURIComponent(fsEls.material.value)}&machine=${encodeURIComponent(fsEls.machine.value)}&aggressiveness=${fsEls.aggr.value}&radial_engagement=${fsEls.ae.value}`);
+    const f = await r.json(); if (!r.ok) throw new Error(f.error);
+    fsResult = f;
+    fsEls.out.innerHTML = [['Surface speed', f.vc + ' m/min'], ['Spindle', f.rpm + ' rpm'], ['Chip load', f.chipload + ' mm/tooth'], ['Feed', f.feed + ' mm/min'], ['Plunge', f.plunge + ' mm/min'], ['Stepdown', f.stepdown + ' mm'], ['Stepover (rough)', Math.round(f.stepover * 100) + '% of Ø']].map(([k, v]) => `<div>${k}</div><div>${v}</div>`).join('');
+    fsEls.notes.textContent = (f.notes || []).map(n => '· ' + n).join('\n');
+  } catch (e) { fsEls.out.innerHTML = ''; fsEls.notes.textContent = e.message; fsResult = null; }
+}
+for (const k of ['tool', 'material', 'machine']) fsEls[k].onchange = fsCalc;
+for (const k of ['aggr', 'ae']) fsEls[k].oninput = fsCalc;
+fsEls.apply.onclick = async () => {
+  if (!fsResult) return;
+  const t = library.tools.find(x => String(x.number) === fsEls.tool.value); if (!t) return;
+  const nt = { ...t, rpm: fsResult.rpm, feed: fsResult.feed, plunge: fsResult.plunge, stepdown: fsResult.stepdown, stepover: fsResult.stepover, notes: ((t.notes || '').replace(/\s*\[.*?\]$/, '') + ` [${fsResult.material}: vc ${fsResult.vc} m/min, fz ${fsResult.chipload} mm]`).trim() };
+  try { await api('/api/cam/tool', { tool: nt }); addMsg('system', `feeds applied to T${t.number} ${t.name} (${fsResult.material})`); } catch (e) { addMsg('error', e.message); }
+};
+fsInit();
+
+// ------------------------------------------------------------------ Design tab: parameters, measure, drawings, library
+let paramsList = [];
+let paramTimer = null;
+async function loadParams() {
+  try { const { params } = await fetch('/api/params').then(r => r.json()); paramsList = params; renderParams(); } catch {}
+}
+function renderParams() {
+  const el = document.getElementById('params-body');
+  if (!paramsList.length) { el.className = 'muted'; el.textContent = 'no numeric parameters in the script (top-level name = number)'; return; }
+  el.className = ''; el.innerHTML = '';
+  for (const p of paramsList) {
+    const r = document.createElement('div'); r.className = 'prow';
+    r.innerHTML = `<label>${p.name}</label><span class="c">${p.comment || ''}</span><input type="number" step="any" value="${p.value}">`;
+    const inp = r.querySelector('input');
+    inp.onchange = () => { const v = parseFloat(inp.value); if (!isFinite(v)) return; clearTimeout(paramTimer); paramTimer = setTimeout(() => api('/api/params', { values: { [p.name]: v } }).catch(e => addMsg('error', e.message)), 250); };
+    inp.onkeydown = e => { if (e.key === 'ArrowUp' || e.key === 'ArrowDown') { e.preventDefault(); const step = e.shiftKey ? 10 : (e.altKey ? 0.1 : 1); inp.value = +(parseFloat(inp.value) + (e.key === 'ArrowUp' ? step : -step)).toFixed(4); inp.onchange(); } };
+    el.appendChild(r);
+  }
+  document.getElementById('params-hint').textContent = `${paramsList.length} · ↑↓ ±1, ⇧ ±10, ⌥ ±0.1`;
+}
+
+// measure mode: snap to vertex > edge > face point; two picks -> distance + angle, drawn in the viewer
+let measuring = false, mPicks = [], mBodies = [];
+const measureOut = document.getElementById('measure-out');
+const mGroup = new THREE.Group(); scene.add(mGroup);
+const hoverEdgeMat = new THREE.LineBasicMaterial({ color: 0xff8c42, depthTest: false }); const pickEdgeMat = new THREE.LineBasicMaterial({ color: 0xffd166, depthTest: false });
+let hoverObj = null, hoverSnap = null;
+function mkSphere(p, color, scale = 1.0) { const sz = (bbox ? bbox.getSize(new THREE.Vector3()).length() : 60) * 0.006 * scale; const m = new THREE.Mesh(new THREE.SphereGeometry(sz, 16, 12), new THREE.MeshBasicMaterial({ color, depthTest: false })); m.position.set(...p); m.renderOrder = 30; return m; }
+function mkLine(pts, mat) { const l = new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts.map(p => new THREE.Vector3(...p))), mat); l.renderOrder = 25; return l; }
+function setMeasuring(on) {
+  measuring = on; document.body.classList.toggle('measuring', on); if (typeof syncRibbon === 'function') syncRibbon();
+  document.getElementById('measure-btn').classList.toggle('active', on); document.getElementById('measure-toggle').textContent = on ? 'Stop' : 'Start';
+  if (on) { document.querySelector('[data-pane=design]').click(); } else { clearMeasure(); clearHover(); }
+}
+function clearMeasure() { mPicks = []; while (mGroup.children.length) mGroup.remove(mGroup.children[0]); measureState.mid = null; measureOut.innerHTML = ''; }
+function measureUndo() { if (!mPicks.length) return; mPicks.pop(); redrawPicks(); if (mPicks.length === 1) measureRequest(); else { measureState.mid = null; measureOut.innerHTML = ''; } }
+function clearHover() { if (hoverObj) { scene.remove(hoverObj); hoverObj = null; } hoverSnap = null; }
+document.getElementById('measure-btn').onclick = () => setMeasuring(!measuring);
+document.getElementById('measure-toggle').onclick = () => setMeasuring(!measuring);
+document.addEventListener('keydown', e => {
+  const typing = ['TEXTAREA', 'INPUT'].includes(document.activeElement.tagName) || document.querySelector('.CodeMirror-focused');
+
+  if (e.key === 'Escape' && measuring) { if (mPicks.length) clearMeasure(); else setMeasuring(false); }
+  if (e.key === 'Backspace' && measuring && !typing) { e.preventDefault(); measureUndo(); }
+});
+// screen-space snapping
+function snapPick(ev) {
+  if (!model) return null;
+  const r = renderer.domElement.getBoundingClientRect();
+  const mx = ev.clientX - r.left, my = ev.clientY - r.top;
+  const toPx = p => { const v = new THREE.Vector3(...p).project(camera); return [(v.x + 1) / 2 * r.width, (1 - v.y) / 2 * r.height, v.z]; };
+  let best = null;   // {d, type, ...}
+  const consider = c => { if (!best || c.d < best.d) best = c; };
+  for (const b of model.bodies.values()) {
+    if (!b.mesh.visible) continue;
+    for (const e of b.edgeLines) {
+      if (e.pts.length < 2) continue;
+      const px = e.pts.map(toPx);
+      // vertices (edge ends)
+      for (const [k, q] of [[0, px[0]], [e.pts.length - 1, px[px.length - 1]]]) {
+        const d = Math.hypot(q[0] - mx, q[1] - my); if (d < 10) consider({ d: d - 4, type: 'vertex', p: e.pts[k], body: b, z: q[2] });   // vertices win ties
+      }
+      for (let k = 0; k + 1 < px.length; k++) {
+        const ax = px[k][0], ay = px[k][1], bx = px[k+1][0], by = px[k+1][1];
+        const vx = bx - ax, vy = by - ay, L2 = vx * vx + vy * vy || 1e-9;
+        let t = ((mx - ax) * vx + (my - ay) * vy) / L2; t = Math.max(0, Math.min(1, t));
+        const d = Math.hypot(ax + vx * t - mx, ay + vy * t - my);
+        if (d < 8) { const P = e.pts[k], Q = e.pts[k+1]; consider({ d, type: 'edge', id: e.info.id, info: e.info, p: [P[0] + (Q[0]-P[0]) * t, P[1] + (Q[1]-P[1]) * t, P[2] + (Q[2]-P[2]) * t], pts: e.pts, body: b, z: px[k][2] }); }
+      }
+    }
+  }
+  const h = pick(ev);
+  if (best) {
+    // an edge/vertex behind the surface under the cursor shouldn't snap (hidden line)
+    if (h) { const hz = new THREE.Vector3(...h.point).project(camera).z; if (best.z > hz + 0.002) best = null; }
+  }
+  if (best) return best;
+  if (h) return { type: 'face', id: h.face, p: h.point, body: h.body };
+  return null;
+}
+function describeSnap(sn) {
+  if (!sn) return '';
+  const f3 = v => (+v.toFixed(2)).toString();
+  if (sn.type === 'vertex') return `vertex (${sn.p.map(f3).join(', ')})`;
+  if (sn.type === 'edge') { const i = sn.info; if (i.kind === 'LINE') return `edge #${i.id} · line ${f3(i.length)} mm`; if (i.kind === 'CIRCLE') return i.closed ? `edge #${i.id} · circle Ø${f3(i.radius * 2)} (R${f3(i.radius)})` : `edge #${i.id} · arc R${f3(i.radius)} · ${f3(i.sweep)}°`; return `edge #${i.id} · ${i.kind.toLowerCase()} ${f3(i.length)} mm`; }
+  if (sn.type === 'face') { const fi = model.faces.get(sn.id); return `${sn.body.path} · ${fi ? fi.label : '#' + sn.id} · point (${sn.p.map(f3).join(', ')})`; }
+  return '';
+}
+function measureHover(ev) {
+  const sn = snapPick(ev);
+  clearHover(); hoverSnap = sn;
+  hoverEl.textContent = sn ? describeSnap(sn) + '  — click to pick' : 'measure: hover an edge, vertex or face · right-click/⌫ removes the last pick · Esc clears';
+  if (!sn) return;
+  if (sn.type === 'edge') { hoverObj = new THREE.Group(); hoverObj.add(mkLine(sn.pts, hoverEdgeMat)); hoverObj.add(mkSphere(sn.p, 0xff8c42, 0.7)); }
+  else if (sn.type === 'vertex') hoverObj = mkSphere(sn.p, 0xff8c42, 1.2);
+  else hoverObj = mkSphere(sn.p, 0xff8c42, 0.6);
+  scene.add(hoverObj);
+}
+function redrawPicks() {
+  while (mGroup.children.length) mGroup.remove(mGroup.children[0]);
+  for (const pk of mPicks) {
+    if (pk.type === 'edge') { mGroup.add(mkLine(pk.pts, pickEdgeMat)); mGroup.add(mkSphere(pk.p, 0xffd166, 0.7)); }
+    else mGroup.add(mkSphere(pk.p, 0xffd166, pk.type === 'vertex' ? 1.2 : 0.6));
+  }
+}
+function measurePick(sn) {
+  if (!sn) return;
+  if (mPicks.length >= 2) mPicks = [];
+  mPicks.push(sn); redrawPicks(); measureRequest();
+}
+async function measureRequest() {
+  const entities = mPicks.map(pk => pk.type === 'edge' ? { type: 'edge', id: pk.id } : pk.type === 'face' ? { type: 'face', id: pk.id } : { type: pk.type, p: pk.p });
+  try {
+    const res = await api('/api/measure', { entities });
+    renderMeasure(res);
+    if (mPicks.length === 2) {
+      const a = res.closest ? res.closest[0] : mPicks[0].p, b = res.closest ? res.closest[1] : mPicks[1].p;
+      mGroup.add(mkLine([a, b], new THREE.LineBasicMaterial({ color: 0xffd166, depthTest: false })));
+      mGroup.add(mkSphere(a, 0xffd166, 0.5)); mGroup.add(mkSphere(b, 0xffd166, 0.5));
+      measureState.mid = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (a[2] + b[2]) / 2];
+      const parts = [];
+      if (res.distance != null) parts.push(`${(+res.distance.toFixed(3))} mm`);
+      if (res.center_distance != null) parts.push(`centres ${(+res.center_distance.toFixed(3))} mm`);
+      if (res.angle != null) parts.push(`∠ ${(+res.angle.toFixed(2))}°` + (res.relation && res.relation !== 'none' ? ` (${res.relation})` : ''));
+      measureState.text = parts.join(' · ');
+    } else measureState.mid = null;
+  } catch (e) { addMsg('error', e.message); }
+}
+function renderMeasure(res) {
+  const rows = [];
+  const f = v => (typeof v === 'number' ? (+v.toFixed(3)).toString() : v);
+  (res.items || []).forEach((it, i) => {
+    if (it.type === 'face') { rows.push([`pick ${i + 1}`, `face ${it.label} · ${it.body}`]); rows.push(['  area', f(it.area) + ' mm²']); if (it.radius) rows.push(['  radius', f(it.radius) + ' mm']); if (it.normal) rows.push(['  normal', it.normal.map(f).join(', ')]); }
+    else if (it.type === 'edge') { rows.push([`pick ${i + 1}`, `edge #${it.id} ${it.kind.toLowerCase()} · ${it.body || ''}`]); rows.push(['  length', f(it.length) + ' mm']); if (it.radius) rows.push([it.closed ? '  diameter' : '  radius', it.closed ? 'Ø' + f(it.radius * 2) : f(it.radius) + ' mm' + (it.sweep ? ` (${f(it.sweep)}°)` : '')]); if (it.center) rows.push(['  centre', it.center.map(f).join(', ')]); if (it.dir) rows.push(['  direction', it.dir.map(f).join(', ')]); }
+    else rows.push([`pick ${i + 1}`, `${it.type} (${it.p.map(f).join(', ')})`]);
+  });
+  if (res.distance != null) rows.push(['distance', f(res.distance) + ' mm']);
+  if (res.delta) rows.push(['  Δx Δy Δz', res.delta.map(f).join(', ')]);
+  if (res.center_distance != null) rows.push(['centre distance', f(res.center_distance) + ' mm']);
+  if (res.center_delta) rows.push(['  Δ centres', res.center_delta.map(f).join(', ')]);
+  if (res.plane_gap != null) rows.push(['plane gap', f(res.plane_gap) + ' mm']);
+  if (res.angle != null) rows.push([`angle (${res.angle_kind || ''})`, `${f(res.angle)}° / ${f(res.angle_supplement)}°`]);
+  if (res.relation && res.relation !== 'none') rows.push(['relation', res.relation]);
+  if (res.bodies) res.bodies.forEach(b => { rows.push([`body ${b.body}`, `${f(b.volume_mm3)} mm³ · ${f(b.mass_g)} g @ ${b.density_g_cm3}`]); rows.push(['  size', b.bbox_size.map(f).join(' × ')]); rows.push(['  centre of mass', b.center_of_mass.map(f).join(', ')]); });
+  if (res.clearance) rows.push(['clearance', `${res.clearance.status} · ${f(res.clearance.min_distance)} mm` + (res.clearance.interference_volume_mm3 != null ? ` · overlap ${f(res.clearance.interference_volume_mm3)} mm³` : '')]);
+  measureOut.innerHTML = rows.map(([k, v]) => `<div>${k}</div><div>${v}</div>`).join('') || '<div class="muted">—</div>';
+}
+async function measureBodies(ids) {
+  try { const res = await api('/api/measure', { bodies: ids }); renderMeasure(res); } catch (e) { addMsg('error', e.message); }
+}
+(async () => { try { const d = document.getElementById('measure-density'); d.innerHTML = ['aluminium', 'steel', 'stainless', 'brass', 'titanium', 'pla', 'petg', 'abs', 'nylon', 'acrylic', 'hdpe', 'delrin', 'plywood', 'mdf', 'hardwood', 'softwood'].map(m => `<option>${m}</option>`).join(''); } catch {} })();
+
+// drawings
+async function makeDrawings() {
+  const material = document.getElementById('draw-material').value, sheet = document.getElementById('draw-sheet').value;
+  const dens = { aluminium: 2.7, steel: 7.85, stainless: 7.9, brass: 8.5, titanium: 4.43, pla: 1.24, petg: 1.27, abs: 1.04, nylon: 1.15, acrylic: 1.18, hdpe: 0.95, delrin: 1.41, plywood: 0.6, mdf: 0.75, hardwood: 0.7, softwood: 0.5 };
+  const density = dens[(material || '').toLowerCase().split(/[ ,]/)[0]] || null;
+  document.getElementById('draw-files').textContent = 'generating…';
+  try { const r = await api('/api/drawings', { material, density, sheet }); renderDrawings(r.design, r.files); if (r.files[0]) window.open(`/api/drawings/${r.design}/${r.files[0].svg}`); }
+  catch (e) { addMsg('error', e.message); document.getElementById('draw-files').textContent = ''; }
+}
+function renderDrawings(design, files) {
+  const el = document.getElementById('draw-files'); el.className = ''; el.innerHTML = '';
+  for (const f of files) { const r = document.createElement('div'); r.className = 'librow'; r.innerHTML = `<span class="nm">${f.body}</span><a class="btn small" target="_blank" href="/api/drawings/${design}/${f.svg}">SVG</a>` + (f.dxf ? `<a class="btn small" href="/api/drawings/${design}/${f.dxf}">DXF</a>` : ''); el.appendChild(r); }
+}
+document.getElementById('draw-make').onclick = makeDrawings;
+
+// part library (first-class: Library tab, Browser "+ Part", body menu "Save to library…")
+let libParts = [];
+function libMatch(p, q) { if (!q) return true; q = q.toLowerCase(); return [p.name, p.description, ...(p.tags || []), p.kind].join(' ').toLowerCase().includes(q); }
+function renderLibrary() {
+  const el = document.getElementById('lib-list'); const q = document.getElementById('lib-search').value.trim();
+  const parts = libParts.filter(p => libMatch(p, q));
+  if (!parts.length) { el.className = 'muted'; el.style.padding = '10px 12px'; el.textContent = libParts.length ? 'no parts match' : 'empty — save the design (+ Design), save a body (Browser ▸ right-click ▸ Save to library…), or import a STEP (+ STEP)'; return; }
+  el.className = ''; el.innerHTML = '';
+  for (const p of parts) el.appendChild(libCard(p));
+}
+function libCard(p, onInsert) {
+  const r = document.createElement('div'); r.className = 'libcard';
+  const ps = Object.entries(p.params || {}).map(([k, v]) => `${k}=${v}`).join(', ');
+  r.innerHTML = `${p.thumb ? `<img src="/api/library/thumb/${p.slug}?t=${p.created}">` : '<div class="noimg"></div>'}<div class="nm"><b>${p.name}</b><span class="meta">${p.kind === 'script' ? 'parametric' : 'exact STEP'}${p.description ? ' · ' + p.description : ''}${ps ? '<br>' + ps : ''}</span></div><div class="acts"><button class="btn primary" data-a="ins">Insert</button><button class="btn" data-a="del">Delete</button></div>`;
+  r.querySelector('[data-a=ins]').onclick = () => { if (onInsert) onInsert(); insertLibraryPart(p); };
+  r.querySelector('[data-a=del]').onclick = async () => { if (await confirmBox(`Delete library part '${p.name}'?`)) fetch('/api/library/' + p.slug, { method: 'DELETE' }); };
+  return r;
+}
+async function insertLibraryPart(p) {
+  let params = null;
+  if (Object.keys(p.params || {}).length) {
+    const d = document.createElement('div'); d.innerHTML = Object.entries(p.params).map(([k, v]) => `<div class="modal-field"><label>${k}</label><input data-k="${k}" type="number" step="any" value="${v}" style="flex:1;background:var(--bg);color:var(--text);border:1px solid var(--line);border-radius:6px;padding:6px;font:inherit"></div>`).join('');
+    const ok = await openModal(`Insert ${p.name}`, d, [['Cancel', null], ['Insert', () => Object.fromEntries([...d.querySelectorAll('input')].map(i => [i.dataset.k, parseFloat(i.value)])), true]]);
+    if (!ok) return; params = ok;
+  }
+  try { await api('/api/library/insert', { name: p.name, params }); } catch (e) { addMsg('error', e.message); }
+}
+document.getElementById('lib-search').oninput = renderLibrary;
+document.getElementById('lib-import').onclick = () => { stepImportMode = 'library'; document.getElementById('steppick').click(); };
+document.getElementById('tree-addpart').onclick = async ev => {
+  ev.stopPropagation();
+  if (!libParts.length) { document.querySelector('[data-pane=library]').click(); addMsg('system', 'the part library is empty — add a design, a body, or a STEP first'); return; }
+  const d = document.createElement('div'); let close = null;
+  for (const p of libParts) d.appendChild(libCard(p, () => close && close(null)));
+  const res = openModal('Insert part from library', d, [['Cancel', null]]); close = d.__close; await res;
+};
+async function saveBodyToLibrary(path) {
+  const d = document.createElement('div');
+  d.innerHTML = `<div class="modal-field"><label>Name</label><input id="lb-name" value="${path.split('/').pop()}" style="flex:1;background:var(--bg);color:var(--text);border:1px solid var(--line);border-radius:6px;padding:6px;font:inherit"></div>
+    <div class="modal-field"><label>Description</label><input id="lb-desc" style="flex:1;background:var(--bg);color:var(--text);border:1px solid var(--line);border-radius:6px;padding:6px;font:inherit"></div>
+    <div class="modal-field"><label>Tags</label><input id="lb-tags" placeholder="comma separated" style="flex:1;background:var(--bg);color:var(--text);border:1px solid var(--line);border-radius:6px;padding:6px;font:inherit"></div>
+    <div class="muted">Saved as exact geometry (STEP). To keep it parametric, save the whole design instead (Library ▸ + Design).</div>`;
+  const ok = await openModal(`Save '${path}' to library`, d, [['Cancel', null], ['Save', () => ({ name: d.querySelector('#lb-name').value.trim(), description: d.querySelector('#lb-desc').value.trim(), tags: d.querySelector('#lb-tags').value.split(',').map(t => t.trim()).filter(Boolean) }), true]]);
+  if (!ok || !ok.name) return;
+  let thumb = null; try { thumb = await shrinkDataUrl(await renderScreenshot({ view: 'iso', showEdges: true, only: [path] }), 160); } catch {}
+  try { await api('/api/library/add', { name: ok.name, body: path, description: ok.description, tags: ok.tags, thumb }); addMsg('system', `saved body '${path}' to the library as '${ok.name}'`); } catch (e) { addMsg('error', e.message); }
+}
+document.getElementById('lib-add').onclick = async () => {
+  const d = document.createElement('div');
+  d.innerHTML = `<div class="modal-field"><label>Name</label><input id="la-name" value="${design.name || 'part'}" style="flex:1;background:var(--bg);color:var(--text);border:1px solid var(--line);border-radius:6px;padding:6px;font:inherit"></div>
+    <div class="modal-field"><label>Description</label><input id="la-desc" style="flex:1;background:var(--bg);color:var(--text);border:1px solid var(--line);border-radius:6px;padding:6px;font:inherit"></div>
+    <div class="modal-field"><label>Tags</label><input id="la-tags" placeholder="comma separated" style="flex:1;background:var(--bg);color:var(--text);border:1px solid var(--line);border-radius:6px;padding:6px;font:inherit"></div>
+    <div class="muted">Saves the whole script as a parametric part: its parameters stay editable when inserted.</div>`;
+  const ok = await openModal('Save design to library', d, [['Cancel', null], ['Save', () => ({ name: d.querySelector('#la-name').value.trim(), description: d.querySelector('#la-desc').value.trim(), tags: d.querySelector('#la-tags').value.split(',').map(t => t.trim()).filter(Boolean) }), true]]);
+  if (!ok || !ok.name) return;
+  let thumb = null; try { thumb = await shrinkDataUrl(await renderScreenshot({ view: 'iso', showEdges: true }), 160); } catch {}
+  try { await api('/api/library/add', { name: ok.name, body: null, description: ok.description, tags: ok.tags, thumb }); addMsg('system', `saved design to the library as '${ok.name}'`); } catch (e) { addMsg('error', e.message); }
+};
+function shrinkDataUrl(url, size) { return new Promise(res => { const img = new Image(); img.onload = () => { const c = document.createElement('canvas'); c.width = size; c.height = size; const g = c.getContext('2d'); const s = Math.max(size / img.width, size / img.height); g.drawImage(img, (size - img.width * s) / 2, (size - img.height * s) / 2, img.width * s, img.height * s); res(c.toDataURL('image/jpeg', 0.8)); }; img.src = url; }); }
+let stepImportMode = null;
+
+// STEP import
+async function importStepFile(file) {
+  const d = document.createElement('div');
+  d.innerHTML = `<div class="modal-field"><label>Import as</label><select id="is-mode"><option value="add">new body in this design</option><option value="new">new design</option><option value="library">library part</option></select></div><div class="muted">${file.name} · ${(file.size / 1024).toFixed(0)} KB</div>`;
+  if (stepImportMode) { d.querySelector('#is-mode').value = stepImportMode; stepImportMode = null; }
+  const mode = await openModal('Import STEP', d, [['Cancel', null], ['Import', () => d.querySelector('#is-mode').value, true]]);
+  if (!mode) return;
+  const data = await new Promise((res, rej) => { const fr = new FileReader(); fr.onload = () => res(fr.result); fr.onerror = rej; fr.readAsDataURL(file); });
+  try { const r = await api('/api/import/step', { name: file.name, data, mode }); addMsg('system', `imported ${file.name}` + (r.library ? ' into the library' : '')); } catch (e) { addMsg('error', 'STEP import failed: ' + e.message); }
+}
+document.getElementById('steppick').onchange = ev => { const f = ev.target.files[0]; if (f) importStepFile(f); ev.target.value = ''; };
+
+// ------------------------------------------------------------------ sketches: render + Browser rows
+const sketchGroup = new THREE.Group(); scene.add(sketchGroup);
+let sketchDefs = [];     // from the script blocks (editable) — {name, plane, items}
+let modelSketches = [];  // from the kernel (drawn) — {name, edges, origin, normal, faces, area}
+let selSketches = new Set();
+const sketchMat = new THREE.LineBasicMaterial({ color: 0x3ee6c6, depthTest: false, transparent: true, opacity: 0.95 });
+const sketchSelMat = new THREE.LineBasicMaterial({ color: 0xff8c42, depthTest: false });
+function loadSketches(list) {
+  modelSketches = list || [];
+  while (sketchGroup.children.length) { const c = sketchGroup.children.pop(); c.geometry.dispose(); }
+  for (const sk_ of modelSketches) {
+    const segs = [];
+    for (const pl of sk_.edges) for (let k = 0; k + 5 < pl.length; k += 3) segs.push(pl[k], pl[k+1], pl[k+2], pl[k+3], pl[k+4], pl[k+5]);
+    const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(segs, 3));
+    const l = new THREE.LineSegments(g, selSketches.has(sk_.name) ? sketchSelMat : sketchMat); l.renderOrder = 8; l.userData.name = sk_.name; sketchGroup.add(l);
+  }
+  fetch('/api/sketches').then(r => r.json()).then(j => { sketchDefs = j.sketches || []; renderSketchTree(); }).catch(() => renderSketchTree());
+}
+function renderSketchTree() {
+  const el = document.getElementById('sketchtree'); el.innerHTML = '';
+  if (!modelSketches.length) return;
+  const hd = document.createElement('div'); hd.className = 'hd'; hd.style.marginTop = '6px'; hd.textContent = 'Sketches'; el.appendChild(hd);
+  for (const sk_ of modelSketches) {
+    const def = sketchDefs.find(d => d.name === sk_.name);
+    const row = document.createElement('div'); row.className = 'node' + (selSketches.has(sk_.name) ? ' sel' : '');
+    row.innerHTML = `<span class="sw" style="background:#3ee6c6"></span><span class="nm">✎ ${sk_.name}</span><span class="meta">${sk_.faces} f${def ? '' : ' · code'}</span><span class="more">⋯</span>`;
+    row.onclick = ev => { if (ev.shiftKey) selSketches.has(sk_.name) ? selSketches.delete(sk_.name) : selSketches.add(sk_.name); else { selFaces.clear(); selBodies.clear(); selSketches = selSketches.has(sk_.name) && selSketches.size === 1 ? new Set() : new Set([sk_.name]); } loadSketches(modelSketches); renderChips(); renderTree(); };
+    row.ondblclick = () => { if (def) startSketch(def); };
+    const menu = ev => { ev.preventDefault(); ev.stopPropagation(); ctx.innerHTML = '';
+      const items = [def ? ['Edit sketch…', () => startSketch(def)] : ['Edit (code only)', () => document.querySelector('[data-pane=code]').click()],
+                     ['Extrude…', () => extrudeDialog(sk_.name)],
+                     ['Ask agent: extrude…', () => { inputEl.value = `Extrude sketch ${sk_.name} by 10 mm`; selSketches = new Set([sk_.name]); renderChips(); inputEl.focus(); }],
+                     null, ['Delete', async () => { if (await confirmBox(`Delete sketch '${sk_.name}'?`)) agentcad.send({ type: 'delete_sketch', name: sk_.name }); }, 'danger']];
+      for (const it of items) { if (!it) { ctx.appendChild(document.createElement('hr')); continue; } const d = document.createElement('div'); d.textContent = it[0]; if (it[2]) d.className = it[2]; d.onclick = () => { closeCtx(); it[1](); }; ctx.appendChild(d); }
+      ctx.style.left = Math.min(ev.clientX, innerWidth - 180) + 'px'; ctx.style.top = Math.min(ev.clientY, innerHeight - 160) + 'px'; ctx.style.display = 'block'; };
+    row.oncontextmenu = menu; row.querySelector('.more').onclick = menu;
+    el.appendChild(row);
+  }
+}
+
+// ------------------------------------------------------------------ 2D sketch editor
+const skSvg = document.getElementById('sketch-svg');
+var sk = null;   // (var: the render loop runs before this line) { name, plane:{origin,x,y,z,label}, items:[], tool, pts:[], hover:[u,v] }
+function planeFromFace(fid) {
+  const f = model.faces.get(fid);
+  if (!f || f.kind !== 'PLANE' || !f.normal) return null;
+  const n = new THREE.Vector3(...f.normal).normalize();
+  const ref = Math.abs(n.z) < 0.9 ? new THREE.Vector3(0, 0, 1) : new THREE.Vector3(0, 1, 0);
+  const x = new THREE.Vector3().crossVectors(ref, n).normalize();      // in-plane "right"
+  const y = new THREE.Vector3().crossVectors(n, x).normalize();
+  const b = [...model.bodies.values()].find(bd => bd.ranges.has(fid));
+  return { origin: f.center.slice(), x, y, z: n, label: `${b ? b.path + ' ' : ''}${f.label}` };
+}
+function basePlane(name) {
+  const P = { XY: [[1, 0, 0], [0, 1, 0], [0, 0, 1]], XZ: [[1, 0, 0], [0, 0, 1], [0, -1, 0]], YZ: [[0, 1, 0], [0, 0, 1], [1, 0, 0]] }[name];
+  return { origin: [0, 0, 0], x: new THREE.Vector3(...P[0]), y: new THREE.Vector3(...P[1]), z: new THREE.Vector3(...P[2]), label: name + ' plane' };
+}
+async function startSketch(def) {
+  let plane, name = def ? def.name : nextSketchName();
+  if (def) { const p = def.plane; plane = { origin: p.origin.slice(), x: new THREE.Vector3(...p.x_dir).normalize(), z: new THREE.Vector3(...p.z_dir).normalize(), label: p.label || '' }; plane.y = new THREE.Vector3().crossVectors(plane.z, plane.x).normalize(); }
+  else if (selFaces.size === 1) { plane = planeFromFace([...selFaces][0]); if (!plane) { addMsg('error', 'select a planar face to sketch on'); return; } }
+  else {
+    const d = document.createElement('div'); d.innerHTML = `<div class="modal-field"><label>Plane</label><select id="skp"><option>XY</option><option>XZ</option><option>YZ</option></select></div><div class="modal-field"><label>Offset</label><input id="sko" type="number" step="any" value="0" style="flex:1;background:var(--bg);color:var(--text);border:1px solid var(--line);border-radius:6px;padding:6px;font:inherit"></div><div class="muted">Tip: select a flat face first to sketch on it.</div>`;
+    const r = await openModal('New sketch', d, [['Cancel', null], ['Start', () => ({ p: d.querySelector('#skp').value, o: parseFloat(d.querySelector('#sko').value) || 0 }), true]]);
+    if (!r) return;
+    plane = basePlane(r.p); plane.origin = plane.z.clone().multiplyScalar(r.o).toArray(); plane.label = `${r.p} plane` + (r.o ? ` +${r.o}` : '');
+  }
+  if (measuring) setMeasuring(false); if (tool) endTool();
+  sk = { name, plane, items: def ? JSON.parse(JSON.stringify(def.items)) : [], tool: 'rect', pts: [], hover: null };
+  document.getElementById('sk-name').value = name; document.getElementById('sk-plane').textContent = plane.label;
+  document.body.classList.add('sketching'); if (typeof syncRibbon === 'function') syncRibbon();
+  controls.target.set(...plane.origin); orientCamera(plane.z.clone()); controls.enableRotate = false;
+  selFaces.clear(); applyColors(); renderChips(); renderSkItems();
+}
+function nextSketchName() { let i = 1; const names = new Set(modelSketches.map(s_ => s_.name)); while (names.has('sketch' + i)) i++; return 'sketch' + i; }
+function endSketch() { sk = null; document.body.classList.remove('sketching'); controls.enableRotate = true; skSvg.innerHTML = ''; if (typeof syncRibbon === 'function') syncRibbon(); }
+document.getElementById('sketch-btn').onclick = () => sk ? endSketch() : startSketch(null);
+document.getElementById('sk-cancel').onclick = endSketch;
+document.getElementById('sk-finish').onclick = () => {
+  if (!sk) return;
+  const name = document.getElementById('sk-name').value.trim() || sk.name;
+  if (!/^[A-Za-z_]\w*$/.test(name)) { addMsg('error', 'sketch name must be a Python identifier'); return; }
+  const plane = { origin: sk.plane.origin.map(v => +v.toFixed(4)), x_dir: sk.plane.x.toArray().map(v => +v.toFixed(6)), z_dir: sk.plane.z.toArray().map(v => +v.toFixed(6)), label: sk.plane.label };
+  agentcad.send({ type: 'set_sketch', name, plane, items: sk.items });
+  endSketch();
+};
+document.querySelectorAll('#sketch-panel .tool').forEach(b => b.onclick = () => { if (!sk) return; sk.tool = b.dataset.tool; sk.pts = []; document.querySelectorAll('#sketch-panel .tool').forEach(x => x.classList.toggle('active', x === b)); });
+function skLocal(ev) {
+  const rect = renderer.domElement.getBoundingClientRect();
+  const ndc = new THREE.Vector2(((ev.clientX - rect.left) / rect.width) * 2 - 1, -((ev.clientY - rect.top) / rect.height) * 2 + 1);
+  const rc = new THREE.Raycaster(); rc.setFromCamera(ndc, camera);
+  const pl = new THREE.Plane().setFromNormalAndCoplanarPoint(sk.plane.z, new THREE.Vector3(...sk.plane.origin));
+  const hit = new THREE.Vector3(); if (!rc.ray.intersectPlane(pl, hit)) return null;
+  const d = hit.sub(new THREE.Vector3(...sk.plane.origin));
+  const snap = parseFloat(document.getElementById('sk-snap').value) || 0;
+  let u = d.dot(sk.plane.x), v = d.dot(sk.plane.y);
+  if (snap > 0 && !ev.altKey) { u = Math.round(u / snap) * snap; v = Math.round(v / snap) * snap; }
+  return [+u.toFixed(3), +v.toFixed(3)];
+}
+function skWorld(u, v) { return new THREE.Vector3(...sk.plane.origin).addScaledVector(sk.plane.x, u).addScaledVector(sk.plane.y, v); }
+function skScreen(u, v) { const p = skWorld(u, v).project(camera); const r = renderer.domElement.getBoundingClientRect(); return [(p.x + 1) / 2 * r.width, (1 - p.y) / 2 * r.height]; }
+renderer.domElement.addEventListener('pointermove', ev => { if (sk) sk.hover = skLocal(ev); });
+renderer.domElement.addEventListener('pointerup', ev => {
+  if (!sk || ev.button !== 0) return;
+  if (!downAt || Math.hypot(ev.clientX - downAt[0], ev.clientY - downAt[1]) > 4) return;
+  const p = skLocal(ev); if (!p) return;
+  const mode = document.getElementById('sk-sub').checked ? 'subtract' : 'add';
+  if (sk.tool === 'rect') { sk.pts.push(p); if (sk.pts.length === 2) { const [a, b] = sk.pts; if (a[0] !== b[0] && a[1] !== b[1]) sk.items.push({ type: 'rect', cx: +((a[0] + b[0]) / 2).toFixed(3), cy: +((a[1] + b[1]) / 2).toFixed(3), w: +Math.abs(b[0] - a[0]).toFixed(3), h: +Math.abs(b[1] - a[1]).toFixed(3), angle: 0, mode }); sk.pts = []; } }
+  else if (sk.tool === 'circle') { sk.pts.push(p); if (sk.pts.length === 2) { const [c, e] = sk.pts; const r = Math.hypot(e[0] - c[0], e[1] - c[1]); if (r > 0) sk.items.push({ type: 'circle', cx: c[0], cy: c[1], r: +r.toFixed(3), mode }); sk.pts = []; } }
+  else if (sk.tool === 'slot') { sk.pts.push(p); if (sk.pts.length === 2) { const [a, b] = sk.pts; if (a[0] !== b[0] || a[1] !== b[1]) sk.items.push({ type: 'slot', x1: a[0], y1: a[1], x2: b[0], y2: b[1], w: parseFloat(document.getElementById('sk-slotw').value) || 6, mode }); sk.pts = []; } }
+  else if (sk.tool === 'polygon') {
+    if (sk.pts.length >= 3) { const [sx, sy] = skScreen(...sk.pts[0]); const [px, py] = skScreen(...p); if (Math.hypot(sx - px, sy - py) < 10) { sk.items.push({ type: 'polygon', pts: sk.pts, mode }); sk.pts = []; renderSkItems(); return; } }
+    sk.pts.push(p);
+  }
+  renderSkItems();
+});
+document.addEventListener('keydown', ev => {
+  if (!sk || document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA') return;
+  if (ev.key === 'Escape') { if (sk.pts.length) sk.pts = []; else endSketch(); }
+  if (ev.key === 'Backspace') { if (sk.pts.length) sk.pts.pop(); else sk.items.pop(); renderSkItems(); }
+  if (ev.key === 'Enter' && sk.tool === 'polygon' && sk.pts.length >= 3) { sk.items.push({ type: 'polygon', pts: sk.pts, mode: document.getElementById('sk-sub').checked ? 'subtract' : 'add' }); sk.pts = []; renderSkItems(); }
+});
+function renderSkItems() {
+  const el = document.getElementById('sk-list'); el.innerHTML = '';
+  if (!sk) return;
+  const num = (it, k) => `<span class="k">${k}</span><input type="number" step="any" value="${it[k]}" data-k="${k}">`;
+  sk.items.forEach((it, i) => {
+    const r = document.createElement('div'); r.className = 'skrow';
+    let f = `<span>${i + 1}. ${it.type}${it.mode === 'subtract' ? ' −' : ''}</span>`;
+    if (it.type === 'rect') f += num(it, 'cx') + num(it, 'cy') + num(it, 'w') + num(it, 'h') + num(it, 'angle');
+    else if (it.type === 'circle') f += num(it, 'cx') + num(it, 'cy') + num(it, 'r');
+    else if (it.type === 'slot') f += num(it, 'x1') + num(it, 'y1') + num(it, 'x2') + num(it, 'y2') + num(it, 'w');
+    else f += `<span class="k">${it.pts.length} pts</span>`;
+    r.innerHTML = f + '<b title="remove">×</b>';
+    r.querySelectorAll('input').forEach(inp => inp.onchange = () => { it[inp.dataset.k] = parseFloat(inp.value) || 0; });
+    r.querySelector('b').onclick = () => { sk.items.splice(i, 1); renderSkItems(); };
+    el.appendChild(r);
+  });
+}
+function drawSketchOverlay() {
+  if (!sk) return;
+  const r = renderer.domElement.getBoundingClientRect(); skSvg.setAttribute('viewBox', `0 0 ${r.width} ${r.height}`);
+  const out = [];
+  const P = (u, v) => skScreen(u, v).map(x => x.toFixed(1)).join(',');
+  const L = (u0, v0, u1, v1, col, w) => { const a = skScreen(u0, v0), b = skScreen(u1, v1); return `<line x1="${a[0].toFixed(1)}" y1="${a[1].toFixed(1)}" x2="${b[0].toFixed(1)}" y2="${b[1].toFixed(1)}" stroke="${col}" stroke-width="${w}"/>`; };
+  const ext = bbox ? Math.ceil(bbox.getSize(new THREE.Vector3()).length() / 10) * 10 : 60;
+  for (let g = -ext; g <= ext; g += 5) { const maj = g % 10 === 0; out.push(L(g, -ext, g, ext, maj ? '#3a4a5a' : '#28323d', maj ? 0.8 : 0.5)); out.push(L(-ext, g, ext, g, maj ? '#3a4a5a' : '#28323d', maj ? 0.8 : 0.5)); }
+  out.push(L(0, 0, 15, 0, '#e55', 1.5)); out.push(L(0, 0, 0, 15, '#5e5', 1.5));
+  const shape = (it, col) => {
+    if (it.type === 'rect') { const a = (it.angle || 0) * Math.PI / 180, c = Math.cos(a), s_ = Math.sin(a), hw = it.w / 2, hh = it.h / 2; const pts = [[-hw, -hh], [hw, -hh], [hw, hh], [-hw, hh]].map(([x, y]) => P(it.cx + x * c - y * s_, it.cy + x * s_ + y * c)); return `<polygon points="${pts.join(' ')}" fill="${col}22" stroke="${col}" stroke-width="1.5"/>`; }
+    if (it.type === 'circle') { const pts = []; for (let k = 0; k < 48; k++) { const a = k / 48 * 2 * Math.PI; pts.push(P(it.cx + it.r * Math.cos(a), it.cy + it.r * Math.sin(a))); } return `<polygon points="${pts.join(' ')}" fill="${col}22" stroke="${col}" stroke-width="1.5"/>`; }
+    if (it.type === 'polygon') return `<polygon points="${it.pts.map(p => P(...p)).join(' ')}" fill="${col}22" stroke="${col}" stroke-width="1.5"/>`;
+    if (it.type === 'slot') { const dx = it.x2 - it.x1, dy = it.y2 - it.y1, Ln = Math.hypot(dx, dy) || 1, nx = -dy / Ln, ny = dx / Ln; const pts = []; const a0 = Math.atan2(ny, nx); for (let k = 0; k <= 24; k++) { const a = a0 + k / 24 * Math.PI; pts.push(P(it.x2 + it.w / 2 * Math.cos(a), it.y2 + it.w / 2 * Math.sin(a))); } for (let k = 0; k <= 24; k++) { const a = a0 + Math.PI + k / 24 * Math.PI; pts.push(P(it.x1 + it.w / 2 * Math.cos(a), it.y1 + it.w / 2 * Math.sin(a))); } return `<polygon points="${pts.join(' ')}" fill="${col}22" stroke="${col}" stroke-width="1.5"/>`; }
+    return '';
+  };
+  for (const it of sk.items) out.push(shape(it, it.mode === 'subtract' ? '#ff6b6b' : '#3ee6c6'));
+  const hv = sk.hover;
+  if (sk.pts.length && hv) {
+    const a = sk.pts[0];
+    if (sk.tool === 'rect') out.push(shape({ type: 'rect', cx: (a[0] + hv[0]) / 2, cy: (a[1] + hv[1]) / 2, w: Math.abs(hv[0] - a[0]), h: Math.abs(hv[1] - a[1]), angle: 0 }, '#ffd166'));
+    if (sk.tool === 'circle') out.push(shape({ type: 'circle', cx: a[0], cy: a[1], r: Math.hypot(hv[0] - a[0], hv[1] - a[1]) }, '#ffd166'));
+    if (sk.tool === 'slot') out.push(shape({ type: 'slot', x1: a[0], y1: a[1], x2: hv[0], y2: hv[1], w: parseFloat(document.getElementById('sk-slotw').value) || 6 }, '#ffd166'));
+    if (sk.tool === 'polygon') out.push(`<polyline points="${[...sk.pts, hv].map(p => P(...p)).join(' ')}" fill="none" stroke="#ffd166" stroke-width="1.5"/>`);
+  }
+  for (const p of sk.pts) { const [x, y] = skScreen(...p); out.push(`<circle cx="${x}" cy="${y}" r="3" fill="#ffd166"/>`); }
+  if (hv) { const [x, y] = skScreen(...hv); out.push(`<circle cx="${x}" cy="${y}" r="4" fill="none" stroke="#fff"/><text x="${x + 8}" y="${y - 8}" fill="#fff" font-size="11">${hv[0]}, ${hv[1]}</text>`); }
+  skSvg.innerHTML = out.join('');
+}
+
+// ------------------------------------------------------------------ manual modelling dialogs (no agent turn)
+const fld = (id, label, val, extra = '') => `<div class="modal-field"><label>${label}</label><input id="${id}" type="number" step="any" value="${val}" ${extra} style="flex:1;background:var(--bg);color:var(--text);border:1px solid var(--line);border-radius:6px;padding:6px;font:inherit"></div>`;
+const numv = (d, id) => parseFloat(d.querySelector('#' + id).value) || 0;
+async function primitiveDialog() {
+  const d = document.createElement('div');
+  d.innerHTML = `<div class="modal-field"><label>Shape</label><select id="pk"><option value="box">Box</option><option value="cylinder">Cylinder</option><option value="sphere">Sphere</option></select></div>
+    <div class="modal-field"><label>Name</label><input id="pn" placeholder="Block" style="flex:1;background:var(--bg);color:var(--text);border:1px solid var(--line);border-radius:6px;padding:6px;font:inherit"></div>
+    <div id="pdims"></div>${fld('px', 'Centre X', 0)}${fld('py', 'Centre Y', 0)}${fld('pz', 'Centre Z', 0)}
+    <div class="muted">Adds a separate body (centred on X/Y/Z). Join or cut it with the agent or Move/rotate it from the Browser.</div>`;
+  const dims = { box: fld('dx', 'Size X', 20) + fld('dy', 'Size Y', 20) + fld('dz', 'Size Z', 10), cylinder: fld('dd', 'Diameter', 10) + fld('dh', 'Height', 20), sphere: fld('dd', 'Diameter', 10) };
+  const sel = d.querySelector('#pk'); const upd = () => { d.querySelector('#pdims').innerHTML = dims[sel.value]; }; sel.onchange = upd; upd();
+  const r = await openModal('Add body', d, [['Cancel', null], ['Add', () => ({ kind: sel.value, name: d.querySelector('#pn').value.trim() || null,
+    dims: sel.value === 'box' ? { x: numv(d, 'dx'), y: numv(d, 'dy'), z: numv(d, 'dz') } : sel.value === 'cylinder' ? { d: numv(d, 'dd'), h: numv(d, 'dh') } : { d: numv(d, 'dd') },
+    at: [numv(d, 'px'), numv(d, 'py'), numv(d, 'pz')] }), true]]);
+  if (r) send({ type: 'add_primitive', ...r });
+}
+document.getElementById('tree-addbody').onclick = primitiveDialog;
+async function transformDialog(path) {
+  const d = document.createElement('div');
+  d.innerHTML = `${fld('mx', 'Move X', 0)}${fld('my', 'Move Y', 0)}${fld('mz', 'Move Z', 0)}${fld('rx', 'Rotate X°', 0)}${fld('ry', 'Rotate Y°', 0)}${fld('rz', 'Rotate Z°', 0)}<div class="muted">Applied as Pos(...) * Rot(...) * body in the script (relative to the current position; rotation about the origin).</div>`;
+  const r = await openModal(`Move / rotate ${path}`, d, [['Cancel', null], ['Apply', () => ({ move: [numv(d, 'mx'), numv(d, 'my'), numv(d, 'mz')], rotate: [numv(d, 'rx'), numv(d, 'ry'), numv(d, 'rz')] }), true]]);
+  if (r) send({ type: 'transform_body', path, ...r });
+}
+async function extrudeDialog(name) {
+  const bodies = model ? [...model.bodies.values()] : [];
+  const d = document.createElement('div');
+  d.innerHTML = `${fld('ea', 'Distance (mm)', 10)}
+    <div class="modal-field"><label>Direction</label><select id="ed"><option value="+">along the sketch normal</option><option value="-">opposite (into the face)</option><option value="both">both sides</option></select></div>
+    <div class="modal-field"><label>Operation</label><select id="eo"><option value="new">new body</option>${bodies.map(b => `<option value="join:${b.path}">join to ${b.path}</option><option value="cut:${b.path}">cut from ${b.path}</option>`).join('')}</select></div>
+    <div class="muted">Writes extrude(${name}, amount=…) into the script; the sketch stays editable.</div>`;
+  const r = await openModal(`Extrude ${name}`, d, [['Cancel', null], ['Extrude', () => { const dir = d.querySelector('#ed').value, [op, body] = d.querySelector('#eo').value.split(':'); return { name, amount: numv(d, 'ea') * (dir === '-' ? -1 : 1), both: dir === 'both', op, body: body || null }; }, true]]);
+  if (r) send({ type: 'extrude_sketch', ...r });
+}
+
+// ------------------------------------------------------------------ modelling toolbar (ribbon + command dialog, code-backed)
+// Every tool: pick things in the viewer (faces/edges via snapPick), fill the command dialog, OK → the server
+// rewrites the script (script_edit) and rebuilds. No agent turn.
+const ICO = {
+  box: '<path d="M12 3 3 7.5v9L12 21l9-4.5v-9L12 3Z"/><path d="M3 7.5l9 4.5 9-4.5M12 12v9"/>',
+  cylinder: '<ellipse cx="12" cy="6" rx="7" ry="3"/><path d="M5 6v12c0 1.7 3.1 3 7 3s7-1.3 7-3V6"/>',
+  sphere: '<circle cx="12" cy="12" r="9"/><ellipse cx="12" cy="12" rx="9" ry="3.5"/><path d="M12 3a9 9 0 0 1 0 18"/>',
+  sketch: '<path d="M4 20l4-1 11-11-3-3L5 16l-1 4Z"/><path d="M13 8l3 3"/>',
+  extrude: '<path d="M4 15l8 4 8-4"/><path d="M4 15v4l8 4 8-4v-4"/><path d="M12 3v10M8 7l4-4 4 4"/>',
+  hole: '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4"/><path d="M12 3v2M12 19v2M3 12h2M19 12h2"/>',
+  fillet: '<path d="M4 20V10a6 6 0 0 1 6-6h10"/><path d="M4 4h2M20 20v-2"/>',
+  chamfer: '<path d="M4 20V11l7-7h9"/><path d="M4 4h2M20 20v-2"/>',
+  shell: '<path d="M4 4h16v16H4Z"/><path d="M8 8h8v8H8Z"/><path d="M4 4l4 4M20 4l-4 4M4 20l4-4M20 20l-4-4"/>',
+  move: '<path d="M12 2v20M2 12h20"/><path d="M9 5l3-3 3 3M9 19l3 3 3-3M5 9l-3 3 3 3M19 9l3 3-3 3"/>',
+  measure: '<path d="M3 17 17 3l4 4L7 21 3 17Z"/><path d="M8 12l2 2M11 9l2 2M14 6l2 2"/>',
+  check: '<path d="M5 12l4 4L19 6"/>', close: '<path d="M6 6l12 12M18 6 6 18"/>',
+};
+const svg = (k, size = 20) => `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">${ICO[k]}</svg>`;
+const TOOLS = {
+  box:      { group: 'create', label: 'Box',        key: 'B', hint: 'Click a face to stand the box on it, or empty space for the origin.', picks: 'face1', steps: ['Place', 'Size'] },
+  cylinder: { group: 'create', label: 'Cylinder',   key: 'C', hint: 'Click a face to stand the cylinder on it.', picks: 'face1', steps: ['Place', 'Size'] },
+  sphere:   { group: 'create', label: 'Sphere',     key: 'O', hint: 'Click a face to place the sphere on it.', picks: 'face1', steps: ['Place', 'Size'] },
+  sketch:   { group: 'create', label: 'Sketch',     key: 'K', hint: 'Select a flat face first, or choose a base plane.', picks: 'none' },
+  extrude:  { group: 'modify', label: 'Press/Pull', key: 'Q', hint: 'Click a face, then set the distance. Negative pushes in (cut).', picks: 'face1', steps: ['Face', 'Distance'] },
+  hole:     { group: 'modify', label: 'Hole',       key: 'H', hint: 'Click where the hole starts on a face. Plain, counterbored or tapped.', picks: 'face1', steps: ['Position', 'Size'] },
+  fillet:   { group: 'modify', label: 'Fillet',     key: 'F', hint: 'Click edges, or a face to take all of its edges. Then set the radius.', picks: 'edges', steps: ['Edges', 'Radius'] },
+  chamfer:  { group: 'modify', label: 'Chamfer',    key: 'X', hint: 'Click edges, or a face to take all of its edges. Then set the distance.', picks: 'edges', steps: ['Edges', 'Distance'] },
+  shell:    { group: 'modify', label: 'Shell',      key: 'L', hint: 'Click the faces to open. Leave none selected for a hollow body.', picks: 'faces', steps: ['Open faces', 'Thickness'] },
+  move:     { group: 'modify', label: 'Move',       key: 'V', hint: 'Choose a body, then offsets and rotation.', picks: 'body', steps: ['Body', 'Offset'] },
+  measure:  { group: 'inspect', label: 'Measure',   key: 'I', hint: 'Hover snaps to vertices and edges. Click two things for distance and angle.', picks: 'none' },
+};
+let tool = null;   // { kind, picks: [snap...] }
+const cmdEl = document.getElementById('cmd');
+// --- ribbon buttons
+for (const [k, t] of Object.entries(TOOLS)) {
+  const b = document.createElement('button'); b.className = 'rb'; b.dataset.tool = k;
+  b.innerHTML = `<span class="ic">${svg(k)}</span><span class="lb">${t.label}</span>`;
+  b.onmouseenter = () => showTip(b, t); b.onmouseleave = hideTip;
+  b.onclick = () => activateTool(k);
+  document.getElementById('rg-' + t.group).appendChild(b);
+}
+placeTree();
+function activateTool(k) {
+  if (k === 'sketch') { if (tool) endTool(); if (measuring) setMeasuring(false); sk ? endSketch() : startSketch(null); return; }
+  if (k === 'measure') { if (tool) endTool(); setMeasuring(!measuring); return; }
+  tool && tool.kind === k ? endTool() : startTool(k);
+}
+// tooltip
+const tipEl = document.getElementById('tip');
+function showTip(b, t) {
+  const r = b.getBoundingClientRect();
+  tipEl.innerHTML = `<div class="tt"><b>${t.label}</b><kbd>${t.key}</kbd></div><div class="th">${t.hint}</div>`;
+  tipEl.style.left = Math.max(8, Math.min(innerWidth - 300, r.left + r.width / 2 - 130)) + 'px'; tipEl.style.top = (r.bottom + 8) + 'px'; tipEl.classList.add('on');
+}
+function hideTip() { tipEl.classList.remove('on'); }
+function syncRibbon() {
+  document.querySelectorAll('#ribbon .rb').forEach(b => b.classList.toggle('active', (tool && tool.kind === b.dataset.tool) || (b.dataset.tool === 'sketch' && !!sk) || (b.dataset.tool === 'measure' && measuring)));
+}
+function startTool(kind) {
+  if (measuring) setMeasuring(false); if (sk) endSketch();
+  tool = { kind, picks: [] };
+  document.body.classList.add('tooling'); syncRibbon(); hoverEl.textContent = TOOLS[kind].hint;
+  renderCmd();
+}
+function endTool() {
+  pullTeardown(); tool = null; clearHover(); while (mGroup.children.length) mGroup.remove(mGroup.children[0]);
+  document.body.classList.remove('tooling'); cmdEl.classList.remove('on'); cmdEl.innerHTML = ''; syncRibbon();
+}
+function toolHover(ev) {
+  const sn = snapPick(ev); clearHover(); hoverSnap = sn;
+  const want = TOOLS[tool.kind].picks;
+  const ok = sn && (want === 'edges' ? (sn.type === 'edge' || sn.type === 'face') : (sn.type === 'face'));
+  hoverEl.textContent = ok ? describeSnap(sn) : TOOLS[tool.kind].hint;
+  if (!ok) return;
+  if (sn.type === 'edge') { hoverObj = new THREE.Group(); hoverObj.add(mkLine(sn.pts, hoverEdgeMat)); }
+  else hoverObj = mkSphere(sn.p, 0xff8c42, 0.6);
+  scene.add(hoverObj);
+}
+function toolPick(sn) {
+  if (!sn) return;
+  const want = TOOLS[tool.kind].picks;
+  if (want === 'edges') { if (sn.type !== 'edge' && sn.type !== 'face') return; tool.picks.push(sn); }
+  else if (want === 'faces') { if (sn.type !== 'face') return; tool.picks.push(sn); }
+  else if (want === 'face1') { if (sn.type !== 'face') return; tool.picks = [sn]; }
+  else return;
+  redrawToolPicks(); renderCmd();
+  if (tool.kind === 'extrude' && sn.type === 'face') pullSetup(sn);
+  const inp = cmdEl.querySelector('input[type=number]'); if (inp && want === 'face1') { inp.focus(); inp.select(); }
+}
+function redrawToolPicks() {
+  while (mGroup.children.length) mGroup.remove(mGroup.children[0]);
+  for (const pk of tool.picks) { if (pk.type === 'edge') mGroup.add(mkLine(pk.pts, pickEdgeMat)); else mGroup.add(mkSphere(pk.p, 0xffd166, 0.7)); }
+}
+function faceNormalAt(sn) { const fi = model.faces.get(sn.id); return fi && fi.normal ? fi.normal : [0, 0, 1]; }
+const pickLabel = pk => pk.type === 'edge' ? `edge #${pk.id}` : `${pk.body.path} · ${(model.faces.get(pk.id) || {}).label || '#' + pk.id}`;
+// --- command dialog
+function renderCmd() {
+  if (!tool) return;
+  const k = tool.kind, T = TOOLS[k], p = tool.picks, first = p[0], target = first ? first.body.path : null;
+  const num = (id, label, val, unit = 'mm') => `<div class="row"><label for="${id}">${label}</label><div class="in"><input id="${id}" type="number" step="any" value="${val}"><span class="u">${unit}</span></div></div>`;
+  const sel = (id, label, opts) => `<div class="row"><label for="${id}">${label}</label><div class="in sel"><select id="${id}">${opts}</select></div></div>`;
+  const chk = (id, label) => `<div class="row"><label for="${id}">${label}</label><div class="in"><label class="sw"><input id="${id}" type="checkbox"><span></span></label></div></div>`;
+  const bodyOpts = (cur) => [...model.bodies.values()].map(b => `<option value="${b.path}" ${b.path === cur ? 'selected' : ''}>${b.path}</option>`).join('');
+  let fields = '', ready = true;
+  const havePick = p.length > 0;
+  if (k === 'box') fields = num('tx', 'Length X', 20) + num('ty', 'Width Y', 20) + num('tz', 'Height', 10);
+  if (k === 'cylinder') fields = num('td', 'Diameter', 10) + num('th', 'Height', 20);
+  if (k === 'sphere') fields = num('td', 'Diameter', 10);
+  if (['box', 'cylinder', 'sphere'].includes(k)) fields += sel('tmode', 'Operation', `<option value="join" ${target ? 'selected' : ''}>Join ${target || ''}</option><option value="cut">Cut from ${target || ''}</option><option value="new" ${target ? '' : 'selected'}>New body</option>`);
+  if (k === 'extrude') { fields = num('ta', 'Distance', 5) + sel('tdir', 'Direction', '<option value="out">Outward (add)</option><option value="in">Inward (cut)</option>'); ready = havePick; }
+  if (k === 'hole') { fields = sel('tthr', 'Type', `<option value="">Plain hole</option>${['M2', 'M2.5', 'M3', 'M4', 'M5', 'M6', 'M8', 'M10', 'M12'].map(m => `<option value="${m}">Tapped ${m}</option>`).join('')}`) + num('td', 'Diameter', 5) + num('tdep', 'Depth', 10) + chk('tthru', 'Through all') + num('tcb', 'Counterbore Ø', 0) + num('tcbd', 'Counterbore depth', 0); ready = havePick; }
+  if (k === 'fillet') { fields = num('tr', 'Radius', 1); ready = havePick; }
+  if (k === 'chamfer') { fields = num('tr', 'Distance', 1); ready = havePick; }
+  if (k === 'shell') { fields = num('tt', 'Thickness', 1.5); ready = true; }
+  if (k === 'move') { fields = sel('tbody', 'Body', bodyOpts(target)) + num('mx', 'Offset X', 0) + num('my', 'Offset Y', 0) + num('mz', 'Offset Z', 0) + num('rz', 'Rotate Z', 0, '°'); ready = model && model.bodies.size > 0; }
+  const step = havePick || T.picks === 'none' || k === 'shell' || k === 'move' ? 1 : 0;
+  const steps = (T.steps || []).map((s_, i) => `<span class="st ${i === step ? 'cur' : (i < step ? 'done' : '')}"><i>${i + 1}</i>${s_}</span>`).join('<span class="stl"></span>');
+  const promptTxt = T.picks === 'face1' ? (havePick ? 'Adjust the values, then OK.' : 'Click a face in the viewer.')
+    : T.picks === 'edges' ? (havePick ? `${p.length} selected — keep clicking, or OK.` : 'Click edges, or a face for all of its edges.')
+    : T.picks === 'faces' ? (havePick ? `${p.length} face(s) will be open.` : 'Click faces to open, or OK for a closed hollow.') : 'Set the values, then OK.';
+  const chips = p.length ? `<div class="chips">${p.map((pk, i) => `<span class="pk">${pickLabel(pk)}<b data-i="${i}">×</b></span>`).join('')}</div>` : '';
+  cmdEl.innerHTML = `<div class="hd"><span class="ic">${svg(k, 18)}</span><span class="nm">${T.label}</span><span class="kbd">${T.key}</span><button class="x" title="Cancel (Esc)">${svg('close', 16)}</button></div>
+    <div class="steps">${steps}</div>
+    <div class="prompt ${havePick ? 'ok' : ''}"><i></i>${promptTxt}</div>${chips}
+    <div class="fields">${fields}</div>
+    <div class="ft"><span class="hint">↵ OK · ⌫ remove pick · Esc cancel</span><button class="btn" id="tcancel">Cancel</button><button class="btn primary" id="tapply" ${ready ? '' : 'disabled'}>${svg('check', 14)} OK</button></div>`;
+  cmdEl.classList.add('on');
+  cmdEl.querySelectorAll('.pk b').forEach(b => b.onclick = () => { tool.picks.splice(+b.dataset.i, 1); redrawToolPicks(); renderCmd(); });
+  cmdEl.querySelector('.x').onclick = endTool; cmdEl.querySelector('#tcancel').onclick = endTool;
+  cmdEl.querySelectorAll('input[type=number]').forEach(inp => inp.onkeydown = e => { if (e.key === 'ArrowUp' || e.key === 'ArrowDown') { e.preventDefault(); const st = e.shiftKey ? 10 : (e.altKey ? 0.1 : 1); inp.value = +((parseFloat(inp.value) || 0) + (e.key === 'ArrowUp' ? st : -st)).toFixed(3); } });
+  const v = id => parseFloat(cmdEl.querySelector('#' + id)?.value) || 0;
+  cmdEl.querySelector('#tapply').onclick = () => {
+    const at = first ? first.p : [0, 0, 0], normal = first ? faceNormalAt(first) : [0, 0, 1];
+    if (['box', 'cylinder', 'sphere'].includes(k)) {
+      const dims = k === 'box' ? { x: v('tx'), y: v('ty'), z: v('tz') } : k === 'cylinder' ? { d: v('td'), h: v('th') } : { d: v('td') };
+      send({ type: 'op', kind: 'primitive', shape: k, dims, at, normal, body: target, mode: cmdEl.querySelector('#tmode').value });
+    } else if (k === 'extrude') send({ type: 'op', kind: 'extrude_face', body: target, point: first.p, normal, amount: Math.abs(v('ta')) * (cmdEl.querySelector('#tdir').value === 'in' ? -1 : 1) });
+    else if (k === 'hole') send({ type: 'op', kind: 'hole', body: target, at, normal, diameter: v('td'), depth: v('tdep'), through: cmdEl.querySelector('#tthru').checked, thread: cmdEl.querySelector('#tthr').value || null, counterbore: v('tcb') > 0 ? [v('tcb'), v('tcbd')] : null });
+    else if (k === 'fillet' || k === 'chamfer') {
+      const byBody = {}; for (const pk of p) (byBody[pk.body.path] ||= { points: [], faces: [] })[pk.type === 'edge' ? 'points' : 'faces'].push(pk.p);
+      for (const [body, s_] of Object.entries(byBody)) send({ type: 'op', kind: k, body, points: s_.points, faces: s_.faces, radius: v('tr') });
+    } else if (k === 'shell') { const body = target || [...model.bodies.values()][0].path; send({ type: 'op', kind: 'shell', body, faces: p.filter(x => x.body.path === body).map(x => x.p), thickness: v('tt') }); }
+    else if (k === 'move') send({ type: 'transform_body', path: cmdEl.querySelector('#tbody').value, move: [v('mx'), v('my'), v('mz')], rotate: [0, 0, v('rz')] });
+    pullTeardown(); tool.picks = []; redrawToolPicks(); renderCmd();
+  };
+  if (k === 'extrude') { const upd = () => pullUpdate(currentPullAmount()); cmdEl.querySelector('#ta')?.addEventListener('input', upd); cmdEl.querySelector('#tdir')?.addEventListener('change', upd); }
+}
+document.addEventListener('keydown', ev => {
+  const typing = ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName) || document.querySelector('.CodeMirror-focused');
+  if (tool) {
+    if (ev.key === 'Escape') { endTool(); return; }
+    if (ev.key === 'Enter' && !ev.shiftKey) { ev.preventDefault(); cmdEl.querySelector('#tapply')?.click(); return; }
+    if (ev.key === 'Backspace' && !typing && tool.picks.length) { ev.preventDefault(); tool.picks.pop(); redrawToolPicks(); renderCmd(); return; }
+  }
+  if (typing || ev.metaKey || ev.ctrlKey || ev.altKey || sk) return;
+  const hit = Object.entries(TOOLS).find(([, t]) => t.key.toLowerCase() === ev.key.toLowerCase());
+  if (hit) { ev.preventDefault(); activateTool(hit[0]); }
+});
+
+// ------------------------------------------------------------------ version + changelog
+(async () => { try { const v = await fetch('/api/version').then(r => r.json()); document.getElementById('verbtn').textContent = 'v' + v.version; document.title = document.title; window.agentcadVersion = v; } catch {} })();
+document.getElementById('verbtn').onclick = async () => {
+  const v = window.agentcadVersion || await fetch('/api/version').then(r => r.json());
+  const d = document.createElement('div'); d.className = 'md'; d.innerHTML = marked.parse(v.changelog || 'no changelog');
+  d.style.maxHeight = '60vh'; d.style.overflow = 'auto';
+  openModal(`AgentCAD v${v.version} — what's new`, d, [['Close', null, true]]);
+};
+
+// ------------------------------------------------------------------ press/pull drag handle + ghost preview
+let pull = null;   // { origin, normal, axisPx, handle(Group), ghost(Mesh), amount, drag }
+const pullMat = new THREE.MeshBasicMaterial({ color: 0x4ea1ff, transparent: true, opacity: 0.35, depthWrite: false, side: THREE.DoubleSide });
+const handleMat = new THREE.MeshStandardMaterial({ color: 0x4ea1ff, emissive: 0x1a4a80, roughness: 0.4 });
+function pullSetup(sn) {
+  pullTeardown();
+  const n = new THREE.Vector3(...faceNormalAt(sn)).normalize(), o = new THREE.Vector3(...sn.p);
+  const size = bbox ? bbox.getSize(new THREE.Vector3()).length() : 60, L = Math.max(6, size * 0.12), r = Math.max(0.5, size * 0.008);
+  const handle = new THREE.Group();
+  const shaft = new THREE.Mesh(new THREE.CylinderGeometry(r * 0.5, r * 0.5, L, 12), handleMat); shaft.position.y = L / 2;
+  const head = new THREE.Mesh(new THREE.ConeGeometry(r * 1.8, L * 0.35, 16), handleMat); head.position.y = L + L * 0.175;
+  const grip = new THREE.Mesh(new THREE.SphereGeometry(r * 2.6, 16, 12), new THREE.MeshBasicMaterial({ visible: false })); grip.position.y = L + L * 0.175;   // fat invisible hit target
+  handle.add(shaft, head, grip); handle.userData.isHandle = true;
+  handle.position.copy(o); handle.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), n);
+  scene.add(handle);
+  // ghost: the picked face's own triangles, offset along the normal
+  const b = sn.body, rng = b.ranges.get(sn.id);
+  let ghost = null;
+  if (rng) {
+    const idx = b.mesh.geometry.index.array, pos = b.mesh.geometry.attributes.position.array, tri = [];
+    for (let i = rng[0]; i < rng[0] + rng[1]; i++) { const v = idx[i] * 3; tri.push(pos[v], pos[v + 1], pos[v + 2]); }
+    const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(tri, 3));
+    ghost = new THREE.Mesh(g, pullMat); ghost.renderOrder = 6; scene.add(ghost);
+  }
+  pull = { origin: o, normal: n, handle, ghost, amount: 0, drag: null };
+  pullUpdate(currentPullAmount());
+}
+function currentPullAmount() { const a = parseFloat(cmdEl.querySelector('#ta')?.value) || 0; const dir = cmdEl.querySelector('#tdir')?.value; return Math.abs(a) * (dir === 'in' ? -1 : 1); }
+function pullUpdate(amount) {
+  if (!pull) return; pull.amount = amount;
+  pull.handle.position.copy(pull.origin).addScaledVector(pull.normal, Math.max(amount, 0));
+  if (pull.ghost) pull.ghost.position.copy(pull.normal).multiplyScalar(amount);
+}
+function pullTeardown() { if (!pull) return; scene.remove(pull.handle); if (pull.ghost) { scene.remove(pull.ghost); pull.ghost.geometry.dispose(); } pull = null; controls.enabled = true; }
+function pullHit(ev) {
+  if (!pull) return false;
+  const rect = renderer.domElement.getBoundingClientRect();
+  const ndc = new THREE.Vector2(((ev.clientX - rect.left) / rect.width) * 2 - 1, -((ev.clientY - rect.top) / rect.height) * 2 + 1);
+  const rc = new THREE.Raycaster(); rc.setFromCamera(ndc, camera);
+  return rc.intersectObject(pull.handle, true).length > 0;
+}
+function axisScreen() {   // screen-space direction (px) of one model-mm along the pull normal, at the origin
+  const rect = renderer.domElement.getBoundingClientRect();
+  const P = v => { const q = v.clone().project(camera); return [(q.x + 1) / 2 * rect.width, (1 - q.y) / 2 * rect.height]; };
+  const a = P(pull.origin), b = P(pull.origin.clone().addScaledVector(pull.normal, 1));
+  return [b[0] - a[0], b[1] - a[1]];
+}
+renderer.domElement.addEventListener('pointerdown', ev => {
+  if (!pull || ev.button !== 0 || !pullHit(ev)) return;
+  ev.stopImmediatePropagation();
+  const ax = axisScreen(), L2 = ax[0] * ax[0] + ax[1] * ax[1] || 1e-9;
+  pull.drag = { x: ev.clientX, y: ev.clientY, start: pull.amount, ax, L2 }; controls.enabled = false;
+  renderer.domElement.setPointerCapture(ev.pointerId);
+}, true);
+renderer.domElement.addEventListener('pointermove', ev => {
+  if (!pull) return;
+  if (pull.drag) {
+    const d = pull.drag, mm = ((ev.clientX - d.x) * d.ax[0] + (ev.clientY - d.y) * d.ax[1]) / d.L2;
+    let a = d.start + mm; a = ev.shiftKey ? Math.round(a * 10) / 10 : Math.round(a);
+    pullUpdate(a);
+    const inp = cmdEl.querySelector('#ta'), dir = cmdEl.querySelector('#tdir');
+    if (inp) inp.value = Math.abs(a); if (dir) dir.value = a < 0 ? 'in' : 'out';
+    hoverEl.textContent = `press/pull ${a >= 0 ? '+' : ''}${a} mm  — release to set, then OK`;
+  } else renderer.domElement.style.cursor = pullHit(ev) ? 'grab' : '';
+}, true);
+renderer.domElement.addEventListener('pointerup', ev => {
+  if (!pull || !pull.drag) return;
+  pull.drag = null; controls.enabled = true; ev.stopImmediatePropagation();
+}, true);
+
+// ------------------------------------------------------------------ settings (model, effort, MCP servers)
+document.getElementById('settings-btn').onclick = openSettings;
+async function openSettings() {
+  const [{ settings, models }, status] = await Promise.all([fetch('/api/settings').then(r => r.json()), fetch('/api/agent/status').then(r => r.json())]);
+  const st = JSON.parse(JSON.stringify(settings));
+  const d = document.createElement('div');
+  const mcpStatus = Object.fromEntries((status.mcp || []).map(m => [m.name, m]));
+  const isKnown = !st.model || models.includes(st.model);
+  const modelOpts = ['', ...models].map(m => `<option value="${m}" ${m === (st.model || '') ? 'selected' : ''}>${m || '(Claude Code default)'}</option>`).join('') + `<option value="__custom" ${isKnown ? '' : 'selected'}>custom…</option>`;
+  d.innerHTML = `<div class="set-grid">
+    <label>Model</label><div style="display:flex;gap:6px"><select id="s-model" style="flex:1">${modelOpts}</select><input id="s-model-custom" placeholder="model id" value="${isKnown ? '' : st.model}" style="flex:1;${isKnown ? 'display:none' : ''}"></div>
+    <label>Effort</label><select id="s-effort">${['', 'low', 'medium', 'high', 'xhigh', 'max'].map(e => `<option value="${e}" ${e === (st.effort || '') ? 'selected' : ''}>${e || '(default)'}</option>`).join('')}</select>
+    <label>Max steps / turn</label><input id="s-turns" type="number" value="${st.max_turns}">
+    <label>Thinking</label><select id="s-think"><option value="omitted" ${st.thinking_display !== 'summarized' ? 'selected' : ''}>hidden</option><option value="summarized" ${st.thinking_display === 'summarized' ? 'selected' : ''}>show summary in chat</option></select>
+    <label>Web tools</label><label style="color:var(--text)"><input id="s-web" type="checkbox" ${st.web !== false ? 'checked' : ''}> allow WebFetch / WebSearch</label>
+    <label>Extra instructions</label><textarea id="s-extra" rows="3" placeholder="house rules, your machine, preferred materials…"></textarea>
+  </div>
+  <div style="margin-top:10px;display:flex;align-items:center"><b style="font-size:12px">MCP servers</b><span class="muted" style="margin-left:8px">tools become mcp__&lt;name&gt;__*</span><button class="btn small" id="s-mcp-add" style="margin-left:auto">+ Add</button></div>
+  <div id="s-mcp"></div>
+  <div class="muted" style="margin-top:8px">Status: ${status.connected ? 'connected' : 'not connected'} · model ${status.model} · effort ${status.effort}${status.session_id ? ' · session ' + status.session_id.slice(0, 8) : ''}${status.mcp_error ? ' · ' + status.mcp_error : ''}</div>`;
+  d.querySelector('#s-extra').value = st.extra_prompt || '';
+  const sel = d.querySelector('#s-model'), custom = d.querySelector('#s-model-custom');
+  sel.onchange = () => { custom.style.display = sel.value === '__custom' ? '' : 'none'; };
+  const renderMcp = () => {
+    const box = d.querySelector('#s-mcp'); box.innerHTML = '';
+    const names = Object.keys(st.mcp_servers || {});
+    if (!names.length) box.innerHTML = '<div class="muted" style="padding:6px 0">none — the built-in cad server is always on</div>';
+    for (const n of names) {
+      const c = st.mcp_servers[n]; const s_ = mcpStatus[n];
+      const row = document.createElement('div'); row.className = 'mcp-row';
+      row.innerHTML = `<input type="checkbox" ${c.enabled !== false ? 'checked' : ''} title="enabled"><span class="nm"><b>${n}</b> <span class="muted">${c.type || 'stdio'} · ${c.command ? c.command + ' ' + (c.args || []).join(' ') : c.url || ''}</span></span><span class="st ${s_ ? s_.status : ''}">${s_ ? s_.status + (s_.error ? ': ' + s_.error : '') : (c.enabled === false ? 'disabled' : 'not started')}</span><button class="btn small" data-a="edit">Edit</button><button class="btn small" data-a="del">✕</button>`;
+      row.querySelector('input').onchange = e => { c.enabled = e.target.checked; };
+      row.querySelector('[data-a=edit]').onclick = () => editJson(`MCP server ${n}`, { name: n, ...c }, async obj => { const { name, ...cfg } = obj; delete st.mcp_servers[n]; st.mcp_servers[name || n] = cfg; renderMcp(); });
+      row.querySelector('[data-a=del]').onclick = () => { delete st.mcp_servers[n]; renderMcp(); };
+      box.appendChild(row);
+    }
+  };
+  d.querySelector('#s-mcp-add').onclick = () => editJson('New MCP server', { name: 'my-server', type: 'stdio', command: 'npx', args: ['-y', '@modelcontextprotocol/server-filesystem', '/path'], env: {}, enabled: true },
+    async obj => { const { name, ...cfg } = obj; if (!name) return; st.mcp_servers = st.mcp_servers || {}; st.mcp_servers[name] = cfg; renderMcp(); });
+  renderMcp();
+  const collect = () => ({ model: sel.value === '__custom' ? custom.value.trim() : sel.value, effort: d.querySelector('#s-effort').value, max_turns: parseInt(d.querySelector('#s-turns').value) || 60,
+    thinking_display: d.querySelector('#s-think').value, web: d.querySelector('#s-web').checked, extra_prompt: d.querySelector('#s-extra').value, mcp_servers: st.mcp_servers || {} });
+  const r = await openModal('Agent settings', d, [['Cancel', null], ['Save', () => ({ s: collect(), restart: false })], ['Save & restart agent', () => ({ s: collect(), restart: true }), true]]);
+  if (!r) return;
+  try { await api('/api/settings', { settings: r.s, restart: r.restart }); addMsg('system', r.restart ? 'settings saved · agent restarting' : 'settings saved (apply with Save & restart)'); }
+  catch (e) { addMsg('error', e.message); }
+}
+
+// ------------------------------------------------------------------ websocket
+let ws; let busy = false; let lastDiag = 0;
+function send(obj) { if (ws && ws.readyState === 1) ws.send(JSON.stringify(obj)); }
+function connect() {
+  ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws');
+  ws.onopen = () => setStatus('connected');
+  ws.onclose = () => { setStatus('disconnected — retrying'); setTimeout(connect, 1500); };
+  ws.onmessage = async ev => {
+    const m = JSON.parse(ev.data);
+    switch (m.type) {
+      case 'model':
+        loadMesh(m.mesh); loadSketches(m.mesh.sketches); document.getElementById('undo').disabled = (m.history_len ?? 2) < 2; loadParams(); if (measuring) { mPicks = []; hideMeasureLine(); }
+        designCode = m.code;
+        if (codeWhich === 'design' && (!codeDirty || m.source === 'user')) { codeEl.value = m.code; codeDirty = false; }
+        document.getElementById('codeerr').textContent = '';
+        if (m.source === 'user') addMsg('system', 'model rebuilt from Code panel');
+        if (m.source === 'revert') addMsg('system', 'undo: reverted to previous build');
+        if (m.source === 'requality') addMsg('system', `display mesh re-tessellated (${m.mesh.quality})`);
+        if (m.source === 'open' || m.source === 'new') setView('iso');   // different part: re-fit the view
+        else if (lastDiag && bbox) { const d = bbox.getSize(new THREE.Vector3()).length(); if (d > lastDiag * 1.6 || d < lastDiag * 0.6) fitCamera(); }   // size changed a lot: keep direction, refit
+        lastDiag = bbox ? bbox.getSize(new THREE.Vector3()).length() : lastDiag;
+        if (m.source === 'open') addMsg('system', 'design opened');
+        if (m.source === 'new') addMsg('system', 'new design');
+        if (m.source === 'params') addMsg('system', 'rebuilt with new parameters');
+        if (m.source === 'insert') addMsg('system', 'body inserted');
+        if (m.source === 'sketch') addMsg('system', 'sketch saved · rebuilt');
+        if (m.source === 'edit') addMsg('system', 'script edited · rebuilt');
+        if (m.source === 'edit') { /* rename/delete: message comes via 'info' */ }
+        break;
+      case 'design': setDesign(m); break;
+      case 'library_parts': libParts = m.parts; renderLibrary(); break;
+      case 'drawings': renderDrawings(m.design, m.files); break;
+      case 'library': library = { machines: m.machines, tools: m.tools }; renderCamTab(); fsFillLibs(); fsCalc(); break;
+      case 'cam':
+        camCode = m.code || ''; lastGcodeLines = m.gcode_lines || 0; loadProgram(m.program);
+        if (codeWhich === 'cam' && (!codeDirty || m.source === 'user')) { codeEl.value = camCode; codeDirty = false; }
+        document.getElementById('codeerr').textContent = '';
+        if (m.source === 'user') addMsg('system', 'CAM program rebuilt from Code panel');
+        if (m.source === 'agent' && m.program) addMsg('system', `CAM program built: ${m.program.ops.length} ops · ${m.program.time.toFixed(1)} min` + (m.program.warnings.length ? ` · ${m.program.warnings.length} warning(s), see CAM tab` : ''));
+        break;
+      case 'cam_error': document.getElementById('codeerr').textContent = m.text; addMsg('error', 'CAM build failed — see Code tab'); break;
+      case 'build_error': document.getElementById('codeerr').textContent = m.text; break;
+      case 'status': busy = m.busy; setBusy(busy); if (m.agent_ready) setStatus('agent ready'); break;
+      case 'agent_ready': setStatus('agent ready'); break;
+      case 'delta': thinkingEl.style.display = 'none'; onDelta(m.text); break;
+      case 'thinking': thinkingEl.style.display = 'block'; break;
+      case 'text': if (currentBubble) { currentText = m.text; finishBubble(); } else if (m.text) addMsg('assistant', m.text); break;
+      case 'tool_start': finishBubble(); thinkingEl.style.display = 'none'; toolChip(m.id, m.name); break;
+      case 'tool_use': { finishBubble(); const el = toolChip(m.id, m.name); el.querySelector('.args').textContent = summarizeInput(m.name, m.input);
+        if (m.name === 'build_model') { const pre = document.createElement('pre'); pre.textContent = m.input.code || ''; el.appendChild(pre); } break; }
+      case 'tool_result': { const el = toolChip(m.id, m.name); const st = el.querySelector('.state');
+        st.textContent = m.is_error ? 'error' : 'done'; st.className = 'state ' + (m.is_error ? 'err' : 'ok');
+        if (m.text) { const pre = document.createElement('pre'); pre.textContent = m.text; el.appendChild(pre); }
+        if (m.is_error) el.open = true; scroll(); break; }
+      case 'result': finishBubble(); thinkingEl.style.display = 'none';
+        if (m.cost != null) addMsg('system', `turn done · ${m.turns} steps · ${(m.duration_ms/1000).toFixed(1)}s · $${m.cost.toFixed(3)}`); break;
+      case 'error': finishBubble(); addMsg('error', m.text); break;
+      case 'info': addMsg('system', m.text); break;
+      case 'exported': addMsg('system', 'exported ' + m.files.join(', ') + ' to workspace/exports'); break;
+      case 'screenshot_request': {
+        let png = '';
+        try { if (!model) throw new Error('no model loaded in this tab'); png = await renderScreenshot(m); } catch (e) { console.error('screenshot failed', e); }
+        send({ type: 'screenshot_result', id: m.id, png });
+        if (png) { const img = document.createElement('img'); img.src = png; img.style.maxHeight = '180px';
+          const last = [...toolEls.values()].reverse().find(el => el.querySelector('.name').textContent === 'screenshot' && !el.querySelector('img'));
+          if (last) last.appendChild(img); } break; }
+    }
+  };
+}
+function setStatus(t) { statusText.textContent = t; statusEl.className = t.includes('ready') ? 'ready' : ''; if (busy) statusEl.className = 'busy'; }
+function setBusy(b) { busy = b; stopBtn.style.display = b ? '' : 'none'; sendBtn.disabled = b; statusEl.className = b ? 'busy' : 'ready'; statusText.textContent = b ? 'agent working…' : 'agent ready'; if (!b) thinkingEl.style.display = 'none'; }
+connect();
+
+// ---- image attachments (downscaled in the browser, sent with the message, kept in the bubble)
+let pending = [];   // [{name, data (dataURL jpeg), mime}]
+const attachEl = document.getElementById('attach');
+function renderAttach() {
+  attachEl.innerHTML = '';
+  pending.forEach((im, i) => { const d = document.createElement('div'); d.className = 'thumb'; d.innerHTML = `<img src="${im.data}" title="${im.name}"><b>×</b>`; d.querySelector('b').onclick = () => { pending.splice(i, 1); renderAttach(); }; attachEl.appendChild(d); });
+}
+async function addImageFiles(files) {
+  for (const f of files) {
+    if (!f.type.startsWith('image/')) continue;
+    const data = await downscale(f, 1600, 0.85);
+    pending.push({ name: f.name || 'pasted.jpg', data, mime: 'image/jpeg' });
+  }
+  renderAttach();
+}
+function downscale(file, maxPx, q) {
+  return new Promise((res, rej) => {
+    const url = URL.createObjectURL(file); const img = new Image();
+    img.onload = () => { const s = Math.min(1, maxPx / Math.max(img.width, img.height)); const c = document.createElement('canvas'); c.width = Math.round(img.width * s); c.height = Math.round(img.height * s);
+      const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height); g.drawImage(img, 0, 0, c.width, c.height); URL.revokeObjectURL(url); res(c.toDataURL('image/jpeg', q)); };
+    img.onerror = rej; img.src = url;
+  });
+}
+document.getElementById('attach-btn').onclick = () => document.getElementById('imgpick').click();
+document.getElementById('imgpick').onchange = ev => { addImageFiles([...ev.target.files]); ev.target.value = ''; };
+const composerEl = document.getElementById('composer');
+for (const t of ['dragenter', 'dragover']) composerEl.addEventListener(t, ev => { ev.preventDefault(); composerEl.classList.add('drop'); });
+for (const t of ['dragleave', 'drop']) composerEl.addEventListener(t, ev => { ev.preventDefault(); composerEl.classList.remove('drop'); });
+composerEl.addEventListener('drop', ev => { const fs = [...ev.dataTransfer.files]; const steps = fs.filter(f => /\.(step|stp)$/i.test(f.name)); if (steps.length) importStepFile(steps[0]); addImageFiles(fs); });
+viewerEl.addEventListener('dragover', ev => ev.preventDefault());
+viewerEl.addEventListener('drop', ev => { ev.preventDefault(); const fs = [...ev.dataTransfer.files]; const steps = fs.filter(f => /\.(step|stp)$/i.test(f.name)); if (steps.length) importStepFile(steps[0]); addImageFiles(fs); });
+document.addEventListener('paste', ev => { const files = [...(ev.clipboardData?.items || [])].filter(i => i.type.startsWith('image/')).map(i => i.getAsFile()); if (files.length) addImageFiles(files); });
+window.agentcad.addImageFiles = addImageFiles;
+
+function submit() {
+  const text = inputEl.value.trim(); if ((!text && !pending.length) || busy) return;
+  const sel = { faces: [...selFaces], bodies: [...selBodies], sketches: [...selSketches] };
+  const bodyOf = f => [...model.bodies.values()].find(b => b.ranges.has(f));
+  const snap = {
+    faces: sel.faces.map(id => { const fi = model.faces.get(id); return { id, label: fi.label, kind: fi.kind, center: fi.center, normal: fi.normal, body: bodyOf(id)?.path || '' }; }),
+    bodies: sel.bodies.map(id => { const b = model.bodies.get(id); return { id, path: b.path, center: b.bboxMin.map((v, i) => (v + b.bboxMax[i]) / 2) }; }),
+  };
+  const images = pending; pending = []; renderAttach();
+  addUserMsg(text || '(image)', snap, images);
+  send({ type: 'chat', text: text || 'See the attached image(s).', selection: sel, images });
+  selSketches.clear(); loadSketches(modelSketches);
+  // keep the asked-about geometry lit (dimmer) while the agent works on it; cleared by the next rebuild or click
+  ghostFaces = new Set(sel.faces); ghostBodies = new Set(sel.bodies);
+  inputEl.value = ''; selFaces.clear(); selBodies.clear(); applyColors(); renderChips(); renderTree(); setBusy(true);
+}
+sendBtn.onclick = submit;
+inputEl.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submit(); } });
+stopBtn.onclick = () => send({ type: 'interrupt' });
+
+// tabs + code pane
+document.querySelectorAll('.tab').forEach(t => t.onclick = () => {
+  document.querySelectorAll('.tab').forEach(x => x.classList.toggle('active', x === t));
+  document.querySelectorAll('.pane').forEach(p => p.classList.toggle('active', p.id === 'pane-' + t.dataset.pane));
+  if (t.dataset.pane === 'code') setTimeout(() => cm.refresh(), 0);
+  if (t.dataset.pane === 'library') renderLibrary();
+});
+let codeDirty = false, settingCode = false;
+const cm = CodeMirror.fromTextArea(document.getElementById('code'), {
+  mode: 'python', theme: 'agentcad', lineNumbers: true, indentUnit: 4, indentWithTabs: false, tabSize: 4,
+  matchBrackets: true, styleActiveLine: true, lineWrapping: false,
+  extraKeys: { Tab: c => c.somethingSelected() ? c.indentSelection('add') : c.replaceSelection('    '), 'Shift-Tab': c => c.indentSelection('subtract'),
+               'Cmd-Enter': () => document.getElementById('code-run').click(), 'Ctrl-Enter': () => document.getElementById('code-run').click() },
+});
+cm.on('change', () => { if (!settingCode) codeDirty = true; });
+window.cm = cm;
+// small adapter so the rest of the code can keep using codeEl.value
+const codeEl = { get value() { return cm.getValue(); }, set value(v) { settingCode = true; cm.setValue(v); settingCode = false; } };
+let designCode = '', codeWhich = 'design';
+document.getElementById('code-which').onchange = e => {
+  codeWhich = e.target.value; codeDirty = false;
+  codeEl.value = codeWhich === 'design' ? designCode : (camCode || '# CAM script — see the CAM tab. Assign `program`.\n');
+  document.getElementById('code-hint').innerHTML = codeWhich === 'design' ? 'build123d · <code>result</code> = shape or {name: shape} · ⌘↩ runs' : 'cam_kernel · assign <code>program</code> · ⌘↩ builds toolpaths';
+  document.getElementById('codeerr').textContent = '';
+};
+document.getElementById('code-run').onclick = () => { send({ type: codeWhich === 'design' ? 'run_code' : 'run_cam', code: codeEl.value }); };
+document.getElementById('code-reload').onclick = () => { codeDirty = false; if (codeWhich === 'design') send({ type: 'get_model' }); else codeEl.value = camCode; };
+</script>
+</body>
+</html>
