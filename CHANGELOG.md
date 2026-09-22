@@ -9,6 +9,7 @@ features, patch bumps fix things. The version shown in the UI header comes from 
   (`AGENTICCAD_*`) and paths follow. Added `requirements.txt` and install notes.
 ### Added
 - Licence: PolyForm Noncommercial 1.0.0 (free for non-commercial use; commercial licensing on request).
+- README hero screenshot, status/gaps/roadmap section; CONTRIBUTING, SECURITY, code of conduct, issue and PR templates, CI (pytest on push and PRs); `?pane=` URL parameter.
 
 ## [0.9.0] — 2026-09-22
 ### Added

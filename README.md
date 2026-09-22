@@ -1,17 +1,23 @@
-# AgenticCAD — agent-native CAD prototype
+# AgenticCAD — agent-native CAD/CAM
 
-Talk to a Claude agent; it writes [build123d](https://build123d.readthedocs.io) code, the server
-executes it on the OCCT kernel, and the browser shows the live model. Click faces in the viewer to
-reference them in chat. The agent can look at the part (screenshot tool) and export STEP/STL.
+![AgenticCAD](docs/screenshot.png)
 
-```
-browser (three.js viewer + chat)  <-- websocket -->  server.py (FastAPI)
-                                                        |-- agent.py   Claude Agent SDK session + in-process MCP tools
-                                                        |-- cad_kernel.py  build123d exec, per-face tessellation, export
-                                                        `-- workspace/   model.py (current script), history/, exports/
-```
+Describe the part; a Claude agent writes [build123d](https://build123d.readthedocs.io) code, the exact
+OCCT kernel builds it, and the browser shows it live. Click faces, edges and bodies to reference them in
+chat, or use the Fusion-style ribbon to model by hand — every manual operation is written into the same
+script, so the design is always one reproducible Python file. Then generate GRBL toolpaths (adaptive
+clearing, contours with tabs, drilling, 3D finishing), shop drawings, STEP/STL and G-code.
 
 > Free for non-commercial use under the PolyForm Noncommercial 1.0.0 licence. Commercial use requires a licence — see [Licence](#licence).
+
+```
+browser (three.js viewer · ribbon · sketch editor · chat)  <-- websocket -->  server.py (FastAPI)
+                                                                               |-- agent.py       Claude Agent SDK session + in-process MCP tools
+                                                                               |-- cad_kernel.py  build123d exec, exact B-rep, display meshing, export
+                                                                               |-- cam_kernel.py  2.5D/3D toolpaths, GRBL post
+                                                                               |-- drawing.py / threads.py / library.py / script_edit.py
+                                                                               `-- workspace/     designs, library, machines, tools, history, exports
+```
 
 ## Run
 
@@ -252,14 +258,49 @@ Pre-1.0: minor bump for features, patch bump for fixes. `/api/version` serves bo
   rate, cost, steps and time per case. Exit code 1 on any failure (`--allow-fail` to override).
   Add a case by appending a `Case(...)` to `evals/cases.py`.
 
-## Known gaps / next
+## Status, gaps and roadmap
 
-- Single shared session (one model, one agent) — fine for a local tool.
-- Screenshots the agent receives are JPEG (size-capped: the SDK rejects tool results over its message buffer; we also raise `max_buffer_size` to 8 MB) and archived in `workspace/screenshots/`, rendered by the tab you last chatted from.
-- Sphere/cylinder seam edges are drawn (Fusion hides them).
-- Face ids are renumbered on every rebuild (OCCT explorer order); the agent re-inspects instead of tracking identity.
-- No edge/vertex picking yet; no sketch UI (agent-native by design).
-- CAM not started.
+**Status (v0.9.x):** working end to end on a single machine for a single user — design by chat, by
+hand, or both; multi-body designs; sketches; threads; measurement; drawings; part library; CAM with a
+GRBL post; settings for model/effort/MCP servers; unit tests and graded agent evals. Treat it as a
+capable prototype, not a shipped product: the modelling kernel is exact and the toolpaths are checked,
+but nothing here has been run on a real machine yet by anyone but the author.
+
+### Known gaps
+- **One project, one session.** A single global design and one agent session per server; two browsers
+  or two people will interfere. Chat history is not persisted across server restarts.
+- **No stock simulation or collision checking in CAM.** Toolpaths are drawn, but there is no cut
+  simulation showing the finished part, gouges, or a holder hitting a wall; flute-length vs depth is left
+  to the agent's judgement. Time estimates ignore acceleration.
+- **Adaptive corners rely on feed reduction**, not on geometry; ring-shaped regions still retract for
+  some links. No trochoidal slotting op, no rest for 3D, no Z-level (waterline) finishing.
+- **Sketches are basic**: rectangles, circles, polygons, slots; no lines/arcs with constraints,
+  no dimensions on the sketch, no snapping to model edges.
+- **Manual tools are typed, not dragged** (except Press/Pull): no drag handles for primitives,
+  no mates/joints for positioning library parts; no patterns, mirror, loft or sweep by hand.
+- **Drawings** have overall dimensions and hole tables only; no section views, no feature
+  dimensions, no PDF.
+- **Library parts land at the origin** and are moved afterwards; there is no standard-parts seed
+  (fasteners, bearings, inserts) yet.
+- **Face and edge ids change on every rebuild**; references in the script use clicked points, which
+  survive edits but can pick a neighbour if geometry moves under them.
+- Display: cylinder/sphere seam edges are drawn; screenshots for the agent are JPEG (size-capped).
+
+### Roadmap (rough order)
+1. **Projects and sessions** — a project per folder, one agent session per project, persisted chat via
+   SDK session resume. Prerequisite for deploying as a shared service.
+2. **CAM stock simulation + collision checks** — voxel/heightmap cut sim, holder/shank checks, realistic
+   time estimates. Then Z-level finishing, trochoidal slotting, thread milling, ramp entries.
+3. **Assembly positioning** — mate-style placement (face-to-face, concentric) for library parts, and a
+   seeded standard-parts library (ISO fasteners, nuts, washers, bearings, heat-set inserts).
+4. **Sketch upgrades** — lines and arcs, snapping to model edges, driven dimensions, constraints.
+5. **Drag handles everywhere** — primitives, holes, fillet radius, sketch items.
+6. **G-code sender** — WebSerial to GRBL: jog, DRO, probing, streaming with a progress marker.
+7. **Drawings** — section views, feature dimensions, PDF; **imports** — DXF/SVG profiles.
+8. **Deployment** — Docker image, auth, multi-user, GitHub Pages site.
+9. **Other posts** (LinuxCNC, Marlin) and 3D-printing exports (3MF, orientation analysis).
+
+Contributions and issues welcome at https://github.com/agenticcad/agenticcad.
 
 ## Licence
 
