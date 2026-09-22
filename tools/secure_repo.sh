@@ -38,3 +38,7 @@ echo "== verify"
 gh api repos/$R --jq '{visibility, allow_forking, has_issues, has_wiki, has_projects, secret_scanning: .security_and_analysis.secret_scanning.status, push_protection: .security_and_analysis.secret_scanning_push_protection.status}'
 gh api repos/$R/branches/main/protection --jq '{reviews: .required_pull_request_reviews.required_approving_review_count, checks: .required_status_checks.contexts, push_users: [.restrictions.users[].login], force_push: .allow_force_pushes.enabled, deletions: .allow_deletions.enabled}'
 echo "done"
+
+# ---- GitHub Pages from the `site` branch (needs a public repo on the free plan)
+gh api -X POST repos/$R/pages -f 'source[branch]=site' -f 'source[path]=/' >/dev/null 2>&1 || gh api -X PUT repos/$R/pages -f 'source[branch]=site' -f 'source[path]=/' >/dev/null
+echo "Pages: $(gh api repos/$R/pages --jq .html_url)"
