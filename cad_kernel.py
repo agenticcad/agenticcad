@@ -257,8 +257,8 @@ LIBRARY = None
 # Per-run bindings: run_script() sets these for the duration of the script, so several sessions in one
 # process (tests, evals, future multi-project server) never see each other's imports/ or library/.
 # ContextVars survive `asyncio.to_thread` and a script's own `from build123d import *`.
-_CTX_WORKSPACE: ContextVar[Path | None] = ContextVar("agentcad_workspace", default=None)
-_CTX_LIBRARY: ContextVar[Any] = ContextVar("agentcad_library", default=None)
+_CTX_WORKSPACE: ContextVar[Path | None] = ContextVar("agenticcad_workspace", default=None)
+_CTX_LIBRARY: ContextVar[Any] = ContextVar("agenticcad_library", default=None)
 
 
 def import_step(name: str) -> Shape:

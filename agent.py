@@ -1,5 +1,5 @@
 """
-Claude Agent SDK wrapper for AgentCAD.
+Claude Agent SDK wrapper for AgenticCAD.
 
 One long-lived ClaudeSDKClient session per server. Custom CAD tools run
 in-process (SDK MCP server) so they can touch the kernel and the browser bus.
@@ -30,7 +30,7 @@ import script_edit
 
 Emit = Callable[[dict[str, Any]], Awaitable[None]]
 
-SYSTEM_PROMPT = """You are AgentCAD, a CAD copilot. The user talks to you; you build and modify a
+SYSTEM_PROMPT = """You are AgenticCAD, a CAD copilot. The user talks to you; you build and modify a
 parametric 3D design by writing build123d (Python, OCCT-based) code and calling the `build_model`
 tool with the COMPLETE script every time (there is one design script; each build replaces it).
 
@@ -185,7 +185,7 @@ class CadAgent:
         self.busy = False
         self.session_id: str | None = None
         self.model_lock = asyncio.Lock()
-        self.quality = os.environ.get("AGENTCAD_QUALITY", "normal")   # display-mesh preset
+        self.quality = os.environ.get("AGENTICCAD_QUALITY", "normal")   # display-mesh preset
         self.design_name: str | None = None   # None = unsaved/untitled
         self.saved_code: str | None = None    # code as of last save/open
         self.notes: list[str] = []            # out-of-band events to tell the agent on the next turn
@@ -1180,7 +1180,7 @@ class CadAgent:
             include_partial_messages=True,
             cwd=str(self.workspace),
             setting_sources=[],
-            model=st.get("model") or os.environ.get("AGENTCAD_MODEL") or None,
+            model=st.get("model") or os.environ.get("AGENTICCAD_MODEL") or None,
             max_turns=int(st.get("max_turns") or 60),
             # keep the CAD tools loaded up front instead of deferred behind ToolSearch
             env={"ENABLE_TOOL_SEARCH": "false"},

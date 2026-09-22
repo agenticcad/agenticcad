@@ -83,7 +83,7 @@ class ThreadSpec:
         return f"{self.size}×{self.pitch:g} {d}".strip()
 
 
-_REGISTRY: ContextVar[list[ThreadSpec] | None] = ContextVar("agentcad_threads", default=None)
+_REGISTRY: ContextVar[list[ThreadSpec] | None] = ContextVar("agenticcad_threads", default=None)
 
 
 def begin_registry() -> Any:

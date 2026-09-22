@@ -1,4 +1,4 @@
-"""AgentCAD server: static UI + WebSocket bridge between browser and the CAD agent, plus design file API."""
+"""AgenticCAD server: static UI + WebSocket bridge between browser and the CAD agent, plus design file API."""
 from __future__ import annotations
 
 import asyncio
@@ -23,7 +23,7 @@ from version import __version__
 import os
 
 ROOT = Path(__file__).parent
-WORKSPACE = Path(os.environ.get("AGENTCAD_WORKSPACE") or (ROOT / "workspace"))   # override for tests
+WORKSPACE = Path(os.environ.get("AGENTICCAD_WORKSPACE") or (ROOT / "workspace"))   # override for tests
 for sub in ("exports", "history", "designs"):
     (WORKSPACE / sub).mkdir(parents=True, exist_ok=True)
 
@@ -94,7 +94,7 @@ agent = CadAgent(WORKSPACE, bus.emit, bus.screenshot)
 async def lifespan(app: FastAPI):
     agent.load_initial()
     task = None
-    if os.environ.get("AGENTCAD_NO_AGENT") != "1":      # tests run the API without a Claude session
+    if os.environ.get("AGENTICCAD_NO_AGENT") != "1":      # tests run the API without a Claude session
         task = asyncio.create_task(_connect_agent())
     yield
     if task:

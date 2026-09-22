@@ -1,4 +1,4 @@
-"""API tests: the FastAPI app with the Claude session disabled (AGENTCAD_NO_AGENT=1)."""
+"""API tests: the FastAPI app with the Claude session disabled (AGENTICCAD_NO_AGENT=1)."""
 import json
 import os
 import sys
@@ -22,8 +22,8 @@ def wait_for(ws, kind, limit=40):
 @pytest.fixture(scope="module")
 def client(tmp_path_factory):
     ws = tmp_path_factory.mktemp("ws")
-    os.environ["AGENTCAD_WORKSPACE"] = str(ws)
-    os.environ["AGENTCAD_NO_AGENT"] = "1"
+    os.environ["AGENTICCAD_WORKSPACE"] = str(ws)
+    os.environ["AGENTICCAD_NO_AGENT"] = "1"
     for m in ("server", "agent"):
         sys.modules.pop(m, None)
     import server
@@ -32,7 +32,7 @@ def client(tmp_path_factory):
 
 
 def test_index_and_initial_model(client):
-    assert "AgentCAD" in client.get("/").text
+    assert "AgenticCAD" in client.get("/").text
     with client.websocket_connect("/ws") as ws:
         first = ws.receive_json()
         assert first["type"] == "model" and len(first["mesh"]["bodies"]) == 2

@@ -1,4 +1,4 @@
-# AgentCAD — agent-native CAD prototype
+# AgenticCAD — agent-native CAD prototype
 
 Talk to a Claude agent; it writes [build123d](https://build123d.readthedocs.io) code, the server
 executes it on the OCCT kernel, and the browser shows the live model. Click faces in the viewer to
@@ -14,12 +14,12 @@ browser (three.js viewer + chat)  <-- websocket -->  server.py (FastAPI)
 ## Run
 
 ```bash
-cd /Users/mike/projects/agentcad
+cd /Users/mike/projects/agenticcad
 .venv/bin/python server.py          # http://127.0.0.1:8765
 ```
 
 Auth: the Agent SDK's bundled Claude Code binary uses your Claude Code login; set `ANTHROPIC_API_KEY`
-to use an API key instead. `AGENTCAD_MODEL=claude-opus-5` (etc.) overrides the model.
+to use an API key instead. `AGENTICCAD_MODEL=claude-opus-5` (etc.) overrides the model.
 
 Setup from scratch: `python3 -m venv .venv && .venv/bin/pip install claude-agent-sdk build123d fastapi "uvicorn[standard]"`.
 
@@ -109,6 +109,14 @@ Deleting the last body at a level is refused.
   circle Ø). Two picks give distance with closest points drawn and labelled in the viewer, Δxyz, and the
   angle (line-line, line-plane, plane-plane) with parallel/perpendicular flags; two circles give centre
   spacing. Backspace/right-click removes the last pick, Esc clears. Agent `measure` accepts edge ids too.
+
+## Install
+
+```bash
+python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
+.venv/bin/python server.py        # http://127.0.0.1:8765 (PORT env overrides)
+```
+Auth: the Claude Agent SDK uses your Claude Code login (or `ANTHROPIC_API_KEY`).
 
 ## Fidelity model
 
@@ -234,7 +242,7 @@ Pre-1.0: minor bump for features, patch bump for fixes. `/api/version` serves bo
 - **Unit tests** (`tests/`): kernel (bodies, ids, exact normals, exports, measurement), script editing
   (params, rename/delete/add), CAM (holes, sections, every op, arc post, machine checks, feeds, and an
   independent fine-grid engagement audit of the adaptive op), drawings, library, and the FastAPI/WebSocket
-  API with the Claude session disabled (`AGENTCAD_NO_AGENT=1`, `AGENTCAD_WORKSPACE=<tmp>`).
+  API with the Claude session disabled (`AGENTICCAD_NO_AGENT=1`, `AGENTICCAD_WORKSPACE=<tmp>`).
 - **Evals** (`evals/`): the real agent runs headless in a throwaway workspace (the screenshot tool is an
   offscreen matplotlib render), one fresh session per case, graded by deterministic geometry / program /
   answer checks (`harness.py` helpers: bbox, bodies, holes, volume, params, script contents, op params,

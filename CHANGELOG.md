@@ -1,7 +1,12 @@
 # Changelog
 
-All notable changes to AgentCAD. Versions follow [SemVer](https://semver.org): pre-1.0, minor bumps add
+All notable changes to AgenticCAD. Versions follow [SemVer](https://semver.org): pre-1.0, minor bumps add
 features, patch bumps fix things. The version shown in the UI header comes from `version.py`.
+
+## [0.9.1] — 2026-09-22
+### Changed
+- Renamed the app to **AgenticCAD** (repository `agenticcad/agenticcad`); identifiers, env vars
+  (`AGENTICCAD_*`) and paths follow. Added `requirements.txt` and install notes.
 
 ## [0.9.0] — 2026-09-22
 ### Added

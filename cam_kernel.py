@@ -1,5 +1,5 @@
 """
-CAM kernel for AgentCAD — 2.5D / simple 3D toolpaths from the exact B-rep, GRBL post-processor.
+CAM kernel for AgenticCAD — 2.5D / simple 3D toolpaths from the exact B-rep, GRBL post-processor.
 
 Everything is in model coordinates (mm, Z up). The post subtracts the WCS origin.
 The agent writes a CAM script (see agent.py CAM_PROMPT) that builds a `Program`.
@@ -1488,7 +1488,7 @@ def post_grbl(prog: Program) -> str:
     ox, oy, oz = prog.setup.origin_point()
     st = prog.setup.stock
     out: list[str] = []
-    out.append(f"; AgentCAD GRBL post — {prog.name} — machine: {m.name}")
+    out.append(f"; AgenticCAD GRBL post — {prog.name} — machine: {m.name}")
     out.append(f"; stock {st.size[0]:.1f} x {st.size[1]:.1f} x {st.size[2]:.1f} mm, WCS origin: {prog.setup.origin}")
     out.append(f"; est. time {prog.time_minutes():.1f} min; tools: " + ", ".join(sorted({op.tool.label() for op in prog.ops})))
     for w in prog.check():

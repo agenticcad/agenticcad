@@ -136,7 +136,7 @@ async def run_case(case: Case, model_name: str | None = None) -> Run:
         return await asyncio.to_thread(render_mesh, run.model, spec)
 
     if model_name:
-        os.environ["AGENTCAD_MODEL"] = model_name
+        os.environ["AGENTICCAD_MODEL"] = model_name
     agent = CadAgent(ws, emit, screenshot)
     run = Run(case, ws, agent, events)
     try:

@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>AgentCAD</title>
+<title>AgenticCAD</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
   :root { --bg:#14171c; --panel:#1c2027; --panel2:#232830; --line:#2e343d; --text:#e6e9ee; --muted:#8b94a1; --accent:#ff8c42; --accent2:#4ea1ff; --err:#ff5c5c; --ok:#4cd37a; }
@@ -121,29 +121,29 @@
   #code:focus { outline:none; }
   /* editor theme: VS Code Dark+ palette (defined inline so it never depends on a CDN theme file) */
   #pane-code .CodeMirror { flex:1; height:auto; min-height:0; font:12.5px/1.55 ui-monospace,Menlo,"SF Mono",monospace; }
-  .cm-s-agentcad.CodeMirror { background:#0f1216; color:#d4d4d4; }
-  .cm-s-agentcad .CodeMirror-gutters { background:#0f1216; border-right:1px solid var(--line); }
-  .cm-s-agentcad .CodeMirror-linenumber { color:#5a6270; }
-  .cm-s-agentcad .CodeMirror-cursor { border-left:1.5px solid #e6e9ee; }
-  .cm-s-agentcad .CodeMirror-selected, .cm-s-agentcad .CodeMirror-focused .CodeMirror-selected { background:#264f78; }
-  .cm-s-agentcad .CodeMirror-activeline-background { background:#161b22; }
-  .cm-s-agentcad .CodeMirror-activeline .CodeMirror-linenumber { color:#c6c6c6; }
-  .cm-s-agentcad .CodeMirror-matchingbracket { color:#ffd700 !important; outline:1px solid #888; background:transparent; }
-  .cm-s-agentcad .cm-comment { color:#6a9955; font-style:italic; }
-  .cm-s-agentcad .cm-keyword { color:#c586c0; }
-  .cm-s-agentcad .cm-atom { color:#569cd6; }
-  .cm-s-agentcad .cm-number { color:#b5cea8; }
-  .cm-s-agentcad .cm-string, .cm-s-agentcad .cm-string-2 { color:#ce9178; }
-  .cm-s-agentcad .cm-builtin { color:#dcdcaa; }
-  .cm-s-agentcad .cm-def { color:#dcdcaa; }
-  .cm-s-agentcad .cm-variable { color:#9cdcfe; }
-  .cm-s-agentcad .cm-variable-2 { color:#9cdcfe; }
-  .cm-s-agentcad .cm-variable-3, .cm-s-agentcad .cm-type { color:#4ec9b0; }
-  .cm-s-agentcad .cm-property { color:#dcdcaa; }
-  .cm-s-agentcad .cm-operator { color:#d4d4d4; }
-  .cm-s-agentcad .cm-meta { color:#c586c0; }
-  .cm-s-agentcad .cm-error { color:#f44747; text-decoration:none; }
-  .cm-s-agentcad .cm-call { color:#dcdcaa; }
+  .cm-s-agenticcad.CodeMirror { background:#0f1216; color:#d4d4d4; }
+  .cm-s-agenticcad .CodeMirror-gutters { background:#0f1216; border-right:1px solid var(--line); }
+  .cm-s-agenticcad .CodeMirror-linenumber { color:#5a6270; }
+  .cm-s-agenticcad .CodeMirror-cursor { border-left:1.5px solid #e6e9ee; }
+  .cm-s-agenticcad .CodeMirror-selected, .cm-s-agenticcad .CodeMirror-focused .CodeMirror-selected { background:#264f78; }
+  .cm-s-agenticcad .CodeMirror-activeline-background { background:#161b22; }
+  .cm-s-agenticcad .CodeMirror-activeline .CodeMirror-linenumber { color:#c6c6c6; }
+  .cm-s-agenticcad .CodeMirror-matchingbracket { color:#ffd700 !important; outline:1px solid #888; background:transparent; }
+  .cm-s-agenticcad .cm-comment { color:#6a9955; font-style:italic; }
+  .cm-s-agenticcad .cm-keyword { color:#c586c0; }
+  .cm-s-agenticcad .cm-atom { color:#569cd6; }
+  .cm-s-agenticcad .cm-number { color:#b5cea8; }
+  .cm-s-agenticcad .cm-string, .cm-s-agenticcad .cm-string-2 { color:#ce9178; }
+  .cm-s-agenticcad .cm-builtin { color:#dcdcaa; }
+  .cm-s-agenticcad .cm-def { color:#dcdcaa; }
+  .cm-s-agenticcad .cm-variable { color:#9cdcfe; }
+  .cm-s-agenticcad .cm-variable-2 { color:#9cdcfe; }
+  .cm-s-agenticcad .cm-variable-3, .cm-s-agenticcad .cm-type { color:#4ec9b0; }
+  .cm-s-agenticcad .cm-property { color:#dcdcaa; }
+  .cm-s-agenticcad .cm-operator { color:#d4d4d4; }
+  .cm-s-agenticcad .cm-meta { color:#c586c0; }
+  .cm-s-agenticcad .cm-error { color:#f44747; text-decoration:none; }
+  .cm-s-agenticcad .cm-call { color:#dcdcaa; }
   #codebar { display:flex; gap:8px; padding:8px 12px; border-top:1px solid var(--line); align-items:center; }
   #cam-body { flex:1; overflow:auto; padding:10px 12px; }
   .cam-sec { border:1px solid var(--line); border-radius:8px; padding:8px 10px; margin-bottom:10px; }
@@ -310,7 +310,7 @@
   <div id="splitter" title="Drag to resize · double-click to reset"></div>
   <div id="side">
     <div id="tabs">
-      <div class="title">Agent<span>CAD</span><small id="designname">untitled</small><button class="ver" id="verbtn" title="What's new">v—</button></div>
+      <div class="title">Agentic<span>CAD</span><small id="designname">untitled</small><button class="ver" id="verbtn" title="What's new">v—</button></div>
       <div class="tab active" data-pane="chat">Chat</div>
       <div class="tab" data-pane="code">Code</div>
       <div class="tab" data-pane="cam">CAM</div>
@@ -585,9 +585,9 @@ new ResizeObserver(() => resize()).observe(viewerEl);   // panel resize / collap
 
 // ---- side panel: resizable + collapsible (remembered per browser)
 const sideEl = document.getElementById('side'), splitter = document.getElementById('splitter');
-function setSideWidth(w) { w = Math.round(Math.max(280, Math.min(w, innerWidth * 0.7))); document.documentElement.style.setProperty('--side-w', w + 'px'); try { localStorage.setItem('agentcad.sideWidth', w); } catch {} }
-function setSideHidden(h) { document.body.classList.toggle('side-hidden', h); try { localStorage.setItem('agentcad.sideHidden', h ? '1' : '0'); } catch {} if (!h) setTimeout(() => window.cm && cm.refresh(), 0); }
-try { const w = +localStorage.getItem('agentcad.sideWidth'); if (w) setSideWidth(w); if (localStorage.getItem('agentcad.sideHidden') === '1') setSideHidden(true); } catch {}
+function setSideWidth(w) { w = Math.round(Math.max(280, Math.min(w, innerWidth * 0.7))); document.documentElement.style.setProperty('--side-w', w + 'px'); try { localStorage.setItem('agenticcad.sideWidth', w); } catch {} }
+function setSideHidden(h) { document.body.classList.toggle('side-hidden', h); try { localStorage.setItem('agenticcad.sideHidden', h ? '1' : '0'); } catch {} if (!h) setTimeout(() => window.cm && cm.refresh(), 0); }
+try { const w = +localStorage.getItem('agenticcad.sideWidth'); if (w) setSideWidth(w); if (localStorage.getItem('agenticcad.sideHidden') === '1') setSideHidden(true); } catch {}
 splitter.addEventListener('pointerdown', ev => {
   ev.preventDefault(); splitter.setPointerCapture(ev.pointerId); splitter.classList.add('drag'); document.body.classList.add('dragging');
   const move = e => setSideWidth(innerWidth - e.clientX);
@@ -809,7 +809,7 @@ async function renderScreenshot(spec) {
   }
 }
 
-window.agentcad = { renderScreenshot, get model() { return model; }, scene, camera, renderer, send: (o) => send(o) };
+window.agenticcad = { renderScreenshot, get model() { return model; }, scene, camera, renderer, send: (o) => send(o) };
 
 // toolbar
 document.getElementById('fit').onclick = () => fitCamera();
@@ -824,7 +824,7 @@ document.addEventListener('click', () => fileMenu.classList.remove('open'));
 fileMenu.querySelectorAll('.dd div').forEach(d => d.onclick = () => fileAction(d.dataset.act));
 document.addEventListener('keydown', e => { if ((e.metaKey || e.ctrlKey) && e.key === 's') { e.preventDefault(); fileAction('save'); } });
 let design = { name: null, dirty: false };
-let stlRes = '0.01,0.05'; try { stlRes = localStorage.getItem('agentcad.stlRes') || stlRes; } catch {}
+let stlRes = '0.01,0.05'; try { stlRes = localStorage.getItem('agenticcad.stlRes') || stlRes; } catch {}
 const STL_OPTS = [['0.002,0.02', '0.002 mm / 1° (very fine)'], ['0.01,0.05', '0.01 mm / 3° (fine, default)'], ['0.05,0.1', '0.05 mm / 6° (medium)'], ['0.2,0.3', '0.2 mm / 17° (coarse)']];
 async function exportStlBox(bodyPath) {
   const d = document.createElement('div');
@@ -834,7 +834,7 @@ async function exportStlBox(bodyPath) {
     <div style="color:var(--muted);font-size:11px;margin-top:8px">STL is tessellated at export from the exact B-rep: max chordal deviation / max angular deviation. STEP export is exact and needs no settings.</div>`;
   const ok = await openModal('Export STL', d, [['Cancel', null], ['Export', () => ({ res: d.querySelector('#x-res').value, body: d.querySelector('#x-body').value }), true]]);
   if (!ok) return;
-  stlRes = ok.res; try { localStorage.setItem('agentcad.stlRes', stlRes); } catch {}
+  stlRes = ok.res; try { localStorage.setItem('agenticcad.stlRes', stlRes); } catch {}
   const [tol, ang] = stlRes.split(',');
   window.open(`/api/export/stl?tol=${tol}&ang=${ang}${ok.body ? '&body=' + encodeURIComponent(ok.body) : ''}`);
 }
@@ -863,7 +863,7 @@ document.getElementById('filepick').onchange = async ev => {
 };
 function setDesign(d) {
   design = d; const el = document.getElementById('designname');
-  el.textContent = (d.name || 'untitled') + (d.dirty ? ' •' : ''); document.title = `AgentCAD · ${d.name || 'untitled'}${d.dirty ? ' •' : ''}`;
+  el.textContent = (d.name || 'untitled') + (d.dirty ? ' •' : ''); document.title = `AgenticCAD · ${d.name || 'untitled'}${d.dirty ? ' •' : ''}`;
 }
 // modal helpers
 const modal = document.getElementById('modal'), mTitle = document.getElementById('modal-title'), mBody = document.getElementById('modal-body'), mRow = document.getElementById('modal-row');
@@ -1424,7 +1424,7 @@ function renderSketchTree() {
       const items = [def ? ['Edit sketch…', () => startSketch(def)] : ['Edit (code only)', () => document.querySelector('[data-pane=code]').click()],
                      ['Extrude…', () => extrudeDialog(sk_.name)],
                      ['Ask agent: extrude…', () => { inputEl.value = `Extrude sketch ${sk_.name} by 10 mm`; selSketches = new Set([sk_.name]); renderChips(); inputEl.focus(); }],
-                     null, ['Delete', async () => { if (await confirmBox(`Delete sketch '${sk_.name}'?`)) agentcad.send({ type: 'delete_sketch', name: sk_.name }); }, 'danger']];
+                     null, ['Delete', async () => { if (await confirmBox(`Delete sketch '${sk_.name}'?`)) agenticcad.send({ type: 'delete_sketch', name: sk_.name }); }, 'danger']];
       for (const it of items) { if (!it) { ctx.appendChild(document.createElement('hr')); continue; } const d = document.createElement('div'); d.textContent = it[0]; if (it[2]) d.className = it[2]; d.onclick = () => { closeCtx(); it[1](); }; ctx.appendChild(d); }
       ctx.style.left = Math.min(ev.clientX, innerWidth - 180) + 'px'; ctx.style.top = Math.min(ev.clientY, innerHeight - 160) + 'px'; ctx.style.display = 'block'; };
     row.oncontextmenu = menu; row.querySelector('.more').onclick = menu;
@@ -1475,7 +1475,7 @@ document.getElementById('sk-finish').onclick = () => {
   const name = document.getElementById('sk-name').value.trim() || sk.name;
   if (!/^[A-Za-z_]\w*$/.test(name)) { addMsg('error', 'sketch name must be a Python identifier'); return; }
   const plane = { origin: sk.plane.origin.map(v => +v.toFixed(4)), x_dir: sk.plane.x.toArray().map(v => +v.toFixed(6)), z_dir: sk.plane.z.toArray().map(v => +v.toFixed(6)), label: sk.plane.label };
-  agentcad.send({ type: 'set_sketch', name, plane, items: sk.items });
+  agenticcad.send({ type: 'set_sketch', name, plane, items: sk.items });
   endSketch();
 };
 document.querySelectorAll('#sketch-panel .tool').forEach(b => b.onclick = () => { if (!sk) return; sk.tool = b.dataset.tool; sk.pts = []; document.querySelectorAll('#sketch-panel .tool').forEach(x => x.classList.toggle('active', x === b)); });
@@ -1755,12 +1755,12 @@ document.addEventListener('keydown', ev => {
 });
 
 // ------------------------------------------------------------------ version + changelog
-(async () => { try { const v = await fetch('/api/version').then(r => r.json()); document.getElementById('verbtn').textContent = 'v' + v.version; document.title = document.title; window.agentcadVersion = v; } catch {} })();
+(async () => { try { const v = await fetch('/api/version').then(r => r.json()); document.getElementById('verbtn').textContent = 'v' + v.version; document.title = document.title; window.agenticcadVersion = v; } catch {} })();
 document.getElementById('verbtn').onclick = async () => {
-  const v = window.agentcadVersion || await fetch('/api/version').then(r => r.json());
+  const v = window.agenticcadVersion || await fetch('/api/version').then(r => r.json());
   const d = document.createElement('div'); d.className = 'md'; d.innerHTML = marked.parse(v.changelog || 'no changelog');
   d.style.maxHeight = '60vh'; d.style.overflow = 'auto';
-  openModal(`AgentCAD v${v.version} — what's new`, d, [['Close', null, true]]);
+  openModal(`AgenticCAD v${v.version} — what's new`, d, [['Close', null, true]]);
 };
 
 // ------------------------------------------------------------------ press/pull drag handle + ghost preview
@@ -1986,7 +1986,7 @@ composerEl.addEventListener('drop', ev => { const fs = [...ev.dataTransfer.files
 viewerEl.addEventListener('dragover', ev => ev.preventDefault());
 viewerEl.addEventListener('drop', ev => { ev.preventDefault(); const fs = [...ev.dataTransfer.files]; const steps = fs.filter(f => /\.(step|stp)$/i.test(f.name)); if (steps.length) importStepFile(steps[0]); addImageFiles(fs); });
 document.addEventListener('paste', ev => { const files = [...(ev.clipboardData?.items || [])].filter(i => i.type.startsWith('image/')).map(i => i.getAsFile()); if (files.length) addImageFiles(files); });
-window.agentcad.addImageFiles = addImageFiles;
+window.agenticcad.addImageFiles = addImageFiles;
 
 function submit() {
   const text = inputEl.value.trim(); if ((!text && !pending.length) || busy) return;
@@ -2017,7 +2017,7 @@ document.querySelectorAll('.tab').forEach(t => t.onclick = () => {
 });
 let codeDirty = false, settingCode = false;
 const cm = CodeMirror.fromTextArea(document.getElementById('code'), {
-  mode: 'python', theme: 'agentcad', lineNumbers: true, indentUnit: 4, indentWithTabs: false, tabSize: 4,
+  mode: 'python', theme: 'agenticcad', lineNumbers: true, indentUnit: 4, indentWithTabs: false, tabSize: 4,
   matchBrackets: true, styleActiveLine: true, lineWrapping: false,
   extraKeys: { Tab: c => c.somethingSelected() ? c.indentSelection('add') : c.replaceSelection('    '), 'Shift-Tab': c => c.indentSelection('subtract'),
                'Cmd-Enter': () => document.getElementById('code-run').click(), 'Ctrl-Enter': () => document.getElementById('code-run').click() },
