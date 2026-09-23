@@ -5,3 +5,9 @@ workspace/
 evals/results/
 .pytest_cache/
 .DS_Store
+
+# packaging (Briefcase)
+build/
+dist/
+logs/
+.briefcase/

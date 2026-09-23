@@ -156,3 +156,12 @@ def test_version_endpoint(client):
     from version import __version__
     v = client.get("/api/version").json()
     assert v["version"] == __version__ and f"## [{__version__}]" in v["changelog"]
+
+
+def test_setup_page_and_cli_probe(client):
+    r = client.get("/setup")
+    assert r.status_code == 200 and "Claude Code" in r.text
+    r = client.get("/api/agent/cli")
+    j = r.json()
+    assert set(j) >= {"found", "path", "connected", "searched", "workspace"}
+    assert isinstance(j["searched"], list) and j["searched"]

@@ -3,6 +3,15 @@
 All notable changes to AgenticCAD. Versions follow [SemVer](https://semver.org): pre-1.0, minor bumps add
 features, patch bumps fix things. The version shown in the UI header comes from `version.py`.
 
+## [Unreleased]
+
+### Added
+- **Desktop app** (Briefcase): `AgenticCAD.app` (.dmg, Apple Silicon) and Windows .msi built by the `package`
+  workflow on each release. Native window (pywebview), data in the OS user-data folder, free-port selection.
+  Claude Code is **not bundled**: the app finds the user's own install (PATH and the official install
+  locations) and shows a setup page (`/setup`) with install and sign-in steps when it is missing.
+  `agent.find_claude_cli()`, `/api/agent/cli`, `agent_missing_cli` event. Unsigned builds for now.
+
 ## [0.9.2] — 2026-09-23
 ### Added
 - Releases: `tools/release.sh` tags the version, builds `agenticcad-<version>.zip` (git archive) and publishes a GitHub release; the site links to the latest release zip.

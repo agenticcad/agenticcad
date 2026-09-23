@@ -1,0 +1,65 @@
+# Briefcase packaging for the AgenticCAD desktop app (macOS .dmg, Windows .msi; Linux later).
+#   .venv/bin/briefcase create macOS && .venv/bin/briefcase build macOS && .venv/bin/briefcase package macOS --adhoc-sign
+# Claude Code is deliberately NOT bundled (see cleanup_paths): users install it separately and the app finds it.
+# Keep `version` in sync with version.py (tools/release.sh checks).
+
+[tool.briefcase]
+project_name = "AgenticCAD"
+bundle = "au.com.prodevelop"
+version = "0.9.2"
+url = "https://agenticcad.github.io/agenticcad/"
+license = "PolyForm-Noncommercial-1.0.0"
+license_files = ["LICENSE"]
+author = "Mike Orzel"
+author_email = "morzel@prodevelop.com.au"
+
+[tool.briefcase.app.agenticcad]
+formal_name = "AgenticCAD"
+description = "Agent-native CAD/CAM: describe it, point at it, export STEP, STL and G-code"
+long_description = """AgenticCAD is a CAD/CAM workspace with a Claude agent inside it. Describe a part and the agent
+writes it as build123d code; the exact OCCT kernel builds it and the viewer shows it live. Point at faces to steer
+it, tweak by hand with a Fusion-style ribbon, then export STEP/STL, shop drawings or GRBL G-code.
+
+Requires Claude Code (installed and signed in separately). Free for non-commercial use.
+"""
+icon = "src/agenticcad/resources/agenticcad"
+sources = [
+    "src/agenticcad",
+    "server.py", "agent.py", "cad_kernel.py", "cam_kernel.py", "cam_data.py", "drawing.py",
+    "library.py", "script_edit.py", "threads.py", "version.py",
+    "static", "CHANGELOG.md",
+]
+requires = [
+    "bd_warehouse==0.3.0",
+    "build123d==0.11.1",
+    "claude-agent-sdk==0.2.152",
+    "fastapi==0.141.1",
+    "httpx2==2.12.0",
+    "numpy==2.5.2",
+    "pydantic==2.13.5",
+    "shapely==2.1.2",
+    "uvicorn==0.52.4",
+    "websockets==17.1",
+    "platformdirs==4.11.12",
+    "pywebview==6.2.1",
+    # pure-python dependency of pywebview published only as an sdist; Briefcase installs wheels only
+    "./wheels/proxy_tools-0.1.0-py3-none-any.whl",
+]
+# The Claude Agent SDK wheel ships a 200 MB Claude Code binary. We do not redistribute it: the desktop app
+# uses the user's own Claude Code install (found on PATH / in the official install locations).
+cleanup_paths = [
+    "**/claude_agent_sdk/_bundled",
+    "**/__pycache__",
+]
+
+[tool.briefcase.app.agenticcad.macOS]
+universal_build = false
+min_os_version = "14.0"   # numpy/scipy arm64 wheels are macosx_14_0
+requires = ["pyobjc-core", "pyobjc-framework-Cocoa", "pyobjc-framework-WebKit", "pyobjc-framework-Security"]
+
+[tool.briefcase.app.agenticcad.windows]
+console_app = false
+requires = ["pythonnet>=3.0", "pywin32"]
+
+[tool.briefcase.app.agenticcad.linux]
+supported = false

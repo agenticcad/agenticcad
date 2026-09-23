@@ -1925,6 +1925,7 @@ function connect() {
       case 'build_error': document.getElementById('codeerr').textContent = m.text; break;
       case 'status': busy = m.busy; setBusy(busy); if (m.agent_ready) setStatus('agent ready'); break;
       case 'agent_ready': setStatus('agent ready'); break;
+      case 'agent_missing_cli': location.href = '/setup'; break;
       case 'delta': thinkingEl.style.display = 'none'; onDelta(m.text); break;
       case 'thinking': thinkingEl.style.display = 'block'; break;
       case 'text': if (currentBubble) { currentText = m.text; finishBubble(); } else if (m.text) addMsg('assistant', m.text); break;

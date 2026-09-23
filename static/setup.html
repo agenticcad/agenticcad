@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>AgenticCAD · set up Claude Code</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+  :root{--bg:#14171c;--panel:#1c2027;--panel2:#232830;--line:#2e343d;--text:#e6e9ee;--muted:#8b94a1;--accent:#ff8c42;--accent2:#4ea1ff;--ok:#4cd37a;--err:#ff5c5c}
+  *{box-sizing:border-box} html,body{margin:0;height:100%;background:var(--bg);color:var(--text);font:14px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Inter,sans-serif}
+  .wrap{max-width:720px;margin:0 auto;padding:48px 28px}
+  h1{font-size:26px;letter-spacing:-.02em;margin:0 0 6px} h2{font-size:15px;margin:26px 0 8px;color:var(--muted);font-weight:600;letter-spacing:.06em;text-transform:uppercase}
+  p{margin:0 0 12px;color:#cfd6df} code,pre{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12.5px}
+  pre{background:#0d1117;border:1px solid var(--line);border-radius:8px;padding:10px 12px;overflow:auto;margin:0 0 10px;color:#d8e0ea}
+  code{background:var(--panel2);border:1px solid var(--line);border-radius:4px;padding:0 5px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:18px 20px;margin:0 0 14px}
+  .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+  .btn{background:var(--panel2);border:1px solid var(--line);color:var(--text);padding:8px 14px;border-radius:8px;cursor:pointer;font:inherit;font-weight:600}
+  .btn.primary{background:var(--accent2);border-color:var(--accent2);color:#06131f}
+  .btn:hover{filter:brightness(1.1)} .btn:disabled{opacity:.5;cursor:default}
+  .status{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted)} .dot{width:9px;height:9px;border-radius:50%;background:var(--err)} .dot.ok{background:var(--ok)}
+  .tabs{display:flex;gap:4px;margin:0 0 10px} .tabs span{padding:5px 10px;border-radius:6px;cursor:pointer;color:var(--muted);border:1px solid transparent} .tabs span.on{color:var(--text);border-color:var(--line);background:var(--panel2)}
+  .os{display:none} .os.on{display:block}
+  a{color:var(--accent2)} .brand{display:flex;align-items:center;gap:10px;margin-bottom:22px;font-weight:700;font-size:16px}
+  .brand svg{width:28px;height:28px} .ver{font-family:ui-monospace,Menlo,monospace;font-size:11px;color:var(--muted);border:1px solid var(--line);border-radius:999px;padding:1px 8px}
+  small{color:var(--muted)}
+</style></head>
+<body><div class="wrap">
+  <div class="brand"><svg viewBox="0 0 32 32" fill="none"><path d="M16 3 28 9.5v13L16 29 4 22.5v-13L16 3Z" stroke="#4ea1ff" stroke-width="1.8" stroke-linejoin="round"/><path d="M16 16 28 9.5M16 16v13M16 16 4 9.5" stroke="#4ea1ff" stroke-width="1.8" stroke-linejoin="round"/><circle cx="16" cy="16" r="3.2" fill="#ff8c42"/></svg>AgenticCAD <span class="ver" id="ver"></span></div>
+  <h1>One more thing: Claude Code</h1>
+  <p>AgenticCAD's agent runs on <b>Claude Code</b>, Anthropic's command-line tool. It is not bundled with this app, so install it once and sign in with your Claude account (or an API key). AgenticCAD finds it automatically afterwards.</p>
+
+  <div class="card">
+    <div class="status"><span class="dot" id="dot"></span><span id="st">checking…</span></div>
+    <div class="row" style="margin-top:12px"><button class="btn primary" id="check">Check again</button><button class="btn" id="go" disabled>Open AgenticCAD →</button></div>
+    <p style="margin:10px 0 0"><small id="searched"></small></p>
+  </div>
+
+  <h2>1 · Install Claude Code</h2>
+  <div class="card">
+    <div class="tabs"><span data-os="mac">macOS</span><span data-os="win">Windows</span><span data-os="linux">Linux</span></div>
+    <div class="os" data-os="mac"><p>In Terminal:</p><pre>curl -fsSL https://claude.ai/install.sh | bash</pre><p><small>Or <code>brew install --cask claude-code</code>. Installs to <code>~/.local/bin/claude</code>.</small></p></div>
+    <div class="os" data-os="win"><p>In PowerShell:</p><pre>irm https://claude.ai/install.ps1 | iex</pre><p><small>Installs <code>claude.exe</code> under <code>%USERPROFILE%\.local\bin</code>. The npm install (<code>claude.cmd</code>) is not usable from a desktop app; use the installer above.</small></p></div>
+    <div class="os" data-os="linux"><p>In a terminal:</p><pre>curl -fsSL https://claude.ai/install.sh | bash</pre></div>
+    <p style="margin-top:8px"><small>Official instructions: <a href="https://docs.anthropic.com/en/docs/claude-code/setup" target="_blank" rel="noopener">docs.anthropic.com → Claude Code → Set up</a>. Claude Code is Anthropic's software under Anthropic's terms; AgenticCAD is a separate program that talks to it.</small></p>
+  </div>
+
+  <h2>2 · Sign in</h2>
+  <div class="card">
+    <p>Run <code>claude</code> once in a terminal and follow the login prompt. A Claude Pro or Max subscription works; so does an Anthropic Console account with an API key (<code>claude</code> asks which). AgenticCAD reuses that login; it never sees your password.</p>
+    <p><small>Prefer an API key without the login flow? Set <code>ANTHROPIC_API_KEY</code> in your environment before starting AgenticCAD.</small></p>
+  </div>
+
+  <h2>3 · Come back here</h2>
+  <p>Press <b>Check again</b>. When Claude Code is found the agent connects and the button opens the workspace. Your designs live in <code id="ws"></code>.</p>
+</div>
+<script>
+  const os = navigator.platform.startsWith('Mac') ? 'mac' : /Win/.test(navigator.platform) ? 'win' : 'linux';
+  const showOs = k => { document.querySelectorAll('[data-os]').forEach(el => el.classList.toggle('on', el.dataset.os === k)); };
+  document.querySelectorAll('.tabs span').forEach(t => t.onclick = () => showOs(t.dataset.os)); showOs(os);
+  fetch('/api/version').then(r => r.json()).then(v => document.getElementById('ver').textContent = 'v' + (v.version || ''));
+  const dot = document.getElementById('dot'), st = document.getElementById('st'), go = document.getElementById('go'), searched = document.getElementById('searched');
+  async function check(restart) {
+    st.textContent = 'checking…';
+    const c = await fetch('/api/agent/cli').then(r => r.json());
+    document.getElementById('ws').textContent = c.workspace;
+    if (!c.found) { dot.className = 'dot'; st.textContent = 'Claude Code not found'; searched.textContent = 'Looked on PATH and in: ' + c.searched.join(', '); go.disabled = true; return; }
+    dot.className = 'dot ok'; st.textContent = 'Claude Code found: ' + c.path + (c.connected ? ' · agent connected' : ' · connecting agent…'); searched.textContent = '';
+    if (!c.connected && restart) { await fetch('/api/agent/restart', { method: 'POST' }).catch(() => {}); }
+    go.disabled = false;
+  }
+  document.getElementById('check').onclick = () => check(true);
+  go.onclick = () => location.href = '/';
+  check(false); setInterval(() => check(false), 5000);
+</script>
+</body></html>

@@ -10,6 +10,8 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import sys
+import shutil
 import re
 import time
 from pathlib import Path
@@ -29,6 +31,37 @@ from library import PartLibrary, slug as lib_slug
 import script_edit
 
 Emit = Callable[[dict[str, Any]], Awaitable[None]]
+
+# ---------------------------------------------------------------------------- Claude Code discovery
+# Claude Code is not bundled with the desktop app (it is installed and signed in separately). GUI apps get a
+# minimal PATH on macOS/Windows, so look in the places the official installers use as well as PATH.
+def claude_cli_candidates() -> list[str]:
+    home = Path.home()
+    if sys.platform == "win32":
+        cands = [home / ".local" / "bin" / "claude.exe",
+                 Path(os.environ.get("LOCALAPPDATA", home / "AppData" / "Local")) / "Programs" / "claude" / "claude.exe",
+                 Path(os.environ.get("APPDATA", home / "AppData" / "Roaming")) / "npm" / "claude.exe"]
+    else:
+        cands = [home / ".local" / "bin" / "claude", Path("/opt/homebrew/bin/claude"), Path("/usr/local/bin/claude"),
+                 home / ".npm-global" / "bin" / "claude", Path("/usr/local/lib/node_modules/@anthropic-ai/claude-code/cli.js"),
+                 home / ".claude" / "local" / "claude"]
+    return [str(c) for c in cands]
+
+
+def find_claude_cli() -> str | None:
+    """Path to a runnable Claude Code binary, or None. Env AGENTICCAD_CLAUDE overrides."""
+    env = os.environ.get("AGENTICCAD_CLAUDE")
+    if env and Path(env).is_file():
+        return env
+    exe = shutil.which("claude.exe" if sys.platform == "win32" else "claude")
+    if exe and not exe.lower().endswith((".cmd", ".bat", ".ps1")):
+        return exe
+    for c in claude_cli_candidates():
+        p = Path(c)
+        if p.is_file() and os.access(p, os.X_OK) and not c.endswith(".js"):
+            return str(p)
+    return None
+
 
 SYSTEM_PROMPT = """You are AgenticCAD, a CAD copilot. The user talks to you; you build and modify a
 parametric 3D design by writing build123d (Python, OCCT-based) code and calling the `build_model`
@@ -1130,7 +1163,7 @@ class CadAgent:
         return out
 
     async def agent_status(self) -> dict[str, Any]:
-        st: dict[str, Any] = {"connected": self.client is not None, "busy": self.busy, "session_id": self.session_id,
+        st: dict[str, Any] = {"connected": self.client is not None, "busy": self.busy, "session_id": self.session_id, "cli": find_claude_cli(),
                               "model": self.settings.get("model") or "(default)", "effort": self.settings.get("effort") or "(default)",
                               "mcp": []}
         if self.client is not None:
@@ -1187,6 +1220,9 @@ class CadAgent:
             max_buffer_size=8 * 1024 * 1024,   # screenshots + big tool results (default 1 MB is too small)
             **kw,
         )
+        cli = find_claude_cli()                 # not bundled in the desktop app; GUI PATH is minimal
+        if cli:
+            options.cli_path = cli
         self.client = ClaudeSDKClient(options=options)
         await self.client.connect()
 

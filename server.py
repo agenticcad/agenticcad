@@ -17,10 +17,11 @@ from pydantic import BaseModel
 
 import cad_kernel as ck
 import cam_kernel as cam
-from agent import CadAgent
+from agent import CadAgent, claude_cli_candidates, find_claude_cli
 from version import __version__
 
 import os
+import sys
 
 ROOT = Path(__file__).parent
 WORKSPACE = Path(os.environ.get("AGENTICCAD_WORKSPACE") or (ROOT / "workspace"))   # override for tests
@@ -103,6 +104,9 @@ async def lifespan(app: FastAPI):
 
 
 async def _connect_agent() -> None:
+    if find_claude_cli() is None:
+        await bus.emit({"type": "agent_missing_cli"})
+        return
     try:
         await agent.start()
         await bus.emit({"type": "agent_ready"})
@@ -117,6 +121,21 @@ app.mount("/static", StaticFiles(directory=ROOT / "static"), name="static")
 @app.get("/")
 async def index() -> HTMLResponse:
     return HTMLResponse((ROOT / "static" / "index.html").read_text())
+
+
+@app.get("/setup")
+async def setup_page() -> HTMLResponse:
+    """First-run page when Claude Code is not installed (the desktop app does not bundle it)."""
+    return HTMLResponse((ROOT / "static" / "setup.html").read_text())
+
+
+@app.get("/api/agent/cli")
+async def agent_cli():
+    """Where Claude Code was found (or not), so the setup page can poll while the user installs it."""
+    path = find_claude_cli()
+    return {"found": path is not None, "path": path, "connected": agent.client is not None,
+            "packaged": os.environ.get("AGENTICCAD_PACKAGED") == "1", "workspace": str(WORKSPACE),
+            "platform": sys.platform, "searched": claude_cli_candidates()}
 
 
 def _model_event(source: str = "load") -> dict[str, Any]:

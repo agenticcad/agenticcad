@@ -23,15 +23,34 @@ browser (three.js viewer · ribbon · sketch editor · chat)  <-- websocket --> 
 
 ## Run
 
+**Desktop app** (macOS Apple Silicon `.dmg`, Windows `.msi`): download from the
+[website](https://agenticcad.github.io/agenticcad/#download) or the [releases](https://github.com/agenticcad/agenticcad/releases).
+The app **requires [Claude Code](https://docs.anthropic.com/en/docs/claude-code/setup) installed separately**
+(it is Anthropic's tool and is not bundled); the app shows a setup page with the install and sign-in steps if
+it is missing. Builds are unsigned for now (macOS: right-click → Open; Windows: SmartScreen → More info → Run anyway).
+Data lives in the OS user-data folder (`~/Library/Application Support/AgenticCAD`, `%LOCALAPPDATA%\AgenticCAD`).
+
+**From source:**
+
 ```bash
-cd /Users/mike/projects/agenticcad
+cd agenticcad
 .venv/bin/python server.py          # http://127.0.0.1:8765
 ```
 
 Auth: the Agent SDK's bundled Claude Code binary uses your Claude Code login; set `ANTHROPIC_API_KEY`
 to use an API key instead. `AGENTICCAD_MODEL=claude-opus-5` (etc.) overrides the model.
 
-Setup from scratch: `python3 -m venv .venv && .venv/bin/pip install claude-agent-sdk build123d fastapi "uvicorn[standard]"`.
+Setup from scratch: `python3 -m venv .venv && .venv/bin/pip install -r requirements.txt`.
+
+**Building the desktop app** ([Briefcase](https://briefcase.beeware.org), config in `pyproject.toml`):
+
+```bash
+.venv/bin/pip install briefcase==0.4.5
+.venv/bin/briefcase create macOS && .venv/bin/briefcase build macOS && .venv/bin/briefcase package macOS --adhoc-sign
+```
+The `package` GitHub workflow does this for macOS and Windows on every published release and attaches the
+installers. `cleanup_paths` strips the Claude Code binary that the Agent SDK wheel ships, so the app never
+redistributes it; `agent.find_claude_cli()` locates the user's own install.
 
 ## Agent tools (in-process MCP server `cad`)
 
