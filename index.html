@@ -83,7 +83,7 @@
     <h1>CAD that <span>talks back.</span></h1>
     <p class="lead">Say what you want and it gets built. Point at what you mean and it gets changed. Tweak by hand when that is quicker. No feature tree to fight, no menus to memorise, and every edit stays reproducible. From first idea to drawings and G-code in one place, on your own machine.</p>
     <div class="cta">
-      <a class="btn primary" href="https://github.com/agenticcad/agenticcad/releases/latest" data-dl><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12M6 9l6 6 6-6M4 20h16"/></svg>Download <span data-dl-ver>latest</span></a>
+      <a class="btn primary" href="#download" data-dl><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12M6 9l6 6 6-6M4 20h16"/></svg>Download <span data-dl-ver>latest</span> · <span data-dl-label>desktop app</span></a>
       <a class="btn" href="tutorials/">▶&nbsp; Try the simulated tutorials</a>
       <a class="btn" href="docs/">Read the docs</a>
       <a class="btn" href="https://github.com/agenticcad/agenticcad">Source on GitHub</a>
@@ -104,18 +104,27 @@
         <div class="eyebrow">Get started</div>
         <h2 id="download">Three commands and one sentence.</h2>
         <ol class="steps">
-          <li><b>Download and unzip</b> the latest release, or clone the repo. Python 3.12 is the only requirement.</li>
-          <li><b>Install and run</b> with the three lines on the right. Your browser opens the workspace at <code>127.0.0.1:8765</code>.</li>
-          <li><b>Sign in once.</b> The agent uses your Claude Code login, or set <code>ANTHROPIC_API_KEY</code>. Nothing else leaves your machine.</li>
+          <li><b>Download the app</b> for macOS or Windows, or the source zip for anything with Python 3.12.</li>
+          <li><b>Install Claude Code</b>, Anthropic's free command-line tool, and sign in once. The app is not allowed to bundle it, so it shows the exact commands if it is missing.</li>
+          <li><b>Open AgenticCAD.</b> Desktop app: double-click. From source: the three lines on the right, then <code>127.0.0.1:8765</code>. Nothing leaves your machine except the conversation with Claude.</li>
           <li><b>Type your first part.</b> Something like this, and watch it appear:</li>
         </ol>
         <div class="prompt"><small>your first message</small>Make a 60 × 40 × 8 mm mounting plate with four Ø5 holes 8 mm in from each corner and a Ø20 boss 15 mm tall in the middle with a Ø8 through bore.</div>
         <a class="btn small" href="tutorials/?t=first-part">Watch this exact session as a tutorial →</a>
       </div>
       <div>
-        <div class="dlbox"><div class="ico"><svg viewBox="0 0 24 24"><path d="M12 3v12M6 9l6 6 6-6M4 20h16"/></svg></div>
-          <div class="txt"><b>AgenticCAD <span data-dl-ver>latest</span> · source zip</b><span><span data-dl-size></span> · released <span data-dl-date></span> <span data-dl-count></span></span></div>
-          <a class="btn primary" href="https://github.com/agenticcad/agenticcad/releases/latest" data-dl>Download .zip</a></div>
+        <div class="dlbox" style="flex-wrap:wrap">
+          <div class="ico"><svg viewBox="0 0 24 24"><path d="M12 3v12M6 9l6 6 6-6M4 20h16"/></svg></div>
+          <div class="txt"><b>AgenticCAD <span data-dl-ver>latest</span> · desktop app</b><span>released <span data-dl-date></span> <span data-dl-count></span></span></div>
+          <div class="dlrow">
+            <a class="btn primary" href="https://github.com/agenticcad/agenticcad/releases/latest" data-dl="mac">macOS · Apple Silicon <small data-dl-asset-size></small></a>
+            <a class="btn primary" href="https://github.com/agenticcad/agenticcad/releases/latest" data-dl="win">Windows · x64 <small data-dl-asset-size></small></a>
+            <a class="btn" href="https://github.com/agenticcad/agenticcad/releases/latest" data-dl="src">Source zip <small data-dl-asset-size></small></a>
+          </div>
+          <p class="dlnote"><b>Needs Claude Code.</b> The app does not bundle Anthropic's Claude Code; install it once (free, one command) and sign in with your Claude account or API key. The app walks you through it on first launch. <a href="docs/#desktop">Details</a>.</p>
+          <p class="dlnote muted"><span data-dl-note="mac"></span> <span data-dl-note="win"></span> Intel Macs and Linux: use the source zip for now.</p>
+        </div>
+        <p class="muted" style="font-size:13px;margin:0 0 6px">From source instead (any platform with Python 3.12):</p>
 <pre><code><span class="hl-c"># inside the unzipped folder (or a clone of github.com/agenticcad/agenticcad)</span>
 python3 -m venv .venv &amp;&amp; .venv/bin/pip install -r requirements.txt
 .venv/bin/python server.py        <span class="hl-c"># → http://127.0.0.1:8765</span></code></pre>

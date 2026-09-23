@@ -121,3 +121,5 @@ footer a{color:var(--muted)}footer a:hover{color:var(--text)}
 .cookie-txt b{color:var(--text)}
 .cookie-btns{display:flex;gap:8px;flex:none}
 @media(max-width:700px){.cookie-in{flex-direction:column;align-items:stretch}.cookie-btns .btn{flex:1;justify-content:center}}
+.dlrow{display:flex;gap:8px;flex-wrap:wrap;width:100%}.dlrow .btn small{font-size:11px;opacity:.75;margin-left:4px}
+.dlnote{width:100%;font-size:13px;margin:6px 0 0;color:#cfd6df}.dlnote.muted{color:var(--muted);font-size:12px}

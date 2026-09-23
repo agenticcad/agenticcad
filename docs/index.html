@@ -34,7 +34,7 @@
 <script type="module">import { nav } from '../assets/nav.js'; nav('../', 'docs');</script>
 <div class="wrap docs">
   <aside class="toc" id="toc">
-    <div class="g">Start</div><a href="#overview">Overview</a><a href="#install">Install and run</a><a href="#workspace">The workspace</a>
+    <div class="g">Start</div><a href="#overview">Overview</a><a href="#desktop">Desktop app</a><a href="#install">Install from source</a><a href="#workspace">The workspace</a>
     <div class="g">Design</div><a href="#script">Design as script</a><a href="#chat">Chat and selection</a><a href="#images">Reference images</a><a href="#bodies">Bodies and the Browser</a><a href="#ribbon">Ribbon tools</a><a href="#sketches">Sketches</a><a href="#threads">Threads</a><a href="#params">Parameters</a><a href="#measure">Measure</a><a href="#drawings">Shop drawings</a><a href="#library">Part library</a><a href="#step">STEP import and export</a><a href="#fidelity">Fidelity</a>
     <div class="g">CAM</div><a href="#cam">CAM overview</a><a href="#machines">Machines and tools</a><a href="#ops">Operations</a><a href="#adaptive">Adaptive clearing</a><a href="#post">Post and G-code</a>
     <div class="g">Agent</div><a href="#settings">Settings and MCP</a><a href="#tools">Agent tools reference</a>
@@ -55,10 +55,18 @@
                                                                     └─ workspace/     designs, library, machines, tools, history, exports</code></pre>
     <div class="callout">Single machine, single user. One design and one agent session per server process. See <a href="#gaps">known gaps</a>.</div>
 
-    <h2 id="install">Install and run</h2>
-    <div class="dlbox"><div class="ico"><svg viewBox="0 0 24 24"><path d="M12 3v12M6 9l6 6 6-6M4 20h16"/></svg></div>
-      <div class="txt"><b>AgenticCAD <span data-dl-ver>latest</span> · source zip</b><span><span data-dl-size></span> · released <span data-dl-date></span></span></div>
-      <a class="btn primary" href="https://github.com/agenticcad/agenticcad/releases/latest" data-dl>Download .zip</a></div>
+    <h2 id="desktop">Desktop app</h2>
+    <div class="dlbox" style="flex-wrap:wrap"><div class="ico"><svg viewBox="0 0 24 24"><path d="M12 3v12M6 9l6 6 6-6M4 20h16"/></svg></div>
+      <div class="txt"><b>AgenticCAD <span data-dl-ver>latest</span></b><span>released <span data-dl-date></span></span></div>
+      <div class="dlrow"><a class="btn primary" href="https://github.com/agenticcad/agenticcad/releases/latest" data-dl="mac">macOS · Apple Silicon <small data-dl-asset-size></small></a><a class="btn primary" href="https://github.com/agenticcad/agenticcad/releases/latest" data-dl="win">Windows · x64 <small data-dl-asset-size></small></a><a class="btn" href="https://github.com/agenticcad/agenticcad/releases/latest" data-dl="src">Source zip</a></div></div>
+    <p>The desktop app is the same program in a native window with Python bundled. Two things to know:</p>
+    <ul>
+      <li><b>Claude Code is required and not included.</b> AgenticCAD drives Anthropic's Claude Code command-line tool and is not permitted to redistribute it. On first launch the app checks for it (on PATH and in the official install locations) and, if missing, shows a setup page with the install command for your platform and the sign-in step. Install: macOS and Linux <code>curl -fsSL https://claude.ai/install.sh | bash</code>; Windows PowerShell <code>irm https://claude.ai/install.ps1 | iex</code>. Then run <code>claude</code> once in a terminal to sign in (Claude Pro or Max subscription, or an API key). The npm-based install on Windows (<code>claude.cmd</code>) cannot be launched by a desktop app; use the installer above.</li>
+      <li><b>The builds are unsigned for now.</b> macOS: the app is ad-hoc signed, so the first launch needs right-click → Open, or System Settings → Privacy &amp; Security → Open Anyway. Windows: SmartScreen shows "Windows protected your PC"; choose More info → Run anyway. Signed builds will follow.</li>
+    </ul>
+    <p>Your data lives in the OS user-data folder: <code>~/Library/Application Support/AgenticCAD</code> on macOS, <code>%LOCALAPPDATA%\AgenticCAD\AgenticCAD</code> on Windows (designs, library, machines, tools, history, exports, settings). Set <code>AGENTICCAD_WORKSPACE</code> to move it. The app picks a free localhost port; the UI is the same page you would see from a source install, so everything else in these docs applies. Intel Macs and Linux: run from source below.</p>
+
+    <h2 id="install">Install from source</h2>
     <p>Requirements: Python 3.12, a Claude Code login (the Agent SDK's bundled binary uses it) or an <code>ANTHROPIC_API_KEY</code>, and a modern browser.</p>
 <pre><code><span class="hl-c"># unzip the release (or git clone https://github.com/agenticcad/agenticcad.git), then inside the folder:</span>
 python3 -m venv .venv &amp;&amp; .venv/bin/pip install -r requirements.txt
