@@ -39,6 +39,16 @@ gh api repos/$R --jq '{visibility, allow_forking, has_issues, has_wiki, has_proj
 gh api repos/$R/branches/main/protection --jq '{reviews: .required_pull_request_reviews.required_approving_review_count, checks: .required_status_checks.contexts, push_users: [.restrictions.users[].login], force_push: .allow_force_pushes.enabled, deletions: .allow_deletions.enabled}'
 echo "done"
 
+
+# ---- the `site` branch (GitHub Pages source): pushes restricted to the maintainer, no force-push, no deletion.
+# No PR requirement, so the maintainer can publish the site directly.
+gh api -X PUT repos/$R/branches/site/protection --input - <<'JSON' >/dev/null
+{"required_status_checks": null, "enforce_admins": false, "required_pull_request_reviews": null,
+ "restrictions": {"users": ["mikeorzel"], "teams": [], "apps": []},
+ "allow_force_pushes": false, "allow_deletions": false, "required_linear_history": true}
+JSON
+echo "   site branch: push restricted to mikeorzel, no force-push/delete"
+
 # ---- GitHub Pages from the `site` branch (needs a public repo on the free plan)
 gh api -X POST repos/$R/pages -f 'source[branch]=site' -f 'source[path]=/' >/dev/null 2>&1 || gh api -X PUT repos/$R/pages -f 'source[branch]=site' -f 'source[path]=/' >/dev/null
 echo "Pages: $(gh api repos/$R/pages --jq .html_url)"
