@@ -3,9 +3,9 @@
 All notable changes to AgenticCAD. Versions follow [SemVer](https://semver.org): pre-1.0, minor bumps add
 features, patch bumps fix things. The version shown in the UI header comes from `version.py`.
 
-## [Unreleased]
-
+## [0.9.2] — 2026-09-23
 ### Added
+- Releases: `tools/release.sh` tags the version, builds `agenticcad-<version>.zip` (git archive) and publishes a GitHub release; the site links to the latest release zip.
 - GitHub Pages site on the `site` branch (landing page, documentation, simulated tutorials); `tools/gen_site_tutorials.py` bakes the tutorial data from the real kernel.
 - `tools/secure_repo.sh`: post-public repository hardening (branch protection, secret scanning, Dependabot, fork-PR approval).
 
