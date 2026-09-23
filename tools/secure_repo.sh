@@ -5,7 +5,7 @@
 set -euo pipefail
 R=agenticcad/agenticcad
 echo "== repo settings"
-gh api -X PATCH repos/$R -F allow_forking=true -F has_issues=true -F has_projects=false -F has_wiki=false \
+gh api -X PATCH repos/$R -F has_issues=true -F has_projects=false -F has_wiki=false \
   -F delete_branch_on_merge=true -F allow_merge_commit=false -F allow_squash_merge=true -F allow_rebase_merge=true >/dev/null
 echo "== security: secret scanning + push protection, dependabot alerts/updates, private vulnerability reporting"
 gh api -X PATCH repos/$R -f 'security_and_analysis[secret_scanning][status]=enabled' \
