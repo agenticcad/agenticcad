@@ -56,9 +56,11 @@
     <div class="callout">Single machine, single user. One design and one agent session per server process. See <a href="#gaps">known gaps</a>.</div>
 
     <h2 id="install">Install and run</h2>
+    <div class="dlbox"><div class="ico"><svg viewBox="0 0 24 24"><path d="M12 3v12M6 9l6 6 6-6M4 20h16"/></svg></div>
+      <div class="txt"><b>AgenticCAD <span data-dl-ver>latest</span> · source zip</b><span><span data-dl-size></span> · released <span data-dl-date></span></span></div>
+      <a class="btn primary" href="https://github.com/agenticcad/agenticcad/releases/latest" data-dl>Download .zip</a></div>
     <p>Requirements: Python 3.12, a Claude Code login (the Agent SDK's bundled binary uses it) or an <code>ANTHROPIC_API_KEY</code>, and a modern browser.</p>
-<pre><code>git clone https://github.com/agenticcad/agenticcad.git
-cd agenticcad
+<pre><code><span class="hl-c"># unzip the release (or git clone https://github.com/agenticcad/agenticcad.git), then inside the folder:</span>
 python3 -m venv .venv &amp;&amp; .venv/bin/pip install -r requirements.txt
 .venv/bin/python server.py            # http://127.0.0.1:8765</code></pre>
     <table class="table"><tr><th>Variable</th><th>Effect</th></tr>

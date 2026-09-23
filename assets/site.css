@@ -101,3 +101,14 @@ footer a{color:var(--muted)}footer a:hover{color:var(--text)}
 .ribbon .tb.on{background:rgba(78,161,255,.14);color:var(--blue)}
 .ribbon .tb svg{width:22px;height:22px;stroke:currentColor;fill:none;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round}
 .ribbon .tb kbd{font-size:9px;padding:0 4px;line-height:1.4;color:var(--dim)}
+
+.nav nav a.dl{color:var(--accent);border:1px solid rgba(255,140,66,.45);margin-left:4px}
+.nav nav a.dl:hover{background:rgba(255,140,66,.12);color:#ffb27a}
+.dlbox{display:flex;align-items:center;gap:18px;border:1px solid rgba(255,140,66,.4);background:linear-gradient(135deg,rgba(255,140,66,.12),rgba(255,140,66,.03));border-radius:16px;padding:20px 22px;margin:0 0 18px}
+.dlbox .ico{width:46px;height:46px;border-radius:12px;background:var(--accent);display:grid;place-items:center;flex:none}
+.dlbox .ico svg{width:24px;height:24px;stroke:#1a0d04;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.dlbox .txt{flex:1;min-width:0}
+.dlbox .txt b{display:block;font-size:17px;letter-spacing:-.01em}
+.dlbox .txt span{color:var(--muted);font-size:13px;font-family:var(--mono)}
+.dlbox .btn{flex:none}
+@media(max-width:600px){.dlbox{flex-wrap:wrap}.nav nav a.dl{display:inline-flex!important}}

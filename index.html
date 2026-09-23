@@ -72,9 +72,10 @@
     <h1>CAD that <span>talks back.</span></h1>
     <p class="lead">Say what you want and it gets built. Point at what you mean and it gets changed. Tweak by hand when that is quicker. No feature tree to fight, no menus to memorise, and every edit stays reproducible. From first idea to drawings and G-code in one place, on your own machine.</p>
     <div class="cta">
-      <a class="btn primary" href="tutorials/">▶&nbsp; Try the simulated tutorials</a>
+      <a class="btn primary" href="https://github.com/agenticcad/agenticcad/releases/latest" data-dl><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12M6 9l6 6 6-6M4 20h16"/></svg>Download <span data-dl-ver>latest</span></a>
+      <a class="btn" href="tutorials/">▶&nbsp; Try the simulated tutorials</a>
       <a class="btn" href="docs/">Read the docs</a>
-      <a class="btn" href="https://github.com/agenticcad/agenticcad">Get the code</a>
+      <a class="btn" href="https://github.com/agenticcad/agenticcad">Source on GitHub</a>
     </div>
     <div class="frame"><div class="bar"><i></i><i></i><i></i><span>127.0.0.1:8765 — AgenticCAD · bracket.py</span></div><img src="assets/img/hero.png" alt="AgenticCAD: chat on the left, exact model with the Browser tree and ribbon on the right" width="2000" height="1250" fetchpriority="high"></div>
   </div>
@@ -212,14 +213,16 @@ result = {<span class="hl-s">"Plate"</span>: _plate3.<span class="hl-f">fillet</
     <div class="split">
       <div>
         <div class="eyebrow">Get started</div>
-        <h2>Runs on your machine, talks to your Claude.</h2>
+        <h2 id="download">Runs on your machine, talks to your Claude.</h2>
         <p class="muted">Python 3.12, one virtualenv, one process. The agent uses your Claude Code login, or an <code>ANTHROPIC_API_KEY</code>. Nothing leaves your machine except the conversation.</p>
         <div class="stats"><div><b>1</b><span>Python file per design</span></div><div><b>20</b><span>agent tools</span></div><div><b>73</b><span>unit tests</span></div><div><b>13</b><span>graded agent evals</span></div></div>
       </div>
       <div>
-<pre><code><span class="hl-c"># clone, install, run</span>
-git clone https://github.com/agenticcad/agenticcad.git
-cd agenticcad
+        <div class="dlbox"><div class="ico"><svg viewBox="0 0 24 24"><path d="M12 3v12M6 9l6 6 6-6M4 20h16"/></svg></div>
+          <div class="txt"><b>AgenticCAD <span data-dl-ver>latest</span> · source zip</b><span><span data-dl-size></span> · released <span data-dl-date></span> · <span data-dl-count></span></span></div>
+          <a class="btn primary" href="https://github.com/agenticcad/agenticcad/releases/latest" data-dl>Download .zip</a></div>
+        <p class="muted" style="font-size:13px;margin:-6px 0 14px">Unzip, then run the three lines below inside the folder. Or clone the repo to follow main. All releases: <a href="https://github.com/agenticcad/agenticcad/releases">github.com/agenticcad/agenticcad/releases</a>.</p>
+<pre><code><span class="hl-c"># install, run (inside the unzipped folder or a clone)</span>
 python3 -m venv .venv &amp;&amp; .venv/bin/pip install -r requirements.txt
 .venv/bin/python server.py        <span class="hl-c"># → http://127.0.0.1:8765</span>
 
