@@ -13,7 +13,7 @@ git rev-parse -q --verify "refs/tags/$TAG" >/dev/null || git tag -a "$TAG" -m "R
 git push origin main "$TAG"
 git archive --format=zip --prefix="agenticcad-$V/" -o "/tmp/$ZIP" "$TAG"
 NOTES=$(awk -v v="$V" '$0 ~ "^## \\["v"\\]" {p=1; next} /^## \[/ {p=0} p' CHANGELOG.md)
-printf '%s\n\n**Install**\n```\nunzip %s && cd agenticcad-%s\npython3 -m venv .venv && .venv/bin/pip install -r requirements.txt\n.venv/bin/python server.py   # http://127.0.0.1:8765\n```\nFree for non-commercial use (PolyForm Noncommercial 1.0.0); commercial licences: morzel@prodevelop.com.au. Site: https://agenticcad.github.io/agenticcad/\n' "$NOTES" "$ZIP" "$V" > "/tmp/notes-$V.md"
+printf '%s\n\n**Install**\n```\nunzip %s && cd agenticcad-%s\npython3 -m venv .venv && .venv/bin/pip install -r requirements.txt\n.venv/bin/python server.py   # http://127.0.0.1:8765\n```\nFree for non-commercial use (PolyForm Noncommercial 1.0.0); commercial licences: agenticcad@prodevelop.com.au. Site: https://agenticcad.github.io/agenticcad/\n' "$NOTES" "$ZIP" "$V" > "/tmp/notes-$V.md"
 if gh release view "$TAG" -R $R >/dev/null 2>&1; then gh release upload "$TAG" "/tmp/$ZIP" --clobber -R $R
 else gh release create "$TAG" "/tmp/$ZIP" -R $R --title "AgenticCAD $V" --notes-file "/tmp/notes-$V.md" --latest; fi
 echo "installers: the package workflow builds the macOS .dmg and Windows .msi and attaches them within ~20 min"

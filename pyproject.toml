@@ -18,7 +18,7 @@ bundle = "au.com.prodevelop"
 version = "0.10.0"
 url = "https://agenticcad.github.io/agenticcad/"
 author = "Mike Orzel"
-author_email = "morzel@prodevelop.com.au"
+author_email = "agenticcad@prodevelop.com.au"
 
 [tool.briefcase.app.agenticcad]
 formal_name = "AgenticCAD"
