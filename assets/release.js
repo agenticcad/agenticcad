@@ -19,6 +19,6 @@ export async function release() {
   document.querySelectorAll('[data-dl-ver]').forEach(x => x.textContent = ver ? `v${ver}` : 'latest');
   document.querySelectorAll('[data-dl-size]').forEach(x => x.textContent = size);
   document.querySelectorAll('[data-dl-date]').forEach(x => x.textContent = rel ? new Date(rel.published_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : '');
-  document.querySelectorAll('[data-dl-count]').forEach(x => x.textContent = asset ? `${asset.download_count} downloads` : '');
+  document.querySelectorAll('[data-dl-count]').forEach(x => x.textContent = asset && asset.download_count >= 25 ? `${asset.download_count} downloads` : '');
   document.querySelectorAll('[data-version]').forEach(x => { if (ver) x.textContent = `v${ver}`; });
 }
