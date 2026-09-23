@@ -5,7 +5,7 @@
 //   be changed any time from the "Cookie settings" link in the footer. Consent is re-asked after 12 months.
 // - Download clicks are reported as a `file_download` event (only when consent is granted).
 // Set GA_ID to your measurement id (G-XXXXXXXXXX); leave it empty and no banner is shown at all.
-export const GA_ID = "";
+export const GA_ID = "G-T5BR5HHP3M";
 const KEY = 'agenticcad-consent', MAX_AGE = 365 * 864e5;
 
 function stored() { try { const v = JSON.parse(localStorage.getItem(KEY) || 'null'); return v && Date.now() - v.at < MAX_AGE ? v.choice : null; } catch { return null; } }
