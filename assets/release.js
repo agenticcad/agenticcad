@@ -21,9 +21,11 @@ export async function release() {
   const sizeOf = a => a ? `${(a.size / 1048576).toFixed(0)} MB` : '';
   for (const el of els) {
     const want = el.dataset.dl || mine;                       // data-dl="mac|win|src", or auto-detect
+    const missing = el.dataset.dl && want !== 'src' && !kinds[want].asset;   // explicit platform button, no installer yet
     const k = kinds[want] && kinds[want].asset ? kinds[want] : kinds.src;
-    const url = k.asset ? k.asset.browser_download_url : FALLBACK;
+    const url = missing ? `https://github.com/${REPO}/releases` : (k.asset ? k.asset.browser_download_url : FALLBACK);
     el.href = url;
+    if (missing) { el.classList.remove('primary'); el.title = 'Installer not attached to this release yet'; el.querySelectorAll('[data-dl-asset-size]').forEach(x => x.textContent = 'soon'); continue; }
     el.querySelectorAll('[data-dl-label]').forEach(x => x.textContent = k.label);
     el.querySelectorAll('[data-dl-asset-size]').forEach(x => x.textContent = sizeOf(k.asset));
     el.addEventListener('click', () => track('file_download', { file_name: k.asset ? k.asset.name : 'releases-page', version: ver || 'unknown', link_url: url, platform: want }));
