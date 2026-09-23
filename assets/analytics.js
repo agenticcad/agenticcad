@@ -35,7 +35,7 @@ function banner(root, reopen = false) {
     <div class="cookie-txt"><b>Cookies for analytics?</b> We'd like to use Google Analytics to count visits and downloads so we know what to improve. It sets cookies and sends usage data to Google. Nothing is set until you choose, and declining changes nothing about the site. <a href="${root}privacy.html">Privacy notice</a></div>
     <div class="cookie-btns"><button class="btn" data-c="denied">Decline</button><button class="btn primary" data-c="granted">Accept</button></div></div>`;
   document.body.appendChild(el);
-  requestAnimationFrame(() => el.classList.add('show'));
+  setTimeout(() => el.classList.add('show'), 30);
   el.addEventListener('click', e => {
     const b = e.target.closest('[data-c]'); if (!b) return;
     store(b.dataset.c); el.classList.remove('show'); setTimeout(() => el.remove(), 300);
