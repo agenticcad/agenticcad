@@ -3,13 +3,20 @@
 # Claude Code is deliberately NOT bundled (see cleanup_paths): users install it separately and the app finds it.
 # Keep `version` in sync with version.py (tools/release.sh checks).
 
+# PEP 621/639 metadata: Briefcase's Windows installer reads the licence file list from here.
+[project]
+name = "agenticcad"
+version = "0.9.2"
+description = "Agent-native CAD/CAM: describe it, point at it, export STEP, STL and G-code"
+license = "PolyForm-Noncommercial-1.0.0"
+license-files = ["LICENSE"]
+requires-python = ">=3.12"
+
 [tool.briefcase]
 project_name = "AgenticCAD"
 bundle = "au.com.prodevelop"
 version = "0.9.2"
 url = "https://agenticcad.github.io/agenticcad/"
-license = "PolyForm-Noncommercial-1.0.0"
-license_files = ["LICENSE"]
 author = "Mike Orzel"
 author_email = "morzel@prodevelop.com.au"
 
