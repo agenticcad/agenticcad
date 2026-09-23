@@ -30,7 +30,7 @@
   .how .card{padding:26px}
   .how .num{font-family:var(--mono);font-size:12px;color:var(--accent);margin-bottom:12px}
   .demo{display:grid;grid-template-columns:1fr 1fr;gap:0;border:1px solid var(--line);border-radius:16px;overflow:hidden;background:var(--bg2);min-height:460px}
-  .demo .viewer{min-height:460px}
+  .demo .viewer{height:460px}
   .demo .code{background:#0d1117;padding:18px 20px;font-family:var(--mono);font-size:12.5px;line-height:1.6;overflow:auto;border-right:1px solid var(--line);position:relative}
   .demo .code .ttl{font-size:11px;color:var(--dim);letter-spacing:.1em;text-transform:uppercase;margin-bottom:10px;display:flex;justify-content:space-between}
   .demo .code pre{background:none;border:0;padding:0;margin:0;white-space:pre}
@@ -60,6 +60,17 @@
   .stats div span{color:var(--muted);font-size:13px}
   .install pre{font-size:13.5px}
   @media(max-width:900px){.demo{grid-template-columns:1fr}.demo .code{border-right:0;border-bottom:1px solid var(--line);max-height:280px}}
+  .split>*,.demo>*{min-width:0}
+  .viewer{position:relative}.viewer canvas{position:absolute;inset:0}
+  .steps{counter-reset:s;list-style:none;padding:0;margin:0 0 1.4em}
+  .steps li{position:relative;padding:4px 0 14px 44px;color:#cfd6df}
+  .steps li::before{counter-increment:s;content:counter(s);position:absolute;left:0;top:2px;width:28px;height:28px;border-radius:50%;background:rgba(255,140,66,.14);border:1px solid rgba(255,140,66,.5);color:var(--accent);font-family:var(--mono);font-size:12px;display:grid;place-items:center}
+  .steps li b{color:var(--text)}
+  .prompt{background:#0d1117;border:1px solid var(--line);border-left:3px solid var(--blue);border-radius:10px;padding:12px 14px;font-size:14px;color:#dbe3ec;margin:0 0 1.2em}
+  .prompt small{display:block;color:var(--dim);font-size:11px;letter-spacing:.08em;text-transform:uppercase;margin-bottom:4px}
+  .mini{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-top:40px}
+  .mini .card{padding:18px}.mini .card h3{font-size:15px;margin:10px 0 4px}.mini .card p{font-size:13px}
+  @media(max-width:900px){.mini{grid-template-columns:repeat(2,1fr)}}@media(max-width:600px){.mini{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
@@ -82,28 +93,52 @@
 </section>
 
 <div class="ticker"><div class="track">
-  <span>Exact B-rep kernel (OCCT via build123d)</span><span>Design is one Python script</span><span>Point at faces, edges, bodies in chat</span><span>Fusion-style ribbon, code-backed</span><span>Sketches on any face</span><span>ISO threads</span><span>Constant-engagement adaptive clearing</span><span>GRBL post with G2/G3 arcs</span><span>Shop drawings with hole tables</span><span>Parametric part library</span><span>STEP in / STEP + STL out</span><span>Unit tests and graded agent evals</span>
-  <span>Exact B-rep kernel (OCCT via build123d)</span><span>Design is one Python script</span><span>Point at faces, edges, bodies in chat</span><span>Fusion-style ribbon, code-backed</span><span>Sketches on any face</span><span>ISO threads</span><span>Constant-engagement adaptive clearing</span><span>GRBL post with G2/G3 arcs</span><span>Shop drawings with hole tables</span><span>Parametric part library</span><span>STEP in / STEP + STL out</span><span>Unit tests and graded agent evals</span>
+  <span>Describe a part in plain words</span><span>Point at faces, edges and bodies in chat</span><span>Fusion-style ribbon for hand tweaks</span><span>Sketches on any face</span><span>ISO threads</span><span>Exact STEP, tolerance-controlled STL</span><span>Shop drawings with hole tables</span><span>Constant-engagement adaptive clearing</span><span>GRBL G-code with arcs</span><span>Parametric part library</span><span>Pick your Claude model, plug in MCP servers</span><span>Unit tests and graded agent evals</span>
+  <span>Describe a part in plain words</span><span>Point at faces, edges and bodies in chat</span><span>Fusion-style ribbon for hand tweaks</span><span>Sketches on any face</span><span>ISO threads</span><span>Exact STEP, tolerance-controlled STL</span><span>Shop drawings with hole tables</span><span>Constant-engagement adaptive clearing</span><span>GRBL G-code with arcs</span><span>Parametric part library</span><span>Pick your Claude model, plug in MCP servers</span><span>Unit tests and graded agent evals</span>
 </div></div>
 
-<section class="how" id="how">
+<section id="start" class="install">
   <div class="wrap">
-    <div class="eyebrow">How it works</div>
-    <h2>The model is the script. The agent is the modeller.<br>You are the one pointing.</h2>
-    <p class="muted" style="max-width:720px">There is no feature tree to fight and no hidden state. Every design is a build123d script that the kernel executes; every change, by chat or by hand, is a change to that script.</p>
-    <div class="grid g3" style="margin-top:36px">
-      <div class="card reveal"><div class="num">01</div><h3>Say what you want</h3><p>“60 × 40 × 8 plate, four Ø5 holes 8 mm from the corners, a Ø20 boss with an Ø8 bore.” Attach a photo or a napkin sketch if you have one. The agent writes the code with named dimensions.</p></div>
-      <div class="card reveal" style="transition-delay:.1s"><div class="num">02</div><h3>Point at it</h3><p>Click a face, an edge or a body and it becomes a chip on your message, with its exact type, centre, normal and size. The agent selects that same face in code, not a guess.</p></div>
-      <div class="card reveal" style="transition-delay:.2s"><div class="num">03</div><h3>Tweak, cut, ship</h3><p>Press/pull, holes, fillets and sketches from the ribbon are written into the same script. Then CAM: adaptive roughing, tabs, drilling, G-code checked against your machine.</p></div>
+    <div class="split">
+      <div>
+        <div class="eyebrow">Get started</div>
+        <h2 id="download">Three commands and one sentence.</h2>
+        <ol class="steps">
+          <li><b>Download and unzip</b> the latest release, or clone the repo. Python 3.12 is the only requirement.</li>
+          <li><b>Install and run</b> with the three lines on the right. Your browser opens the workspace at <code>127.0.0.1:8765</code>.</li>
+          <li><b>Sign in once.</b> The agent uses your Claude Code login, or set <code>ANTHROPIC_API_KEY</code>. Nothing else leaves your machine.</li>
+          <li><b>Type your first part.</b> Something like this, and watch it appear:</li>
+        </ol>
+        <div class="prompt"><small>your first message</small>Make a 60 × 40 × 8 mm mounting plate with four Ø5 holes 8 mm in from each corner and a Ø20 boss 15 mm tall in the middle with a Ø8 through bore.</div>
+        <a class="btn small" href="tutorials/?t=first-part">Watch this exact session as a tutorial →</a>
+      </div>
+      <div>
+        <div class="dlbox"><div class="ico"><svg viewBox="0 0 24 24"><path d="M12 3v12M6 9l6 6 6-6M4 20h16"/></svg></div>
+          <div class="txt"><b>AgenticCAD <span data-dl-ver>latest</span> · source zip</b><span><span data-dl-size></span> · released <span data-dl-date></span> <span data-dl-count></span></span></div>
+          <a class="btn primary" href="https://github.com/agenticcad/agenticcad/releases/latest" data-dl>Download .zip</a></div>
+<pre><code><span class="hl-c"># inside the unzipped folder (or a clone of github.com/agenticcad/agenticcad)</span>
+python3 -m venv .venv &amp;&amp; .venv/bin/pip install -r requirements.txt
+.venv/bin/python server.py        <span class="hl-c"># → http://127.0.0.1:8765</span></code></pre>
+        <p class="muted" style="font-size:13px">Runs on macOS and Linux today; Windows via WSL. All releases: <a href="https://github.com/agenticcad/agenticcad/releases">github.com/agenticcad/agenticcad/releases</a>. Free for non-commercial use under PolyForm Noncommercial 1.0.0; commercial licences: <a href="mailto:morzel@prodevelop.com.au">morzel@prodevelop.com.au</a>.</p>
+      </div>
     </div>
   </div>
 </section>
 
-<section id="demo" style="padding-top:0">
+<section class="how" id="create" style="background:var(--bg2);border-top:1px solid var(--line);border-bottom:1px solid var(--line)">
   <div class="wrap">
-    <div class="split" style="margin-bottom:26px">
-      <div><div class="eyebrow">Live · real kernel output</div><h2>Point at a face. See what the agent sees.</h2></div>
-      <p class="muted">This viewer is running the site's copy of the app's renderer on meshes baked from the real kernel. Hover and click faces: the chip and the <code>[Selected geometry]</code> block are exactly what a chat message carries.</p>
+    <div class="eyebrow">Step 1 · Create a model</div>
+    <h2>Describe it. Point at it. Tweak it.</h2>
+    <p class="muted" style="max-width:720px">Three ways to shape a part, and they all end in the same place: one build123d script that the exact kernel executes. No feature tree, no hidden state, nothing you cannot read.</p>
+    <div class="grid g3" style="margin-top:36px" id="features">
+      <div class="card reveal"><div class="num">01</div><h3>Describe</h3><p>“60 × 40 × 8 plate, four Ø5 holes 8 mm from the corners, a Ø20 boss with a Ø8 bore.” Attach a photo or a napkin sketch if you have one. The agent writes the model with named dimensions.</p></div>
+      <div class="card reveal" style="transition-delay:.1s"><div class="num">02</div><h3>Point</h3><p>Click a face, an edge or a body and it becomes a chip on your message, with its exact type, centre, normal and size. The agent works on that face, not a guess.</p></div>
+      <div class="card reveal" style="transition-delay:.2s"><div class="num">03</div><h3>Tweak</h3><p>Press/pull, holes, fillets, chamfers, shells and sketches from a Fusion-style ribbon, or change a number in the Design tab. Written into the same script, undoable, visible to the agent.</p></div>
+    </div>
+
+    <div class="split" style="margin:64px 0 26px">
+      <div><div class="eyebrow">Live · real kernel output</div><h2 style="font-size:28px">Point at a face. See what the agent sees.</h2></div>
+      <p class="muted">This viewer runs the app's renderer on meshes baked from the real kernel. Hover and click faces: the chip and the <code>[Selected geometry]</code> block are exactly what a chat message carries.</p>
     </div>
     <div class="demo reveal">
       <div class="code"><div class="ttl"><span>design.py</span><span>build123d · exact</span></div><pre id="demo-code"></pre></div>
@@ -115,39 +150,14 @@
       <div class="seen" id="demo-seen"><span class="k"># what the agent receives with your message</span>
 [Selected geometry]
   (click a face)</div>
-      <div><p class="muted" style="margin:0 0 10px">Because the message carries the geometry, the agent can write <code>faces().sort_by_distance((x, y, z))[0]</code> and hit the face you meant, and then confirm with <code>inspect_model</code> or a screenshot. Every rebuild renumbers faces, so the app matches chips again by type and centre.</p><a class="btn small" href="tutorials/?t=select-face">Play the “point at a face” tutorial →</a></div>
+      <div><p class="muted" style="margin:0 0 10px">Because the message carries the geometry, the agent can write <code>faces().sort_by_distance((x, y, z))[0]</code> and hit the face you meant, then confirm with <code>inspect_model</code> or a screenshot. Every rebuild renumbers faces, so the app matches chips again by type and centre.</p><a class="btn small" href="tutorials/?t=select-face">Play the “point at a face” tutorial →</a></div>
     </div>
-  </div>
-</section>
 
-<section id="features" style="background:var(--bg2);border-top:1px solid var(--line);border-bottom:1px solid var(--line)">
-  <div class="wrap">
-    <div class="eyebrow">Features</div>
-    <h2>Everything a small shop needs, in one script.</h2>
-    <div class="grid g3" style="margin-top:36px">
-      <div class="card reveal"><div class="ico"><svg viewBox="0 0 24 24"><path d="M12 3 20 7.5v9L12 21l-8-4.5v-9L12 3Z"/><path d="M12 12 20 7.5M12 12v9M12 12 4 7.5"/></svg></div><h3>Exact B-rep, not triangles</h3><p>Planes, cylinders, cones, spheres, tori and B-splines from OCCT. The display mesh has exact per-vertex normals; STEP export is analytic; STL is tessellated only at export, at the tolerance you choose.</p></div>
-      <div class="card reveal accent"><div class="ico"><svg viewBox="0 0 24 24"><path d="m8 9-4 3 4 3M16 9l4 3-4 3M14 5l-4 14"/></svg></div><h3>Design as script</h3><p>A design is a build123d file with named parameters. The Design tab exposes them as fields; rename, delete, add bodies and sketches are AST rewrites of that file. Undo steps through builds.</p></div>
-      <div class="card reveal cyan"><div class="ico"><svg viewBox="0 0 24 24"><path d="M4 4h16v16H4z"/><circle cx="14" cy="14" r="3"/><path d="M8 8h4"/></svg></div><h3>Sketches on any face</h3><p>Select a face, press <kbd>K</kbd>: rectangles, circles, polygons and slots with grid snap. Stored as an editable block that is also a normal <code>Sketch</code> the agent can extrude, cut or revolve.</p></div>
-      <div class="card reveal"><div class="ico"><svg viewBox="0 0 24 24"><path d="M6 3v18M6 6c4 0 4 3 8 3s4-3 8-3M6 12c4 0 4 3 8 3s4-3 8-3"/></svg></div><h3>Fusion-style ribbon, code-backed</h3><p>Box, cylinder, sphere, press/pull with a drag handle, holes (plain, counterbored, tapped), fillet, chamfer, shell, move. Each one becomes an expression on the body in the script and a note to the agent.</p></div>
-      <div class="card reveal yellow"><div class="ico"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/><path d="M12 4v2M12 18v2M4 12h2M18 12h2"/></svg></div><h3>ISO threads</h3><p>Tap drill, clearance, hex and socket heads, nuts and washers from the tables. <code>tap(part, "M4", …)</code> cuts the hole, registers the thread, and drawings call it out as M4×0.7.</p></div>
-      <div class="card reveal accent"><div class="ico"><svg viewBox="0 0 24 24"><path d="M4 18c3-8 6-10 8-10s5 2 8 10"/><path d="M4 14c3-5 6-7 8-7s5 2 8 7"/><path d="M12 3v5"/></svg></div><h3>Constant-engagement adaptive</h3><p>Front-offset HSM clearing: the tool never exceeds its target engagement angle, with helix entry, engagement-aware feed in corners, rest machining from a previous tool, and an independent audit in the test suite.</p></div>
-      <div class="card reveal"><div class="ico"><svg viewBox="0 0 24 24"><path d="M3 20h18M5 20V8l7-4 7 4v12"/><path d="M9 20v-6h6v6"/></svg></div><h3>GRBL post, machine-checked</h3><p>Machines with travel, feeds, spindle range and tool-change policy; tools with feeds and stepdowns. G2/G3 arc fitting, tabs, lead arcs, pecking, feeds and speeds for 13 materials. Warnings before you press run.</p></div>
-      <div class="card reveal cyan"><div class="ico"><svg viewBox="0 0 24 24"><path d="M4 4h16v16H4z"/><path d="M4 9h16M9 9v11"/><path d="M12 13h5M12 16h5"/></svg></div><h3>Shop drawings</h3><p>Third-angle front, top, right and iso with hidden lines, overall dimensions, hole callouts and a lettered hole table, title block with mass and scale. SVG per body plus DXF.</p></div>
-      <div class="card reveal yellow"><div class="ico"><svg viewBox="0 0 24 24"><path d="M4 7h16v13H4zM8 7V4h8v3"/><path d="M4 12h16"/></svg></div><h3>First-class part library</h3><p>Parametric script parts and exact STEP parts with thumbnails and tags. Insert from the Browser, save any body to it, and the agent searches it before modelling a standard part.</p></div>
-      <div class="card reveal"><div class="ico"><svg viewBox="0 0 24 24"><path d="M3 17 17 3l4 4L7 21H3z"/><path d="m13 7 4 4M9 11l4 4"/></svg></div><h3>Measure that snaps</h3><p>Vertex, edge, then face snapping with a live readout: lengths, radii and sweeps, distances with closest points drawn, angles between lines and planes, hole spacing, mass and centre of mass, clearance between bodies.</p></div>
-      <div class="card reveal accent"><div class="ico"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M7 15l3-3-3-3M12 15h5"/></svg></div><h3>Choose the model, plug in MCP</h3><p>Settings for the Claude model, effort, max steps, thinking summaries, web tools, standing instructions and MCP servers (stdio, http, sse) with live connection status. Restart the session in place.</p></div>
-      <div class="card reveal cyan"><div class="ico"><svg viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/><path d="M3 20h18"/></svg></div><h3>Tested, and evaluated</h3><p>73 unit and API tests run in seconds with no Claude calls. 13 agent evals run the real agent headless and grade geometry, programs and answers deterministically, with cost and steps per case.</p></div>
-    </div>
-  </div>
-</section>
-
-<section id="ribbon">
-  <div class="wrap">
-    <div class="split">
+    <div class="split" style="margin-top:72px">
       <div>
         <div class="eyebrow">Manual, still code</div>
-        <h2>“I just want to tweak it.”</h2>
-        <p class="muted">Sometimes you know exactly what you want and don't want to say it. The ribbon works like a desktop CAD tool: pick, type a number, <kbd>↵</kbd>. A command dialog walks you through each tool with a live prompt, chips for what you picked and unit fields. Under the hood the operation is appended to the body's expression in the script, so it is undoable, reproducible and visible to the agent.</p>
+        <h2 style="font-size:28px">“I just want to tweak it.”</h2>
+        <p class="muted">Sometimes you know exactly what you want and do not want to say it. The ribbon works like a desktop CAD tool: pick, type a number, <kbd>↵</kbd>. A command dialog walks you through each tool with a live prompt, chips for what you picked and unit fields. Under the hood the operation is appended to the body's expression in the script, so it is undoable, reproducible and visible to the agent.</p>
         <pre><code><span class="hl-v">_plate</span> = plate.part
 <span class="hl-v">_plate2</span> = _plate + <span class="hl-f">extrude</span>(_plate.<span class="hl-f">faces</span>().<span class="hl-f">sort_by_distance</span>((<span class="hl-n">7</span>, <span class="hl-n">0</span>, <span class="hl-n">19</span>))[<span class="hl-n">0</span>], amount=<span class="hl-n">5</span>, dir=(<span class="hl-n">0</span>, <span class="hl-n">0</span>, <span class="hl-n">1</span>))
 <span class="hl-v">_plate3</span> = <span class="hl-f">tap</span>(_plate2, <span class="hl-s">"M4"</span>, at=(<span class="hl-n">18</span>, <span class="hl-n">0</span>, <span class="hl-n">4</span>), depth=<span class="hl-n">6</span>, axis=(<span class="hl-n">0</span>, <span class="hl-n">0</span>, <span class="hl-n">-1</span>))
@@ -160,6 +170,33 @@ result = {<span class="hl-s">"Plate"</span>: _plate3.<span class="hl-f">fillet</
         <div class="frame" style="margin-top:18px"><img src="assets/img/design-tab.jpg" alt="Design tab: parameters, measure, drawings" loading="lazy"></div>
       </div>
     </div>
+
+    <div class="mini">
+      <div class="card reveal cyan"><div class="ico"><svg viewBox="0 0 24 24"><path d="M4 4h16v16H4z"/><circle cx="14" cy="14" r="3"/><path d="M8 8h4"/></svg></div><h3>Sketches on any face</h3><p>Select a face, press <kbd>K</kbd>: rectangles, circles, polygons and slots with grid snap. Stored as an editable block that is also a real <code>Sketch</code> the agent can extrude, cut or revolve.</p></div>
+      <div class="card reveal yellow"><div class="ico"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/><path d="M12 4v2M12 18v2M4 12h2M18 12h2"/></svg></div><h3>ISO threads</h3><p>Tap drill, clearance, hex and socket heads, nuts and washers from the tables. <code>tap(part, "M4", …)</code> cuts the hole and drawings call it out as M4×0.7.</p></div>
+      <div class="card reveal"><div class="ico"><svg viewBox="0 0 24 24"><path d="M3 17 17 3l4 4L7 21H3z"/><path d="m13 7 4 4M9 11l4 4"/></svg></div><h3>Parameters and measure</h3><p>Every top-level number is a field. Measure snaps to vertices, edges and faces: lengths, radii, angles, hole spacing, mass, clearance between bodies.</p></div>
+      <div class="card reveal accent"><div class="ico"><svg viewBox="0 0 24 24"><path d="M12 3 20 7.5v9L12 21l-8-4.5v-9L12 3Z"/><path d="M12 12 20 7.5M12 12v9M12 12 4 7.5"/></svg></div><h3>Exact B-rep, not triangles</h3><p>Planes, cylinders, cones, spheres, tori and B-splines from OCCT. The display mesh has exact normals; the geometry underneath is analytic.</p></div>
+    </div>
+  </div>
+</section>
+
+<section id="export">
+  <div class="wrap">
+    <div class="split">
+      <div>
+        <div class="eyebrow">Step 2 · Print it, or document it</div>
+        <h2>Send it to the printer, or to the shop.</h2>
+        <p class="muted">Most parts stop here. File ▸ Export gives you what a slicer or another CAD package needs, and the Design tab turns the model into a drawing you can hand to someone.</p>
+        <ul class="checks">
+          <li><b>STL for 3D printing</b>, tessellated only at export, at the resolution you choose in the dialog (or the agent picks a tolerance). One file for everything or one per body, so multi-part prints come out as separate meshes.</li>
+          <li><b>STEP, exact</b>: cylinders stay cylinders and bodies stay separate solids, so it opens cleanly in Fusion, FreeCAD, SolidWorks or a supplier's quoting tool.</li>
+          <li><b>Shop drawings</b> from the exact model: third-angle front, top, right and iso with hidden lines, overall dimensions, hole callouts and a lettered hole table, title block with mass and scale. SVG and DXF.</li>
+          <li><b>Ask for it</b>: “export an STL at 0.05 mm for the Pin only” or “make drawings in aluminium” works too, because export and drawings are agent tools.</li>
+        </ul>
+        <a class="btn small" href="docs/#step">Export details in the docs →</a>
+      </div>
+      <div class="drawing reveal"><img src="assets/img/drawing.svg" alt="Automatically generated shop drawing" loading="lazy"></div>
+    </div>
   </div>
 </section>
 
@@ -167,37 +204,35 @@ result = {<span class="hl-s">"Plate"</span>: _plate3.<span class="hl-f">fillet</
   <div class="wrap">
     <div class="split rev">
       <div>
-        <div class="eyebrow">CAM · GRBL</div>
+        <div class="eyebrow">Step 3 · Machine it</div>
         <h2>Ask for a program. Get real toolpaths.</h2>
-        <p class="muted">CAM is a second script per design, written by the agent against a small, honest API: <code>section</code>, <code>holes</code>, <code>stock_minus</code> from the exact B-rep; <code>face</code>, <code>contour</code>, <code>pocket</code>, <code>adaptive</code>, <code>drill</code>, <code>parallel3d</code> for the cuts. The post checks travel, spindle range, feeds and depth against the machine you picked.</p>
+        <p class="muted">Have a CNC router? Describe the job the way you would brief a machinist and the agent writes a second script, cam.py, against a small honest API: <code>section</code>, <code>holes</code> and <code>stock_minus</code> taken from the exact model; <code>face</code>, <code>contour</code>, <code>pocket</code>, <code>adaptive</code>, <code>drill</code> and <code>parallel3d</code> for the cuts. The GRBL post checks travel, spindle range, feeds and depth against the machine you picked and tells you before you press run.</p>
         <div class="caml" id="cam-ops"></div>
         <div style="display:flex;gap:10px;margin-top:16px;align-items:center"><button class="btn small" id="cam-replay">↻ Replay</button><a class="btn small" href="tutorials/?t=cam">Play the CAM tutorial →</a></div>
       </div>
       <div class="reveal">
-        <div class="frame"><div class="bar"><i></i><i></i><i></i><span>plate.cam.py — Generic 3018 · aluminium</span></div><div class="viewer" id="cam-viewer" style="height:400px"><div class="hud" id="cam-hud"></div></div></div>
-        <div class="gc" id="cam-gcode" style="margin-top:14px"></div>
+        <div class="frame"><div class="bar"><i></i><i></i><i></i><span>plate.cam.py — Generic 3018 · aluminium · toolpaths drawn from the real program</span></div><div class="viewer" id="cam-viewer" style="height:400px"><div class="tag">Toolpaths</div><div class="hud" id="cam-hud"></div></div></div>
+        <p class="muted" style="font-size:12px;margin:10px 0 6px">The first lines of the exported G-code:</p>
+        <div class="gc" id="cam-gcode"></div>
       </div>
     </div>
   </div>
 </section>
 
-<section id="drawings">
+<section id="advanced">
   <div class="wrap">
-    <div class="split">
-      <div>
-        <div class="eyebrow">Drawings · library · import</div>
-        <h2>The boring parts, done.</h2>
-        <ul class="checks">
-          <li>Shop drawings from the exact model: third-angle views with hidden lines, dimensions, hole callouts and table, title block. SVG and DXF.</li>
-          <li>STEP import as a new body, a new design, or straight into the library, exactly.</li>
-          <li>Part library with parametric scripts and STEP parts, thumbnails and tags. <b>+ Part</b> in the Browser, <b>Save to library…</b> on any body, and a <code>library</code> tool for the agent.</li>
-          <li>Measure, mass properties with material densities, clearance and interference between bodies.</li>
-          <li>Reference images in chat: photos, napkin sketches, old drawings. Your dimensions override its guesses.</li>
-        </ul>
-        <div class="frame"><img src="assets/img/library-tab.jpg" alt="Part library tab" loading="lazy"></div>
-      </div>
-      <div class="drawing reveal"><img src="assets/img/drawing.svg" alt="Automatically generated shop drawing" loading="lazy"></div>
+    <div class="eyebrow">Going further</div>
+    <h2>Reuse, import, connect, trust.</h2>
+    <p class="muted" style="max-width:720px">The things you reach for once the first parts are done.</p>
+    <div class="grid g3" style="margin-top:36px">
+      <div class="card reveal yellow"><div class="ico"><svg viewBox="0 0 24 24"><path d="M4 7h16v13H4zM8 7V4h8v3"/><path d="M4 12h16"/></svg></div><h3>Part library</h3><p>Parametric script parts and exact STEP parts with thumbnails and tags. Insert from the Browser with <b>+ Part</b>, save any body to it, and the agent searches it before modelling a standard part.</p></div>
+      <div class="card reveal"><div class="ico"><svg viewBox="0 0 24 24"><path d="M12 3v12M6 9l6 6 6-6"/><path d="M4 20h16"/></svg></div><h3>STEP import</h3><p>Drop a .step on the viewer: as a new body in the current design, as a new design, or straight into the library. Exact, and referenced from the script so the design stays reproducible.</p></div>
+      <div class="card reveal cyan"><div class="ico"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="m8 10 2 2 4-4"/><path d="M8 21h8"/></svg></div><h3>Reference images</h3><p>Attach photos, sketches or old drawings to a message. The agent reads them directly; the dimensions you type override what it estimates.</p></div>
+      <div class="card reveal accent"><div class="ico"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M7 15l3-3-3-3M12 15h5"/></svg></div><h3>Choose the model, plug in MCP</h3><p>Settings for the Claude model, effort, max steps, thinking summaries, web tools, standing instructions and MCP servers (stdio, http, sse) with live connection status. Restart the session in place.</p></div>
+      <div class="card reveal"><div class="ico"><svg viewBox="0 0 24 24"><path d="m8 9-4 3 4 3M16 9l4 3-4 3M14 5l-4 14"/></svg></div><h3>Design as script</h3><p>Rename, delete and add bodies, set parameters, sketch blocks and ribbon operations are AST rewrites of the same file. Every build is kept in history; Undo steps back through it.</p></div>
+      <div class="card reveal cyan"><div class="ico"><svg viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/><path d="M3 20h18"/></svg></div><h3>Tested, and evaluated</h3><p>73 unit and API tests run in seconds with no Claude calls. 13 agent evals run the real agent headless and grade geometry, programs and answers deterministically, with cost and steps per case.</p></div>
     </div>
+    <div class="frame reveal" style="margin-top:28px"><div class="bar"><i></i><i></i><i></i><span>Library tab — parametric and STEP parts</span></div><img src="assets/img/library-tab.jpg" alt="Part library tab" loading="lazy"></div>
   </div>
 </section>
 
@@ -205,33 +240,6 @@ result = {<span class="hl-s">"Plate"</span>: _plate3.<span class="hl-f">fillet</
   <div class="wrap">
     <div class="split" style="margin-bottom:28px"><div><div class="eyebrow">Tutorials</div><h2>Watch a session, step by step.</h2></div><p class="muted">Simulated replays of real sessions: the chat, the tool calls, the code and the exact meshes at every step were generated by the kernel, not drawn. Play them, pause them, scrub them.</p></div>
     <div class="grid g3" id="tut-cards"></div>
-  </div>
-</section>
-
-<section class="install" id="install">
-  <div class="wrap">
-    <div class="split">
-      <div>
-        <div class="eyebrow">Get started</div>
-        <h2 id="download">Runs on your machine, talks to your Claude.</h2>
-        <p class="muted">Python 3.12, one virtualenv, one process. The agent uses your Claude Code login, or an <code>ANTHROPIC_API_KEY</code>. Nothing leaves your machine except the conversation.</p>
-        <div class="stats"><div><b>1</b><span>Python file per design</span></div><div><b>20</b><span>agent tools</span></div><div><b>73</b><span>unit tests</span></div><div><b>13</b><span>graded agent evals</span></div></div>
-      </div>
-      <div>
-        <div class="dlbox"><div class="ico"><svg viewBox="0 0 24 24"><path d="M12 3v12M6 9l6 6 6-6M4 20h16"/></svg></div>
-          <div class="txt"><b>AgenticCAD <span data-dl-ver>latest</span> · source zip</b><span><span data-dl-size></span> · released <span data-dl-date></span> <span data-dl-count></span></span></div>
-          <a class="btn primary" href="https://github.com/agenticcad/agenticcad/releases/latest" data-dl>Download .zip</a></div>
-        <p class="muted" style="font-size:13px;margin:-6px 0 14px">Unzip, then run the three lines below inside the folder. Or clone the repo to follow main. All releases: <a href="https://github.com/agenticcad/agenticcad/releases">github.com/agenticcad/agenticcad/releases</a>.</p>
-<pre><code><span class="hl-c"># install, run (inside the unzipped folder or a clone)</span>
-python3 -m venv .venv &amp;&amp; .venv/bin/pip install -r requirements.txt
-.venv/bin/python server.py        <span class="hl-c"># → http://127.0.0.1:8765</span>
-
-<span class="hl-c"># tests (no Claude calls) and agent evals</span>
-.venv/bin/python -m pytest -q
-.venv/bin/python evals/run.py</code></pre>
-        <p class="muted" style="font-size:13px">Free for non-commercial use under PolyForm Noncommercial 1.0.0. Commercial use needs a licence: <a href="mailto:morzel@prodevelop.com.au">morzel@prodevelop.com.au</a>.</p>
-      </div>
-    </div>
   </div>
 </section>
 
