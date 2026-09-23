@@ -123,3 +123,6 @@ footer a{color:var(--muted)}footer a:hover{color:var(--text)}
 @media(max-width:700px){.cookie-in{flex-direction:column;align-items:stretch}.cookie-btns .btn{flex:1;justify-content:center}}
 .dlrow{display:flex;gap:8px;flex-wrap:wrap;width:100%}.dlrow .btn small{font-size:11px;opacity:.75;margin-left:4px}
 .dlnote{width:100%;font-size:13px;margin:6px 0 0;color:#cfd6df}.dlnote.muted{color:var(--muted);font-size:12px}
+.dlprice{display:flex;align-items:center;gap:14px;width:100%;margin:4px 0 2px;padding:10px 14px;border-radius:10px;background:rgba(255,140,66,.14);border:1px solid rgba(255,140,66,.45);font-size:13.5px;color:#f1e4d8;flex-wrap:wrap}
+.dlprice b{color:var(--accent);font-size:15px}.dlprice .sep{width:1px;height:20px;background:rgba(255,140,66,.4)}.dlprice a{color:#ffb27a;text-decoration:underline}
+@media(max-width:600px){.dlprice .sep{display:none}}
