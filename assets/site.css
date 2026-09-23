@@ -112,3 +112,12 @@ footer a{color:var(--muted)}footer a:hover{color:var(--text)}
 .dlbox .txt span{color:var(--muted);font-size:13px;font-family:var(--mono)}
 .dlbox .btn{flex:none}
 @media(max-width:600px){.dlbox{flex-wrap:wrap}.nav nav a.dl{display:inline-flex!important}}
+
+/* cookie banner */
+.cookie{position:fixed;left:16px;right:16px;bottom:16px;z-index:100;display:flex;justify-content:center;opacity:0;transform:translateY(12px);transition:.3s;pointer-events:none}
+.cookie.show{opacity:1;transform:none;pointer-events:auto}
+.cookie-in{display:flex;align-items:center;gap:18px;max-width:900px;background:rgba(22,27,35,.97);border:1px solid var(--line2);border-radius:14px;padding:16px 18px;box-shadow:0 20px 60px rgba(0,0,0,.55);backdrop-filter:blur(10px)}
+.cookie-txt{font-size:13.5px;line-height:1.5;color:#cfd6df}
+.cookie-txt b{color:var(--text)}
+.cookie-btns{display:flex;gap:8px;flex:none}
+@media(max-width:700px){.cookie-in{flex-direction:column;align-items:stretch}.cookie-btns .btn{flex:1;justify-content:center}}

@@ -2,7 +2,7 @@
 import { analytics } from './analytics.js';
 import { release } from './release.js';
 export function nav(root = '', active = '') {
-  analytics();
+  analytics(root);
   const L = (h, t, k) => `<a href="${root}${h}" class="${active === k ? 'on' : ''}">${t}</a>`;
   document.currentScript?.remove();
   const el = document.createElement('header'); el.className = 'nav';
