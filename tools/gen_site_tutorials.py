@@ -203,7 +203,7 @@ program.add(contour(setup, t6, section(part, 0.0), z_top=4, z_bottom=-4.5, tabs=
             "intro": "Ask for a program and get real toolpaths: facing, constant-engagement adaptive roughing, drilling, a tabbed outline, and GRBL G-code with arcs and tool changes, checked against your machine's limits.",
             "meshes": {"m1": mesh_of(m)},
             "program": payload,
-            "gcode_head": "\\n".join(lines[:28]),
+            "gcode_head": "\n".join(lines[:28]),
             "steps": [
                 {"kind": "model", "mesh": "m1", "narr": "The filleted plate. We will machine it from aluminium bar on a small 3018 router."},
                 {"kind": "user", "text": "Make a CAM program on the Generic 3018 in aluminium: face the stock, adaptive-rough around the boss with the 6 mm endmill, open the bore with the 3 mm, pilot-drill the mounting holes, then cut the outline through with 4 tabs. Stock = bbox + 3 mm, 1 mm extra on top.",
@@ -216,7 +216,7 @@ program.add(contour(setup, t6, section(part, 0.0), z_top=4, z_bottom=-4.5, tabs=
                  "narr": "CAM is a second script, cam.py, saved next to the design. Each line is one operation on geometry taken straight from the exact model: section, holes, stock_minus."},
                 {"kind": "toolpaths",
                  "narr": "Toolpaths draw over the model: rapids red, each operation its own colour, the stock as a yellow box. The orange spiral is the adaptive op: the tool never exceeds its target engagement, so it can cut full flute depth."},
-                {"kind": "agent", "text": prog.summary().replace("\\n", "  \\n"),
+                {"kind": "agent", "text": prog.summary().replace("\n", "  \n"),
                  "narr": "The program summary: every op with its tool, cut length, time and depths, plus warnings. The CAM tab shows the same with visibility toggles and a simulation slider."},
                 {"kind": "tool", "name": "export_gcode", "detail": 'name="plate"', "result": f"wrote workspace/exports/plate.nc — {len(lines)} lines, G0 {sum(l.startswith('G0 ') for l in lines)}, G1 {sum(l.startswith('G1 ') for l in lines)}, arcs {sum(l.startswith(('G2 ', 'G3 ')) for l in lines)}, tool changes {sum(l.startswith('M6') for l in lines)}",
                  "narr": "export_gcode runs the GRBL post: arcs fitted where the path is circular, collinear moves merged, tool changes with a pause because the 3018 has no changer."},
