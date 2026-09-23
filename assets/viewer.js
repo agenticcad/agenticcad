@@ -78,6 +78,7 @@ export function createViewer(el, opts = {}) {
     }
     bbox = new THREE.Box3(mesh.bboxMin ? new THREE.Vector3(...mesh.bboxMin) : undefined, mesh.bboxMax ? new THREE.Vector3(...mesh.bboxMax) : undefined);
     if (bbox.isEmpty()) bbox.setFromObject(group);
+    if (bbox.isEmpty()) { bbox = new THREE.Box3(new THREE.Vector3(-30, -20, -5), new THREE.Vector3(30, 20, 20)); if (!bodies.length && fit) fitView(false); fit = false; }
     makeGrid(bbox.getSize(new THREE.Vector3()).length() / 2);
     if (fit) fitView(fit === 'animate');
     if (fade) { for (const b of bodies) { b.mesh.material.opacity = 0; b.lines.material.opacity = 0; } fadeStart = performance.now(); }

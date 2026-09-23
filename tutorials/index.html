@@ -56,7 +56,7 @@ fetch('data/index.json').then(r => r.json()).then(ix => {
   list.innerHTML = ix.map((t, i) => `<a href="?t=${t.id}" data-id="${t.id}"><div class="m">${i + 1} · ${t.minutes} MIN · ${t.steps} STEPS</div><h3>${t.title}</h3><p>${t.intro}</p></a>`).join('');
   [...list.children].forEach(a => a.onclick = e => { e.preventDefault(); load(a.dataset.id, true); document.getElementById('player').scrollIntoView({ behavior: 'smooth', block: 'start' }); });
   const want = new URLSearchParams(location.search).get('t');
-  load(ix.some(t => t.id === want) ? want : ix[0].id, !!want);
+  const ok = ix.some(t => t.id === want); load(ok ? want : ix[0].id, ok); if (ok) setTimeout(() => document.getElementById('player').scrollIntoView({ behavior: 'smooth', block: 'start' }), 300);
 });
 </script>
 </body>

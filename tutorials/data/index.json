@@ -2,15 +2,15 @@
  {
   "id": "first-part",
   "title": "Your first part",
-  "minutes": 3,
-  "intro": "Describe a part in plain words. The agent writes build123d code, the exact kernel builds it, and the viewer updates. You never see a sketch unless you want one.",
-  "steps": 11
+  "minutes": 4,
+  "intro": "Describe a part in plain words. The agent writes build123d code, the exact kernel builds it, and the viewer updates. Then change a number by hand and watch it rebuild without the agent.",
+  "steps": 12
  },
  {
   "id": "select-face",
   "title": "Point at a face and ask",
   "minutes": 2,
-  "intro": "Click geometry in the viewer to talk about it. The selection travels with your message as exact type, centre and normal, so the agent picks the same face in code.",
+  "intro": "Click geometry in the viewer to talk about it. The selection travels with your message as the face's exact type, centre and normal, so the agent picks the same face in code.",
   "steps": 10
  },
  {
@@ -31,7 +31,7 @@
   "id": "cam",
   "title": "CAM in five minutes",
   "minutes": 4,
-  "intro": "Ask for a program and get real toolpaths: facing, constant-engagement adaptive roughing, drilling, a tabbed outline, and GRBL G-code with arcs and tool changes \u2014 checked against your machine's limits.",
+  "intro": "Ask for a program and get real toolpaths: facing, constant-engagement adaptive roughing, drilling, a tabbed outline, and GRBL G-code with arcs and tool changes, checked against your machine's limits.",
   "steps": 10
  }
 ]

@@ -111,3 +111,24 @@
 .pl-end h3{margin-bottom:6px}.pl-end p{color:var(--muted);font-size:13px}
 .pl-end .row{display:flex;gap:8px;justify-content:center;margin-top:14px}
 @media(max-width:900px){.pl-app{grid-template-columns:1fr;height:auto}.pl-side{height:380px;border-right:0;border-bottom:1px solid var(--line)}.pl-view{height:420px}.pl-browser{display:none}.pl-panel{width:80%}}
+
+/* narration strip: the lesson text for the current step */
+.pl-narr{display:flex;align-items:flex-start;gap:12px;padding:11px 16px;background:linear-gradient(90deg,rgba(255,140,66,.10),rgba(255,140,66,.02));border-bottom:1px solid var(--line);min-height:54px;font-size:13.5px;line-height:1.5;color:#e2e7ee}
+.pl-narr .n{font-family:var(--mono);font-size:11px;color:var(--accent);white-space:nowrap;padding-top:3px;min-width:52px}
+.pl-narr .k{display:inline-block;font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);border:1px solid var(--line2);border-radius:5px;padding:1px 6px;margin-right:8px;vertical-align:1px}
+.pl-narr code{font-size:11px}
+.pl-narr.pulse{animation:narr .5s ease}
+@keyframes narr{0%{background:rgba(255,140,66,.28)}100%{background:linear-gradient(90deg,rgba(255,140,66,.10),rgba(255,140,66,.02))}}
+.msg,.tool{position:relative}
+.msg.user::before,.msg.agent::before,.tool::before,.msg.note::before{content:attr(data-label);display:block;font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-bottom:3px}
+.tool::before{padding:6px 10px 0}
+.pl-side{position:relative}
+.pl-design{position:absolute;top:71px;left:0;right:0;bottom:0;background:#1c2027;z-index:3;display:none;flex-direction:column;overflow:auto}
+.pl-design.show{display:flex}
+.pl-design .t{padding:10px 12px 6px;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.pl-design .prow{display:flex;align-items:center;gap:8px;padding:5px 12px}
+.pl-design .prow label{flex:1;font-family:var(--mono);color:#9cdcfe;font-size:12px}
+.pl-design .prow span{width:84px;background:#14171c;border:1px solid var(--line);border-radius:6px;padding:4px 8px;text-align:right;font-family:var(--mono);font-size:12px;transition:.2s}
+.pl-design .prow.hot span{border-color:var(--accent);color:var(--accent);box-shadow:0 0 0 2px rgba(255,140,66,.2)}
+.pl-design .sec{margin-top:12px;border-top:1px solid var(--line);padding:10px 12px;color:var(--muted);font-size:12px}
+.pl-design .sec b{display:block;color:var(--text);margin-bottom:4px;font-weight:600}

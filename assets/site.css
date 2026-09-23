@@ -63,7 +63,7 @@ section.tight{padding:56px 0}
 .frame .bar{height:34px;display:flex;align-items:center;gap:6px;padding:0 12px;border-bottom:1px solid var(--line);background:#12161d}
 .frame .bar i{width:10px;height:10px;border-radius:50%;background:#2c3340;display:block}
 .frame .bar span{margin-left:10px;font-size:11px;color:var(--dim);font-family:var(--mono)}
-.frame img{display:block;width:100%}
+.frame img{display:block;width:100%;height:auto}
 .viewer{position:relative;background:#0f1319;min-height:320px}
 .viewer canvas{display:block}
 .viewer .hud{position:absolute;left:12px;bottom:10px;font-family:var(--mono);font-size:11px;color:var(--muted);pointer-events:none}
