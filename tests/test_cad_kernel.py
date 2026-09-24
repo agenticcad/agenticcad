@@ -67,7 +67,6 @@ def test_nested_dict_makes_component_tree():
 
 @pytest.mark.parametrize("code,msg", [
     ("x = 1", "assign the final shape"),
-    ("result = None", "None"),
     ("result = 42", "must be build123d shapes"),
     ("result = Box(1,1,", "SyntaxError"),
     ("result = Box(1,1,1).nonexistent()", "AttributeError"),
@@ -76,6 +75,13 @@ def test_script_errors_are_cad_errors(code, msg):
     with pytest.raises(ck.CadError) as ei:
         ck.run_script(code)
     assert msg in str(ei.value)
+
+
+def test_empty_result_is_an_empty_design():
+    for code in ("result = None\n", "result = {}\n", ck.NEW_DESIGN_CODE):
+        m = ck.run_script(code)
+        assert m.bodies == [] and m.faces == [] and m.mesh["bodies"] == [] and m.mesh["tree"] == []
+        assert "empty design" in m.summary() and m.mesh["bboxMin"] == [0.0, 0.0, 0.0]
 
 
 def test_get_face_and_get_edge(demo_model):

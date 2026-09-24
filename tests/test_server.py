@@ -24,6 +24,8 @@ def client(tmp_path_factory):
     ws = tmp_path_factory.mktemp("ws")
     os.environ["AGENTICCAD_WORKSPACE"] = str(ws)
     os.environ["AGENTICCAD_NO_AGENT"] = "1"
+    import cad_kernel as ck
+    (ws / "model.py").write_text(ck.DEFAULT_CODE)        # these tests exercise the two-body demo, not the empty first run
     for m in ("server", "agent"):
         sys.modules.pop(m, None)
     import server

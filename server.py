@@ -17,6 +17,7 @@ from pydantic import BaseModel
 
 import cad_kernel as ck
 import cam_kernel as cam
+import script_edit
 from agent import CadAgent, claude_cli_candidates, find_claude_cli
 from version import __version__
 
@@ -185,6 +186,8 @@ async def cam_machine(body: MachineBody):
 @app.delete("/api/cam/machine/{name}")
 async def cam_machine_delete(name: str):
     ok = agent.library.delete_machine(name)
+    if not ok:
+        return JSONResponse({"error": f"no machine '{name}'"}, status_code=404)
     await bus.emit({"type": "library", **agent.library_payload()})
     return {"deleted": ok}
 
@@ -202,6 +205,8 @@ async def cam_tool(body: ToolBody):
 @app.delete("/api/cam/tool/{number}")
 async def cam_tool_delete(number: int):
     ok = agent.library.delete_tool(number)
+    if not ok:
+        return JSONResponse({"error": f"no tool T{number}"}, status_code=404)
     await bus.emit({"type": "library", **agent.library_payload()})
     return {"deleted": ok}
 
@@ -353,6 +358,8 @@ async def library_add(body: LibAdd):
 @app.delete("/api/library/{slug}")
 async def library_delete(slug: str):
     ok = agent.parts.delete(slug)
+    if not ok:
+        return JSONResponse({"error": f"no library part '{slug}'"}, status_code=404)
     await bus.emit({"type": "library_parts", "parts": agent.parts.list()})
     return {"deleted": ok}
 
@@ -498,71 +505,81 @@ async def ws_endpoint(ws: WebSocket) -> None:
                                        "agent_ready": agent.client is not None}))
         while True:
             raw = await ws.receive_text()
-            msg = json.loads(raw)
-            t = msg.get("type")
-            if t == "chat":
-                bus.primary = ws
-                asyncio.create_task(agent.chat(msg.get("text", ""), msg.get("selection"), msg.get("images") or []))
-            elif t == "get_model" and agent.model:
-                await ws.send_text(json.dumps(_model_event()))
-            elif t == "set_quality":
-                await agent.set_quality(msg.get("quality", "normal"))
-            elif t == "run_cam":
-                try:
-                    await agent.set_cam_code(msg.get("code", ""), rebuild=bool(msg.get("code", "").strip()), source="user")
-                    agent.notes.append("The user edited and rebuilt the CAM script by hand in the Code panel.")
-                except cam.CamError as e:
-                    await ws.send_text(json.dumps({"type": "cam_error", "text": str(e)}))
-                except Exception as e:  # noqa: BLE001
-                    await ws.send_text(json.dumps({"type": "cam_error", "text": f"{type(e).__name__}: {e}"}))
-            elif t == "set_sketch":
-                try:
-                    await agent.set_sketch(msg.get("name") or "sketch1", msg.get("plane") or {}, msg.get("items") or [])
-                except (ck.CadError, Exception) as e:  # noqa: BLE001
-                    await ws.send_text(json.dumps({"type": "error", "text": f"sketch failed: {e}"}))
-            elif t == "extrude_sketch":
-                await agent.extrude_sketch(msg.get("name", ""), float(msg.get("amount") or 0), msg.get("op", "new"),
-                                           msg.get("body"), bool(msg.get("both")), msg.get("body_name"))
-            elif t == "add_primitive":
-                await agent.add_primitive(msg.get("kind", "box"), msg.get("dims") or {}, msg.get("at") or [0, 0, 0], msg.get("name"))
-            elif t == "op":
-                k = msg.get("kind")
-                try:
-                    if k == "primitive":
-                        await agent.op_primitive(msg.get("shape", "box"), msg.get("dims") or {}, msg.get("at") or [0, 0, 0], msg.get("normal"), msg.get("body"), msg.get("mode", "join"), msg.get("name"))
-                    elif k == "extrude_face":
-                        await agent.op_extrude_face(msg["body"], msg["point"], msg["normal"], float(msg.get("amount") or 0), msg.get("mode", "join"))
-                    elif k == "hole":
-                        await agent.op_hole(msg["body"], msg["at"], msg["normal"], float(msg.get("diameter") or 0), msg.get("depth"), bool(msg.get("through")), msg.get("thread"), msg.get("counterbore"))
-                    elif k in ("fillet", "chamfer"):
-                        await agent.op_edges(msg["body"], msg.get("points") or [], float(msg.get("radius") or 0), k, msg.get("faces"))
-                    elif k == "shell":
-                        await agent.op_shell(msg["body"], msg.get("faces") or [], float(msg.get("thickness") or 1))
-                except (KeyError, ValueError, ck.CadError) as e:
-                    await ws.send_text(json.dumps({"type": "error", "text": f"{k} failed: {e}"}))
-            elif t == "transform_body":
-                await agent.transform_body(msg.get("path", ""), msg.get("move") or [0, 0, 0], msg.get("rotate") or [0, 0, 0])
-            elif t == "delete_sketch":
-                await agent.delete_sketch(msg.get("name", ""))
-            elif t == "rename_body":
-                await agent.edit_body("rename", msg.get("path", ""), msg.get("name", ""))
-            elif t == "delete_body":
-                await agent.edit_body("delete", msg.get("path", ""))
-            elif t == "undo":
-                await agent.undo()
-            elif t == "interrupt":
-                await agent.interrupt()
-            elif t == "screenshot_result":
-                bus.resolve(msg["id"], msg.get("png", ""))
-            elif t == "run_code":
-                try:
-                    await agent.build(msg.get("code", ""), source="user")
-                except ck.CadError as e:
-                    await ws.send_text(json.dumps({"type": "build_error", "text": str(e)}))
+            try:
+                msg = json.loads(raw)
+                await _dispatch(ws, msg)
+            except WebSocketDisconnect:
+                raise
+            except (ck.CadError, cam.CamError, script_edit.Refused, script_edit.Unsupported, KeyError, ValueError, TypeError) as e:
+                # a bad or failed manual operation must never drop the connection
+                await ws.send_text(json.dumps({"type": "error", "text": f"{msg.get('type', '?') if isinstance(msg, dict) else '?'} failed: {e}"}))
     except WebSocketDisconnect:
         pass
     finally:
         bus.clients.discard(ws)
+
+
+async def _dispatch(ws: WebSocket, msg: dict) -> None:
+    t = msg.get("type")
+    if t == "chat":
+        bus.primary = ws
+        asyncio.create_task(agent.chat(msg.get("text", ""), msg.get("selection"), msg.get("images") or []))
+    elif t == "get_model" and agent.model:
+        await ws.send_text(json.dumps(_model_event()))
+    elif t == "set_quality":
+        await agent.set_quality(msg.get("quality", "normal"))
+    elif t == "run_cam":
+        try:
+            await agent.set_cam_code(msg.get("code", ""), rebuild=bool(msg.get("code", "").strip()), source="user")
+            agent.notes.append("The user edited and rebuilt the CAM script by hand in the Code panel.")
+        except cam.CamError as e:
+            await ws.send_text(json.dumps({"type": "cam_error", "text": str(e)}))
+        except Exception as e:  # noqa: BLE001
+            await ws.send_text(json.dumps({"type": "cam_error", "text": f"{type(e).__name__}: {e}"}))
+    elif t == "set_sketch":
+        try:
+            await agent.set_sketch(msg.get("name") or "sketch1", msg.get("plane") or {}, msg.get("items") or [])
+        except (ck.CadError, Exception) as e:  # noqa: BLE001
+            await ws.send_text(json.dumps({"type": "error", "text": f"sketch failed: {e}"}))
+    elif t == "extrude_sketch":
+        await agent.extrude_sketch(msg.get("name", ""), float(msg.get("amount") or 0), msg.get("op", "new"),
+                                   msg.get("body"), bool(msg.get("both")), msg.get("body_name"))
+    elif t == "add_primitive":
+        await agent.add_primitive(msg.get("kind", "box"), msg.get("dims") or {}, msg.get("at") or [0, 0, 0], msg.get("name"))
+    elif t == "op":
+        k = msg.get("kind")
+        try:
+            if k == "primitive":
+                await agent.op_primitive(msg.get("shape", "box"), msg.get("dims") or {}, msg.get("at") or [0, 0, 0], msg.get("normal"), msg.get("body"), msg.get("mode", "join"), msg.get("name"))
+            elif k == "extrude_face":
+                await agent.op_extrude_face(msg["body"], msg["point"], msg["normal"], float(msg.get("amount") or 0), msg.get("mode", "join"))
+            elif k == "hole":
+                await agent.op_hole(msg["body"], msg["at"], msg["normal"], float(msg.get("diameter") or 0), msg.get("depth"), bool(msg.get("through")), msg.get("thread"), msg.get("counterbore"))
+            elif k in ("fillet", "chamfer"):
+                await agent.op_edges(msg["body"], msg.get("points") or [], float(msg.get("radius") or 0), k, msg.get("faces"))
+            elif k == "shell":
+                await agent.op_shell(msg["body"], msg.get("faces") or [], float(msg.get("thickness") or 1))
+        except (KeyError, ValueError, ck.CadError) as e:
+            await ws.send_text(json.dumps({"type": "error", "text": f"{k} failed: {e}"}))
+    elif t == "transform_body":
+        await agent.transform_body(msg.get("path", ""), msg.get("move") or [0, 0, 0], msg.get("rotate") or [0, 0, 0])
+    elif t == "delete_sketch":
+        await agent.delete_sketch(msg.get("name", ""))
+    elif t == "rename_body":
+        await agent.edit_body("rename", msg.get("path", ""), msg.get("name", ""))
+    elif t == "delete_body":
+        await agent.edit_body("delete", msg.get("path", ""))
+    elif t == "undo":
+        await agent.undo()
+    elif t == "interrupt":
+        await agent.interrupt()
+    elif t == "screenshot_result":
+        bus.resolve(msg["id"], msg.get("png", ""))
+    elif t == "run_code":
+        try:
+            await agent.build(msg.get("code", ""), source="user")
+        except ck.CadError as e:
+            await ws.send_text(json.dumps({"type": "build_error", "text": str(e)}))
 
 
 if __name__ == "__main__":

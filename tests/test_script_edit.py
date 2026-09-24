@@ -24,10 +24,11 @@ def test_set_params_rewrites_in_place_keeping_int_float_style():
     assert ck.run_script(out).bbox_max[0] == 3.5
 
 
-def test_set_params_unknown_names_are_ignored():
-    code = "a = 5\nresult = Box(a, a, a)\n"
-    assert se.set_params(code, {"zzz": 1}) == code
-
+def test_set_params_unknown_names_are_refused():
+    code = "a = 1\nresult = Box(a, a, a)\n"
+    with pytest.raises(se.Refused, match="zzz"):
+        se.set_params(code, {"zzz": 2})            # silently ignoring a typo would mislead the agent
+    assert "a = 3" in se.set_params(code, {"a": 3})
 
 def test_rename_and_delete_dict_bodies():
     code = ck.DEFAULT_CODE

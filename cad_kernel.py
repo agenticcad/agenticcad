@@ -158,6 +158,9 @@ class Model:
 
     def summary(self, max_faces: int = 40) -> str:
         size = [hi - lo for lo, hi in zip(self.bbox_min, self.bbox_max)]
+        if not self.bodies:
+            return "Model OK: empty design (no bodies yet). Assign shapes to `result` to add geometry." + (
+                "\nwarnings: " + "; ".join(self.warnings) if self.warnings else "")
         lines = [
             f"Model OK: {len(self.bodies)} bod{'y' if len(self.bodies) == 1 else 'ies'}, "
             f"{len(self.faces)} faces, total volume={self.volume:.1f}mm³",
@@ -221,7 +224,7 @@ def coerce_bodies(obj: Any, prefix: str = "", out: list[tuple[str, Shape]] | Non
         out = []
     obj = _unwrap(obj)
     if obj is None:
-        raise CadError("`result` is None.")
+        return out                                   # `result = None` → empty design
     if isinstance(obj, dict):
         for k, v in obj.items():
             coerce_bodies(v, f"{prefix}{k}/", out)
@@ -330,9 +333,7 @@ def run_script(code: str, quality: str = "normal", workspace: Path | None = None
     if "result" not in ns:
         raise CadError("Script must assign the final shape(s) to a variable named `result`."
                        + ("\nstdout:\n" + buf.getvalue() if buf.getvalue() else ""))
-    pairs = coerce_bodies(ns["result"])
-    if not pairs:
-        raise CadError("`result` contains no shapes.")
+    pairs = coerce_bodies(ns["result"])          # [] = an empty design (result = {} / None): allowed, nothing to show yet
     model = build_model(pairs, code, quality)
     model.stdout = buf.getvalue()
     model.threads = [t for t in registered if not t.external]
@@ -384,6 +385,8 @@ def build_model(pairs: list[tuple[str, Shape]] | Shape, code: str = "", quality:
         bodies.append(body)
         face_lists.append(faces)
 
+    if not bodies:                                   # empty design: finite bbox so the viewer has something to frame
+        gmin, gmax = [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]
     diag = math.dist(gmin, gmax) or 1.0
     lin = max(diag * lin_frac, 0.002)
     total_volume = sum(b.volume for b in bodies)
@@ -592,6 +595,8 @@ def export(model: Model, out_dir: Path, name: str, formats: list[str],
     chordal (mm) and angular (rad) deviation — independent of the display mesh.
     `body` limits the export to one body (by name or path)."""
     out_dir.mkdir(parents=True, exist_ok=True)
+    if not model.bodies:
+        raise CadError("nothing to export: the design is empty")
     shape = model.shape
     if body:
         b = model.body_by_name(body)
@@ -644,13 +649,12 @@ pin = Pos(0, 0, plate_t / 2 + boss_h + 2) * Cylinder(bore_d / 2 - 0.1, 30)   # s
 result = {"Bracket": bracket.part, "Pin": pin}
 '''
 
-NEW_DESIGN_CODE = '''# New design. Assign the final shape(s) to `result`.
-# One body:            result = part
-# Several bodies:      result = {"Base": base, "Lid": lid}
-# Components (tree):   result = {"Assembly": {"Base": base, "Lid": lid}, "Screw": screw}
-with BuildPart() as bp:
-    Box(20, 20, 10)
-result = bp.part
+NEW_DESIGN_CODE = '''# New design — describe a part in the chat, use the ribbon, or write build123d here.
+# Assign the final shape(s) to `result`:
+#   one body:         result = part
+#   several bodies:   result = {"Base": base, "Lid": lid}
+#   components:       result = {"Assembly": {"Base": base, "Lid": lid}, "Screw": screw}
+result = {}
 '''
 
 
@@ -670,7 +674,9 @@ def entity_info(model: Model, ent: dict[str, Any]) -> tuple[dict[str, Any], Any]
     """(description, build123d shape/point) for a measure entity {type, id | p}."""
     t = ent.get("type")
     if t == "face":
-        fi = {f.id: f for f in model.faces}[int(ent["id"])]
+        fi = {f.id: f for f in model.faces}.get(int(ent["id"]))
+        if fi is None:
+            raise CadError(f"no face #{ent['id']} (ids change on every rebuild; inspect_model lists current ones)")
         face = model.get_face(fi.id)
         d = {**fi.to_dict(), "type": "face", "body": fi.body_name}
         return d, face

@@ -3,6 +3,28 @@
 All notable changes to AgenticCAD. Versions follow [SemVer](https://semver.org): pre-1.0, minor bumps add
 features, patch bumps fix things. The version shown in the UI header comes from `version.py`.
 
+## [Unreleased]
+
+### Changed
+- **First run starts empty.** A fresh workspace (and File ▸ New) opens a blank design instead of the demo bracket;
+  `result = {}` / `result = None` are valid empty designs, the viewer frames the grid and the Browser explains
+  how to add a body. An untouched empty design is not marked unsaved.
+
+### Fixed
+- `set_parameters` with an unknown name is refused (it was silently ignored, so the agent believed it had changed something).
+- Measuring an unknown face id returns a clean error instead of crashing the request.
+- The `library` tool no longer saves a part when given an unknown action.
+- Deleting a sketch that the script still uses is refused with a hint, instead of breaking the build.
+- Malformed sketch items report the missing field; a failed manual operation never drops the WebSocket connection.
+- `feeds_speeds` accepted `T1` but crashed on unknown `T99`; tool lookup now handles numbers, `Tn` and names.
+- Chat without a Claude session (no Claude Code installed, or the agent disabled) reports the situation instead of
+  trying to start one; DELETE of a missing machine/tool/library part returns 404.
+
+### Added
+- Tests: 123 unit/API tests (was 74) covering every manual ribbon operation, the agent's MCP tools, the WebSocket
+  protocol, HTTP endpoints, the desktop launcher, empty designs, and CAM/kernel edge cases. Tool handlers are
+  exposed as `CadAgent.tool_handlers` for direct testing.
+
 ## [0.10.1] — 2026-09-23
 ### Changed
 - Contact address for licensing, security and conduct is agenticcad@prodevelop.com.au (site, LICENSE notice, templates, installer metadata).

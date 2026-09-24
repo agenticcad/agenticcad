@@ -173,6 +173,7 @@ def set_params(code: str, values: dict) -> str:
     for line in b.splitlines(keepends=True):
         boffs.append(boffs[-1] + len(line))
     edits = []   # (start, end, text)
+    seen: set[str] = set()
     for node in tree.body:
         if not isinstance(node, ast.Assign) or len(node.targets) != 1:
             continue
@@ -185,11 +186,16 @@ def set_params(code: str, values: dict) -> str:
         for name, vnode in pairs:
             if name not in values or _num_of(vnode) is None:
                 continue
+            seen.add(name)
             new = values[name]
             new_txt = _fmt_num(new, isinstance(_num_of(vnode), int) and float(new).is_integer())
             start = boffs[vnode.lineno - 1] + vnode.col_offset
             end = boffs[vnode.end_lineno - 1] + vnode.end_col_offset
             edits.append((start, end, new_txt.encode("utf-8")))
+    missing = [k for k in values if k not in seen]
+    if missing:
+        raise Refused(f"no numeric top-level parameter named {', '.join(missing)}; parameters: "
+                      + ", ".join(p['name'] for p in params(code)))
     for start, end, txt in sorted(edits, key=lambda e: -e[0]):
         b = b[:start] + txt + b[end:]
     return b.decode("utf-8")
@@ -259,6 +265,20 @@ def sketch_code(name: str, plane: dict, items: list[dict]) -> str:
              f"with BuildSketch(Plane(origin=({_f(o[0])}, {_f(o[1])}, {_f(o[2])}), x_dir=({_f(x[0])}, {_f(x[1])}, {_f(x[2])}), "
              f"z_dir=({_f(z[0])}, {_f(z[1])}, {_f(z[2])}))) as _{name}:"]
     for it in items:
+        try:
+            _sketch_item(lines, it)
+        except KeyError as e:
+            raise Unsupported(f"sketch item {it.get('type')!r} is missing field {e}; expected rect(cx,cy,w,h,angle) | "
+                              f"circle(cx,cy,r) | polygon(pts) | slot(x1,y1,x2,y2,w)")
+    if not items:
+        lines.append("    pass")
+    lines.append(f"{name} = _{name}.sketch")
+    lines.append(f"# /sketch:{name}")
+    return "\n".join(lines) + "\n"
+
+
+def _sketch_item(lines: list[str], it: dict) -> None:
+    if True:
         mode = ", mode=Mode.SUBTRACT" if it.get("mode") == "subtract" else ""
         t = it.get("type")
         if t == "rect":
@@ -276,11 +296,6 @@ def sketch_code(name: str, plane: dict, items: list[dict]) -> str:
             lines.append(f"    SlotCenterPoint(({_f(mx)}, {_f(my)}), ({_f(it['x2'])}, {_f(it['y2'])}), {_f(it['w'])}{mode})")
         else:
             raise Unsupported(f"unknown sketch item type {t!r}")
-    if not items:
-        lines.append("    pass")
-    lines.append(f"{name} = _{name}.sketch")
-    lines.append(f"# /sketch:{name}")
-    return "\n".join(lines) + "\n"
 
 
 def sketches(code: str) -> list[dict]:

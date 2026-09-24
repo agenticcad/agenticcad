@@ -116,6 +116,87 @@ def adaptive_engagement_reported(run: Run):
             check("max engagement < 4× target", o.params.get("max_engagement_angle", 999) < 4 * tgt, f"{o.params.get('max_engagement_angle')} vs {tgt}")]
 
 
+# ---------------------------------------------------------------- additional scenarios (2026-09-24)
+POCKETED = """# plate with a rectangular recess (for rest-machining evals)
+plate_l, plate_w, plate_t = 60, 40, 10
+with BuildPart() as bp:
+    Box(plate_l, plate_w, plate_t)
+    with Locations((0, 0, plate_t / 2)):
+        Box(30, 20, 4, align=(Align.CENTER, Align.CENTER, Align.MAX), mode=Mode.SUBTRACT)
+result = {"Plate": bp.part}
+"""
+DOMED = """# block with a spherical dome on top (for 3D finishing evals)
+with BuildPart() as bp:
+    Box(40, 40, 10)
+    with Locations((0, 0, 5)):
+        Sphere(12, mode=Mode.ADD)
+    Box(60, 60, 20, align=(Align.CENTER, Align.CENTER, Align.MAX), mode=Mode.SUBTRACT)
+    Box(60, 60, 20, mode=Mode.INTERSECT)
+result = {"Dome": bp.part}
+"""
+
+
+async def seed_step_import(run: Run) -> None:
+    """Put a STEP file of the Pin into workspace/imports so the agent can import_step() it."""
+    import cad_kernel as _ck
+    _ck.export(run.model, run.workspace / "imports", "pin", ["step"], body="Pin")
+    (run.workspace / "imports" / "pin.step").exists() or (run.workspace / "imports" / "pin_Pin.step").rename(run.workspace / "imports" / "pin.step")
+
+
+async def manual_hole_first(run: Run) -> None:
+    """Simulate the user drilling a Ø4 hole with the ribbon before asking the agent about it (notes mechanism)."""
+    await run.agent.op_hole("Bracket", [20, 12, 4], [0, 0, 1], 4, None, True)
+
+
+def files_in(sub: str, pattern: str, at_least: int = 1):
+    def g(run: Run):
+        hits = sorted(str(p.relative_to(run.workspace)) for p in (run.workspace / sub).rglob(pattern))
+        return [check(f"{sub}/{pattern} written", len(hits) >= at_least, str(hits))]
+    return g
+
+
+def hole_diameter_present(d: float, tol: float = 0.15, count: int | None = None):
+    def g(run: Run):
+        hs = [h for h in cam.holes(run.model.shape) if abs(h.diameter - d) < tol] if run.model else []
+        ok = len(hs) >= 1 if count is None else len(hs) == count
+        return [check(f"Ø{d} hole present" + (f" ×{count}" if count else ""), ok, str(hs))]
+    return g
+
+
+def mass_of_bracket_steel_answered(run: Run):
+    import cad_kernel as _ck
+    m = run.model
+    if m is None or m.body_by_name("Bracket") is None:
+        return [check("mass", False, "no Bracket")]
+    mp = _ck.mass_properties(m, "Bracket", "steel")
+    g = mp["mass_g"]
+    import re as _re
+    nums = [float(x) for x in _re.findall(r"\b(\d+(?:\.\d+)?)\s*(?:g|grams?)\b", run.text)]
+    return [check(f"answer states mass ≈ {g:.0f} g (±3%)", any(abs(n - g) / g < 0.03 for n in nums), f"found {nums} in answer")]
+
+
+def library_has(name_sub: str):
+    def g(run: Run):
+        names = [p["name"] for p in run.agent.parts.list()]
+        return [check(f"library part containing '{name_sub}'", any(name_sub in n.lower() for n in names), str(names))]
+    return g
+
+
+def sketch_named(name: str):
+    def g(run: Run):
+        defs = script_edit.sketches(run.model.code) if run.model else []
+        return [check(f"editable sketch '{name}' in script", any(d["name"] == name for d in defs), str([d["name"] for d in defs]))]
+    return g
+
+
+def volume_dropped_by(expected: float, rel: float = 0.15, from_code: str = ""):
+    def g(run: Run):
+        base = ck.run_script(from_code).volume if from_code else 0
+        drop = base - run.model.volume if run.model else 0
+        return [check(f"volume reduced by ≈{expected:.0f} mm³", abs(drop - expected) < rel * expected, f"drop {drop:.0f}")]
+    return g
+
+
 CASES: list[Case] = [
     Case("cad_box_hole", tags=["cad"],
          prompt="Make a 20 × 30 × 10 mm block centred on the origin with a Ø5 through hole down the centre (Z axis). Single body called Block.",
@@ -167,4 +248,56 @@ CASES: list[Case] = [
          prompt="CAM on the Generic 3018, Bracket only, aluminium feeds from the calculator: adaptive-rough the central Ø6 bore with the 3 mm endmill at 0.15 stepover leaving 0.2 mm, then finish the bore wall with an inside contour. Nothing else.",
          graders=[no_agent_error(), expect_program(["adaptive", "contour"], min_ops=2), expect_op("contour", side="inside"),
                   adaptive_engagement_reported, feeds_from_calculator, expect_gcode()]),
+    # ---- added 2026-09-24: first run, multi-body edits, exports, drawings, mass, imports, library save, notes, CAM rest/3D/limits
+    Case("cad_first_run_flange", tags=["cad", "first-run"],
+         prompt="Make a flange: Ø60 disc, 8 mm thick, with a Ø20 centre bore and four Ø6 bolt holes on a 44 mm PCD. Call the body Flange.",
+         graders=[no_agent_error(), expect_bodies(["Flange"], count=1), expect_bbox((60, 60, 8), tol=0.5),
+                  expect_holes(5, through=True), hole_diameter_present(20.0, count=1), hole_diameter_present(6.0, count=4)]),
+    Case("cad_rename_and_add_body", tags=["cad", "bodies"], initial_code=ck.DEFAULT_CODE,
+         prompt="Rename the Pin body to Dowel, and add a separate Washer body (Ø20 outside, Ø8 hole, 2 mm thick) lying flat on top of the plate at the origin. Keep the bracket unchanged.",
+         graders=[no_agent_error(), expect_bodies(["Bracket", "Dowel", "Washer"], count=3), expect_bbox((20, 20, 2), body="Washer"),
+                  lambda run: [check("washer sits on plate top (z≈4)", abs(run.model.body_by_name("Washer").bbox_min[2] - 4) < 0.3, str(run.model.body_by_name("Washer").bbox_min))]]),
+    Case("cad_export_files", tags=["cad", "export"], initial_code=ck.DEFAULT_CODE,
+         prompt="Export a fine STL (0.01 mm tolerance) of only the Pin named pin_fine, and a STEP of the whole assembly named bracket_assy.",
+         graders=[no_agent_error(), expect_tools_used("export_model"), files_in("exports", "pin_fine*.stl"), files_in("exports", "bracket_assy*.step"),
+                  expect_bodies(["Bracket", "Pin"], count=2)]),
+    Case("cad_drawings", tags=["cad", "drawings"], initial_code=ck.DEFAULT_CODE,
+         prompt="Produce shop drawings for this design in aluminium 6061 on A4 sheets.",
+         graders=[no_agent_error(), expect_tools_used("make_drawings"), files_in("drawings", "*.svg", at_least=2), files_in("drawings", "*.dxf")]),
+    Case("measure_mass_steel", tags=["measure"], initial_code=ck.DEFAULT_CODE,
+         prompt="What would the Bracket body weigh in steel? Use the tools, not an estimate, and give the answer in grams.",
+         graders=[no_agent_error(), expect_tools_used("mass_properties"), mass_of_bracket_steel_answered]),
+    Case("cad_step_import", tags=["cad", "import"], initial_code=ck.DEFAULT_CODE, setup=seed_step_import,
+         prompt="There is a STEP file pin.step in the imports folder. Add it to the design as a new body named ImportedPin, moved 30 mm along +X so it sits beside the bracket. Keep the existing bodies.",
+         graders=[no_agent_error(), expect_script_contains("import_step("), expect_bodies(count=3),
+                  lambda run: [check("ImportedPin exists and is offset in X", (lambda b: b is not None and b.bbox_min[0] > 20)(run.model.body_by_name("ImportedPin")), str([(b.name, b.bbox_min) for b in run.model.bodies]))]]),
+    Case("cad_library_save_body", tags=["cad", "library"], initial_code=ck.DEFAULT_CODE,
+         prompt="Save the Bracket body to the part library as 'demo bracket body' with the tags bracket and demo, description 'L bracket with boss'.",
+         graders=[no_agent_error(), expect_tools_used("library"), library_has("demo bracket body"), expect_bodies(["Bracket", "Pin"], count=2)]),
+    Case("cad_manual_op_note", tags=["cad", "notes"], initial_code=ck.DEFAULT_CODE, setup=manual_hole_first,
+         prompt="Briefly, what did I just change by hand? Then make that new hole Ø6 instead of Ø4, nothing else.",
+         graders=[no_agent_error(), expect_answer(r"hole|drill"), hole_diameter_present(6.0, count=1),
+                  lambda run: [check("Ø4 hole gone", not any(abs(h.diameter - 4) < 0.1 for h in cam.holes(run.model.shape)), "")],
+                  expect_bodies(["Bracket", "Pin"], count=2)]),
+    Case("cad_agent_sketch_cut", tags=["cad", "sketch"], initial_code=PLATE,
+         prompt="Create an editable sketch called slot1 on the top face of the plate with a 20 × 6 mm slot centred at (15, 0) along X, then cut it 3 mm deep into the plate. Keep the sketch editable for me.",
+         graders=[no_agent_error(), expect_tools_used("sketch"), sketch_named("slot1"), expect_bodies(count=1),
+                  volume_dropped_by((20 - 6) * 6 * 3 + math.pi * 9 * 3, rel=0.2, from_code=PLATE)]),
+    Case("cam_rest_machining", tags=["cam", "rest"], initial_code=POCKETED,
+         prompt="CAM on the Generic 3018 in aluminium (feeds from the calculator): clear the 30 × 20 recess with the 6 mm endmill as a pocket, then rest-machine the corners it could not reach with the 3 mm endmill. Nothing else.",
+         graders=[no_agent_error(), expect_program(["pocket", "rest"], min_ops=2, no_warnings_matching="travel|rpm"), feeds_from_calculator,
+                  lambda run: [check("rest op uses the 3 mm tool", any(o.kind == "rest" and abs(o.tool.diameter - 3) < 0.01 for o in run.program.ops), str([(o.kind, o.tool.diameter) for o in run.program.ops]))],
+                  expect_gcode()]),
+    Case("cam_3d_finish", tags=["cam", "3d"], initial_code=DOMED,
+         prompt="Finish the dome on this part with the 6 mm ball endmill using parallel 3D passes at 0.5 mm stepover over the dome region only (about ±14 mm around the centre), on the Generic 3018. Nothing else.",
+         graders=[no_agent_error(), expect_program(["parallel3d"], min_ops=1, no_warnings_matching="travel|rpm"),
+                  lambda run: [check("ball tool, fine stepover", any(o.kind == "parallel3d" and o.tool.type == "ball" and o.params.get("stepover", 99) <= 0.6 for o in run.program.ops), str([(o.tool.type, o.params.get("stepover")) for o in run.program.ops]))],
+                  expect_gcode()]),
+    Case("cam_travel_limits", tags=["cam", "limits"],
+         prompt="Model a 400 × 60 × 6 mm rail named Rail, then create a CAM program on the Generic 3018 that cuts its outline. Tell me plainly if anything about the machine setup is a problem.",
+         graders=[no_agent_error(), expect_bodies(["Rail"], count=1), expect_answer(r"travel|too (long|large|big)|exceed|does not fit|doesn't fit|won't fit|300 ?mm")]),
+    Case("cam_gcode_export", tags=["cam", "export"], initial_code=ck.DEFAULT_CODE,
+         prompt="CAM for the Bracket on the Generic 3018: face the stock and cut the outline through with the 6 mm endmill (2 tabs). Then export the G-code as bracket_run and tell me how many lines it has.",
+         graders=[no_agent_error(), expect_program(["face", "contour"], min_ops=2), expect_tools_used("export_gcode"),
+                  files_in("exports", "bracket_run*.nc"), expect_answer(r"\b\d{2,5}\s*lines")]),
 ]

@@ -228,6 +228,7 @@ class CadAgent:
         ck.WORKSPACE = workspace
         ck.LIBRARY = self.parts
         (workspace / "imports").mkdir(exist_ok=True)
+        self.tool_handlers: dict[str, Any] = {}   # filled by _make_server()
         self.cam_code: str = ""               # CAM script working copy (workspace/cam.py)
         self.program: cam.Program | None = None
         cam_path = workspace / "cam.py"
@@ -488,6 +489,9 @@ class CadAgent:
         except script_edit.Unsupported as e:
             await self.emit({"type": "error", "text": str(e)})
             return
+        if re.search(rf"\b{re.escape(name)}\b", code):      # still used (e.g. extrude(sk1, ...)) → would break the build
+            await self.emit({"type": "error", "text": f"sketch '{name}' is still used in the script; remove or replace those uses first (or ask the agent to)"})
+            return
         await self.build(code, source="sketch")
         self.notes.append(f"The user deleted sketch '{name}'.")
 
@@ -740,13 +744,16 @@ class CadAgent:
             self.design_name = name
             self.saved_code = (self.designs_dir / f"{name}.py").read_text()
             code = code or self.saved_code
-        code = code or ck.DEFAULT_CODE
+        fresh = code is None
+        code = code or ck.NEW_DESIGN_CODE          # first run: an empty design, not a demo
         try:
             self.model = ck.run_script(code, self.quality, self.workspace, self.parts)
         except ck.CadError:
-            code = ck.DEFAULT_CODE
+            code = ck.NEW_DESIGN_CODE
             self.model = ck.run_script(code, self.quality, self.workspace, self.parts)
             self.design_name, self.saved_code = None, None
+        if fresh and self.design_name is None:
+            self.saved_code = code                 # an untouched empty design is not unsaved work
         (self.workspace / "model.py").write_text(code)
         if self.cam_code.strip():          # rebuild the CAM program from the working copy
             try:
@@ -919,8 +926,10 @@ class CadAgent:
                "required": ["tool", "material"]})
         async def feeds_speeds(args: dict[str, Any]) -> dict[str, Any]:
             tm = agent.library.tool_map()
-            key = args["tool"]
-            t = tm.get(key) or tm.get(int(key)) if str(key).lstrip("T").isdigit() else tm.get(key)
+            key = str(args["tool"]).strip()
+            digits = key[1:] if key[:1] in "Tt" and key[1:].isdigit() else key
+            t = tm.get(key) or tm.get(key.upper()) or (tm.get(int(digits)) if digits.isdigit() else None) \
+                or next((x for x in tm.values() if getattr(x, "name", "").lower() == key.lower()), None)
             if t is None:
                 return {"content": [{"type": "text", "text": f"unknown tool '{key}'. Tools: " + ", ".join(x.label() for x in agent.library.tools())}], "is_error": True}
             machines = agent.library.machines()
@@ -1054,6 +1063,8 @@ class CadAgent:
                     ok = agent.parts.delete(args.get("name") or "")
                     await agent.emit({"type": "library_parts", "parts": agent.parts.list()})
                     return {"content": [{"type": "text", "text": "deleted" if ok else "not found"}]}
+                if a not in ("save_design", "save_body"):
+                    return {"content": [{"type": "text", "text": f"unknown library action {a!r}; use list | search | get | insert | save_design | save_body | delete"}], "is_error": True}
                 meta = await agent.add_to_library(args.get("name") or "part", args.get("body") if a == "save_body" else None,
                                                   args.get("description") or "", args.get("tags") or [], None)
                 return {"content": [{"type": "text", "text": f"saved library part '{meta['name']}' ({meta['kind']})" + (f" params {meta['params']}" if meta.get('params') else "")}]}
@@ -1102,10 +1113,11 @@ class CadAgent:
             except (ck.CadError, script_edit.Unsupported) as e:
                 return {"content": [{"type": "text", "text": f"sketch failed: {e}"}], "is_error": True}
 
-        return create_sdk_mcp_server("cad", "0.4.0",
-                                     tools=[build_model, inspect_model, screenshot, export_model, get_code, save_design,
-                                            cam_context, build_cam, get_cam_code, export_gcode, feeds_speeds, save_machine, save_tool,
-                                            get_parameters, set_parameters, measure_tool, mass_properties, make_drawings, library_tool, sketch_tool])
+        tools = [build_model, inspect_model, screenshot, export_model, get_code, save_design,
+                 cam_context, build_cam, get_cam_code, export_gcode, feeds_speeds, save_machine, save_tool,
+                 get_parameters, set_parameters, measure_tool, mass_properties, make_drawings, library_tool, sketch_tool]
+        self.tool_handlers = {t.name: t.handler for t in tools}     # name -> async handler (tests call these directly)
+        return create_sdk_mcp_server("cad", "0.4.0", tools=tools)
 
     # ------------------------------------------------------------------ settings (model, effort, MCP servers)
     DEFAULT_SETTINGS: dict[str, Any] = {
@@ -1281,7 +1293,18 @@ class CadAgent:
 
     async def chat(self, text: str, selection: Any = None, images: list[dict[str, Any]] | None = None) -> None:
         if self.client is None:
-            await self.start()
+            if os.environ.get("AGENTICCAD_NO_AGENT") == "1":
+                await self.emit({"type": "error", "text": "The agent is disabled on this server (AGENTICCAD_NO_AGENT=1); manual tools still work."})
+                return
+            if find_claude_cli() is None:
+                await self.emit({"type": "agent_missing_cli"})
+                await self.emit({"type": "error", "text": "Claude Code is not installed, so the agent can't answer. Manual tools still work; see the setup page."})
+                return
+            try:
+                await self.start()
+            except Exception as e:  # noqa: BLE001
+                await self.emit({"type": "error", "text": f"agent failed to start: {e}"})
+                return
         if self.busy:
             await self.emit({"type": "error", "text": "Agent is busy; press Stop first."})
             return

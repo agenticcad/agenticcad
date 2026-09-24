@@ -500,6 +500,8 @@ function loadMesh(data) {
   // carry body visibility across rebuilds by path
   hidden = new Set([...bodies.values()].filter(b => hiddenPaths.has(b.path)).map(b => b.id));
   bbox = new THREE.Box3(new THREE.Vector3(...data.bboxMin), new THREE.Vector3(...data.bboxMax));
+  const emptyDesign = data.bodies.length === 0;
+  if (emptyDesign || bbox.getSize(new THREE.Vector3()).length() < 1e-6) bbox = new THREE.Box3(new THREE.Vector3(-30, -20, 0), new THREE.Vector3(30, 20, 20));   // frame something sensible when there is nothing yet
   makeHelpers(bbox.getSize(new THREE.Vector3()).length());
   selFaces.clear(); selBodies.clear(); ghostFaces.clear(); ghostBodies.clear(); hideMarker(); renderChips();
   applyVisibility();
@@ -507,7 +509,7 @@ function loadMesh(data) {
   if (firstLoad) { setView('iso'); firstLoad = false; }
   const kinds = {}; for (const f of data.faces) kinds[f.kind] = (kinds[f.kind] || 0) + 1;
   const tris = data.bodies.reduce((n, b) => n + b.indices.length / 3, 0);
-  document.getElementById('stats').textContent = `exact B-rep: ${data.bodies.length} bod${data.bodies.length === 1 ? 'y' : 'ies'}, ${Object.entries(kinds).map(([k, n]) => `${n} ${k.toLowerCase()}`).join(', ')} · ${(bbox.max.x-bbox.min.x).toFixed(1)} × ${(bbox.max.y-bbox.min.y).toFixed(1)} × ${(bbox.max.z-bbox.min.z).toFixed(1)} mm · display mesh ${data.quality || ''} ${tris} tris`;
+  document.getElementById('stats').textContent = emptyDesign ? 'empty design — describe a part in the chat, use the ribbon (B for a box), or write build123d in the Code tab' : `exact B-rep: ${data.bodies.length} bod${data.bodies.length === 1 ? 'y' : 'ies'}, ${Object.entries(kinds).map(([k, n]) => `${n} ${k.toLowerCase()}`).join(', ')} · ${(bbox.max.x-bbox.min.x).toFixed(1)} × ${(bbox.max.y-bbox.min.y).toFixed(1)} × ${(bbox.max.z-bbox.min.z).toFixed(1)} mm · display mesh ${data.quality || ''} ${tris} tris`;
   if (data.quality) document.getElementById('quality').value = data.quality;
   renderTree();
 }
@@ -714,6 +716,7 @@ const collapsed = new Set();
 function renderTree() {
   const el = document.getElementById('treebody'); el.innerHTML = '';
   if (!model) return;
+  if (!model.tree.length) { const hint = document.createElement('div'); hint.className = 'node'; hint.style.cssText = 'color:var(--muted);cursor:default;font-size:11px;line-height:1.4;white-space:normal'; hint.textContent = 'No bodies yet. Describe a part in the chat, press B for a box, or use + Body.'; el.appendChild(hint); }
   const nodes = model.tree, byParent = {};
   for (const n of nodes) (byParent[n.parent || ''] ||= []).push(n);
   const bodyOfFace = f => { for (const b of model.bodies.values()) if (b.ranges.has(f)) return b.id; return -1; };
