@@ -277,6 +277,7 @@
       <span class="sep" id="cam-sep" style="display:none"></span>
       <button class="btn active" id="tp-toggle" title="Show toolpaths" style="display:none">Toolpaths</button>
       <button class="btn active" id="stock-toggle" title="Show stock" style="display:none">Stock</button>
+      <button class="btn active" id="layers-toggle" title="Show sliced layers" style="display:none">Layers</button>
     </div>
     <div id="tree"><div class="hd" style="display:flex;align-items:center">Browser<button class="btn small" id="tree-addbody" style="display:none">+ Body</button><button class="btn small" id="tree-addpart" style="margin-left:auto;padding:1px 6px" title="Insert a part from the library">+ Part</button></div><div id="treebody"></div><div id="sketchtree"></div></div>
     <div id="ribbon">
@@ -347,6 +348,25 @@
           <div class="modal-field"><label>Material</label><input id="draw-material" placeholder="e.g. Aluminium 6061" style="flex:1;background:var(--bg);color:var(--text);border:1px solid var(--line);border-radius:6px;padding:6px;font:inherit"></div>
           <div class="modal-field"><label>Sheet</label><select id="draw-sheet"><option>A4</option><option>A3</option></select></div>
           <div id="draw-files" class="muted">no drawings yet</div>
+        </div>
+        <div class="cam-sec" id="print-sec" style="display:none"><h4>3D printing <span class="muted" id="print-slicer"></span><button class="btn small primary" id="print-slice">Slice</button></h4>
+          <div class="modal-field"><label>Printer</label><select id="print-machine" style="flex:1;min-width:0"></select></div>
+          <div class="modal-field"><label>Quality</label><select id="print-process" style="flex:1;min-width:0"></select></div>
+          <div class="modal-field"><label>Filament</label><select id="print-filament" style="flex:1;min-width:0"></select></div>
+          <div class="modal-field"><label>Body</label><select id="print-body" style="flex:1;min-width:0"><option value="">whole design</option></select></div>
+          <div class="modal-field"><label>Layer height</label><input id="print-lh" type="number" step="0.02" min="0.05" max="1" placeholder="profile" style="width:80px;background:var(--bg);color:var(--text);border:1px solid var(--line);border-radius:6px;padding:4px 6px;font:inherit"><span class="muted">mm</span></div>
+          <div class="modal-field"><label>Infill</label><input id="print-infill" type="number" step="5" min="0" max="100" placeholder="profile" style="width:80px;background:var(--bg);color:var(--text);border:1px solid var(--line);border-radius:6px;padding:4px 6px;font:inherit"><span class="muted">%</span></div>
+          <div class="modal-field"><label>Walls</label><input id="print-walls" type="number" step="1" min="1" max="10" placeholder="profile" style="width:80px;background:var(--bg);color:var(--text);border:1px solid var(--line);border-radius:6px;padding:4px 6px;font:inherit"><span class="muted">loops</span></div>
+          <div class="modal-field"><label>Supports</label><label style="width:auto;display:flex;align-items:center;gap:6px;color:var(--text)"><input type="checkbox" id="print-support"> enable</label>
+            <label style="width:auto;color:var(--muted)">Brim</label><select id="print-brim"><option value="">profile</option><option value="no_brim">none</option><option value="outer_only">outer</option><option value="outer_and_inner">outer + inner</option><option value="auto_brim">auto</option></select></div>
+          <div id="print-out" class="muted" style="margin-top:6px">Slices with the slicer installed on this computer and shows the layers here. The agent can do it too: <i>"slice this for my printer at 0.28 mm"</i>.</div>
+          <div id="print-result" style="display:none">
+            <div class="kv" id="print-stats" style="margin-top:6px"></div>
+            <div class="modal-field" style="margin-top:6px"><label>Layer</label><input type="range" id="print-layer" min="1" max="1" value="1" step="1" style="flex:1"><span id="print-layer-v" class="muted" style="min-width:110px;text-align:right"></span></div>
+            <div id="print-legend" style="display:flex;flex-wrap:wrap;gap:4px 10px;font-size:11px;margin:4px 0"></div>
+            <div class="modal-field"><label></label><label style="width:auto;display:flex;align-items:center;gap:6px;color:var(--text)"><input type="checkbox" id="print-hide-model" checked> hide model while previewing</label></div>
+            <div style="display:flex;gap:6px;margin-top:4px"><a class="btn small" href="/api/slicer/gcode">G-code</a><a class="btn small" href="/api/slicer/3mf">3MF</a><button class="btn small" id="print-clear">Clear preview</button></div>
+          </div>
         </div>
       </div>
     </div>
@@ -532,7 +552,8 @@ function applyColors(extraHighlight = []) {
   }
 }
 function applyVisibility() {
-  for (const b of model.bodies.values()) { const vis = !hidden.has(b.id); b.mesh.visible = vis; b.lines.visible = vis && showEdges; }
+  const hideAll = typeof sliceData !== 'undefined' && !!sliceData && showLayers && document.getElementById('print-hide-model').checked;   // sliced-layer preview
+  for (const b of model.bodies.values()) { const vis = !hidden.has(b.id) && !hideAll; b.mesh.visible = vis; b.lines.visible = vis && showEdges; }
 }
 
 const VIEW_DIRS = { iso: [1, -1, 0.8], iso_back: [-1, 1, 0.8], front: [0, -1, 0], back: [0, 1, 0], left: [-1, 0, 0], right: [1, 0, 0], top: [0, -0.0001, 1], bottom: [0, -0.0001, -1] };
@@ -982,6 +1003,92 @@ function renderChips() {
     chipsEl.appendChild(c);
   }
 }
+
+// ------------------------------------------------------------------ 3D printing: sliced layers from the external slicer
+const sliceGroup = new THREE.Group(); sliceGroup.renderOrder = 6; scene.add(sliceGroup);
+let sliceData = null, sliceLines = null, showLayers = true, sliceHidden = new Set(), printProfiles = null;
+const sliceMat = new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.95 });
+function clearSlice(keepData) {
+  if (sliceLines) { sliceGroup.remove(sliceLines); sliceLines.geometry.dispose(); sliceLines = null; }
+  if (!keepData) { sliceData = null; document.getElementById('print-result').style.display = 'none'; document.getElementById('layers-toggle').style.display = 'none'; }
+  applyModelVisibility();
+}
+function applyModelVisibility() { if (model) applyVisibility(); }
+function buildSliceGeometry() {
+  clearSlice(true); if (!sliceData) return;
+  const d = sliceData, n = d.feat.length, col = d.colors.map(c => new THREE.Color(c));
+  // segments are already in layer order; keep hidden features in place (collapsed to a point) so per-layer drawRange still works
+  const pos = new Float32Array(d.pos), colors = new Float32Array(n * 6);
+  for (let i = 0; i < n; i++) {
+    const c = col[d.feat[i]] || col[0]; const hid = sliceHidden.has(d.types[d.feat[i]]);
+    if (hid) { pos[i*6+3] = pos[i*6]; pos[i*6+4] = pos[i*6+1]; pos[i*6+5] = pos[i*6+2]; }
+    colors[i*6] = colors[i*6+3] = c.r; colors[i*6+1] = colors[i*6+4] = c.g; colors[i*6+2] = colors[i*6+5] = c.b;
+  }
+  const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  sliceLines = new THREE.LineSegments(g, sliceMat); sliceLines.renderOrder = 6; sliceGroup.add(sliceLines);
+  setSliceLayer(+document.getElementById('print-layer').value); applyModelVisibility();
+}
+function setSliceLayer(k) {
+  if (!sliceData || !sliceLines) return;
+  const L = sliceData.layers, end = k >= L.length ? sliceData.feat.length : L[k].start;
+  sliceLines.geometry.setDrawRange(0, end * 2);
+  const cur = L[Math.max(0, k - 1)] || {};
+  document.getElementById('print-layer-v').textContent = `${k} / ${L.length}` + (cur.z != null ? ` · z ${(+cur.z).toFixed(2)}` : '') + (cur.h != null ? ` · ${(+cur.h).toFixed(2)} mm` : '');
+}
+function loadSlice(m) {
+  sliceData = m.layers; const r = m.result;
+  const st = document.getElementById('print-stats'); const t = r.time_s >= 3600 ? `${Math.floor(r.time_s / 3600)} h ${Math.floor(r.time_s % 3600 / 60)} min` : `${Math.floor(r.time_s / 60)} min ${Math.round(r.time_s % 60)} s`;
+  st.innerHTML = [['Printer', r.machine], ['Quality', r.process], ['Filament', r.filament], ['Layers', `${r.layers} · ${r.height_mm.toFixed(2)} mm tall`], ['Time', t],
+    ['Filament', `${r.filament_g.toFixed(1)} g · ${(r.filament_mm / 1000).toFixed(2)} m`], ...(Object.keys(r.overrides).length ? [['Overrides', Object.entries(r.overrides).map(([k, v]) => `${k}=${v}`).join(', ')]] : []),
+    ...(r.warnings.length ? [['Warnings', r.warnings.join('; ')]] : []), ...(sliceData.truncated ? [['Note', 'preview truncated (very large G-code)']] : [])]
+    .map(([k, v]) => `<div>${k}</div><div>${v}</div>`).join('');
+  const lg = document.getElementById('print-legend'); lg.innerHTML = '';
+  sliceData.types.forEach((ty, i) => { if (ty === 'Custom') return; const b = document.createElement('label'); b.style.cssText = 'display:flex;align-items:center;gap:4px;cursor:pointer;opacity:' + (sliceHidden.has(ty) ? .45 : 1);
+    b.innerHTML = `<span style="width:10px;height:10px;border-radius:2px;background:${sliceData.colors[i]};display:inline-block"></span>${ty}`;
+    b.onclick = () => { if (sliceHidden.has(ty)) sliceHidden.delete(ty); else sliceHidden.add(ty); buildSliceGeometry(); b.style.opacity = sliceHidden.has(ty) ? .45 : 1; }; lg.appendChild(b); });
+  const sl = document.getElementById('print-layer'); sl.max = sliceData.layers.length; sl.value = sliceData.layers.length;
+  document.getElementById('print-result').style.display = ''; document.getElementById('layers-toggle').style.display = '';
+  document.getElementById('print-out').textContent = r.summary; document.getElementById('print-out').className = '';
+  buildSliceGeometry(); sliceGroup.visible = showLayers;
+  if (!m.restore) { addMsg('system', r.summary); document.querySelector('[data-pane=design]').click(); }
+}
+document.getElementById('print-layer').oninput = e => setSliceLayer(+e.target.value);
+document.getElementById('print-hide-model').onchange = applyModelVisibility;
+document.getElementById('print-clear').onclick = () => { clearSlice(false); document.getElementById('print-out').textContent = 'preview cleared'; };
+document.getElementById('layers-toggle').onclick = e => { showLayers = !showLayers; e.currentTarget.classList.toggle('active', showLayers); sliceGroup.visible = showLayers; applyModelVisibility(); };
+async function loadPrintProfiles(machine) {
+  const pe = document.getElementById('print-process'), fe = document.getElementById('print-filament');
+  pe.innerHTML = fe.innerHTML = '<option value="">loading…</option>';
+  try {
+    const pf = await api('/api/slicer/profiles?machine=' + encodeURIComponent(machine)); printProfiles = pf;
+    pe.innerHTML = pf.processes.map(p => `<option ${p.name === pf.default_process ? 'selected' : ''}>${p.name}</option>`).join('') || '<option value="">(none compatible)</option>';
+    fe.innerHTML = pf.filaments.map(f => `<option ${f.name === pf.default_filament ? 'selected' : ''}>${f.name}</option>`).join('') || '<option value="">(none compatible)</option>';
+  } catch (e) { pe.innerHTML = fe.innerHTML = '<option value="">—</option>'; document.getElementById('print-out').textContent = e.message; }
+}
+async function setupPrinting(m) {
+  const sec = document.getElementById('print-sec'); sec.style.display = m.installed ? '' : 'none';
+  if (!m.installed) { clearSlice(false); return; }
+  document.getElementById('print-slicer').textContent = `${m.slicer.name} ${m.slicer.version || ''}`.trim();
+  const me = document.getElementById('print-machine');
+  if (!me.options.length) {
+    try {
+      const { machines, default: def } = await api('/api/slicer/machines');
+      me.innerHTML = machines.map(x => `<option ${x.name === def ? 'selected' : ''}>${x.name}</option>`).join('');
+      if (me.value) loadPrintProfiles(me.value);
+    } catch (e) { document.getElementById('print-out').textContent = e.message; }
+    me.onchange = () => loadPrintProfiles(me.value);
+  }
+}
+function fillPrintBodies() { const be = document.getElementById('print-body'); const cur = be.value; be.innerHTML = '<option value="">whole design</option>' + (model ? [...model.bodies.values()].map(b => `<option ${b.path === cur ? 'selected' : ''} value="${b.path}">${b.name}</option>`).join('') : ''); }
+document.getElementById('print-slice').onclick = async () => {
+  const v = id => document.getElementById(id).value;
+  const overrides = {}; if (v('print-lh')) overrides.layer_height = +v('print-lh'); if (v('print-infill') !== '') overrides.sparse_infill_density = +v('print-infill');
+  if (v('print-walls')) overrides.wall_loops = +v('print-walls'); if (document.getElementById('print-support').checked) overrides.enable_support = true; if (v('print-brim')) overrides.brim_type = v('print-brim');
+  const out = document.getElementById('print-out'); out.className = 'muted'; out.textContent = 'slicing…'; document.getElementById('print-slice').disabled = true;
+  try { await api('/api/slicer/slice', { machine: v('print-machine'), process: v('print-process') || null, filament: v('print-filament') || null, body: v('print-body') || null, overrides }); }
+  catch (e) { out.textContent = e.message; addMsg('error', 'slicing failed: ' + e.message); }
+  finally { document.getElementById('print-slice').disabled = false; }
+};
 
 // ------------------------------------------------------------------ CAM: toolpaths, stock, simulation, library
 const camGroup = new THREE.Group(); scene.add(camGroup);
@@ -1900,6 +2007,7 @@ function connect() {
       case 'model':
         loadMesh(m.mesh); loadSketches(m.mesh.sketches); document.getElementById('undo').disabled = (m.history_len ?? 2) < 2; loadParams(); if (measuring) { mPicks = []; hideMeasureLine(); }
         designCode = m.code;
+        fillPrintBodies(); if (sliceData && m.source !== 'requality') { const o = document.getElementById('print-out'); o.className = 'muted'; o.textContent = 'model changed since the last slice — slice again'; } applyModelVisibility();
         if (codeWhich === 'design' && (!codeDirty || m.source === 'user')) { codeEl.value = m.code; codeDirty = false; }
         document.getElementById('codeerr').textContent = '';
         if (m.source === 'user') addMsg('system', 'model rebuilt from Code panel');
@@ -1917,6 +2025,8 @@ function connect() {
         if (m.source === 'edit') { /* rename/delete: message comes via 'info' */ }
         break;
       case 'design': setDesign(m); break;
+      case 'slicer': setupPrinting(m); break;
+      case 'sliced': loadSlice(m); break;
       case 'library_parts': libParts = m.parts; renderLibrary(); break;
       case 'drawings': renderDrawings(m.design, m.files); break;
       case 'library': library = { machines: m.machines, tools: m.tools }; renderCamTab(); fsFillLibs(); fsCalc(); break;

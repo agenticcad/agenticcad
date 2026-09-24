@@ -18,6 +18,7 @@ from pydantic import BaseModel
 import cad_kernel as ck
 import cam_kernel as cam
 import script_edit
+import slicer
 from agent import CadAgent, claude_cli_candidates, find_claude_cli
 from version import __version__
 
@@ -390,6 +391,70 @@ async def drawing_file(design: str, fname: str):
     return FileResponse(p, media_type="image/svg+xml" if fname.endswith(".svg") else "application/dxf")
 
 
+# ---------------------------------------------------------------- 3D printing (external slicer; absent when none is installed)
+class SliceBody(BaseModel):
+    machine: str | None = None
+    process: str | None = None
+    filament: str | None = None
+    body: str | None = None
+    walls_only: bool = False
+    overrides: dict = {}
+
+
+@app.get("/api/slicer")
+async def slicer_info(refresh: bool = False):
+    if refresh:
+        slicer.find_slicer(refresh=True)
+    return agent.slicer_payload()
+
+
+@app.get("/api/slicer/machines")
+async def slicer_machines(q: str = ""):
+    info = slicer.find_slicer()
+    if info is None:
+        return JSONResponse({"error": "no slicer installed"}, status_code=404)
+    ms = await asyncio.to_thread(slicer.machines, info)
+    q = q.lower()
+    return {"machines": [m for m in ms if not q or q in m["name"].lower()], "default": slicer.default_machine(info)}
+
+
+@app.get("/api/slicer/profiles")
+async def slicer_profiles(machine: str):
+    info = slicer.find_slicer()
+    if info is None:
+        return JSONResponse({"error": "no slicer installed"}, status_code=404)
+    try:
+        mach = await asyncio.to_thread(slicer.flatten, info, "machine", machine)
+        pf = await asyncio.to_thread(slicer.profiles_for, info, machine)
+    except slicer.SlicerError as e:
+        return JSONResponse({"error": str(e)}, status_code=404)
+    return pf | {"default_process": mach.get("default_print_profile", ""), "default_filament": (mach.get("default_filament_profile") or [""])[0],
+                 "bed": mach.get("printable_area"), "height": mach.get("printable_height"), "overrides": list(slicer.OVERRIDE_KEYS)}
+
+
+@app.post("/api/slicer/slice")
+async def slicer_slice(body: SliceBody):
+    try:
+        res = await agent.slice_model(body.machine, body.process, body.filament, body.overrides, body.body, body.walls_only)
+    except (slicer.SlicerError, ck.CadError) as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+    return res.to_dict() | {"summary": res.summary()}
+
+
+@app.get("/api/slicer/gcode")
+async def slicer_gcode():
+    if agent.slice_result is None:
+        return JSONResponse({"error": "nothing sliced yet"}, status_code=404)
+    return FileResponse(agent.slice_result.gcode, filename=(agent.design_name or "model") + ".gcode", media_type="text/plain")
+
+
+@app.get("/api/slicer/3mf")
+async def slicer_3mf():
+    if agent.slice_result is None:
+        return JSONResponse({"error": "nothing sliced yet"}, status_code=404)
+    return FileResponse(agent.slice_result.three_mf, filename=(agent.design_name or "model") + ".3mf", media_type="model/3mf")
+
+
 # ---------------------------------------------------------------- settings / agent
 class SettingsBody(BaseModel):
     settings: dict
@@ -513,6 +578,10 @@ async def ws_endpoint(ws: WebSocket) -> None:
                                        "program": agent.program.to_payload() if agent.program else None,
                                        "summary": agent.program.summary() if agent.program else "",
                                        "gcode_lines": agent.program.gcode().count("\n") if agent.program else 0}))
+        await ws.send_text(json.dumps(agent.slicer_payload()))
+        if agent.slice_layers is not None:
+            await ws.send_text(json.dumps({"type": "sliced", "result": agent.slice_result.to_dict() | {"summary": agent.slice_result.summary()},
+                                           "layers": agent.slice_layers, "restore": True}))
         await ws.send_text(json.dumps({"type": "status", "busy": agent.busy,
                                        "agent_ready": agent.client is not None, "auth_required": agent.auth_problem}))
         while True:
@@ -522,7 +591,7 @@ async def ws_endpoint(ws: WebSocket) -> None:
                 await _dispatch(ws, msg)
             except WebSocketDisconnect:
                 raise
-            except (ck.CadError, cam.CamError, script_edit.Refused, script_edit.Unsupported, KeyError, ValueError, TypeError) as e:
+            except (ck.CadError, cam.CamError, slicer.SlicerError, script_edit.Refused, script_edit.Unsupported, KeyError, ValueError, TypeError) as e:
                 # a bad or failed manual operation must never drop the connection
                 await ws.send_text(json.dumps({"type": "error", "text": f"{msg.get('type', '?') if isinstance(msg, dict) else '?'} failed: {e}"}))
     except WebSocketDisconnect:

@@ -30,6 +30,7 @@ import drawing
 from cam_data import Library
 from library import PartLibrary, slug as lib_slug
 import script_edit
+import slicer
 
 Emit = Callable[[dict[str, Any]], Awaitable[None]]
 
@@ -256,6 +257,8 @@ class CadAgent:
         self.tool_handlers: dict[str, Any] = {}   # filled by _make_server()
         self.auth_problem: str | None = None       # set when Claude Code is not signed in; shown as a banner in every tab
         self.cam_code: str = ""               # CAM script working copy (workspace/cam.py)
+        self.slice_result: slicer.SliceResult | None = None   # last 3D-printing slice (only when a slicer is installed)
+        self.slice_layers: dict[str, Any] | None = None       # its parsed G-code, viewer payload
         self.program: cam.Program | None = None
         cam_path = workspace / "cam.py"
         if cam_path.exists():
@@ -1146,11 +1149,91 @@ class CadAgent:
             except (ck.CadError, script_edit.Unsupported) as e:
                 return {"content": [{"type": "text", "text": f"sketch failed: {e}"}], "is_error": True}
 
+        # 3D printing: only offered when a slicer is installed on this machine (nothing is bundled)
+        slicing_tools = []
+        if slicer.find_slicer() is not None:
+            @tool("slicer_info", "The installed 3D-printing slicer, the printers it knows and, for `machine`, the compatible process "
+                  "(quality) and filament profiles plus the printer currently selected in the slicer. Call before slice_for_printing "
+                  "when the user names a printer or material you have not seen.",
+                  {"type": "object", "properties": {"machine": {"type": "string"}, "search": {"type": "string", "description": "filter printers by substring"}}})
+            async def slicer_info(args: dict[str, Any]) -> dict[str, Any]:
+                info = slicer.find_slicer()
+                if info is None:
+                    return {"content": [{"type": "text", "text": "no slicer installed"}], "is_error": True}
+                out: dict[str, Any] = {"slicer": f"{info.name} {info.version}".strip(), "default_machine": slicer.default_machine(info)}
+                q = (args.get("search") or "").lower()
+                ms = [m for m in slicer.machines(info) if not q or q in m["name"].lower()]
+                out["printers"] = [m["name"] for m in ms][:80] + ([f"... {len(ms) - 80} more, use search"] if len(ms) > 80 else [])
+                if args.get("machine"):
+                    try:
+                        pf = slicer.profiles_for(info, args["machine"])
+                    except slicer.SlicerError as e:
+                        return {"content": [{"type": "text", "text": str(e)}], "is_error": True}
+                    out["processes"] = [p["name"] for p in pf["processes"]]
+                    out["filaments"] = [f["name"] for f in pf["filaments"]]
+                    out["overrides"] = list(slicer.OVERRIDE_KEYS)
+                return {"content": [{"type": "text", "text": json.dumps(out)}]}
+
+            @tool("slice_for_printing", "Slice the design (or one `body`) for 3D printing with the installed slicer and show the layers in the "
+                  "viewer. `machine` is a printer profile name (default: the printer selected in the slicer), `process` a quality profile "
+                  "and `filament` a filament profile (defaults: the printer's defaults). Common overrides: layer_height (mm), "
+                  "sparse_infill_density (percent), enable_support (bool), brim_type (no_brim|outer_only|outer_and_inner|auto_brim), "
+                  "wall_loops, top_shell_layers, bottom_shell_layers. Returns layers, height, time and filament estimates; the "
+                  "G-code and 3MF are saved in workspace/slicing.",
+                  {"type": "object",
+                   "properties": {"machine": {"type": "string"}, "process": {"type": "string"}, "filament": {"type": "string"},
+                                  "body": {"type": "string"},
+                                  "layer_height": {"type": "number"}, "sparse_infill_density": {"type": "number"},
+                                  "enable_support": {"type": "boolean"}, "brim_type": {"type": "string"},
+                                  "wall_loops": {"type": "integer"}, "top_shell_layers": {"type": "integer"}, "bottom_shell_layers": {"type": "integer"}},
+                   "required": []})
+            async def slice_for_printing(args: dict[str, Any]) -> dict[str, Any]:
+                ov = {k: args[k] for k in slicer.OVERRIDE_KEYS if args.get(k) is not None}
+                try:
+                    res = await agent.slice_model(args.get("machine"), args.get("process"), args.get("filament"), ov, args.get("body"))
+                except (slicer.SlicerError, ck.CadError) as e:
+                    return {"content": [{"type": "text", "text": f"slicing failed: {e}"}], "is_error": True}
+                return {"content": [{"type": "text", "text": res.summary() + f"\nG-code: {res.gcode}\n3MF: {res.three_mf}"}]}
+
+            slicing_tools = [slicer_info, slice_for_printing]
+
         tools = [build_model, inspect_model, screenshot, export_model, get_code, save_design,
                  cam_context, build_cam, get_cam_code, export_gcode, feeds_speeds, save_machine, save_tool,
-                 get_parameters, set_parameters, measure_tool, mass_properties, make_drawings, library_tool, sketch_tool]
+                 get_parameters, set_parameters, measure_tool, mass_properties, make_drawings, library_tool, sketch_tool] + slicing_tools
         self.tool_handlers = {t.name: t.handler for t in tools}     # name -> async handler (tests call these directly)
         return create_sdk_mcp_server("cad", "0.4.0", tools=tools)
+
+
+    # ------------------------------------------------------------------ 3D printing (external slicer)
+    def slicer_payload(self) -> dict[str, Any]:
+        """What the UI needs to show (or hide) the 3D-printing section."""
+        info = slicer.find_slicer()
+        return {"type": "slicer", "installed": info is not None, "slicer": info.to_dict() if info else None,
+                "default_machine": slicer.default_machine(info) if info else None,
+                "result": self.slice_result.to_dict() | {"summary": self.slice_result.summary()} if self.slice_result else None}
+
+    async def slice_model(self, machine: str | None = None, process: str | None = None, filament: str | None = None,
+                          overrides: dict[str, Any] | None = None, body: str | None = None,
+                          walls_only: bool = False) -> slicer.SliceResult:
+        """Export the design (or one body) as STL, slice it with the installed slicer and publish the layers to
+        the viewer (`sliced` event). Raises SlicerError / CadError."""
+        info = slicer.find_slicer()
+        if info is None:
+            raise slicer.SlicerError("no slicer installed (OrcaSlicer or Bambu Studio)")
+        if self.model is None or not self.model.bodies:
+            raise ck.CadError("nothing to slice: the design is empty")
+        machine = machine or slicer.default_machine(info)
+        if not machine:
+            raise slicer.SlicerError("no printer chosen and the slicer has no default; pass `machine`")
+        out = self.workspace / "slicing"
+        out.mkdir(exist_ok=True)
+        paths = await asyncio.to_thread(ck.export, self.model, out, "model", ["stl"], 0.02, 0.1, body)
+        res = await asyncio.to_thread(slicer.slice_file, info, paths[0], machine, process, filament, overrides, out)
+        text = await asyncio.to_thread(Path(res.gcode).read_text, "utf-8", "replace")
+        layers = await asyncio.to_thread(slicer.parse_gcode, text, res.translate, walls_only)
+        self.slice_result, self.slice_layers = res, layers
+        await self.emit({"type": "sliced", "result": res.to_dict() | {"summary": res.summary()}, "layers": layers})
+        return res
 
     # ------------------------------------------------------------------ settings (model, effort, MCP servers)
     DEFAULT_SETTINGS: dict[str, Any] = {
@@ -1259,6 +1342,10 @@ class CadAgent:
         prompt = SYSTEM_PROMPT
         if len(mcp) > 1:
             prompt += "\n\nExternal MCP servers connected (their tools are prefixed mcp__<server>__): " + ", ".join(n for n in mcp if n != "cad") + "."
+        if slicer.find_slicer() is not None:
+            prompt += ("\n\n3D printing: a slicer is installed on this computer, so `slice_for_printing` (and `slicer_info`) are available. "
+                       "When the user wants to print a part, slice it and report layers/time/filament; the layers appear in the viewer. "
+                       "Do not invent printer or filament names: take them from `slicer_info`.")
         if st.get("extra_prompt"):
             prompt += "\n\nAdditional instructions from the user:\n" + st["extra_prompt"]
         kw: dict[str, Any] = {}

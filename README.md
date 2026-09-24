@@ -62,6 +62,7 @@ redistributes it; `agent.find_claude_cli()` locates the user's own install.
 | `export_model(name?, formats?)` | STEP / STL into `workspace/exports/` |
 | `get_code()` | current script |
 | `save_design(name?)` | save the script into `workspace/designs/` (only when the user asks) |
+| `slicer_info(machine?)`, `slice_for_printing(...)` | **only when a slicer is installed**: printers/profiles; slice for 3D printing and show the layers |
 
 ## UI
 
@@ -191,6 +192,27 @@ Agent-native, like the CAD side: a second script per design, `cam.py`, written b
   **Feeds & speeds**: `feeds(tool, material, machine)` / `apply_feeds(...)`, 13 materials, spindle and feed
   clamping, radial chip thinning; CAM-tab calculator with "Apply to tool"; agent tool `feeds_speeds`.
 - Not yet: 4-axis, drilling cycles (GRBL has none), thread milling.
+
+## 3D printing (external slicer)
+
+AgenticCAD does not bundle a slicer. If **OrcaSlicer** (or Bambu Studio, same CLI) is installed on the computer
+the Design tab grows a **3D printing** section and the agent gets two extra tools; otherwise neither exists.
+
+- **Detection**: `/Applications/OrcaSlicer.app` (macOS), `Program Files\OrcaSlicer` (Windows), `orca-slicer` on PATH
+  (Linux); override with `AGENTICCAD_SLICER=/path/to/exe[::/path/to/profiles]`. Printer, quality and filament
+  lists come from the slicer's own profiles (system vendors + your user presets); the printer selected in the
+  slicer is preselected.
+- **Options**: printer, quality (process) profile, filament, one body or the whole design, layer height, infill %,
+  wall loops, supports, brim. Anything else stays as the chosen profile says. The agent uses the same options:
+  *"slice this for my Ender 3 at 0.28 mm with supports"*.
+- **How**: the design is exported as STL (0.02 mm), the profiles' `inherits` chains are flattened (the CLI needs
+  flat JSON), your overrides applied, and the slicer is run headless (`--slice 0 --arrange 1 --export-3mf`).
+  Outputs land in `workspace/slicing/` (G-code + 3MF, downloadable from the section).
+- **Preview**: the G-code is parsed into extrusion segments per layer, mapped back from bed to model coordinates
+  using the 3MF placement, coloured by feature (walls, infill, top/bottom, support, skirt...) and drawn in the
+  viewer with a layer slider and a per-feature legend; the model hides while previewing (toggle). Stats: layers,
+  height, estimated time, filament weight/length, and slicer warnings.
+- Not a slicer UI: for per-object settings, modifiers, painting or multi-plate work, open the 3MF in the slicer.
 
 ## Settings (⚙ in the panel header)
 

@@ -5,6 +5,13 @@ features, patch bumps fix things. The version shown in the UI header comes from 
 
 ## [Unreleased]
 
+### Added
+- **3D printing via an installed slicer** (OrcaSlicer / Bambu Studio; nothing bundled). When one is detected the
+  Design tab gets a 3D printing section (printer, quality, filament, body, layer height, infill, walls, supports,
+  brim → Slice) and the agent gets `slicer_info` + `slice_for_printing`. The G-code is drawn in the viewer as
+  coloured layers with a layer slider and feature legend; stats (layers, time, filament, warnings) and G-code/3MF
+  downloads. `AGENTICCAD_SLICER` overrides detection. New module `slicer.py`, endpoints under `/api/slicer`.
+
 ### Changed
 - CAM is labelled **experimental** on the site, in the docs and README: toolpaths are correct and machine-checked
   but not optimised (long, conservative paths, many retracts, no stock simulation).
