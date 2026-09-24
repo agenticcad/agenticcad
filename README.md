@@ -264,7 +264,7 @@ Pre-1.0: minor bump for features, patch bump for fixes. `/api/version` serves bo
 
 ```bash
 .venv/bin/python -m pytest -q            # 123 unit/API tests, ~20 s, no Claude calls
-.venv/bin/python evals/run.py            # agent evals, 26 cases, ~$10, ~10 min (3 in parallel)
+.venv/bin/python evals/run.py            # agent evals, 26 cases, ~$3.50, ~2 min (3-4 in parallel); needs a Claude login or API key
 .venv/bin/python evals/run.py --filter cam --model claude-sonnet-5 --repeat 3
 ```
 
