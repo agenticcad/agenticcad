@@ -86,7 +86,10 @@ try:
 
         # 1 · describe
         say("Make a 60 × 40 × 8 mm mounting plate with four Ø5 holes 8 mm in from each corner, and a Ø20 boss 15 mm tall in the middle with a Ø8 through bore. Call it Plate.", "plate")
-        page.wait_for_timeout(800); mark("orbit"); orbit(-260, 40); page.wait_for_timeout(600)
+        page.wait_for_timeout(800); mark("orbit"); orbit(-260, 40)
+        cv = page.query_selector("#viewer > canvas").bounding_box(); page.mouse.move(cv["x"] + cv["width"] * 0.5, cv["y"] + cv["height"] * 0.5)
+        for _ in range(6): page.mouse.wheel(0, -120); page.wait_for_timeout(90)          # ease in a little
+        page.wait_for_timeout(600)
 
         # 2 · point at the boss top and ask
         top = face_screen_xy("f => f.kind === 'PLANE' && f.normal && f.normal[2] > 0.99 && f.center[2] > 15", (7, 0, 0))
@@ -110,6 +113,7 @@ try:
         before = stats()
         page.click("#cmd input[type=number]"); page.keyboard.press("Meta+a"); page.keyboard.type("2", delay=120); page.wait_for_timeout(400); page.keyboard.press("Enter")
         wait_rebuild(before); page.wait_for_timeout(800); mark("filleted")
+        page.keyboard.press("Escape"); page.wait_for_timeout(400)                       # close the tool so no dialog lingers
         page.evaluate("document.activeElement && document.activeElement.blur()")
         orbit(180, -30, ms=1100); page.wait_for_timeout(400)
 

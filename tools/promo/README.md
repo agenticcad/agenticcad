@@ -1,15 +1,18 @@
 # Promo video pipeline
 
-Everything here is generated: the footage is the site's simulated tutorial player driven by a "stage" page, the
-soundtrack is synthesised in `music.py` (original, no licensing), and Playwright records the stage in Chrome.
+Two ways to make footage; the live one is what ships.
 
+**Live (real app, real agent):**
 ```bash
 .venv/bin/pip install playwright imageio-ffmpeg && .venv/bin/playwright install ffmpeg
-.venv/bin/python tools/promo/music.py ../agenticcad-admin/promo/promo-music.wav 92
-cp tools/promo/stage/index.html ../agenticcad-site/promo/index.html      # served by the site's local server (promo/ is gitignored there)
-.venv/bin/python tools/promo/record.py http://localhost:8790 ../agenticcad-admin/promo
+.venv/bin/python tools/promo/music.py ../agenticcad-admin/promo/promo-music.wav 92     # original soundtrack
+cp tools/promo/stage/index.html ../agenticcad-site/promo/index.html                     # title/montage/end cards (site server, promo/ is gitignored there)
+.venv/bin/python tools/promo/live.py ../agenticcad-admin/promo                          # records the real app (needs a Claude login)
+.venv/bin/python tools/promo/edit.py http://localhost:8790 ../agenticcad-admin/promo    # speeds up waits only, captions, cards, music
 ```
+`live.py` starts a server on a fresh workspace, drives the UI in headless Chrome (typing, sending, clicking faces
+by projecting model geometry to screen, ribbon tools) and logs event timestamps. `edit.py` compresses the
+`wait:*`→`done:*` spans to ~2.4 s each, keeps everything else at 1×, overlays lower-thirds rendered from the
+stage CSS, and prepends/appends the title, montage (with the drawing the agent actually made) and end card.
 
-Outputs: `AgenticCAD-promo-1080p.mp4` (16:9 master), `AgenticCAD-promo-thumbnail.png`, and a 1:1 version made with
-ffmpeg (see record.py's ffmpeg call for the pattern). Edit `stage/index.html` to change scenes, captions or timing;
-the stage reports its duration in `window.__promoSeconds` so the audio is trimmed to match.
+**Simulated (no agent, deterministic):** `record.py` records the stage page's replay of the site tutorials.

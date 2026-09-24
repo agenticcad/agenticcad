@@ -86,7 +86,7 @@ def clip_len(d: Path) -> float: return float((d.parent / "len.txt").read_text())
 t_len, m_len, e_len = clip_len(title), clip_len(montage), clip_len(end)
 total = t_len + main_len + m_len + e_len
 inputs = ["-i", str(title), "-i", str(raw), "-i", str(montage), "-i", str(end), "-i", str(P / "promo-music.wav")]
-for png, _, _ in overlays: inputs += ["-loop", "1", "-t", f"{total:.2f}", "-i", str(png)]
+for png, _, e in overlays: inputs += ["-loop", "1", "-t", f"{min(e + 0.2, main_len):.2f}", "-i", str(png)]   # never longer than the footage: overlay would freeze-extend it
 fc = []
 fc.append(f"[0:v]trim=0:{t_len:.2f},setpts=PTS-STARTPTS,fps=30,scale=1920:1080,format=yuv420p[tt]")
 segs = []
@@ -97,7 +97,7 @@ cur = "m0"
 for i, (png, s, e) in enumerate(overlays):
     idx = 5 + i
     fc.append(f"[{idx}:v]format=rgba,fade=t=in:st={s:.2f}:d=0.45:alpha=1,fade=t=out:st={max(s, e - 0.45):.2f}:d=0.45:alpha=1[c{i}]")
-    fc.append(f"[{cur}][c{i}]overlay=0:0:enable='between(t,{s:.2f},{e:.2f})'[m{i + 1}]"); cur = f"m{i + 1}"
+    fc.append(f"[{cur}][c{i}]overlay=0:0:eof_action=pass:enable='between(t,{s:.2f},{e:.2f})'[m{i + 1}]"); cur = f"m{i + 1}"
 fc.append(f"[2:v]trim=0:{m_len:.2f},setpts=PTS-STARTPTS,fps=30,scale=1920:1080,format=yuv420p[mm]")
 fc.append(f"[3:v]trim=0:{e_len:.2f},setpts=PTS-STARTPTS,fps=30,scale=1920:1080,format=yuv420p[ee]")
 fc.append(f"[tt][{cur}][mm][ee]concat=n=4:v=1:a=0[vout]")
