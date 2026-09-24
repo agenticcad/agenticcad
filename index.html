@@ -81,7 +81,7 @@
   <div class="wrap">
     <div class="eyebrow" style="justify-content:center">Agent-native CAD / CAM · free for non-commercial use · exact B-rep</div>
     <h1>CAD that <span>talks back.</span></h1>
-    <p class="lead">Say what you want and it gets built. Point at what you mean and it gets changed. Tweak by hand when that is quicker. No feature tree to fight, no menus to memorise, and every edit stays reproducible. From first idea to drawings and G-code in one place, on your own machine.</p>
+    <p class="lead">Say what you want and it gets built. Point at what you mean and it gets changed. Tweak by hand when that is quicker. No feature tree to fight, no menus to memorise, and every edit stays reproducible. From first idea to exact STEP, print-ready STL and shop drawings, on your own machine.</p>
     <div class="cta">
       <a class="btn primary" href="#download" data-dl><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12M6 9l6 6 6-6M4 20h16"/></svg>Download <span data-dl-ver>latest</span> · <span data-dl-label>desktop app</span></a>
       <a class="btn" href="tutorials/">▶&nbsp; Try the simulated tutorials</a>
@@ -93,8 +93,8 @@
 </section>
 
 <div class="ticker"><div class="track">
-  <span>Describe a part in plain words</span><span>Point at faces, edges and bodies in chat</span><span>Fusion-style ribbon for hand tweaks</span><span>Sketches on any face</span><span>ISO threads</span><span>Exact STEP, tolerance-controlled STL</span><span>Shop drawings with hole tables</span><span>Constant-engagement adaptive clearing</span><span>GRBL G-code with arcs</span><span>Parametric part library</span><span>Pick your Claude model, plug in MCP servers</span><span>Unit tests and graded agent evals</span>
-  <span>Describe a part in plain words</span><span>Point at faces, edges and bodies in chat</span><span>Fusion-style ribbon for hand tweaks</span><span>Sketches on any face</span><span>ISO threads</span><span>Exact STEP, tolerance-controlled STL</span><span>Shop drawings with hole tables</span><span>Constant-engagement adaptive clearing</span><span>GRBL G-code with arcs</span><span>Parametric part library</span><span>Pick your Claude model, plug in MCP servers</span><span>Unit tests and graded agent evals</span>
+  <span>Describe a part in plain words</span><span>Point at faces, edges and bodies in chat</span><span>Fusion-style ribbon for hand tweaks</span><span>Sketches on any face</span><span>ISO threads</span><span>Exact STEP, tolerance-controlled STL</span><span>Shop drawings with hole tables</span><span>Experimental GRBL CAM</span><span>Parametric part library</span><span>Pick your Claude model, plug in MCP servers</span><span>Unit tests and graded agent evals</span>
+  <span>Describe a part in plain words</span><span>Point at faces, edges and bodies in chat</span><span>Fusion-style ribbon for hand tweaks</span><span>Sketches on any face</span><span>ISO threads</span><span>Exact STEP, tolerance-controlled STL</span><span>Shop drawings with hole tables</span><span>Experimental GRBL CAM</span><span>Parametric part library</span><span>Pick your Claude model, plug in MCP servers</span><span>Unit tests and graded agent evals</span>
 </div></div>
 
 <section id="start" class="install">
@@ -210,24 +210,6 @@ result = {<span class="hl-s">"Plate"</span>: _plate3.<span class="hl-f">fillet</
   </div>
 </section>
 
-<section id="cam" style="background:var(--bg2);border-top:1px solid var(--line);border-bottom:1px solid var(--line)">
-  <div class="wrap">
-    <div class="split rev">
-      <div>
-        <div class="eyebrow">Step 3 · Machine it</div>
-        <h2>Ask for a program. Get real toolpaths.</h2>
-        <p class="muted">Have a CNC router? Describe the job the way you would brief a machinist and the agent writes a second script, cam.py, against a small honest API: <code>section</code>, <code>holes</code> and <code>stock_minus</code> taken from the exact model; <code>face</code>, <code>contour</code>, <code>pocket</code>, <code>adaptive</code>, <code>drill</code> and <code>parallel3d</code> for the cuts. The GRBL post checks travel, spindle range, feeds and depth against the machine you picked and tells you before you press run.</p>
-        <div class="caml" id="cam-ops"></div>
-        <div style="display:flex;gap:10px;margin-top:16px;align-items:center"><button class="btn small" id="cam-replay">↻ Replay</button><a class="btn small" href="tutorials/?t=cam">Play the CAM tutorial →</a></div>
-      </div>
-      <div class="reveal">
-        <div class="frame"><div class="bar"><i></i><i></i><i></i><span>plate.cam.py — Generic 3018 · aluminium · toolpaths drawn from the real program</span></div><div class="viewer" id="cam-viewer" style="height:400px"><div class="tag">Toolpaths</div><div class="hud" id="cam-hud"></div></div></div>
-        <p class="muted" style="font-size:12px;margin:10px 0 6px">The first lines of the exported G-code:</p>
-        <div class="gc" id="cam-gcode"></div>
-      </div>
-    </div>
-  </div>
-</section>
 
 <section id="advanced">
   <div class="wrap">
@@ -246,6 +228,26 @@ result = {<span class="hl-s">"Plate"</span>: _plate3.<span class="hl-f">fillet</
   </div>
 </section>
 
+
+<section id="cam" style="background:var(--bg2);border-top:1px solid var(--line);border-bottom:1px solid var(--line)">
+  <div class="wrap">
+    <div class="split rev">
+      <div>
+        <div class="eyebrow" style="color:var(--yellow)">Experimental · CAM preview</div>
+        <h2>CAM is in, and it is early.</h2>
+        <div class="callout warn" style="margin:0 0 16px"><b>Treat CAM as a preview.</b> The toolpaths are geometrically correct and the post checks your machine's limits, but they are not yet optimised: expect long, conservative paths with many retracts, and no stock simulation. Good for learning and for simple parts you inspect first; not yet a replacement for your CAM package. The modelling side is where AgenticCAD is solid today.</div>
+        <p class="muted">Have a CNC router? Describe the job the way you would brief a machinist and the agent writes a second script, cam.py, against a small API: <code>section</code>, <code>holes</code> and <code>stock_minus</code> taken from the exact model; <code>face</code>, <code>contour</code>, <code>pocket</code>, <code>adaptive</code>, <code>drill</code> and <code>parallel3d</code> for the cuts. The GRBL post checks travel, spindle range, feeds and depth against the machine you picked and tells you before you press run.</p>
+        <div class="caml" id="cam-ops"></div>
+        <div style="display:flex;gap:10px;margin-top:16px;align-items:center"><button class="btn small" id="cam-replay">↻ Replay</button><a class="btn small" href="tutorials/?t=cam">Play the CAM tutorial (experimental) →</a></div>
+      </div>
+      <div class="reveal">
+        <div class="frame"><div class="bar"><i></i><i></i><i></i><span>plate.cam.py — Generic 3018 · aluminium · toolpaths drawn from the real program</span></div><div class="viewer" id="cam-viewer" style="height:400px"><div class="tag">Toolpaths</div><div class="hud" id="cam-hud"></div></div></div>
+        <p class="muted" style="font-size:12px;margin:10px 0 6px">The first lines of the exported G-code:</p>
+        <div class="gc" id="cam-gcode"></div>
+      </div>
+    </div>
+  </div>
+</section>
 
 <section id="licence" class="tight">
   <div class="wrap">

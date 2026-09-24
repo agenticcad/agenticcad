@@ -187,7 +187,8 @@ sketch1 = _sketch1.sketch
       <li><b>STEP export is exact</b>. <b>STL is tessellated only at export</b>, at the deviation you choose; it never reuses the display mesh.</li>
     </ul>
 
-    <h2 id="cam">CAM overview</h2>
+    <h2 id="cam">CAM overview <span style="font-size:13px;vertical-align:middle;background:rgba(255,209,102,.15);border:1px solid rgba(255,209,102,.5);color:var(--yellow);border-radius:999px;padding:2px 10px;margin-left:8px">experimental</span></h2>
+    <div class="callout warn"><b>Experimental.</b> The CAM toolpaths are geometrically correct and machine-checked, but not optimised: paths are long and conservative with many retracts, there is no stock simulation or collision checking, and nothing here has been cut on a real machine by anyone but the author. Inspect every program before running it. The modelling, export and drawing features are the stable part of AgenticCAD today.</div>
     <p>CAM is a second script per design, <code>cam.py</code> (saved as <code>&lt;name&gt;.cam.py</code>), written against <code>cam_kernel.py</code> and built with the <code>build_cam</code> tool or the Code tab. It must assign <code>program</code>. The namespace provides <code>model</code>, <code>part</code>, <code>bodies</code>, <code>tools</code> and <code>machines</code>.</p>
 <pre><code>part = bodies[<span class="hl-s">"Plate"</span>]
 stock = Stock.<span class="hl-f">from_model</span>(part, margin=<span class="hl-n">3</span>, top=<span class="hl-n">1.0</span>)

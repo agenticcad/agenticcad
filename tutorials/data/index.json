@@ -29,9 +29,9 @@
  },
  {
   "id": "cam",
-  "title": "CAM in five minutes",
+  "title": "CAM in five minutes (experimental)",
   "minutes": 4,
-  "intro": "Ask for a program and get real toolpaths: facing, constant-engagement adaptive roughing, drilling, a tabbed outline, and GRBL G-code with arcs and tool changes, checked against your machine's limits.",
+  "intro": "Experimental preview: ask for a program and get toolpaths (facing, adaptive roughing, drilling, a tabbed outline) and GRBL G-code checked against your machine's limits. Correct, but not yet optimised \u2014 inspect before you run.",
   "steps": 10
  }
 ]
