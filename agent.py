@@ -1121,7 +1121,7 @@ class CadAgent:
 
     # ------------------------------------------------------------------ settings (model, effort, MCP servers)
     DEFAULT_SETTINGS: dict[str, Any] = {
-        "model": "",                       # "" = the Claude Code default; else a model id like claude-opus-5
+        "model": "claude-opus-5-5",        # default model; "" = the Claude Code default
         "effort": "",                      # "" = default; low | medium | high | xhigh | max
         "max_turns": 60,
         "thinking_display": "omitted",     # omitted | summarized (shows the thinking summary in chat)
@@ -1129,7 +1129,7 @@ class CadAgent:
         "mcp_servers": {},                 # name -> {type: stdio|http|sse, command, args, env, url, headers, enabled}
         "extra_prompt": "",                # appended to the system prompt (house rules, machine notes...)
     }
-    MODELS = ["claude-opus-5", "claude-sonnet-5", "claude-haiku-4-5", "claude-opus-4-8", "claude-opus-4-7", "claude-fable-5-1"]
+    MODELS = ["claude-opus-5-5", "claude-fable-5-1", "claude-sonnet-5", "claude-opus-5", "claude-opus-4-8", "claude-haiku-4-5"]
 
     def _settings_path(self) -> Path:
         return self.workspace / "settings.json"

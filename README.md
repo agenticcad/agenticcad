@@ -38,7 +38,7 @@ cd agenticcad
 ```
 
 Auth: the Agent SDK's bundled Claude Code binary uses your Claude Code login; set `ANTHROPIC_API_KEY`
-to use an API key instead. `AGENTICCAD_MODEL=claude-opus-5` (etc.) overrides the model.
+to use an API key instead. The default model is Claude Opus 5.5 (`claude-opus-5-5`); change it in Settings ⚙ or with `AGENTICCAD_MODEL=<model id>`.
 
 Setup from scratch: `python3 -m venv .venv && .venv/bin/pip install -r requirements.txt`.
 
@@ -87,7 +87,7 @@ redistributes it; `agent.find_claude_cli()` locates the user's own install.
 ## Designs (files)
 
 A design **is** its build123d script. `File ▸ Save / Save as…` writes `workspace/designs/<name>.py`;
-`Open…` lists them; `New` resets to a template; `Import .py…` uploads a script from disk;
+`Open…` lists them; `New` starts an empty design (a fresh workspace starts empty too); `Import .py…` uploads a script from disk;
 `Download .py` gives you the current one. The title shows the design name and a `•` when unsaved.
 The last-open design is reopened on restart. The agent gets a `[Note]` when you open/import/undo or
 edit the script by hand, so it re-reads the code before editing.
@@ -190,7 +190,7 @@ Agent-native, like the CAD side: a second script per design, `cam.py`, written b
 
 ## Settings (⚙ in the panel header)
 
-Model (any Claude model id, or the Claude Code default), effort (low…max), max steps per turn, thinking
+Model (default Claude Opus 5.5; any Claude model id, or the Claude Code default), effort (low…max), max steps per turn, thinking
 summary on/off, web tools on/off, extra standing instructions, and **MCP servers** (stdio / http / sse
 configs as JSON, enable toggles, live connection status from the session). Saved to
 `workspace/settings.json`; "Save & restart agent" starts a fresh session with the new options (the agent
@@ -263,8 +263,8 @@ Pre-1.0: minor bump for features, patch bump for fixes. `/api/version` serves bo
 ## Tests and evals
 
 ```bash
-.venv/bin/python -m pytest -q            # 70 unit/API tests, ~9 s, no Claude calls
-.venv/bin/python evals/run.py            # agent evals, 13 cases, ~$5, ~2 min (3 in parallel)
+.venv/bin/python -m pytest -q            # 123 unit/API tests, ~20 s, no Claude calls
+.venv/bin/python evals/run.py            # agent evals, 26 cases, ~$10, ~10 min (3 in parallel)
 .venv/bin/python evals/run.py --filter cam --model claude-sonnet-5 --repeat 3
 ```
 

@@ -3,9 +3,10 @@
 All notable changes to AgenticCAD. Versions follow [SemVer](https://semver.org): pre-1.0, minor bumps add
 features, patch bumps fix things. The version shown in the UI header comes from `version.py`.
 
-## [Unreleased]
+## [0.11.0] — 2026-09-24
 
 ### Changed
+- Default agent model is **Claude Opus 5.5** (`claude-opus-5-5`); the Settings list is ordered Opus 5.5, Fable 5.1, Sonnet 5, Opus 5, Opus 4.8, Haiku 4.5.
 - **First run starts empty.** A fresh workspace (and File ▸ New) opens a blank design instead of the demo bracket;
   `result = {}` / `result = None` are valid empty designs, the viewer frames the grid and the Browser explains
   how to add a body. An untouched empty design is not marked unsaved.

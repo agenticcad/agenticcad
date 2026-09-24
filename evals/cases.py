@@ -129,9 +129,7 @@ DOMED = """# block with a spherical dome on top (for 3D finishing evals)
 with BuildPart() as bp:
     Box(40, 40, 10)
     with Locations((0, 0, 5)):
-        Sphere(12, mode=Mode.ADD)
-    Box(60, 60, 20, align=(Align.CENTER, Align.CENTER, Align.MAX), mode=Mode.SUBTRACT)
-    Box(60, 60, 20, mode=Mode.INTERSECT)
+        Sphere(12)
 result = {"Dome": bp.part}
 """
 
