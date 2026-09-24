@@ -43,7 +43,7 @@
   .frame .pl-hud{font-size:12px}.frame .tool{font-size:15px}.frame .tool .res{font-size:13px}
   .cap{position:absolute;left:160px;bottom:60px;display:flex;flex-direction:column;gap:6px;transform:translateY(40px);opacity:0;transition:.55s cubic-bezier(.2,.8,.2,1)}
   .cap.on{transform:none;opacity:1}
-  .cap b{font-size:64px;font-weight:800;letter-spacing:-.03em;color:#fff;line-height:1.05}
+  .cap b{font-size:64px;font-weight:800;letter-spacing:-.02em;word-spacing:.08em;color:#fff;line-height:1.05;white-space:pre}
   .cap b em{font-style:normal;color:#ff8c42}
   .cap span{font-size:26px;color:#b7c0cc}
   .step{position:absolute;right:160px;top:60px;font:600 20px/1 "JetBrains Mono",monospace;letter-spacing:.14em;color:#ff8c42;text-transform:uppercase;opacity:0;transition:.5s}
@@ -145,7 +145,7 @@ async function run() {
   cap('Point <em>at it.</em>', 'Click a face. The agent works on exactly that geometry.', 'step 2 · point');
   await demo('select-face', 1, 7, 2);
   // 4 · ribbon
-  cap('Tweak it <em>by hand.</em>', 'Fusion-style tools. Every click is written into the script.', 'step 3 · tweak');
+  cap('Tweak it <em>by hand</em>.', 'Fusion-style tools. Every click is written into the script.', 'step 3 · tweak');
   await demo('ribbon', 1, 5, 2);
   // 5 · CAM
   cap('Then <em>cut it.</em>', 'Adaptive clearing, drilling, tabs. GRBL G-code with arcs.', 'step 4 · machine');
