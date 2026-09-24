@@ -331,5 +331,5 @@ and use by charities, schools and public institutions. See the LICENSE file for 
 
 **Commercial use** (using it in a business, in products or services, or as part of paid work) needs a
 commercial licence: **A$100 per user per year**, one licence per person who uses it, same software.
-Email **agenticcad@prodevelop.com.au** with the number of users for an invoice and licence letter; volume and
-site licences on request. Details: https://agenticcad.github.io/agenticcad/#licence
+Buy online for the number of users you need; the receipt is your licence record and there is nothing to
+enter in the app. Volume or site licences: **agenticcad@prodevelop.com.au**. Details: https://agenticcad.github.io/agenticcad/#licence
