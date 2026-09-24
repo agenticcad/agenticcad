@@ -159,7 +159,11 @@ Auth: the Claude Agent SDK uses your Claude Code login (or `ANTHROPIC_API_KEY`).
 - **STL is tessellated only at export time**, at the deviation you choose (toolbar dropdown, or the
   agent's `export_model(tolerance, angular_tolerance)`); it never reuses the display mesh.
 
-## CAM (GRBL)
+## CAM (GRBL) — experimental
+
+> **Experimental.** Toolpaths are geometrically correct and machine-checked, but not optimised (long, conservative
+> paths, many retracts, no stock simulation). Inspect every program before running it. Modelling, export and
+> drawings are the stable part today.
 
 Agent-native, like the CAD side: a second script per design, `cam.py`, written by the agent against
 [cam_kernel.py](cam_kernel.py) and built with the `build_cam` tool. Saved with the design as `<name>.cam.py`.

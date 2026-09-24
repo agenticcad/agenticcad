@@ -1621,8 +1621,8 @@ const TOOLS = {
   cylinder: { group: 'create', label: 'Cylinder',   key: 'C', hint: 'Click a face to stand the cylinder on it.', picks: 'face1', steps: ['Place', 'Size'] },
   sphere:   { group: 'create', label: 'Sphere',     key: 'O', hint: 'Click a face to place the sphere on it.', picks: 'face1', steps: ['Place', 'Size'] },
   sketch:   { group: 'create', label: 'Sketch',     key: 'K', hint: 'Select a flat face first, or choose a base plane.', picks: 'none' },
-  extrude:  { group: 'modify', label: 'Press/Pull', key: 'Q', hint: 'Click a face, then set the distance. Negative pushes in (cut).', picks: 'face1', steps: ['Face', 'Distance'] },
-  hole:     { group: 'modify', label: 'Hole',       key: 'H', hint: 'Click where the hole starts on a face. Plain, counterbored or tapped.', picks: 'face1', steps: ['Position', 'Size'] },
+  extrude:  { group: 'modify', label: 'Press/Pull', key: 'Q', hint: 'Click a flat face, then set the distance. Negative pushes in (cut).', picks: 'face1', steps: ['Face', 'Distance'] },
+  hole:     { group: 'modify', label: 'Hole',       key: 'H', hint: 'Click where the hole starts on a flat face. Plain, counterbored or tapped.', picks: 'face1', steps: ['Position', 'Size'] },
   fillet:   { group: 'modify', label: 'Fillet',     key: 'F', hint: 'Click edges, or a face to take all of its edges. Then set the radius.', picks: 'edges', steps: ['Edges', 'Radius'] },
   chamfer:  { group: 'modify', label: 'Chamfer',    key: 'X', hint: 'Click edges, or a face to take all of its edges. Then set the distance.', picks: 'edges', steps: ['Edges', 'Distance'] },
   shell:    { group: 'modify', label: 'Shell',      key: 'L', hint: 'Click the faces to open. Leave none selected for a hollow body.', picks: 'faces', steps: ['Open faces', 'Thickness'] },
@@ -1669,7 +1669,7 @@ function endTool() {
 function toolHover(ev) {
   const sn = snapPick(ev); clearHover(); hoverSnap = sn;
   const want = TOOLS[tool.kind].picks;
-  const ok = sn && (want === 'edges' ? (sn.type === 'edge' || sn.type === 'face') : (sn.type === 'face'));
+  const ok = sn && (want === 'edges' ? (sn.type === 'edge' || sn.type === 'face') : want === 'face1' ? (sn.type === 'face' && (model.faces.get(sn.id) || {}).kind === 'PLANE') : (sn.type === 'face'));
   hoverEl.textContent = ok ? describeSnap(sn) : TOOLS[tool.kind].hint;
   if (!ok) return;
   if (sn.type === 'edge') { hoverObj = new THREE.Group(); hoverObj.add(mkLine(sn.pts, hoverEdgeMat)); }
@@ -1681,7 +1681,7 @@ function toolPick(sn) {
   const want = TOOLS[tool.kind].picks;
   if (want === 'edges') { if (sn.type !== 'edge' && sn.type !== 'face') return; tool.picks.push(sn); }
   else if (want === 'faces') { if (sn.type !== 'face') return; tool.picks.push(sn); }
-  else if (want === 'face1') { if (sn.type !== 'face') return; tool.picks = [sn]; }
+  else if (want === 'face1') { if (sn.type !== 'face') return; const fi = model.faces.get(sn.id); if (!fi || fi.kind !== 'PLANE') { hoverEl.textContent = 'Pick a flat face — ' + (fi ? fi.kind.toLowerCase() : 'this') + ' faces cannot be pressed, pulled or built on.'; return; } tool.picks = [sn]; }
   else return;
   redrawToolPicks(); renderCmd();
   if (tool.kind === 'extrude' && sn.type === 'face') pullSetup(sn);

@@ -3,6 +3,17 @@
 All notable changes to AgenticCAD. Versions follow [SemVer](https://semver.org): pre-1.0, minor bumps add
 features, patch bumps fix things. The version shown in the UI header comes from `version.py`.
 
+## [Unreleased]
+
+### Changed
+- CAM is labelled **experimental** on the site, in the docs and README: toolpaths are correct and machine-checked
+  but not optimised (long, conservative paths, many retracts, no stock simulation).
+
+### Fixed
+- Press/Pull, Box, Cylinder, Sphere and Hole only accept flat faces (the ribbon says so and ignores curved picks;
+  the server refuses too). Pressing a cylindrical face used to produce an empty body that rendered as nothing.
+- A build whose body has no volume now fails with a clear error instead of showing an empty viewer.
+
 ## [0.11.1] — 2026-09-24
 
 ### Added

@@ -385,6 +385,10 @@ def build_model(pairs: list[tuple[str, Shape]] | Shape, code: str = "", quality:
         bodies.append(body)
         face_lists.append(faces)
 
+    for b in bodies:
+        if b.volume <= 1e-9 or not b.shape.faces():
+            raise CadError(f"body '{b.path}' has no volume (the last operation produced an empty or invalid solid; "
+                           f"check that the face/edge it used was the right one and that the shape is not degenerate)")
     if not bodies:                                   # empty design: finite bbox so the viewer has something to frame
         gmin, gmax = [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]
     diag = math.dist(gmin, gmax) or 1.0

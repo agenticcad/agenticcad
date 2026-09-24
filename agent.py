@@ -23,6 +23,7 @@ from claude_agent_sdk import (
 )
 from claude_agent_sdk.types import StreamEvent, TextBlock, ToolUseBlock, ToolResultBlock
 
+import build123d as b3d
 import cad_kernel as ck
 import cam_kernel as cam
 import drawing
@@ -595,7 +596,14 @@ class CadAgent:
 
     async def op_extrude_face(self, body: str, point: list[float], normal: list[float], amount: float, mode: str = "join") -> None:
         """Press/pull: extrude the face under the clicked `point` of `body` along `normal` by `amount`
-        (negative = into the body → cut)."""
+        (negative = into the body → cut). Only planar faces can be pressed/pulled."""
+        if self.model is not None:
+            b_ = self.model.body_by_name(body)
+            if b_ is not None:
+                pt = b3d.Vector(*point)
+                face = min(b_.shape.faces(), key=lambda f: f.distance_to(pt))
+                if face.geom_type != b3d.GeomType.PLANE:
+                    raise ck.CadError(f"press/pull needs a flat face; the point you clicked is on a {face.geom_type.name.lower()} face")
         face = f"{{body}}.faces().sort_by_distance({self._p(point)})[0]"     # the clicked point lies ON the face
         cut = mode == "cut" or amount < 0
         n = [-v for v in normal] if cut else list(normal)

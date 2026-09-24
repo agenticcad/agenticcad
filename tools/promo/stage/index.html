@@ -92,13 +92,13 @@
         <div>Exact STEP<small>Cylinders stay cylinders. Opens cleanly in any CAD.</small></div>
         <div>STL for printing<small>Tessellated only at export, at the resolution you choose.</small></div>
         <div>Shop drawings<small>Third-angle views, dimensions and hole tables. Automatically.</small></div>
-        <div>GRBL G-code<small>Checked against your machine before you press run.</small></div>
+        <div>Parametric part library<small>Save any body, insert it anywhere, the agent searches it.</small></div>
       </div>
     </div></div>
   <div class="scene" id="s-end"><div class="bgrid"></div><div class="glow a"></div><div class="glow b"></div>
     <div class="end">
       <svg viewBox="0 0 32 32" fill="none"><path d="M16 3 28 9.5v13L16 29 4 22.5v-13L16 3Z" stroke="#4ea1ff" stroke-width="1.6" stroke-linejoin="round"/><path d="M16 16 28 9.5M16 16v13M16 16 4 9.5" stroke="#4ea1ff" stroke-width="1.6" stroke-linejoin="round"/><circle cx="16" cy="16" r="3.2" fill="#ff8c42"/></svg>
-      <h2>Describe it. Point at it. Cut it.</h2>
+      <h2>Describe it. Point at it. Build it.</h2>
       <div class="url">agenticcad.github.io/agenticcad</div>
       <p>Runs on your machine with Claude Code. Every design is one reproducible script.</p>
       <div class="pills"><span class="free">Free for non-commercial use</span><span>macOS</span><span>Windows</span><span>Source</span></div>
@@ -161,7 +161,16 @@ async function run() {
   window.__promoDone = true; window.__promoSeconds = (performance.now() - t0) / 1000;
   document.title = 'DONE ' + window.__promoSeconds.toFixed(1);
 }
-document.fonts.ready.then(() => setTimeout(run, q.has('rec') ? 800 : 300));
+async function runScene(name) {
+  const t0 = performance.now();
+  if (q.get('img')) document.querySelector('#montage img').src = q.get('img');
+  if (name === 'title') { show('s-title'); await sleep(+(q.get('dur') || 5200)); }
+  else if (name === 'montage') { show('s-montage'); const m = document.getElementById('montage'); requestAnimationFrame(() => m.classList.add('on'));
+    const items = [...m.querySelectorAll('.list div')]; for (let i = 0; i < items.length; i++) { await sleep(i === 0 ? 700 : 1400); items[i].classList.add('on'); } await sleep(+(q.get('dur') || 2600)); }
+  else if (name === 'end') { show('s-end'); await sleep(+(q.get('dur') || 7500)); }
+  window.__promoDone = true; window.__promoSeconds = (performance.now() - t0) / 1000;
+}
+document.fonts.ready.then(() => setTimeout(() => q.get('scene') ? runScene(q.get('scene')) : run(), q.has('rec') ? 800 : 300));
 </script>
 </body>
 </html>

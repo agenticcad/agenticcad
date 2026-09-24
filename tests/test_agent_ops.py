@@ -366,3 +366,12 @@ async def test_api_key_setting_is_masked_and_used(ag, monkeypatch):
     assert ag.auth_status() == {"logged_in": True, "auth_method": "api_key", "error": None}
     ag.save_settings({"api_key": ""})
     assert ag.public_settings()["api_key_set"] is False
+
+
+async def test_press_pull_refuses_curved_faces_and_empty_bodies_fail_loudly(ag):
+    await build(ag)
+    with pytest.raises(ck.CadError, match="flat face"):
+        await ag.op_extrude_face("Plate", [4, 0, 15], [0, 0, 1], 5)          # a point on the bore wall (cylinder)
+    assert ag.model.volume > 0
+    with pytest.raises(ck.CadError, match="no volume"):
+        await ag.build("result = {'Ghost': Box(10, 10, 10) - Box(20, 20, 20)}\n")   # empty solid must not build silently

@@ -199,8 +199,8 @@ program.add(drill(setup, drl, mount, peck="auto", name="Mounting holes (pilot)")
 program.add(contour(setup, t6, section(part, 0.0), z_top=4, z_bottom=-4.5, tabs=4, name="Outline"))
 '''
     warn = "; ".join(prog.check()) or "no warnings"
-    return {"id": "cam", "title": "CAM in five minutes", "minutes": 4,
-            "intro": "Ask for a program and get real toolpaths: facing, constant-engagement adaptive roughing, drilling, a tabbed outline, and GRBL G-code with arcs and tool changes, checked against your machine's limits.",
+    return {"id": "cam", "title": "CAM in five minutes (experimental)", "minutes": 4,
+            "intro": "Experimental preview: ask for a program and get toolpaths (facing, adaptive roughing, drilling, a tabbed outline) and GRBL G-code checked against your machine's limits. Correct, but not yet optimised — inspect before you run.",
             "meshes": {"m1": mesh_of(m)},
             "program": payload,
             "gcode_head": "\n".join(lines[:28]),
