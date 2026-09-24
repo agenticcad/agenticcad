@@ -73,6 +73,7 @@
   .steps li::before{counter-increment:s;content:counter(s);position:absolute;left:0;top:2px;width:28px;height:28px;border-radius:50%;background:rgba(255,140,66,.14);border:1px solid rgba(255,140,66,.5);color:var(--accent);font-family:var(--mono);font-size:12px;display:grid;place-items:center}
   .steps li b{color:var(--text)}
   .prompt{background:#0d1117;border:1px solid var(--line);border-left:3px solid var(--blue);border-radius:10px;padding:12px 14px;font-size:14px;color:#dbe3ec;margin:0 0 1.2em}
+  details.src{border:1px solid var(--line);border-radius:10px;padding:10px 14px;margin-top:4px}details.src summary{cursor:pointer;color:var(--muted);font-size:14px}details.src[open] summary{margin-bottom:8px;color:var(--text)}
   .prompt small{display:block;color:var(--dim);font-size:11px;letter-spacing:.08em;text-transform:uppercase;margin-bottom:4px}
   .mini{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-top:40px}
   .mini .card{padding:18px}.mini .card h3{font-size:15px;margin:10px 0 4px}.mini .card p{font-size:13px}
@@ -112,11 +113,11 @@
     <div class="split">
       <div>
         <div class="eyebrow">Get started</div>
-        <h2 id="download">Three commands and one sentence.</h2>
+        <h2 id="download">One download and one sentence.</h2>
         <ol class="steps">
-          <li><b>Download the app</b> for macOS or Windows, or the source zip for anything with Python 3.12.</li>
-          <li><b>Install Claude Code</b>, Anthropic's free command-line tool, and sign in once. The app is not allowed to bundle it, so it shows the exact commands if it is missing.</li>
-          <li><b>Open AgenticCAD.</b> Desktop app: double-click. From source: the three lines on the right, then <code>127.0.0.1:8765</code>. Nothing leaves your machine except the conversation with Claude.</li>
+          <li><b>Download the app</b> for macOS or Windows and open it.</li>
+          <li><b>Install Claude Code</b>, Anthropic's free command-line tool, and sign in once. The app is not allowed to bundle it, so on first launch it shows the exact command and checks for you.</li>
+          <li><b>That's the setup.</b> Everything runs on your machine; nothing leaves it except the conversation with Claude.</li>
           <li><b>Type your first part.</b> Something like this, and watch it appear:</li>
         </ol>
         <div class="prompt"><small>your first message</small>Make a 60 × 40 × 8 mm mounting plate with four Ø5 holes 8 mm in from each corner and a Ø20 boss 15 mm tall in the middle with a Ø8 through bore.</div>
@@ -135,11 +136,13 @@
           <p class="dlnote"><b>Needs Claude Code.</b> The app does not bundle Anthropic's Claude Code; install it once (free, one command) and sign in with your Claude account or API key. The app walks you through it on first launch. <a href="docs/#desktop">Details</a>.</p>
           <p class="dlnote muted"><span data-dl-note="mac"></span> <span data-dl-note="win"></span> Intel Macs and Linux: use the source zip for now.</p>
         </div>
-        <p class="muted" style="font-size:13px;margin:0 0 6px">From source instead (any platform with Python 3.12):</p>
-<pre><code><span class="hl-c"># inside the unzipped folder (or a clone of github.com/agenticcad/agenticcad)</span>
+        <details class="src"><summary>Prefer to run from source? Linux, Intel Mac, or hacking on it.</summary>
+<pre><code><span class="hl-c"># any platform with Python 3.12, inside the unzipped source zip or a clone of github.com/agenticcad/agenticcad</span>
 python3 -m venv .venv &amp;&amp; .venv/bin/pip install -r requirements.txt
-.venv/bin/python server.py        <span class="hl-c"># → http://127.0.0.1:8765</span></code></pre>
-        <p class="muted" style="font-size:13px">Runs on macOS and Linux today; Windows via WSL. All releases: <a href="https://github.com/agenticcad/agenticcad/releases">github.com/agenticcad/agenticcad/releases</a>. Free for non-commercial use under PolyForm Noncommercial 1.0.0. Commercial use is <b>A$100 per user per year</b>; see <a href="#licence">licensing</a>.</p>
+.venv/bin/python server.py        <span class="hl-c"># then open the address it prints in your browser</span></code></pre>
+          <p class="muted" style="font-size:13px;margin:8px 0 0">Same app, same Claude Code requirement. All releases: <a href="https://github.com/agenticcad/agenticcad/releases">github.com/agenticcad/agenticcad/releases</a>.</p>
+        </details>
+        <p class="muted" style="font-size:13px;margin-top:14px">Free for non-commercial use under PolyForm Noncommercial 1.0.0. Commercial use is <b>A$100 per user per year</b>; see <a href="#licence">licensing</a>.</p>
       </div>
     </div>
   </div>
