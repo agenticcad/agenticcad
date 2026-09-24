@@ -7,7 +7,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M16 3 28 9.5v13L16 29 4 22.5v-13L16 3Z' fill='none' stroke='%234ea1ff' stroke-width='2'/%3E%3Ccircle cx='16' cy='16' r='4' fill='%23ff8c42'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="../assets/site.css?v=0.11.0">
+<link rel="stylesheet" href="../assets/site.css?v=0.11.1">
 <style>
   .docs{display:grid;grid-template-columns:250px 1fr;gap:56px;padding:44px 0 80px}
   .toc{position:sticky;top:76px;align-self:start;max-height:calc(100vh - 100px);overflow:auto;font-size:13px;padding-right:8px}
@@ -61,7 +61,7 @@
       <div class="dlrow"><a class="btn primary" href="https://github.com/agenticcad/agenticcad/releases/latest" data-dl="mac">macOS · Apple Silicon <small data-dl-asset-size></small></a><a class="btn primary" href="https://github.com/agenticcad/agenticcad/releases/latest" data-dl="win">Windows · x64 <small data-dl-asset-size></small></a><a class="btn" href="https://github.com/agenticcad/agenticcad/releases/latest" data-dl="src">Source zip</a></div></div>
     <p>The desktop app is the same program in a native window with Python bundled. Two things to know:</p>
     <ul>
-      <li><b>Claude Code is required and not included.</b> AgenticCAD drives Anthropic's Claude Code command-line tool and is not permitted to redistribute it. On first launch the app checks for it (on PATH and in the official install locations) and, if missing, shows a setup page with the install command for your platform and the sign-in step. Install: macOS and Linux <code>curl -fsSL https://claude.ai/install.sh | bash</code>; Windows PowerShell <code>irm https://claude.ai/install.ps1 | iex</code>. Then run <code>claude</code> once in a terminal to sign in (Claude Pro or Max subscription, or an API key). The npm-based install on Windows (<code>claude.cmd</code>) cannot be launched by a desktop app; use the installer above.</li>
+      <li><b>Claude Code is required and not included.</b> AgenticCAD drives Anthropic's Claude Code command-line tool and is not permitted to redistribute it. On first launch the app checks for it (on PATH and in the official install locations) and, if missing, shows a setup page with the install command for your platform and the sign-in step. Install: macOS and Linux <code>curl -fsSL https://claude.ai/install.sh | bash</code>; Windows PowerShell <code>irm https://claude.ai/install.ps1 | iex</code>. Then sign in once: run <code>claude</code> in a terminal and choose Log in (Claude Pro or Max), or paste an Anthropic API key on the app's setup page or in Settings. The app runs Claude Code headless, so it cannot show the login prompt itself; when a login expires it shows a "not signed in" banner with those two options instead of failing silently. The npm-based install on Windows (<code>claude.cmd</code>) cannot be launched by a desktop app; use the installer above.</li>
       <li><b>The builds are unsigned for now.</b> macOS: the app is ad-hoc signed, so the first launch needs right-click → Open, or System Settings → Privacy &amp; Security → Open Anyway. Windows: SmartScreen shows "Windows protected your PC"; choose More info → Run anyway. Signed builds will follow.</li>
     </ul>
     <p>Your data lives in the OS user-data folder: <code>~/Library/Application Support/AgenticCAD</code> on macOS, <code>%LOCALAPPDATA%\AgenticCAD\AgenticCAD</code> on Windows (designs, library, machines, tools, history, exports, settings). Set <code>AGENTICCAD_WORKSPACE</code> to move it. The app picks a free localhost port; the UI is the same page you would see from a source install, so everything else in these docs applies. Intel Macs and Linux: run from source below.</p>
@@ -294,7 +294,7 @@ program.<span class="hl-f">add</span>(<span class="hl-f">contour</span>(setup, t
   </main>
 </div>
 <footer><div class="wrap"><span>© 2026 AgenticCAD · PolyForm Noncommercial 1.0.0</span><a href="../terms.html">Terms</a><a href="../privacy.html">Privacy</a><a href="#" data-cookie-settings>Cookie settings</a><a href="https://github.com/agenticcad/agenticcad">GitHub</a><a href="../tutorials/">Tutorials</a><a href="../index.html">Home</a></div></footer>
-<script src="../assets/site.js?v=0.11.0"></script>
+<script src="../assets/site.js?v=0.11.1"></script>
 <script>
   const links = [...document.querySelectorAll('.toc a')], heads = links.map(a => document.querySelector(a.getAttribute('href')));
   const io = new IntersectionObserver(() => { let cur = 0; heads.forEach((h, i) => { if (h && h.getBoundingClientRect().top < 120) cur = i; }); links.forEach((a, i) => a.classList.toggle('on', i === cur)); }, { rootMargin: '-100px 0px -70% 0px', threshold: [0, 1] });
