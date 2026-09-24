@@ -5,6 +5,8 @@ features, patch bumps fix things. The version shown in the UI header comes from 
 
 ## [Unreleased]
 
+## [0.12.0] — 2026-09-25
+
 ### Added
 - **3D printing via an installed slicer** (OrcaSlicer / Bambu Studio; nothing bundled). When one is detected the
   Design tab gets a 3D printing section (printer, quality, filament, body, layer height, infill, walls, supports,
