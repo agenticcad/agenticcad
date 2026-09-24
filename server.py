@@ -108,6 +108,11 @@ async def _connect_agent() -> None:
     if find_claude_cli() is None:
         await bus.emit({"type": "agent_missing_cli"})
         return
+    auth = await asyncio.to_thread(agent.auth_status)
+    if not auth.get("logged_in"):
+        agent.auth_problem = "Claude Code is installed but not signed in."
+        await bus.emit({"type": "agent_auth_required", "text": agent.auth_problem})
+        return
     try:
         await agent.start()
         await bus.emit({"type": "agent_ready"})
@@ -134,7 +139,10 @@ async def setup_page() -> HTMLResponse:
 async def agent_cli():
     """Where Claude Code was found (or not), so the setup page can poll while the user installs it."""
     path = find_claude_cli()
+    auth = await asyncio.to_thread(agent.auth_status) if path else {"logged_in": False, "auth_method": "none", "error": None}
     return {"found": path is not None, "path": path, "connected": agent.client is not None,
+            "logged_in": auth["logged_in"], "auth_method": auth["auth_method"], "auth_error": auth.get("error"),
+            "api_key_set": bool(agent.settings.get("api_key")),
             "packaged": os.environ.get("AGENTICCAD_PACKAGED") == "1", "workspace": str(WORKSPACE),
             "platform": sys.platform, "searched": claude_cli_candidates()}
 
@@ -396,15 +404,19 @@ async def version():
 
 @app.get("/api/settings")
 async def settings_get():
-    return {"settings": agent.settings, "models": agent.MODELS, "defaults": agent.DEFAULT_SETTINGS}
+    return {"settings": agent.public_settings(), "models": agent.MODELS, "defaults": {k: v for k, v in agent.DEFAULT_SETTINGS.items() if k != "api_key"}}
 
 
 @app.post("/api/settings")
 async def settings_set(body: SettingsBody):
+    patch = dict(body.settings)
+    if patch.get("api_key") == "__keep__":           # the browser never sees the key; this sentinel means "unchanged"
+        patch.pop("api_key")
     try:
-        st = agent.save_settings(body.settings)
+        agent.save_settings(patch)
     except ValueError as e:
         return JSONResponse({"error": str(e)}, status_code=400)
+    st = agent.public_settings()
     if body.restart:
         try:
             await agent.restart()
@@ -502,7 +514,7 @@ async def ws_endpoint(ws: WebSocket) -> None:
                                        "summary": agent.program.summary() if agent.program else "",
                                        "gcode_lines": agent.program.gcode().count("\n") if agent.program else 0}))
         await ws.send_text(json.dumps({"type": "status", "busy": agent.busy,
-                                       "agent_ready": agent.client is not None}))
+                                       "agent_ready": agent.client is not None, "auth_required": agent.auth_problem}))
         while True:
             raw = await ws.receive_text()
             try:

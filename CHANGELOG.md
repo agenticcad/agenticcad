@@ -3,6 +3,16 @@
 All notable changes to AgenticCAD. Versions follow [SemVer](https://semver.org): pre-1.0, minor bumps add
 features, patch bumps fix things. The version shown in the UI header comes from `version.py`.
 
+## [0.11.1] — 2026-09-24
+
+### Added
+- **Sign-in handling.** The app now checks Claude Code's login state (`claude auth status`) before connecting and
+  whenever the agent reports an authentication failure, and shows a banner with the two fixes: run `claude` and
+  log in, or paste an Anthropic API key (Settings ▸ API key, or the setup page). The key is stored in
+  `settings.json` with owner-only permissions, passed to Claude Code as `ANTHROPIC_API_KEY`, and never returned
+  to the browser. `/api/agent/cli` reports `logged_in` / `auth_method`. Previously an expired login surfaced only
+  as an opaque "Failed to authenticate" chat error, because the SDK runs the CLI headless and cannot prompt.
+
 ## [0.11.0] — 2026-09-24
 
 ### Changed

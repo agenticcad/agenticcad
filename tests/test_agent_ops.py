@@ -355,3 +355,14 @@ async def test_settings_roundtrip_and_status(ag):
     assert status["connected"] is False and status["model"] == "claude-sonnet-5" and status["mcp"] == []
     ag2 = CadAgent(ag.workspace, ag.rec.emit, ag.screenshot_fn)
     assert ag2.settings["effort"] == "high"
+
+
+async def test_api_key_setting_is_masked_and_used(ag, monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    ag.save_settings({"api_key": "sk-ant-secret"})
+    pub = ag.public_settings()
+    assert "api_key" not in pub and pub["api_key_set"] is True
+    assert oct((ag.workspace / "settings.json").stat().st_mode & 0o777) == "0o600"
+    assert ag.auth_status() == {"logged_in": True, "auth_method": "api_key", "error": None}
+    ag.save_settings({"api_key": ""})
+    assert ag.public_settings()["api_key_set"] is False

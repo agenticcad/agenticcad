@@ -240,3 +240,14 @@ def test_measure_endpoint_variants(client):
     r = client.post("/api/measure", json={"entities": [{"type": "point", "p": [0, 0, 0]}, {"type": "edge", "id": circ["id"]}]}).json()
     assert "center_distance" in r
     assert client.post("/api/measure", json={"faces": [99999]}).status_code == 400
+
+
+def test_settings_never_return_the_api_key(client):
+    r = client.post("/api/settings", json={"settings": {"api_key": "sk-ant-abc"}, "restart": False}).json()
+    assert "api_key" not in r["settings"] and r["settings"]["api_key_set"] is True
+    assert "api_key" not in client.get("/api/settings").json()["settings"]
+    assert client.get("/api/agent/cli").json()["api_key_set"] is True
+    r = client.post("/api/settings", json={"settings": {"api_key": "__keep__", "effort": "medium"}, "restart": False}).json()
+    assert r["settings"]["api_key_set"] is True and r["settings"]["effort"] == "medium"
+    r = client.post("/api/settings", json={"settings": {"api_key": ""}, "restart": False}).json()
+    assert r["settings"]["api_key_set"] is False

@@ -53,3 +53,23 @@ def test_windows_candidates_and_cmd_shim_rejected(monkeypatch, tmp_path):
     monkeypatch.delenv("AGENTICCAD_CLAUDE", raising=False)
     monkeypatch.setattr(agent.shutil, "which", lambda name: str(tmp_path / "claude.cmd"))
     assert agent.find_claude_cli() is None          # npm's .cmd shim cannot be spawned by the SDK
+
+
+def test_auth_status_and_error_detection(tmp_path, monkeypatch):
+    # an API key (settings or env) counts as signed in without calling the CLI
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+    assert agent.claude_auth_status(None)["auth_method"] == "api_key"
+    monkeypatch.delenv("ANTHROPIC_API_KEY")
+    assert agent.claude_auth_status(None, api_key="sk-x")["logged_in"] is True
+    # no CLI at all
+    monkeypatch.setenv("PATH", str(tmp_path)); monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+    monkeypatch.delenv("AGENTICCAD_CLAUDE", raising=False)
+    st = agent.claude_auth_status(None)
+    assert st["logged_in"] is False and st["error"]
+    # a fake CLI answering like the real one
+    fake = tmp_path / "claude"; fake.write_text('#!/bin/sh\necho \'{"loggedIn": false, "authMethod": "none"}\'\n'); fake.chmod(0o755)
+    st = agent.claude_auth_status(str(fake))
+    assert st == {"logged_in": False, "auth_method": "none", "error": None}
+    for txt in ("Failed to authenticate: OAuth session expired and could not be refreshed", "Invalid API key · Please run /login", "Not logged in"):
+        assert agent.AUTH_ERROR_RE.search(txt), txt
+    assert not agent.AUTH_ERROR_RE.search("Model OK: 1 body")

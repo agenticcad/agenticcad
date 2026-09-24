@@ -27,7 +27,7 @@ browser (three.js viewer · ribbon · sketch editor · chat)  <-- websocket --> 
 [website](https://agenticcad.github.io/agenticcad/#download) or the [releases](https://github.com/agenticcad/agenticcad/releases).
 The app **requires [Claude Code](https://docs.anthropic.com/en/docs/claude-code/setup) installed separately**
 (it is Anthropic's tool and is not bundled); the app shows a setup page with the install and sign-in steps if
-it is missing. Builds are unsigned for now (macOS: right-click → Open; Windows: SmartScreen → More info → Run anyway).
+it is missing, and a "not signed in" banner with two fixes (run `claude` and log in, or paste an API key in Settings) when the login has expired. Builds are unsigned for now (macOS: right-click → Open; Windows: SmartScreen → More info → Run anyway).
 Data lives in the OS user-data folder (`~/Library/Application Support/AgenticCAD`, `%LOCALAPPDATA%\AgenticCAD`).
 
 **From source:**

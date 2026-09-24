@@ -1852,6 +1852,7 @@ async function openSettings() {
     <label>Thinking</label><select id="s-think"><option value="omitted" ${st.thinking_display !== 'summarized' ? 'selected' : ''}>hidden</option><option value="summarized" ${st.thinking_display === 'summarized' ? 'selected' : ''}>show summary in chat</option></select>
     <label>Web tools</label><label style="color:var(--text)"><input id="s-web" type="checkbox" ${st.web !== false ? 'checked' : ''}> allow WebFetch / WebSearch</label>
     <label>Extra instructions</label><textarea id="s-extra" rows="3" placeholder="house rules, your machine, preferred materials…"></textarea>
+    <label>API key</label><div style="display:flex;gap:6px;align-items:center"><input id="s-key" type="password" autocomplete="off" placeholder="${st.api_key_set ? '•••••••• (set — leave blank to keep)' : 'optional: sk-ant-… instead of the Claude Code login'}" style="flex:1">${st.api_key_set ? '<button class="btn small" id="s-key-clear" type="button">Clear</button>' : ''}</div>
   </div>
   <div style="margin-top:10px;display:flex;align-items:center"><b style="font-size:12px">MCP servers</b><span class="muted" style="margin-left:8px">tools become mcp__&lt;name&gt;__*</span><button class="btn small" id="s-mcp-add" style="margin-left:auto">+ Add</button></div>
   <div id="s-mcp"></div>
@@ -1876,8 +1877,10 @@ async function openSettings() {
   d.querySelector('#s-mcp-add').onclick = () => editJson('New MCP server', { name: 'my-server', type: 'stdio', command: 'npx', args: ['-y', '@modelcontextprotocol/server-filesystem', '/path'], env: {}, enabled: true },
     async obj => { const { name, ...cfg } = obj; if (!name) return; st.mcp_servers = st.mcp_servers || {}; st.mcp_servers[name] = cfg; renderMcp(); });
   renderMcp();
+  let clearKey = false; const kc = d.querySelector('#s-key-clear'); if (kc) kc.onclick = () => { clearKey = true; kc.textContent = 'will clear'; };
   const collect = () => ({ model: sel.value === '__custom' ? custom.value.trim() : sel.value, effort: d.querySelector('#s-effort').value, max_turns: parseInt(d.querySelector('#s-turns').value) || 60,
-    thinking_display: d.querySelector('#s-think').value, web: d.querySelector('#s-web').checked, extra_prompt: d.querySelector('#s-extra').value, mcp_servers: st.mcp_servers || {} });
+    thinking_display: d.querySelector('#s-think').value, web: d.querySelector('#s-web').checked, extra_prompt: d.querySelector('#s-extra').value, mcp_servers: st.mcp_servers || {},
+    api_key: clearKey ? '' : (d.querySelector('#s-key').value.trim() || '__keep__') });
   const r = await openModal('Agent settings', d, [['Cancel', null], ['Save', () => ({ s: collect(), restart: false })], ['Save & restart agent', () => ({ s: collect(), restart: true }), true]]);
   if (!r) return;
   try { await api('/api/settings', { settings: r.s, restart: r.restart }); addMsg('system', r.restart ? 'settings saved · agent restarting' : 'settings saved (apply with Save & restart)'); }
@@ -1926,9 +1929,10 @@ function connect() {
         break;
       case 'cam_error': document.getElementById('codeerr').textContent = m.text; addMsg('error', 'CAM build failed — see Code tab'); break;
       case 'build_error': document.getElementById('codeerr').textContent = m.text; break;
-      case 'status': busy = m.busy; setBusy(busy); if (m.agent_ready) setStatus('agent ready'); break;
+      case 'status': busy = m.busy; setBusy(busy); if (m.agent_ready) setStatus('agent ready'); else if (m.auth_required) showAuthBanner(m.auth_required); else if (m.agent_ready === false) setStatus('agent not connected'); break;
       case 'agent_ready': setStatus('agent ready'); break;
       case 'agent_missing_cli': location.href = '/setup'; break;
+      case 'agent_auth_required': showAuthBanner(m.text); break;
       case 'delta': thinkingEl.style.display = 'none'; onDelta(m.text); break;
       case 'thinking': thinkingEl.style.display = 'block'; break;
       case 'text': if (currentBubble) { currentText = m.text; finishBubble(); } else if (m.text) addMsg('assistant', m.text); break;
@@ -1953,6 +1957,18 @@ function connect() {
           if (last) last.appendChild(img); } break; }
     }
   };
+}
+function showAuthBanner(text) {
+  let b = document.getElementById('authbanner');
+  if (!b) {
+    b = document.createElement('div'); b.id = 'authbanner';
+    b.style.cssText = 'position:absolute;z-index:40;top:0;left:0;right:0;background:#3a2a1f;color:#ffd7b8;border-bottom:1px solid var(--accent);padding:8px 14px;font-size:12px;display:flex;gap:12px;align-items:center';
+    document.getElementById('viewer').appendChild(b);
+  }
+  b.innerHTML = `<b>Agent not signed in.</b><span style="flex:1">${(text || '').replace(/</g, '&lt;')} — run <code>claude</code> in a terminal and log in, or paste an API key.</span>
+    <a href="/setup" class="btn small primary" style="text-decoration:none">Sign in / API key</a><button class="btn small" id="authbanner-x">×</button>`;
+  b.querySelector('#authbanner-x').onclick = () => b.remove();
+  setStatus('agent: sign-in needed');
 }
 function setStatus(t) { statusText.textContent = t; statusEl.className = t.includes('ready') ? 'ready' : ''; if (busy) statusEl.className = 'busy'; }
 function setBusy(b) { busy = b; stopBtn.style.display = b ? '' : 'none'; sendBtn.disabled = b; statusEl.className = b ? 'busy' : 'ready'; statusText.textContent = b ? 'agent working…' : 'agent ready'; if (!b) thinkingEl.style.display = 'none'; }

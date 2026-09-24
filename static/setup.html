@@ -43,8 +43,11 @@
 
   <h2>2 · Sign in</h2>
   <div class="card">
-    <p>Run <code>claude</code> once in a terminal and follow the login prompt. A Claude Pro or Max subscription works; so does an Anthropic Console account with an API key (<code>claude</code> asks which). AgenticCAD reuses that login; it never sees your password.</p>
-    <p><small>Prefer an API key without the login flow? Set <code>ANTHROPIC_API_KEY</code> in your environment before starting AgenticCAD.</small></p>
+    <div class="status" style="margin-bottom:10px"><span class="dot" id="adot"></span><span id="ast">checking sign-in…</span></div>
+    <p><b>Option A — your Claude account.</b> Open a terminal, run <code>claude</code>, and choose <b>Log in</b> (a browser window opens). A Claude Pro or Max subscription works. AgenticCAD reuses that login and never sees your password. The app cannot show that prompt itself because it runs Claude Code headless, which is why an expired login shows up here rather than as a pop-up. If you were logged in before, the session simply expired: run <code>claude</code> again.</p>
+    <p><b>Option B — an API key.</b> Paste an Anthropic Console key; it is stored in <code>settings.json</code> in your data folder (readable by you only) and passed to Claude Code, never to anyone else.</p>
+    <div class="row"><input id="key" type="password" autocomplete="off" placeholder="sk-ant-…" style="flex:1;min-width:240px;background:#14171c;border:1px solid var(--line);border-radius:8px;padding:8px 10px;color:var(--text);font:inherit"><button class="btn primary" id="savekey">Save key &amp; connect</button><button class="btn" id="clearkey" style="display:none">Remove key</button></div>
+    <p style="margin:8px 0 0"><small id="keymsg"></small></p>
   </div>
 
   <h2>3 · Come back here</h2>
@@ -61,10 +64,23 @@
     const c = await fetch('/api/agent/cli').then(r => r.json());
     document.getElementById('ws').textContent = c.workspace;
     if (!c.found) { dot.className = 'dot'; st.textContent = 'Claude Code not found'; searched.textContent = 'Looked on PATH and in: ' + c.searched.join(', '); go.disabled = true; return; }
-    dot.className = 'dot ok'; st.textContent = 'Claude Code found: ' + c.path + (c.connected ? ' · agent connected' : ' · connecting agent…'); searched.textContent = '';
-    if (!c.connected && restart) { await fetch('/api/agent/restart', { method: 'POST' }).catch(() => {}); }
-    go.disabled = false;
+    dot.className = 'dot ok'; st.textContent = 'Claude Code found: ' + c.path + (c.connected ? ' · agent connected' : c.logged_in ? ' · connecting agent…' : ' · not signed in'); searched.textContent = '';
+    const adot = document.getElementById('adot'), ast = document.getElementById('ast');
+    if (c.logged_in) { adot.className = 'dot ok'; ast.textContent = 'Signed in' + (c.auth_method === 'api_key' ? ' with an API key' : c.auth_method ? ' (' + c.auth_method + ')' : ''); }
+    else { adot.className = 'dot'; ast.textContent = 'Not signed in — Claude Code has no valid login and no API key is set.' + (c.auth_error ? ' (' + c.auth_error + ')' : ''); }
+    document.getElementById('clearkey').style.display = c.api_key_set ? '' : 'none';
+    if (c.logged_in && !c.connected && restart) { await fetch('/api/agent/restart', { method: 'POST' }).catch(() => {}); }
+    go.disabled = !c.logged_in;
   }
+  async function setKey(key) {
+    const msg = document.getElementById('keymsg'); msg.textContent = key ? 'saving and connecting…' : 'removing key…';
+    const r = await fetch('/api/settings', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ settings: { api_key: key }, restart: !!key }) });
+    const j = await r.json().catch(() => ({}));
+    msg.textContent = r.ok ? (key ? 'Key saved; agent restarted.' : 'Key removed.') : ('Failed: ' + (j.error || r.status));
+    document.getElementById('key').value = ''; check(false);
+  }
+  document.getElementById('savekey').onclick = () => { const k = document.getElementById('key').value.trim(); if (k) setKey(k); };
+  document.getElementById('clearkey').onclick = () => setKey('');
   document.getElementById('check').onclick = () => check(true);
   go.onclick = () => location.href = '/';
   check(false); setInterval(() => check(false), 5000);

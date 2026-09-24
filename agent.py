@@ -200,6 +200,30 @@ SCREENSHOT_VIEWS = ["iso", "iso_back", "front", "back", "left", "right", "top", 
 SAFE_NAME = re.compile(r"[^A-Za-z0-9 _\-\.]+")
 
 
+AUTH_ERROR_RE = re.compile(r"failed to authenticate|oauth (session|token) (expired|invalid)|not logged in|invalid api key|"
+                           r"authentication_error|please run /login|run `?claude login`?|401 unauthorized|api key.*(invalid|missing|required)", re.I)
+
+
+def claude_auth_status(cli: str | None = None, api_key: str | None = None) -> dict[str, Any]:
+    """Ask Claude Code how it is signed in. Returns {logged_in, auth_method, error}. An API key (settings or
+    ANTHROPIC_API_KEY) counts as signed in. The app cannot show the login prompt itself: the SDK runs the CLI
+    headless, so sign-in happens once in a terminal (`claude`) or via an API key."""
+    import subprocess
+    key = api_key or os.environ.get("ANTHROPIC_API_KEY")
+    if key:
+        return {"logged_in": True, "auth_method": "api_key", "error": None}
+    cli = cli or find_claude_cli()
+    if not cli:
+        return {"logged_in": False, "auth_method": "none", "error": "Claude Code not found"}
+    try:
+        r = subprocess.run([cli, "auth", "status", "--json"], capture_output=True, text=True, timeout=20,
+                           env={**os.environ, "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"})
+        data = json.loads(r.stdout or "{}")
+        return {"logged_in": bool(data.get("loggedIn")), "auth_method": data.get("authMethod") or "none", "error": None}
+    except Exception as e:  # noqa: BLE001
+        return {"logged_in": False, "auth_method": "unknown", "error": f"{type(e).__name__}: {e}"}
+
+
 def safe_name(name: str) -> str:
     name = SAFE_NAME.sub("", name or "").strip().rstrip(".")
     return name[:80] or "untitled"
@@ -229,6 +253,7 @@ class CadAgent:
         ck.LIBRARY = self.parts
         (workspace / "imports").mkdir(exist_ok=True)
         self.tool_handlers: dict[str, Any] = {}   # filled by _make_server()
+        self.auth_problem: str | None = None       # set when Claude Code is not signed in; shown as a banner in every tab
         self.cam_code: str = ""               # CAM script working copy (workspace/cam.py)
         self.program: cam.Program | None = None
         cam_path = workspace / "cam.py"
@@ -1128,6 +1153,7 @@ class CadAgent:
         "web": True,                       # allow WebFetch / WebSearch
         "mcp_servers": {},                 # name -> {type: stdio|http|sse, command, args, env, url, headers, enabled}
         "extra_prompt": "",                # appended to the system prompt (house rules, machine notes...)
+        "api_key": "",                     # Anthropic API key (alternative to the Claude Code login); kept in settings.json (0600)
     }
     MODELS = ["claude-opus-5-5", "claude-fable-5-1", "claude-sonnet-5", "claude-opus-5", "claude-opus-4-8", "claude-haiku-4-5"]
 
@@ -1155,8 +1181,22 @@ class CadAgent:
                 raise ValueError(f"MCP server '{name}': {t} servers need a url")
             cfg["type"] = t
         self.settings = st
-        self._settings_path().write_text(json.dumps(st, indent=2))
+        path = self._settings_path()
+        path.write_text(json.dumps(st, indent=2))
+        try:
+            path.chmod(0o600)                  # may hold an API key
+        except OSError:
+            pass
         return st
+
+    def public_settings(self) -> dict[str, Any]:
+        """Settings safe to send to the browser: the API key is never returned, only whether one is set."""
+        st = {k: v for k, v in self.settings.items() if k != "api_key"}
+        st["api_key_set"] = bool(self.settings.get("api_key"))
+        return st
+
+    def auth_status(self) -> dict[str, Any]:
+        return claude_auth_status(find_claude_cli(), self.settings.get("api_key") or None)
 
     def _mcp_configs(self) -> dict[str, Any]:
         out: dict[str, Any] = {"cad": self._make_server()}
@@ -1176,6 +1216,7 @@ class CadAgent:
 
     async def agent_status(self) -> dict[str, Any]:
         st: dict[str, Any] = {"connected": self.client is not None, "busy": self.busy, "session_id": self.session_id, "cli": find_claude_cli(),
+                              "auth_required": self.auth_problem,
                               "model": self.settings.get("model") or "(default)", "effort": self.settings.get("effort") or "(default)",
                               "mcp": []}
         if self.client is not None:
@@ -1228,7 +1269,7 @@ class CadAgent:
             model=st.get("model") or os.environ.get("AGENTICCAD_MODEL") or None,
             max_turns=int(st.get("max_turns") or 60),
             # keep the CAD tools loaded up front instead of deferred behind ToolSearch
-            env={"ENABLE_TOOL_SEARCH": "false"},
+            env={"ENABLE_TOOL_SEARCH": "false", **({"ANTHROPIC_API_KEY": st["api_key"]} if st.get("api_key") else {})},
             max_buffer_size=8 * 1024 * 1024,   # screenshots + big tool results (default 1 MB is too small)
             **kw,
         )
@@ -1237,6 +1278,7 @@ class CadAgent:
             options.cli_path = cli
         self.client = ClaudeSDKClient(options=options)
         await self.client.connect()
+        self.auth_problem = None
 
     async def stop(self) -> None:
         if self.client:
@@ -1362,6 +1404,9 @@ class CadAgent:
                 for blk in msg.content:
                     if isinstance(blk, TextBlock):
                         await self.emit({"type": "text", "text": blk.text})
+                        if AUTH_ERROR_RE.search(blk.text or ""):
+                            self.auth_problem = blk.text.strip()[:300]
+                            await self.emit({"type": "agent_auth_required", "text": self.auth_problem})
                     elif isinstance(blk, ToolUseBlock):
                         tool_names[blk.id] = blk.name
                         await self.emit({"type": "tool_use", "id": blk.id, "name": short(blk.name),
@@ -1375,6 +1420,9 @@ class CadAgent:
                                          "text": result_text(blk.content), "is_error": bool(blk.is_error)})
             elif isinstance(msg, ResultMessage):
                 self.session_id = msg.session_id
+                if msg.is_error and AUTH_ERROR_RE.search(str(getattr(msg, "result", "") or "")):
+                    self.auth_problem = str(msg.result)[:300]
+                    await self.emit({"type": "agent_auth_required", "text": self.auth_problem})
                 await self.emit({"type": "result", "subtype": msg.subtype, "cost": msg.total_cost_usd,
                                  "duration_ms": msg.duration_ms, "turns": msg.num_turns,
                                  "session_id": msg.session_id})
