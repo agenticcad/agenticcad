@@ -35,7 +35,7 @@
 <div class="wrap docs">
   <aside class="toc" id="toc">
     <div class="g">Start</div><a href="#overview">Overview</a><a href="#desktop">Desktop app</a><a href="#install">Install from source</a><a href="#workspace">The workspace</a>
-    <div class="g">Design</div><a href="#script">Design as script</a><a href="#chat">Chat and selection</a><a href="#images">Reference images</a><a href="#bodies">Bodies and the Browser</a><a href="#ribbon">Ribbon tools</a><a href="#sketches">Sketches</a><a href="#threads">Threads</a><a href="#params">Parameters</a><a href="#measure">Measure</a><a href="#drawings">Shop drawings</a><a href="#library">Part library</a><a href="#step">STEP import and export</a><a href="#fidelity">Fidelity</a>
+    <div class="g">Design</div><a href="#script">Design as script</a><a href="#chat">Chat and selection</a><a href="#images">Reference images</a><a href="#bodies">Bodies and the Browser</a><a href="#ribbon">Ribbon tools</a><a href="#sketches">Sketches</a><a href="#threads">Threads</a><a href="#params">Parameters</a><a href="#measure">Measure</a><a href="#drawings">Shop drawings</a><a href="#library">Part library</a><a href="#step">STEP import and export</a><a href="#printing">3D printing</a><a href="#fidelity">Fidelity</a>
     <div class="g">CAM</div><a href="#cam">CAM overview</a><a href="#machines">Machines and tools</a><a href="#ops">Operations</a><a href="#adaptive">Adaptive clearing</a><a href="#post">Post and G-code</a>
     <div class="g">Agent</div><a href="#settings">Settings and MCP</a><a href="#tools">Agent tools reference</a>
     <div class="g">Reference</div><a href="#shortcuts">Keyboard shortcuts</a><a href="#files">Files and API</a><a href="#versioning">Versioning</a><a href="#tests">Tests and evals</a><a href="#gaps">Known gaps and roadmap</a><a href="#licence">Licence</a>
@@ -180,6 +180,17 @@ sketch1 = _sketch1.sketch
     <h2 id="step">STEP import and export</h2>
     <p>File ▸ Import STEP… (or drop a <code>.step</code> on the viewer) adds it as a new body (<code>import_step("file.step")</code> is added to the script, the file is copied to <code>workspace/imports/</code>), as a new design, or straight into the library. Export: File ▸ Export STEP (exact, bodies stay separate solids) and Export STL (dialog: resolution and all-or-one body). Agent: <code>export_model(name, formats, tolerance, angular_tolerance, body)</code>. API: <code>/api/export/{step|stl}</code>.</p>
 
+    <h2 id="printing">3D printing</h2>
+    <p>If <b>OrcaSlicer</b> (or Bambu Studio) is installed on your computer, the Design tab gains a <b>3D printing</b> section and the agent gains the <code>slice_for_printing</code> tool. AgenticCAD does not bundle a slicer; without one the section and the tool simply do not exist.</p>
+    <ul>
+      <li><b>Options</b>: printer, quality profile, filament (all read from the slicer's own profiles, with the printer you last used in the slicer preselected), one body or the whole design, layer height, infill %, wall loops, supports, brim. Everything else comes from the chosen profile.</li>
+      <li><b>Slice</b> exports the design as STL, runs the slicer headless and shows the result: layers, height, estimated time, filament weight and length, and any slicer warnings. G-code and 3MF download buttons appear next to the stats.</li>
+      <li><b>Preview</b>: the toolpaths are drawn in the viewer in model coordinates, coloured by feature (outer/inner walls, infill, top and bottom surfaces, supports, skirt). Drag the layer slider to scrub through the print; click legend entries to hide a feature; the model hides while previewing (untick to overlay). The <b>Layers</b> toolbar button toggles the preview.</li>
+      <li><b>Agent</b>: <i>"slice this for my Ender 3 at 0.28 mm, 15% infill, with supports"</i>. The agent reads printer and filament names from the slicer rather than guessing, and reports the estimates back in chat.</li>
+      <li>Override detection with <code>AGENTICCAD_SLICER=/path/to/slicer[::/path/to/profiles]</code>. Outputs are kept in <code>workspace/slicing/</code>.</li>
+    </ul>
+    <div class="callout">This is a hand-off, not a slicer UI: for per-object settings, modifiers, paint-on supports or multi-plate layouts, open the exported 3MF in the slicer.</div>
+
     <h2 id="fidelity">Fidelity</h2>
     <ul>
       <li>The <b>kernel geometry is exact B-rep</b>: planes, cylinders, cones, spheres, tori, B-splines. <code>inspect_model</code> reports the analytic type and radius of each face.</li>
@@ -237,6 +248,7 @@ program.<span class="hl-f">add</span>(<span class="hl-f">contour</span>(setup, t
       <tr><td><code>make_drawings(material?)</code></td><td>shop drawings (SVG + DXF)</td></tr>
       <tr><td><code>library(action, ...)</code></td><td>list, search, get, insert, save_design, save_body, delete</td></tr>
       <tr><td><code>sketch(action, ...)</code></td><td>list, get, set, delete sketch blocks in the editor's item format</td></tr>
+      <tr><td><code>slicer_info(machine?, search?)</code>, <code>slice_for_printing(machine?, process?, filament?, body?, layer_height?, ...)</code></td><td><b>only when a slicer is installed</b>: printers and compatible profiles; slice for 3D printing and show the layers in the viewer</td></tr>
       <tr><td><code>cam_context()</code></td><td>machines, tools, model facts, holes, current program</td></tr>
       <tr><td><code>build_cam(code)</code>, <code>get_cam_code()</code></td><td>build the CAM program from a script; read it</td></tr>
       <tr><td><code>export_gcode(name?)</code></td><td>write the .nc file and report counts</td></tr>

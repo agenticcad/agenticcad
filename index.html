@@ -104,8 +104,8 @@
 </section>
 
 <div class="ticker"><div class="track">
-  <span>Describe a part in plain words</span><span>Point at faces, edges and bodies in chat</span><span>Fusion-style ribbon for hand tweaks</span><span>Sketches on any face</span><span>ISO threads</span><span>Exact STEP, tolerance-controlled STL</span><span>Shop drawings with hole tables</span><span>Experimental GRBL CAM</span><span>Parametric part library</span><span>Pick your Claude model, plug in MCP servers</span><span>Unit tests and graded agent evals</span>
-  <span>Describe a part in plain words</span><span>Point at faces, edges and bodies in chat</span><span>Fusion-style ribbon for hand tweaks</span><span>Sketches on any face</span><span>ISO threads</span><span>Exact STEP, tolerance-controlled STL</span><span>Shop drawings with hole tables</span><span>Experimental GRBL CAM</span><span>Parametric part library</span><span>Pick your Claude model, plug in MCP servers</span><span>Unit tests and graded agent evals</span>
+  <span>Describe a part in plain words</span><span>Point at faces, edges and bodies in chat</span><span>Fusion-style ribbon for hand tweaks</span><span>Sketches on any face</span><span>ISO threads</span><span>Exact STEP, tolerance-controlled STL</span><span>Shop drawings with hole tables</span><span>Slice for 3D printing with your installed OrcaSlicer, layers in the viewer</span><span>Experimental GRBL CAM</span><span>Parametric part library</span><span>Pick your Claude model, plug in MCP servers</span><span>Unit tests and graded agent evals</span>
+  <span>Describe a part in plain words</span><span>Point at faces, edges and bodies in chat</span><span>Fusion-style ribbon for hand tweaks</span><span>Sketches on any face</span><span>ISO threads</span><span>Exact STEP, tolerance-controlled STL</span><span>Shop drawings with hole tables</span><span>Slice for 3D printing with your installed OrcaSlicer, layers in the viewer</span><span>Experimental GRBL CAM</span><span>Parametric part library</span><span>Pick your Claude model, plug in MCP servers</span><span>Unit tests and graded agent evals</span>
 </div></div>
 
 <section id="start" class="install">
@@ -212,6 +212,7 @@ result = {<span class="hl-s">"Plate"</span>: _plate3.<span class="hl-f">fillet</
         <p class="muted">Most parts stop here. File ▸ Export gives you what a slicer or another CAD package needs, and the Design tab turns the model into a drawing you can hand to someone.</p>
         <ul class="checks">
           <li><b>STL for 3D printing</b>, tessellated only at export, at the resolution you choose in the dialog (or the agent picks a tolerance). One file for everything or one per body, so multi-part prints come out as separate meshes.</li>
+          <li><b>Slice without leaving the app</b>: if OrcaSlicer (or Bambu Studio) is installed, pick printer, quality, filament, layer height, infill and supports, hit Slice, and the layers appear in the viewer with a slider, feature colours, time and filament estimates, plus G-code and 3MF. Or just say “slice this for my Ender 3 at 0.28 mm”.</li>
           <li><b>STEP, exact</b>: cylinders stay cylinders and bodies stay separate solids, so it opens cleanly in Fusion, FreeCAD, SolidWorks or a supplier's quoting tool.</li>
           <li><b>Shop drawings</b> from the exact model: third-angle front, top, right and iso with hidden lines, overall dimensions, hole callouts and a lettered hole table, title block with mass and scale. SVG and DXF.</li>
           <li><b>Ask for it</b>: “export an STL at 0.05 mm for the Pin only” or “make drawings in aluminium” works too, because export and drawings are agent tools.</li>
