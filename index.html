@@ -22,6 +22,12 @@
   .hero .lead{font-size:clamp(17px,2vw,21px);color:#b7c0cc;max-width:760px;margin:18px auto 30px;line-height:1.55}
   .hero .cta{display:flex;gap:12px;justify-content:center;flex-wrap:wrap;margin-bottom:56px}
   .hero .frame{max-width:1120px;margin:0 auto;transform:perspective(1600px) rotateX(4deg);transform-origin:top}
+  .hero .frame.video{transform:none}
+  .frame video{display:block;width:100%;height:auto;background:#0b0e13}
+  .frame .play{position:absolute;left:50%;top:calc(50% + 17px);transform:translate(-50%,-50%);display:flex;align-items:center;gap:12px;background:rgba(255,140,66,.96);color:#1a0d04;border:0;border-radius:999px;padding:14px 26px 14px 18px;font:600 16px Inter,sans-serif;cursor:pointer;box-shadow:0 20px 60px rgba(0,0,0,.6);transition:.2s}
+  .frame .play:hover{transform:translate(-50%,-50%) scale(1.04);background:#ffa066}
+  .frame .play svg{width:26px;height:26px;fill:currentColor}
+  .frame.playing .play{display:none}
   .ticker{border-top:1px solid var(--line);border-bottom:1px solid var(--line);padding:16px 0;overflow:hidden;background:var(--bg2)}
   .ticker .track{display:flex;gap:44px;white-space:nowrap;animation:tick 42s linear infinite;width:max-content}
   .ticker span{font-size:13px;color:var(--muted);letter-spacing:.02em}
@@ -88,7 +94,12 @@
       <a class="btn" href="docs/">Read the docs</a>
       <a class="btn" href="https://github.com/agenticcad/agenticcad">Source on GitHub</a>
     </div>
-    <div class="frame"><div class="bar"><i></i><i></i><i></i><span>127.0.0.1:8765 — AgenticCAD · bracket.py</span></div><img src="assets/img/hero.png" alt="AgenticCAD: chat on the left, exact model with the Browser tree and ribbon on the right" width="2000" height="1250" fetchpriority="high"></div>
+    <div class="frame video"><div class="bar"><i></i><i></i><i></i><span>60-second tour — a real session, real agent, only the thinking time sped up</span></div>
+      <video id="promo" controls playsinline preload="metadata" poster="assets/img/promo-poster.jpg" width="1920" height="1080"><source src="assets/video/agenticcad-promo-1080p.mp4" type="video/mp4">Your browser can't play this video. <a href="assets/video/agenticcad-promo-1080p.mp4">Download it</a> instead.</video>
+      <button class="play" id="promo-play" aria-label="Play the tour"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg><span>Watch the 60-second tour</span></button>
+    </div>
+    <p class="muted" style="font-size:13px;margin:14px 0 0">Sound on. Below the video: the workspace as it looks with a design open.</p>
+    <div class="frame" style="margin-top:22px"><div class="bar"><i></i><i></i><i></i><span>127.0.0.1:8765 — AgenticCAD · bracket.py</span></div><img src="assets/img/hero.png" alt="AgenticCAD: chat on the left, exact model with the Browser tree and ribbon on the right" width="2000" height="1250" loading="lazy"></div>
   </div>
 </section>
 
@@ -330,6 +341,15 @@ fetch('tutorials/data/cam.json').then(r => r.json()).then(t => {
   (function tick() { const f = Math.min(1, (performance.now() - start) / DUR); v.setToolpathProgress(f); hud.textContent = f < 1 ? `drawing toolpaths… ${(f * 100).toFixed(0)}%` : `${p.ops.length} ops · ${p.ops.reduce((a, o) => a + o.moves.length, 0)} moves · est. ${p.time} min`; requestAnimationFrame(tick); })();
   document.getElementById('cam-replay').onclick = () => { start = performance.now(); };
 }).catch(console.error);
+
+// ---- hero video
+const promo = document.getElementById('promo'), promoBtn = document.getElementById('promo-play');
+if (promo && promoBtn) {
+  const start = () => { promo.play(); };
+  promoBtn.onclick = start;
+  promo.addEventListener('play', () => { promo.closest('.frame').classList.add('playing'); import('./assets/analytics.js').then(m => m.track('video_start', { video: 'promo-60s' })); }, { once: true });
+  promo.addEventListener('ended', () => { promo.closest('.frame').classList.remove('playing'); import('./assets/analytics.js').then(m => m.track('video_complete', { video: 'promo-60s' })); });
+}
 
 // ---- tutorial cards
 fetch('tutorials/data/index.json').then(r => r.json()).then(list => {
