@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>AgenticCAD promo stage</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../assets/site.css"><link rel="stylesheet" href="../assets/player.css">
+<style>
+  html,body{margin:0;width:1920px;height:1080px;overflow:hidden;background:#0b0e13;font-family:Inter,sans-serif}
+  #stage{position:relative;width:1920px;height:1080px;overflow:hidden;background:radial-gradient(ellipse 70% 60% at 50% 25%,#151b26 0%,#0b0e13 70%)}
+  .scene{position:absolute;inset:0;opacity:0;transition:opacity .6s ease}
+  .scene.on{opacity:1}
+  /* title */
+  .bgrid{position:absolute;inset:0;background-image:linear-gradient(rgba(255,255,255,.04) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.04) 1px,transparent 1px);background-size:64px 64px;mask-image:radial-gradient(ellipse 60% 55% at 50% 45%,#000 20%,transparent 75%);-webkit-mask-image:radial-gradient(ellipse 60% 55% at 50% 45%,#000 20%,transparent 75%)}
+  .glow{position:absolute;border-radius:50%;filter:blur(120px);opacity:.5}
+  .glow.a{width:900px;height:600px;left:-200px;top:-150px;background:#4ea1ff}
+  .glow.b{width:800px;height:600px;right:-200px;top:300px;background:#ff8c42;opacity:.3}
+  .title{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:26px}
+  .title svg{width:200px;height:200px}
+  .title svg path{stroke-dasharray:400;stroke-dashoffset:400;animation:draw 1.6s ease forwards}
+  .title svg path:nth-child(2){animation-delay:.5s}
+  .title svg circle{transform-origin:16px 16px;transform:scale(0);animation:pop .5s cubic-bezier(.2,1.6,.4,1) 1.5s forwards}
+  @keyframes draw{to{stroke-dashoffset:0}} @keyframes pop{to{transform:scale(1)}}
+  .title h1{margin:0;font-size:120px;font-weight:800;letter-spacing:-.04em;color:#fff;opacity:0;animation:rise .9s ease 1.2s forwards}
+  .title h1 span{color:#4ea1ff}
+  .title p{margin:0;font-size:46px;color:#b7c0cc;opacity:0;animation:rise .9s ease 2.0s forwards}
+  .title p b{background:linear-gradient(90deg,#ffb27a,#ff8c42 40%,#4ea1ff);-webkit-background-clip:text;background-clip:text;color:transparent}
+  @keyframes rise{from{opacity:0;transform:translateY(30px)}to{opacity:1;transform:none}}
+  /* demo scenes */
+  .demo{position:absolute;inset:0}
+  .frame{position:absolute;left:110px;top:90px;width:1700px;transform-origin:center center;transition:transform 14s linear;border:1px solid var(--line2);border-radius:18px;overflow:hidden;box-shadow:0 60px 140px rgba(0,0,0,.65)}
+  .frame .pl{border:0;border-radius:0;box-shadow:none}
+  .frame .pl-top,.frame .pl-bar,.frame .pl-narr{display:none}
+  .frame .pl-app{height:860px;grid-template-columns:470px 1fr}
+  .frame.push{transform:scale(1.035)}
+  .frame .pl-side{font-size:19px}.frame .msg{font-size:19px;line-height:1.45}.frame .pl-msgs{gap:16px;padding:20px}.frame .pl-input{font-size:19px;min-height:74px}
+  .frame .pl-hdr{font-size:18px}.frame .pl-tabs span{font-size:15px}
+  .frame .pl-ribbon .tb{min-width:60px;padding:6px 8px;font-size:11.5px}.frame .pl-ribbon .tb svg{width:24px;height:24px}
+  .frame .pl-browser{font-size:14px;min-width:220px;top:100px}.frame .pl-cube{top:100px;width:90px;height:90px}
+  .frame .pl-cmd{top:210px;width:300px;font-size:14px}.frame .pl-cam{width:300px;font-size:14px;top:100px}
+  .frame .pl-sketch{width:280px;font-size:14px;top:100px}.frame .pl-panel{width:600px}.frame .pl-panel pre{font-size:13px;max-height:340px}
+  .frame .pl-hud{font-size:12px}.frame .tool{font-size:15px}.frame .tool .res{font-size:13px}
+  .cap{position:absolute;left:160px;bottom:60px;display:flex;flex-direction:column;gap:6px;transform:translateY(40px);opacity:0;transition:.55s cubic-bezier(.2,.8,.2,1)}
+  .cap.on{transform:none;opacity:1}
+  .cap b{font-size:64px;font-weight:800;letter-spacing:-.03em;color:#fff;line-height:1.05}
+  .cap b em{font-style:normal;color:#ff8c42}
+  .cap span{font-size:26px;color:#b7c0cc}
+  .step{position:absolute;right:160px;top:60px;font:600 20px/1 "JetBrains Mono",monospace;letter-spacing:.14em;color:#ff8c42;text-transform:uppercase;opacity:0;transition:.5s}
+  .step.on{opacity:1}
+  /* montage */
+  .montage{position:absolute;inset:0;display:grid;grid-template-columns:1fr 1fr;align-items:center;padding:0 160px;gap:80px}
+  .montage .drawing{background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 50px 120px rgba(0,0,0,.6);transform:scale(.96);transition:transform 9s linear}
+  .montage.on .drawing{transform:scale(1.04)}
+  .montage img{display:block;width:100%}
+  .list{display:flex;flex-direction:column;gap:26px}
+  .list div{font-size:44px;font-weight:700;color:#fff;letter-spacing:-.02em;opacity:0;transform:translateX(40px);transition:.6s ease}
+  .list div small{display:block;font-size:24px;font-weight:400;color:#b7c0cc;margin-top:4px}
+  .list div.on{opacity:1;transform:none}
+  .list div::before{content:"";display:inline-block;width:14px;height:14px;border-radius:50%;background:#ff8c42;margin-right:18px;vertical-align:middle}
+  /* end */
+  .end{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:22px;text-align:center}
+  .end svg{width:140px;height:140px}
+  .end h2{margin:0;font-size:84px;font-weight:800;letter-spacing:-.035em;color:#fff}
+  .end .url{font:600 40px "JetBrains Mono",monospace;color:#4ea1ff;background:rgba(78,161,255,.1);border:1px solid rgba(78,161,255,.4);border-radius:14px;padding:14px 30px}
+  .end p{margin:0;font-size:30px;color:#b7c0cc}
+  .end .pills{display:flex;gap:14px;margin-top:6px}
+  .end .pills span{border:1px solid var(--line2);border-radius:999px;padding:10px 22px;font-size:24px;color:#e6e9ee}
+  .end .pills span.free{border-color:#ff8c42;color:#ffb27a}
+  .end > *{opacity:0;animation:rise .8s ease forwards}
+  .end > *:nth-child(2){animation-delay:.2s}.end > *:nth-child(3){animation-delay:.5s}.end > *:nth-child(4){animation-delay:.8s}.end > *:nth-child(5){animation-delay:1.1s}
+  .vignette{position:absolute;inset:0;pointer-events:none;background:radial-gradient(ellipse 80% 75% at 50% 50%,transparent 60%,rgba(0,0,0,.45) 100%)}
+</style>
+</head>
+<body>
+<div id="stage">
+  <div class="scene" id="s-title"><div class="bgrid"></div><div class="glow a"></div><div class="glow b"></div>
+    <div class="title">
+      <svg viewBox="0 0 32 32" fill="none"><path d="M16 3 28 9.5v13L16 29 4 22.5v-13L16 3Z" stroke="#4ea1ff" stroke-width="1.6" stroke-linejoin="round"/><path d="M16 16 28 9.5M16 16v13M16 16 4 9.5" stroke="#4ea1ff" stroke-width="1.6" stroke-linejoin="round"/><circle cx="16" cy="16" r="3.2" fill="#ff8c42"/></svg>
+      <h1>Agentic<span>CAD</span></h1>
+      <p>CAD that <b>talks back.</b></p>
+    </div></div>
+  <div class="scene demo" id="s-demo"><div class="glow a" style="opacity:.25"></div><div class="glow b" style="opacity:.18"></div>
+    <div class="frame" id="frame"></div>
+    <div class="step" id="step"></div>
+    <div class="cap" id="cap"><b id="cap-b"></b><span id="cap-s"></span></div>
+  </div>
+  <div class="scene" id="s-montage"><div class="glow a" style="opacity:.25"></div>
+    <div class="montage" id="montage">
+      <div class="drawing"><img src="../assets/img/drawing.svg" alt=""></div>
+      <div class="list">
+        <div>Exact STEP<small>Cylinders stay cylinders. Opens cleanly in any CAD.</small></div>
+        <div>STL for printing<small>Tessellated only at export, at the resolution you choose.</small></div>
+        <div>Shop drawings<small>Third-angle views, dimensions and hole tables. Automatically.</small></div>
+        <div>GRBL G-code<small>Checked against your machine before you press run.</small></div>
+      </div>
+    </div></div>
+  <div class="scene" id="s-end"><div class="bgrid"></div><div class="glow a"></div><div class="glow b"></div>
+    <div class="end">
+      <svg viewBox="0 0 32 32" fill="none"><path d="M16 3 28 9.5v13L16 29 4 22.5v-13L16 3Z" stroke="#4ea1ff" stroke-width="1.6" stroke-linejoin="round"/><path d="M16 16 28 9.5M16 16v13M16 16 4 9.5" stroke="#4ea1ff" stroke-width="1.6" stroke-linejoin="round"/><circle cx="16" cy="16" r="3.2" fill="#ff8c42"/></svg>
+      <h2>Describe it. Point at it. Cut it.</h2>
+      <div class="url">agenticcad.github.io/agenticcad</div>
+      <p>Runs on your machine with Claude Code. Every design is one reproducible script.</p>
+      <div class="pills"><span class="free">Free for non-commercial use</span><span>macOS</span><span>Windows</span><span>Source</span></div>
+    </div></div>
+  <div class="vignette"></div>
+</div>
+<script type="importmap">{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/" } }</script>
+<script type="module">
+import { mountPlayer } from '../assets/player.js';
+const q = new URLSearchParams(location.search);
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const show = id => { document.querySelectorAll('.scene').forEach(s => s.classList.toggle('on', s.id === id)); };
+const cap = (b, s, step) => { const el = document.getElementById('cap'); el.classList.remove('on'); document.getElementById('cap-b').innerHTML = b; document.getElementById('cap-s').textContent = s || ''; const st = document.getElementById('step'); st.textContent = step || ''; st.classList.toggle('on', !!step); requestAnimationFrame(() => setTimeout(() => el.classList.add('on'), 60)); };
+const hideCap = () => document.getElementById('cap').classList.remove('on');
+const data = {};
+async function load(id) { if (!data[id]) data[id] = await (await fetch(`../tutorials/data/${id}.json`)).json(); return data[id]; }
+const frame = document.getElementById('frame');
+let player = null;
+async function demo(id, from, to, speed = 2) {
+  const t = await load(id);
+  if (player) player.destroy();
+  frame.innerHTML = '';
+  player = mountPlayer(frame, t, {});
+  frame.querySelector(`[data-speed="${speed}"]`)?.click();
+  player.viewer.controls.autoRotateSpeed = 0.55; player.viewer.setAutoRotate(true);     // slow drift keeps the 3D alive
+  frame.classList.remove('push'); requestAnimationFrame(() => setTimeout(() => frame.classList.add('push'), 50));
+  await sleep(300);
+  if (from > 1) await player.seek(from - 1);
+  await sleep(400);
+  const done = new Promise(res => { const iv = setInterval(() => { const st = frame.querySelector('[data-st]').textContent; const k = parseInt(st.replace('step', '')); if (k >= to) { clearInterval(iv); res(); } }, 100); });
+  player.play();
+  await done;
+  await sleep(1400);            // let the last step's animation land
+  player.pause();
+}
+async function run() {
+  const t0 = performance.now();
+  // 1 · title
+  show('s-title'); await sleep(5200);
+  // 2 · describe (first tutorial: prompt → build → model → summary)
+  show('s-demo'); cap('Describe <em>it.</em>', 'Plain words in. An exact, parametric model out.', 'step 1 · describe');
+  await demo('first-part', 1, 5, 2);
+  // 3 · point at a face
+  cap('Point <em>at it.</em>', 'Click a face. The agent works on exactly that geometry.', 'step 2 · point');
+  await demo('select-face', 1, 7, 2);
+  // 4 · ribbon
+  cap('Tweak it <em>by hand.</em>', 'Fusion-style tools. Every click is written into the script.', 'step 3 · tweak');
+  await demo('ribbon', 1, 5, 2);
+  // 5 · CAM
+  cap('Then <em>cut it.</em>', 'Adaptive clearing, drilling, tabs. GRBL G-code with arcs.', 'step 4 · machine');
+  await demo('cam', 5, 7, 2);
+  hideCap(); await sleep(400);
+  // 6 · montage
+  show('s-montage'); const m = document.getElementById('montage'); requestAnimationFrame(() => m.classList.add('on'));
+  const items = [...m.querySelectorAll('.list div')];
+  for (let i = 0; i < items.length; i++) { await sleep(i === 0 ? 700 : 1500); items[i].classList.add('on'); }
+  await sleep(2600);
+  // 7 · end
+  show('s-end'); await sleep(7500);
+  window.__promoDone = true; window.__promoSeconds = (performance.now() - t0) / 1000;
+  document.title = 'DONE ' + window.__promoSeconds.toFixed(1);
+}
+document.fonts.ready.then(() => setTimeout(run, q.has('rec') ? 800 : 300));
+</script>
+</body>
+</html>
