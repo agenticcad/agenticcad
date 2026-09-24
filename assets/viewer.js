@@ -190,20 +190,23 @@ export function createViewer(el, opts = {}) {
   return { scene, camera, controls, renderer, setModel, fitView, viewFrom, animateTo, select, setGhost, showMarker, hideMarker, pick, setToolpaths, setToolpathProgress, clearToolpaths, showSketch, hideSketch, faces: () => faces, bbox: () => bbox, setAutoRotate: v => { controls.autoRotate = !!v; }, dispose: () => { running = false; ro.disconnect(); io.disconnect(); renderer.dispose(); el.innerHTML = ''; } };
 }
 
-// tiny python highlighter for code panels (keywords, strings, numbers, comments, calls)
+// tiny python highlighter for code panels: one pass over the source so markup is never re-matched
 export function hlPython(src) {
-  const esc = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-  const KW = /\b(with|as|for|in|if|else|elif|import|from|def|return|not|and|or|None|True|False|class|lambda)\b/g;
-  return esc(src).split('\n').map(line => {
-    const ci = line.indexOf('#'); let code = line, com = '';
-    if (ci >= 0 && !/["'][^"']*#/.test(line.slice(0, ci))) { code = line.slice(0, ci); com = line.slice(ci); }
-    code = code.replace(/("[^"]*"|'[^']*')/g, '<span class="hl-s">$1</span>')
-      .replace(/\b(\d+(?:\.\d+)?)\b/g, '<span class="hl-n">$1</span>')
-      .replace(KW, '<span class="hl-k">$1</span>')
-      .replace(/\b([A-Z][A-Za-z0-9_]*)(?=\()/g, '<span class="hl-t">$1</span>')
-      .replace(/\b([a-z_][a-z0-9_]*)(?=\()/g, '<span class="hl-f">$1</span>');
-    return code + (com ? `<span class="hl-c">${com}</span>` : '');
-  }).join('\n');
+  const esc = t => t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const KW = new Set(['with', 'as', 'for', 'in', 'if', 'else', 'elif', 'import', 'from', 'def', 'return', 'not', 'and', 'or', 'None', 'True', 'False', 'class', 'lambda']);
+  const re = /(#[^\n]*)|("(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*')|(\b\d+(?:\.\d+)?\b)|(\b[A-Za-z_][A-Za-z0-9_]*\b)(?=\s*\()|(\b[A-Za-z_][A-Za-z0-9_]*\b)/g;
+  let out = '', last = 0, m;
+  while ((m = re.exec(src))) {
+    out += esc(src.slice(last, m.index));
+    const [tok, com, str, num, call, word] = m;
+    if (com) out += `<span class="hl-c">${esc(com)}</span>`;
+    else if (str) out += `<span class="hl-s">${esc(str)}</span>`;
+    else if (num) out += `<span class="hl-n">${num}</span>`;
+    else if (call) out += KW.has(call) ? `<span class="hl-k">${call}</span>` : `<span class="${/^[A-Z]/.test(call) ? 'hl-t' : 'hl-f'}">${call}</span>`;
+    else out += KW.has(word) ? `<span class="hl-k">${word}</span>` : esc(word);
+    last = m.index + tok.length;
+  }
+  return out + esc(src.slice(last));
 }
 export function hlGcode(src) {
   const esc = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
