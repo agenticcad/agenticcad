@@ -186,3 +186,16 @@ def test_drawing_and_print_settings_drive_the_buttons(client):
     svg = client.get(f"/api/drawings/{d['design']}/{d['files'][0]['svg']}").text
     assert "Brass" in svg and ET.fromstring(svg).attrib["width"].startswith("420")     # A3 landscape is 420 mm wide
     client.post("/api/settings", json={"settings": {"drawings": {"material": "", "sheet": "A4"}}})
+
+
+def test_units_setting_and_params_units(client):
+    r = client.post("/api/settings", json={"settings": {"units": "in"}}).json()
+    assert r["settings"]["units"] == "in" and r["settings"]["units_resolved"] == "in" and r["settings"]["units_auto"] in ("mm", "in")
+    assert client.get("/api/params").json()["units"] == "in"
+    assert client.post("/api/settings", json={"settings": {"units": "furlongs"}}).status_code == 400
+    client.post("/api/design/open", json={"name": "demo"})
+    d = client.post("/api/drawings", json={}).json()
+    svg = client.get(f"/api/drawings/{d['design']}/{d['files'][0]['svg']}").text
+    assert "in · third angle" in svg
+    r = client.post("/api/settings", json={"settings": {"units": ""}}).json()
+    assert r["settings"]["units"] == "" and r["settings"]["units_resolved"] == r["settings"]["units_auto"]

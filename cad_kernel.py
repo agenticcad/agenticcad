@@ -309,6 +309,7 @@ def script_namespace() -> dict[str, Any]:
     ns["from_library"] = from_library
     ns.update(thr.namespace())
     ns.update(gears.namespace())
+    ns.update({"inch": 25.4, "IN": 25.4, "ft": 304.8, "thou": 0.0254, "mm": 1.0})   # scripts stay in mm; write imperial as 2.5 * inch
     return ns
 
 

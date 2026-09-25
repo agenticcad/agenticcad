@@ -6,7 +6,7 @@
 # PEP 621/639 metadata: Briefcase's Windows installer reads the licence file list from here.
 [project]
 name = "agenticcad"
-version = "0.15.3"
+version = "0.16.0"
 description = "Agent-native CAD/CAM: describe it, point at it, export STEP, STL and G-code"
 license = "PolyForm-Noncommercial-1.0.0"
 license-files = ["LICENSE"]
@@ -15,7 +15,7 @@ requires-python = ">=3.12"
 [tool.briefcase]
 project_name = "AgenticCAD"
 bundle = "au.com.prodevelop"
-version = "0.15.3"
+version = "0.16.0"
 url = "https://agenticcad.github.io/agenticcad/"
 author = "Mike Orzel"
 author_email = "agenticcad@prodevelop.com.au"
@@ -33,7 +33,7 @@ icon = "src/agenticcad/resources/agenticcad"
 sources = [
     "src/agenticcad",
     "server.py", "agent.py", "cad_kernel.py", "cam_kernel.py", "cam_data.py", "drawing.py",
-    "gears.py", "library.py", "script_edit.py", "slicer.py", "threads.py", "version.py",
+    "gears.py", "library.py", "script_edit.py", "slicer.py", "threads.py", "units.py", "version.py",
     "static", "CHANGELOG.md",
 ]
 requires = [

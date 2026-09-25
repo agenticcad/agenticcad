@@ -31,6 +31,7 @@ from cam_data import Library
 from library import PartLibrary, slug as lib_slug
 import script_edit
 import slicer
+import units as un
 
 Emit = Callable[[dict[str, Any]], Awaitable[None]]
 
@@ -73,7 +74,12 @@ use it for every change to an existing design, including adding bodies. Do not r
 one line.
 
 Rules
-- Units are millimetres, Z is up. Keep dimensions as named variables at the top of the script.
+- Scripts are ALWAYS in millimetres internally (build123d), Z is up. The user's default units are {UNITS_LONG}: a
+  number the user gives without a unit is in {UNITS}. `inch` (= 25.4) is pre-imported: write imperial dimensions
+  as `2.5 * inch` (and parameters as `plate_l = 2.5 * inch`) so the script reads in the user's units and the
+  Parameters panel shows inches; write metric as plain numbers. Mixing both in one script is fine. When you
+  report sizes back, use {UNITS} (with the other unit in brackets if helpful). Keep dimensions as named variables
+  at the top of the script.
 - Geometry is exact B-rep (OCCT). Circles, cylinders, fillets are true analytic surfaces; the viewer's
   triangles are display-only. STEP export is exact; STL is tessellated at export time with a chosen tolerance.
 - The script must assign `result`. One body: `result = part`. Several bodies: a dict of name -> shape,
@@ -130,7 +136,8 @@ Rules
   appear as `[Note]`s and as expression rewrites in the result dict (e.g. `_bracket = bp.part` hoisted
   before `result`, then `_bracket.fillet(2, [...])`) — treat them like any other user edit and keep them.
   `hole(part, d, at=.., depth=.. | through=True, axis=.., counterbore=(d, depth))` is available to you too.
-- Threads (ISO metric, pre-imported): `iso("M4")` -> pitch/tap_drill/clearance; `tap_drill("M4")`,
+- Threads (ISO metric and Unified inch, pre-imported; sizes like "M4", "1/4-20", "#10-32", "3/8" = coarse): `thread("1/4-20")` /
+  `iso("M4")` -> major/pitch/tpi/tap_drill/clearance in mm; `tap_drill("M4")`,
   `clearance_dia("M4", "medium")`; `tapped_hole("M4", depth, at=(x, y, surface_z), through=False)` returns a
   cosmetic cutter to SUBTRACT; `tap(part, "M4", at=(x, y, surface_z), depth=8 | through=True, real=False)` cuts
   (and with real=True actually models) a tapped hole into a part and registers it so drawings call it out
@@ -705,18 +712,19 @@ class CadAgent:
             return {}
         return ck.measure(self.model, faces, points, bodies)
 
-    async def make_drawings(self, material: str = "", density: float | None = None, sheet: str = "", notes: str = "") -> list[dict[str, Any]]:
+    async def make_drawings(self, material: str = "", density: float | None = None, sheet: str = "", notes: str = "", units: str = "") -> list[dict[str, Any]]:
         """Empty material / sheet fall back to Settings ▸ Shop drawings (the ribbon button passes nothing)."""
         if self.model is None or not self.model.bodies:
             raise ck.CadError("nothing to draw: the design is empty")
         dd = self.settings.get("drawings") or {}
         material = material or dd.get("material") or ""
         sheet = sheet or dd.get("sheet") or "A4"
+        units = units or self.units()
         name = self.design_name or "untitled"
         out_dir = self.workspace / "drawings" / safe_name(name)
         for old in out_dir.glob("*"):
             old.unlink()
-        res = await asyncio.to_thread(drawing.drawings_for_model, self.model, out_dir, safe_name(name), material, density, sheet, notes)
+        res = await asyncio.to_thread(drawing.drawings_for_model, self.model, out_dir, safe_name(name), material, density, sheet, notes, units)
         files = [{"body": r["body"], "svg": Path(r["svg"]).name, "dxf": Path(r["dxf"]).name if r.get("dxf") else None, "scale": r["scale"]} for r in res]
         await self.emit({"type": "drawings", "design": safe_name(name), "files": files})
         return res
@@ -1160,10 +1168,11 @@ class CadAgent:
         @tool("make_drawings", "Generate shop drawings (SVG + DXF): third-angle front/top/right views + iso, hidden lines, overall "
               "dimensions, hole callouts and a hole table, title block. One sheet per body (+ assembly). Files go to workspace/drawings/<design>/.",
               {"type": "object", "properties": {"material": {"type": "string"}, "density": {"type": "number"},
-                                                "sheet": {"type": "string", "enum": ["A4", "A3"], "default": "A4"}, "notes": {"type": "string"}}, "required": []})
+                                                "sheet": {"type": "string", "enum": ["A4", "A3"], "default": "A4"}, "notes": {"type": "string"},
+                                                "units": {"type": "string", "enum": ["mm", "in"], "description": "dimension units on the sheet (default: the user's units)"}}, "required": []})
         async def make_drawings(args: dict[str, Any]) -> dict[str, Any]:
             try:
-                res = await agent.make_drawings(args.get("material") or "", args.get("density"), args.get("sheet") or "", args.get("notes") or "")
+                res = await agent.make_drawings(args.get("material") or "", args.get("density"), args.get("sheet") or "", args.get("notes") or "", args.get("units") or "")
             except Exception as e:  # noqa: BLE001
                 return {"content": [{"type": "text", "text": f"failed: {e}"}], "is_error": True}
             lines = [f"{r['body']}: {r['svg']} (scale {r['scale']}), views " + ", ".join(f"{k} {v['w']:.1f}×{v['h']:.1f} {v['holes']} holes" for k, v in r["views"].items())
@@ -1351,6 +1360,7 @@ class CadAgent:
         "mcp_servers": {},                 # name -> {type: stdio|http|sse, command, args, env, url, headers, enabled}
         "extra_prompt": "",                # appended to the system prompt (house rules, machine notes...)
         "api_key": "",                     # Anthropic API key (alternative to the Claude Code login); kept in settings.json (0600)
+        "units": "",                       # display/default units: "" = auto (US timezone → in, else mm) | mm | in
         "drawings": {"material": "", "sheet": "A4"},   # shop-drawing defaults (ribbon Drawings button, agent tool without args)
         "print": {"machine": "", "process": "", "filament": "", "layer_height": None, "sparse_infill_density": None,
                   "wall_loops": None, "enable_support": False, "brim_type": ""},   # 3D-printing defaults (ribbon Slice button)
@@ -1376,6 +1386,8 @@ class CadAgent:
         if st.get("effort") not in ("", "low", "medium", "high", "xhigh", "max"):
             raise ValueError("effort must be one of low, medium, high, xhigh, max")
         st["max_turns"] = int(st.get("max_turns") or 60)
+        if st.get("units", "") not in ("", "mm", "in"):
+            raise ValueError("units must be mm, in, or empty for automatic")
         st["drawings"] = {**self.DEFAULT_SETTINGS["drawings"], **{k: v for k, v in (st.get("drawings") or {}).items() if k in self.DEFAULT_SETTINGS["drawings"]}}
         if st["drawings"]["sheet"] not in ("A4", "A3"):
             raise ValueError("drawings.sheet must be A4 or A3")
@@ -1399,10 +1411,17 @@ class CadAgent:
             pass
         return st
 
+    def units(self) -> str:
+        """Display / default units: the setting, or the timezone-based guess when unset."""
+        return self.settings.get("units") or un.detect_default_units()[0]
+
     def public_settings(self) -> dict[str, Any]:
         """Settings safe to send to the browser: the API key is never returned, only whether one is set."""
         st = {k: v for k, v in self.settings.items() if k != "api_key"}
         st["api_key_set"] = bool(self.settings.get("api_key"))
+        guess, reason = un.detect_default_units()
+        st["units_resolved"] = self.settings.get("units") or guess
+        st["units_auto"] = guess; st["units_auto_reason"] = reason
         return st
 
     def auth_status(self) -> dict[str, Any]:
@@ -1459,7 +1478,8 @@ class CadAgent:
         builtin: list[str] = []                    # no Bash/Edit/Write/Read: the agent works through the CAD tools only
         if st.get("web", True):
             allowed += ["WebFetch", "WebSearch"]; builtin = ["WebFetch", "WebSearch"]
-        prompt = SYSTEM_PROMPT
+        u = self.units()
+        prompt = SYSTEM_PROMPT.replace("{UNITS_LONG}", "inches" if u == "in" else "millimetres").replace("{UNITS}", u)
         if LEGACY_BUILD:
             for new, legacy in LEGACY_PROMPT_SWAPS:
                 assert new in prompt, "legacy swap out of date"

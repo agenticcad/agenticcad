@@ -265,7 +265,21 @@ counterbored, or tapped (M2…M12); fillet/chamfer take edges or whole faces; sh
 All of these rewrite the script (`script_edit.add_body` / `wrap_body_expr`), so the design stays one
 script and the agent is told what you did.
 
-## Threads ([threads.py](threads.py))
+## Units ([units.py](units.py))
+
+Scripts, files and the kernel are always millimetres. **Settings ▸ Units** picks how numbers are shown and how the
+agent reads a bare number from you: *automatic* follows the computer's timezone (US zones → inches, everything else
+mm), or force mm / in. `inch` (= 25.4), `IN`, `ft`, `thou` and `mm` are pre-imported, so a script mixes freely:
+`plate_l = 2.5 * inch` next to `plate_t = 6`. The Parameters card shows each parameter in its own unit (inch
+parameters are edited in inches and written back as `x * inch`), the viewer stats and measure readouts use the
+display units, and shop drawings are dimensioned in them (`make_drawings(units="in")` overrides per sheet).
+
+## Threads ([threads.py](threads.py)) — ISO metric and Unified inch
+
+Sizes are ISO (`M4`, `M6`) or Unified (`1/4-20`, `#10-32`, `3/8-16`; a bare `3/8` means the coarse series, decimal
+`.25-20` works too). `thread(size)` / `iso(size)` return major, pitch, tpi, tap drill and clearance holes in mm (UN
+clearance = ASME close/normal/loose); `tap`, `tapped_hole`, `bolt`, `nut`, `washer` take either kind, with inch hex/socket/
+nut/washer tables from ASME B18. Drawings call out `1/4-20 UNC THRU` alongside `M4×0.7 ↧8`.
 
 ISO metric tables (pitch, tap drill, clearance fine/medium/coarse, hex/socket/nut/washer sizes) and
 script helpers: `iso("M4")`, `tap_drill`, `clearance_dia`, `tapped_hole(size, depth, at=..)` (cosmetic

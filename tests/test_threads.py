@@ -9,7 +9,8 @@ from conftest import close
 
 def test_iso_tables():
     d = thr.iso("m4")
-    assert d == {"size": "M4", "major": 4.0, "pitch": 0.7, "tap_drill": 3.3, "minor": 3.242, "clearance": {"fine": 4.3, "medium": 4.5, "coarse": 4.8}}
+    assert {k: d[k] for k in ("size", "major", "pitch", "tap_drill", "minor", "clearance")} == {"size": "M4", "major": 4.0, "pitch": 0.7, "tap_drill": 3.3, "minor": 3.242, "clearance": {"fine": 4.3, "medium": 4.5, "coarse": 4.8}}
+    assert d["system"] == "iso" and d["label"] == "M4×0.7" and abs(d["tpi"] - 36.29) < 0.01
     assert thr.tap_drill("M6") == 5.0 and thr.clearance_dia("M6") == 6.6 and thr.clearance_dia("M6", "fine") == 6.4
     with pytest.raises(thr.ThreadError):
         thr.iso("M7")

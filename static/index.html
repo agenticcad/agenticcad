@@ -179,6 +179,7 @@
   .modal textarea, #modal textarea { width:100%; min-height:260px; background:#0f1216; color:var(--text); border:1px solid var(--line); border-radius:6px; font:12px/1.4 ui-monospace,Menlo,monospace; padding:8px; }
   .prow { display:flex; align-items:center; gap:8px; padding:3px 0; font-size:12px; }
   .prow label { flex:1; font-family:ui-monospace,Menlo,monospace; color:#9cdcfe; } .prow .c { color:var(--muted); font-size:11px; flex:1.2; }
+  .prow .u { color:var(--muted); font-size:10px; width:16px; }
   .prow input { width:90px; background:var(--bg); color:var(--text); border:1px solid var(--line); border-radius:6px; padding:4px 6px; font:inherit; text-align:right; }
   body.measuring #viewer > canvas { cursor:crosshair; }
   #measure-label { position:absolute; z-index:3; transform:translate(-50%, -100%); background:rgba(20,23,28,.92); border:1px solid #ffd166; color:#ffd166; padding:2px 7px; border-radius:6px; font:12px ui-monospace,Menlo,monospace; pointer-events:none; white-space:nowrap; }
@@ -523,9 +524,14 @@ function loadMesh(data) {
   applyVisibility();
   applyColors();
   if (firstLoad) { setView('iso'); firstLoad = false; }
+  lastStatsData = data; renderStats();
+}
+let lastStatsData = null;
+function renderStats() {
+  const data = lastStatsData; if (!data) return; const emptyDesign = !data.bodies.length;
   const kinds = {}; for (const f of data.faces) kinds[f.kind] = (kinds[f.kind] || 0) + 1;
   const tris = data.bodies.reduce((n, b) => n + b.indices.length / 3, 0);
-  document.getElementById('stats').textContent = emptyDesign ? 'empty design — describe a part in the chat, use the ribbon (B for a box), or write build123d in the Code tab' : `exact B-rep: ${data.bodies.length} bod${data.bodies.length === 1 ? 'y' : 'ies'}, ${Object.entries(kinds).map(([k, n]) => `${n} ${k.toLowerCase()}`).join(', ')} · ${(bbox.max.x-bbox.min.x).toFixed(1)} × ${(bbox.max.y-bbox.min.y).toFixed(1)} × ${(bbox.max.z-bbox.min.z).toFixed(1)} mm · display mesh ${data.quality || ''} ${tris} tris`;
+  document.getElementById('stats').textContent = emptyDesign ? 'empty design — describe a part in the chat, use the ribbon (B for a box), or write build123d in the Code tab' : `exact B-rep: ${data.bodies.length} bod${data.bodies.length === 1 ? 'y' : 'ies'}, ${Object.entries(kinds).map(([k, n]) => `${n} ${k.toLowerCase()}`).join(', ')} · ${L1(bbox.max.x-bbox.min.x)} × ${L1(bbox.max.y-bbox.min.y)} × ${L1(bbox.max.z-bbox.min.z)} ${units} · display mesh ${data.quality || ''} ${tris} tris`;
   if (data.quality) document.getElementById('quality').value = data.quality;
   renderTree();
 }
@@ -1250,8 +1256,12 @@ fsInit();
 // ------------------------------------------------------------------ Design tab: parameters, measure, drawings, library
 let paramsList = [];
 let paramTimer = null;
+let units = 'mm';                       // display units (Settings ▸ Units; auto from the timezone)
+const L = mm => units === 'in' ? (+(mm / 25.4).toFixed(3)).toString() + ' in' : (+mm.toFixed(3)).toString() + ' mm';       // length
+const L1 = mm => units === 'in' ? (mm / 25.4).toFixed(2) : mm.toFixed(1);                                                     // compact, no unit
+const A = mm2 => units === 'in' ? (+(mm2 / 645.16).toFixed(3)).toString() + ' in²' : (+mm2.toFixed(3)).toString() + ' mm²';   // area
 async function loadParams() {
-  try { const { params } = await fetch('/api/params').then(r => r.json()); paramsList = params; renderParams(); } catch {}
+  try { const { params, units: u } = await fetch('/api/params').then(r => r.json()); paramsList = params; if (u && u !== units) { units = u; renderStats(); } renderParams(); } catch {}
 }
 function renderParams() {
   const el = document.getElementById('params-body'), card = document.getElementById('params-card');
@@ -1260,7 +1270,7 @@ function renderParams() {
   el.innerHTML = '';
   for (const p of paramsList) {
     const r = document.createElement('div'); r.className = 'prow';
-    r.innerHTML = `<label>${p.name}</label><span class="c">${p.comment || ''}</span><input type="number" step="any" value="${p.value}">`;
+    r.innerHTML = `<label>${p.name}</label><span class="c">${p.comment || ''}</span><input type="number" step="any" value="${p.value}"><span class="u">${p.unit === 'in' ? 'in' : 'mm'}</span>`;
     const inp = r.querySelector('input');
     inp.onchange = () => { const v = parseFloat(inp.value); if (!isFinite(v)) return; clearTimeout(paramTimer); paramTimer = setTimeout(() => api('/api/params', { values: { [p.name]: v } }).catch(e => addMsg('error', e.message)), 250); };
     inp.onkeydown = e => { if (e.key === 'ArrowUp' || e.key === 'ArrowDown') { e.preventDefault(); const step = e.shiftKey ? 10 : (e.altKey ? 0.1 : 1); inp.value = +(parseFloat(inp.value) + (e.key === 'ArrowUp' ? step : -step)).toFixed(4); inp.onchange(); } };
@@ -1333,7 +1343,7 @@ function describeSnap(sn) {
   if (!sn) return '';
   const f3 = v => (+v.toFixed(2)).toString();
   if (sn.type === 'vertex') return `vertex (${sn.p.map(f3).join(', ')})`;
-  if (sn.type === 'edge') { const i = sn.info; if (i.kind === 'LINE') return `edge #${i.id} · line ${f3(i.length)} mm`; if (i.kind === 'CIRCLE') return i.closed ? `edge #${i.id} · circle Ø${f3(i.radius * 2)} (R${f3(i.radius)})` : `edge #${i.id} · arc R${f3(i.radius)} · ${f3(i.sweep)}°`; return `edge #${i.id} · ${i.kind.toLowerCase()} ${f3(i.length)} mm`; }
+  if (sn.type === 'edge') { const i = sn.info; if (i.kind === 'LINE') return `edge #${i.id} · line ${L(i.length)}`; if (i.kind === 'CIRCLE') return i.closed ? `edge #${i.id} · circle Ø${L(i.radius * 2)} (R${L(i.radius)})` : `edge #${i.id} · arc R${L(i.radius)} · ${f3(i.sweep)}°`; return `edge #${i.id} · ${i.kind.toLowerCase()} ${L(i.length)}`; }
   if (sn.type === 'face') { const fi = model.faces.get(sn.id); return `${sn.body.path} · ${fi ? fi.label : '#' + sn.id} · point (${sn.p.map(f3).join(', ')})`; }
   return '';
 }
@@ -1370,8 +1380,8 @@ async function measureRequest() {
       mGroup.add(mkSphere(a, 0xffd166, 0.5)); mGroup.add(mkSphere(b, 0xffd166, 0.5));
       measureState.mid = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (a[2] + b[2]) / 2];
       const parts = [];
-      if (res.distance != null) parts.push(`${(+res.distance.toFixed(3))} mm`);
-      if (res.center_distance != null) parts.push(`centres ${(+res.center_distance.toFixed(3))} mm`);
+      if (res.distance != null) parts.push(L(res.distance));
+      if (res.center_distance != null) parts.push(`centres ${L(res.center_distance)}`);
       if (res.angle != null) parts.push(`∠ ${(+res.angle.toFixed(2))}°` + (res.relation && res.relation !== 'none' ? ` (${res.relation})` : ''));
       measureState.text = parts.join(' · ');
     } else measureState.mid = null;
@@ -1381,15 +1391,15 @@ function renderMeasure(res) {
   const rows = [];
   const f = v => (typeof v === 'number' ? (+v.toFixed(3)).toString() : v);
   (res.items || []).forEach((it, i) => {
-    if (it.type === 'face') { rows.push([`pick ${i + 1}`, `face ${it.label} · ${it.body}`]); rows.push(['  area', f(it.area) + ' mm²']); if (it.radius) rows.push(['  radius', f(it.radius) + ' mm']); if (it.normal) rows.push(['  normal', it.normal.map(f).join(', ')]); }
-    else if (it.type === 'edge') { rows.push([`pick ${i + 1}`, `edge #${it.id} ${it.kind.toLowerCase()} · ${it.body || ''}`]); rows.push(['  length', f(it.length) + ' mm']); if (it.radius) rows.push([it.closed ? '  diameter' : '  radius', it.closed ? 'Ø' + f(it.radius * 2) : f(it.radius) + ' mm' + (it.sweep ? ` (${f(it.sweep)}°)` : '')]); if (it.center) rows.push(['  centre', it.center.map(f).join(', ')]); if (it.dir) rows.push(['  direction', it.dir.map(f).join(', ')]); }
+    if (it.type === 'face') { rows.push([`pick ${i + 1}`, `face ${it.label} · ${it.body}`]); rows.push(['  area', A(it.area)]); if (it.radius) rows.push(['  radius', L(it.radius)]); if (it.normal) rows.push(['  normal', it.normal.map(f).join(', ')]); }
+    else if (it.type === 'edge') { rows.push([`pick ${i + 1}`, `edge #${it.id} ${it.kind.toLowerCase()} · ${it.body || ''}`]); rows.push(['  length', L(it.length)]); if (it.radius) rows.push([it.closed ? '  diameter' : '  radius', it.closed ? 'Ø' + f(it.radius * 2) : f(it.radius) + ' mm' + (it.sweep ? ` (${f(it.sweep)}°)` : '')]); if (it.center) rows.push(['  centre', it.center.map(f).join(', ')]); if (it.dir) rows.push(['  direction', it.dir.map(f).join(', ')]); }
     else rows.push([`pick ${i + 1}`, `${it.type} (${it.p.map(f).join(', ')})`]);
   });
-  if (res.distance != null) rows.push(['distance', f(res.distance) + ' mm']);
+  if (res.distance != null) rows.push(['distance', L(res.distance)]);
   if (res.delta) rows.push(['  Δx Δy Δz', res.delta.map(f).join(', ')]);
-  if (res.center_distance != null) rows.push(['centre distance', f(res.center_distance) + ' mm']);
+  if (res.center_distance != null) rows.push(['centre distance', L(res.center_distance)]);
   if (res.center_delta) rows.push(['  Δ centres', res.center_delta.map(f).join(', ')]);
-  if (res.plane_gap != null) rows.push(['plane gap', f(res.plane_gap) + ' mm']);
+  if (res.plane_gap != null) rows.push(['plane gap', L(res.plane_gap)]);
   if (res.angle != null) rows.push([`angle (${res.angle_kind || ''})`, `${f(res.angle)}° / ${f(res.angle_supplement)}°`]);
   if (res.relation && res.relation !== 'none') rows.push(['relation', res.relation]);
   if (res.bodies) res.bodies.forEach(b => { rows.push([`body ${b.body}`, `${f(b.volume_mm3)} mm³ · ${f(b.mass_g)} g @ ${b.density_g_cm3}`]); rows.push(['  size', b.bbox_size.map(f).join(' × ')]); rows.push(['  centre of mass', b.center_of_mass.map(f).join(', ')]); });
@@ -1949,6 +1959,7 @@ async function openSettings() {
     <label>Effort</label><select id="s-effort">${['', 'low', 'medium', 'high', 'xhigh', 'max'].map(e => `<option value="${e}" ${e === (st.effort || '') ? 'selected' : ''}>${e || '(default)'}</option>`).join('')}</select>
     <label>Max steps / turn</label><input id="s-turns" type="number" value="${st.max_turns}">
     <label>Thinking</label><select id="s-think"><option value="omitted" ${st.thinking_display !== 'summarized' ? 'selected' : ''}>hidden</option><option value="summarized" ${st.thinking_display === 'summarized' ? 'selected' : ''}>show summary in chat</option></select>
+    <label>Units</label><select id="s-units"><option value="" ${!st.units ? 'selected' : ''}>automatic (${st.units_auto} · ${st.units_auto_reason})</option><option value="mm" ${st.units === 'mm' ? 'selected' : ''}>millimetres</option><option value="in" ${st.units === 'in' ? 'selected' : ''}>inches</option></select>
     <label>Web tools</label><label style="color:var(--text)"><input id="s-web" type="checkbox" ${st.web !== false ? 'checked' : ''}> allow WebFetch / WebSearch</label>
     <label>Extra instructions</label><textarea id="s-extra" rows="3" placeholder="house rules, your machine, preferred materials…"></textarea>
     <label>API key</label><div style="display:flex;gap:6px;align-items:center"><input id="s-key" type="password" autocomplete="off" placeholder="${st.api_key_set ? '•••••••• (set — leave blank to keep)' : 'optional: sk-ant-… instead of the Claude Code login'}" style="flex:1">${st.api_key_set ? '<button class="btn small" id="s-key-clear" type="button">Clear</button>' : ''}</div>
@@ -2014,7 +2025,7 @@ async function openSettings() {
   }
   let clearKey = false; const kc = d.querySelector('#s-key-clear'); if (kc) kc.onclick = () => { clearKey = true; kc.textContent = 'will clear'; };
   const collect = () => ({ model: sel.value === '__custom' ? custom.value.trim() : sel.value, effort: d.querySelector('#s-effort').value, max_turns: parseInt(d.querySelector('#s-turns').value) || 60,
-    thinking_display: d.querySelector('#s-think').value, web: d.querySelector('#s-web').checked, extra_prompt: d.querySelector('#s-extra').value, mcp_servers: st.mcp_servers || {},
+    thinking_display: d.querySelector('#s-think').value, web: d.querySelector('#s-web').checked, units: d.querySelector('#s-units').value, extra_prompt: d.querySelector('#s-extra').value, mcp_servers: st.mcp_servers || {},
     api_key: clearKey ? '' : (d.querySelector('#s-key').value.trim() || '__keep__'),
     drawings: { material: d.querySelector('#s-dmat').value.trim(), sheet: d.querySelector('#s-dsheet').value },
     print: slicerInfo ? { machine: d.querySelector('#s-pmach').value, process: d.querySelector('#s-pproc').value, filament: d.querySelector('#s-pfil').value,
@@ -2022,7 +2033,7 @@ async function openSettings() {
       enable_support: d.querySelector('#s-psup').checked, brim_type: d.querySelector('#s-pbrim').value } : (st.print || {}) });
   const r = await openModal('Settings', d, [['Cancel', null], ['Save', () => ({ s: collect(), restart: false }), true], ['Save & restart agent', () => ({ s: collect(), restart: true })]]);
   if (!r) return;
-  try { await api('/api/settings', { settings: r.s, restart: r.restart }); addMsg('system', r.restart ? 'settings saved · agent restarting' : 'settings saved (drawing and printing options apply now; agent options after Save & restart)'); }
+  try { await api('/api/settings', { settings: r.s, restart: r.restart }); loadParams(); addMsg('system', r.restart ? 'settings saved · agent restarting' : 'settings saved (units, drawing and printing options apply now; the agent picks up model and unit changes after Save & restart)'); }
   catch (e) { addMsg('error', e.message); }
 }
 

@@ -141,6 +141,21 @@ def _num_of(node):
     return None
 
 
+_UNIT_NAMES = {"inch": "in", "IN": "in", "mm": "mm"}
+
+
+def _num_unit_of(node):
+    """(value, unit, literal_node) for `2.5`, `-2.5`, `2.5 * inch`, `inch * 2.5`; unit 'mm' for a bare number. None otherwise."""
+    v = _num_of(node)
+    if v is not None:
+        return v, "mm", node
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Mult):
+        for lit, name in ((node.left, node.right), (node.right, node.left)):
+            if isinstance(name, ast.Name) and name.id in _UNIT_NAMES and _num_of(lit) is not None:
+                return _num_of(lit), _UNIT_NAMES[name.id], lit
+    return None
+
+
 def params(code: str) -> list[dict]:
     """Editable numeric parameters: top-level assignments of numeric literals.
     Returns [{name, value, line, comment}] in source order."""
@@ -156,14 +171,14 @@ def params(code: str) -> list[dict]:
         if "#" in src_line:
             comment = src_line.split("#", 1)[1].strip()
         if isinstance(tgt, ast.Name):
-            v = _num_of(val)
-            if v is not None:
-                out.append({"name": tgt.id, "value": v, "line": node.lineno, "comment": comment})
+            nu = _num_unit_of(val)
+            if nu is not None:
+                out.append({"name": tgt.id, "value": nu[0], "unit": nu[1], "line": node.lineno, "comment": comment})
         elif isinstance(tgt, ast.Tuple) and isinstance(val, ast.Tuple) and len(tgt.elts) == len(val.elts):
             for t_, v_ in zip(tgt.elts, val.elts):
-                v = _num_of(v_)
-                if isinstance(t_, ast.Name) and v is not None:
-                    out.append({"name": t_.id, "value": v, "line": node.lineno, "comment": comment})
+                nu = _num_unit_of(v_)
+                if isinstance(t_, ast.Name) and nu is not None:
+                    out.append({"name": t_.id, "value": nu[0], "unit": nu[1], "line": node.lineno, "comment": comment})
     return out
 
 
@@ -186,13 +201,15 @@ def set_params(code: str, values: dict) -> str:
         elif isinstance(tgt, ast.Tuple) and isinstance(val, ast.Tuple):
             pairs = [(t_.id, v_) for t_, v_ in zip(tgt.elts, val.elts) if isinstance(t_, ast.Name)]
         for name, vnode in pairs:
-            if name not in values or _num_of(vnode) is None:
+            nu = _num_unit_of(vnode)
+            if name not in values or nu is None:
                 continue
             seen.add(name)
             new = values[name]
-            new_txt = _fmt_num(new, isinstance(_num_of(vnode), int) and float(new).is_integer())
-            start = boffs[vnode.lineno - 1] + vnode.col_offset
-            end = boffs[vnode.end_lineno - 1] + vnode.end_col_offset
+            lit = nu[2]                                   # only the number changes; `* inch` stays
+            new_txt = _fmt_num(new, isinstance(nu[0], int) and float(new).is_integer())
+            start = boffs[lit.lineno - 1] + lit.col_offset
+            end = boffs[lit.end_lineno - 1] + lit.end_col_offset
             edits.append((start, end, new_txt.encode("utf-8")))
     missing = [k for k in values if k not in seen]
     if missing:

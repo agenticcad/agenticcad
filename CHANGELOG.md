@@ -5,6 +5,16 @@ features, patch bumps fix things. The version shown in the UI header comes from 
 
 ## [Unreleased]
 
+## [0.16.0] — 2026-09-25
+
+### Added
+- **Inches alongside millimetres.** Settings ▸ Units: automatic (US timezone → inches, else mm), or mm / in. Scripts
+  stay in mm; `inch`, `IN`, `ft`, `thou`, `mm` are pre-imported so dimensions mix (`plate_l = 2.5 * inch`). The
+  Parameters card shows each value in its own unit, viewer stats and measure readouts use the display units, shop
+  drawings are dimensioned in them, and the agent reads bare numbers in the user's units.
+- **Unified inch threads** (UNC/UNF: `1/4-20`, `#10-32`, `3/8-16`…, coarse series by default) next to ISO metric in
+  `thread()` / `iso()`, `tap`, `tapped_hole`, `bolt`, `nut`, `washer`, with ASME hardware tables and drawing callouts.
+
 ## [0.15.3] — 2026-09-25
 
 ### Added

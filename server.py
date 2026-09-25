@@ -294,6 +294,7 @@ class DrawBody(BaseModel):
     density: float | None = None
     sheet: str = ""             # "" -> Settings ▸ Shop drawings
     notes: str = ""
+    units: str = ""             # "" -> Settings ▸ Units
 
 
 @app.get("/api/sketches")
@@ -303,7 +304,7 @@ async def sketches_get():
 
 @app.get("/api/params")
 async def params_get():
-    return {"params": agent.get_params()}
+    return {"params": agent.get_params(), "units": agent.units()}
 
 
 @app.post("/api/params")
@@ -376,7 +377,7 @@ async def library_delete(slug: str):
 @app.post("/api/drawings")
 async def drawings(body: DrawBody):
     try:
-        res = await agent.make_drawings(body.material, body.density, body.sheet, body.notes)
+        res = await agent.make_drawings(body.material, body.density, body.sheet, body.notes, body.units)
     except Exception as e:  # noqa: BLE001
         return JSONResponse({"error": str(e)}, status_code=400)
     return {"files": [{"body": r["body"], "svg": Path(r["svg"]).name, "dxf": Path(r["dxf"]).name if r.get("dxf") else None} for r in res],

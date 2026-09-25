@@ -134,6 +134,8 @@ def _pick_scale(w: float, h: float, sheet_w: float, sheet_h: float) -> float:
 
 
 THREADS: list = []     # threads.ThreadSpec of the model being drawn (set by drawings_for_model)
+UNITS = "mm"
+INCH = 25.4
 
 
 def _thread_label_for(shape: Shape, name: str, h: dict[str, Any]) -> str | None:
@@ -146,13 +148,21 @@ def _thread_label_for(shape: Shape, name: str, h: dict[str, Any]) -> str | None:
             continue
         p = Vector(*t.at) - c
         if abs(p.dot(right) - h["x"]) < 0.05 and abs(p.dot(up) - h["y"]) < 0.05:
-            return t.label()
+            return t.label(UNITS)
     return None
+
+
+def _L(v: float, units: str) -> str:
+    """Dimension text in the drawing units (mm to 2 decimals, inches to 3), trailing zeros trimmed."""
+    s = f"{v / INCH:.3f}" if units == "in" else f"{v:.2f}"
+    return s.rstrip("0").rstrip(".") if "." in s else s
 
 
 def make_drawing(shape: Shape, title: str, out_path: Path, body_name: str = "", material: str = "",
                  density: float | None = None, sheet: str = "A4", notes: str = "",
-                 dxf_path: Path | None = None) -> dict[str, Any]:
+                 dxf_path: Path | None = None, units: str = "mm") -> dict[str, Any]:
+    global UNITS
+    UNITS = units
     sw, sh = SHEETS.get(sheet, SHEETS["A4"])
     margin, gap, tb_h = 12.0, 14.0, 24.0
     views = {n: project(shape, n) for n in ("front", "top", "right", "iso")}
@@ -219,10 +229,10 @@ def make_drawing(shape: Shape, title: str, out_path: Path, body_name: str = "", 
         xl, xr = tx((v.xmin, 0)), tx((v.xmax, 0)); yt, yb = ty((0, v.ymax)), ty((0, v.ymin))
         dy = yb + 9
         ext_line(xl, yb + 1, xl, dy + 1); ext_line(xr, yb + 1, xr, dy + 1)
-        dim_h(xl, xr, dy, f"{v.w:.2f}".rstrip("0").rstrip("."))
+        dim_h(xl, xr, dy, _L(v.w, units))
         dx = xl - 9
         ext_line(xl - 1, yt, dx - 1, yt); ext_line(xl - 1, yb, dx - 1, yb)
-        dim_v(yt, yb, dx, f"{v.h:.2f}".rstrip("0").rstrip("."))
+        dim_v(yt, yb, dx, _L(v.h, units))
         # holes: label + callout per diameter group
         groups: dict[float, list[dict]] = {}
         for h in v.holes:
@@ -248,7 +258,7 @@ def make_drawing(shape: Shape, title: str, out_path: Path, body_name: str = "", 
             lx, ly = tx((v.xmax, 0)) + 4, ty((0, v.ymax)) - 3 - 4.5 * (list(sorted(groups)).index(d))
             svg.append(f'<line x1="{W(px + h0["d"] * s / 2 * 0.7)}" y1="{W(py - h0["d"] * s / 2 * 0.7)}" x2="{W(lx - 1)}" y2="{W(ly)}" stroke="#000" stroke-width="0.18"/>')
             tl = _thread_label_for(shape, name, h0)
-            callout = (f"{len(hs)}× {tl}" if tl else f"{len(hs)}× Ø{d:g}" + (" THRU" if all(x["through"] for x in hs) else f" ↧{hs[0]['depth']:g}"))
+            callout = (f"{len(hs)}× {tl}" if tl else f"{len(hs)}× Ø{_L(d, units)}" + (" THRU" if all(x["through"] for x in hs) else f" ↧{_L(hs[0]['depth'], units)}"))
             svg.append(f'<text x="{W(lx)}" y="{W(ly + 1)}" font-size="3" font-family="{FONT}">{_esc(callout)}</text>')
     # hole table (top-left), only for the top view rows if present else all
     rows = [r_ for r_ in hole_rows if r_["view"] == "top"] or hole_rows
@@ -262,7 +272,7 @@ def make_drawing(shape: Shape, title: str, out_path: Path, body_name: str = "", 
             svg.append(f'<text x="{W(cx_)}" y="{W(yy)}" font-size="2.8" font-family="{FONT}" font-weight="bold">{h_}</text>')
         for r_ in rows[:24]:
             yy += 4
-            vals = [r_["label"], f"{r_['x']:.2f}", f"{r_['y']:.2f}", (r_["thread"].split(" ")[0] if r_.get("thread") else f"Ø{r_['d']:g}"), "THRU" if r_["through"] else f"{r_['depth']:g}"]
+            vals = [r_["label"], _L(r_['x'], units), _L(r_['y'], units), (r_["thread"].rsplit(" ", 1)[0] if r_.get("thread") and ("THRU" in r_["thread"] or "↧" in r_["thread"]) else r_.get("thread") or f"Ø{_L(r_['d'], units)}"), "THRU" if r_["through"] else _L(r_['depth'], units)]
             for cx_, val in zip(colx, vals):
                 svg.append(f'<text x="{W(cx_)}" y="{W(yy)}" font-size="2.8" font-family="{FONT}">{val}</text>')
     # title block
@@ -272,8 +282,8 @@ def make_drawing(shape: Shape, title: str, out_path: Path, body_name: str = "", 
     tb_y = sh - margin - tb_h
     svg.append(f'<rect x="{W(margin)}" y="{W(tb_y)}" width="{W(sw - 2*margin)}" height="{W(tb_h)}" fill="none" stroke="#000" stroke-width="0.35"/>')
     cells = [("TITLE", title), ("PART", body_name or "—"), ("MATERIAL", material or "—"), ("MASS", mass),
-             ("SIZE (X×Y×Z)", f"{bb.size.X:.2f} × {bb.size.Y:.2f} × {bb.size.Z:.2f} mm"),
-             ("SCALE", f"1:{1/S:g}" if S <= 1 else f"{S:g}:1"), ("UNITS", "mm · third angle"), ("DATE", time.strftime("%Y-%m-%d")),
+             ("SIZE (X×Y×Z)", f"{_L(bb.size.X, units)} × {_L(bb.size.Y, units)} × {_L(bb.size.Z, units)} {units}"),
+             ("SCALE", f"1:{1/S:g}" if S <= 1 else f"{S:g}:1"), ("UNITS", f"{units} · third angle"), ("DATE", time.strftime("%Y-%m-%d")),
              ("NOTES", notes or "break sharp edges · unspecified tolerances ±0.1")]
     cw = (sw - 2 * margin) / 5
     for i, (k_, v_) in enumerate(cells[:10]):
@@ -325,7 +335,7 @@ def _export_dxf(views: dict[str, View], pos: dict, S: float, path: Path) -> None
 
 
 def drawings_for_model(model: ck.Model, out_dir: Path, design_name: str, material: str = "",
-                       density: float | None = None, sheet: str = "A4", notes: str = "") -> list[dict[str, Any]]:
+                       density: float | None = None, sheet: str = "A4", notes: str = "", units: str = "mm") -> list[dict[str, Any]]:
     """One sheet per body (plus an assembly sheet when there are several)."""
     global THREADS
     THREADS = list(getattr(model, "threads", []))
@@ -336,7 +346,7 @@ def drawings_for_model(model: ck.Model, out_dir: Path, design_name: str, materia
     for label, shape in targets:
         fname = f"{design_name}_{label.replace('/', '-').replace(' ', '_')}"
         info = make_drawing(shape, design_name, out_dir / f"{fname}.svg", body_name=label, material=material,
-                            density=density, sheet=sheet, notes=notes, dxf_path=out_dir / f"{fname}.dxf")
+                            density=density, sheet=sheet, notes=notes, dxf_path=out_dir / f"{fname}.dxf", units=units)
         info["body"] = label
         out.append(info)
     return out
