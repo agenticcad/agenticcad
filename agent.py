@@ -747,6 +747,24 @@ class CadAgent:
                 self.notes.append("The user edited and rebuilt the script by hand in the Code panel.")
             return model
 
+    async def edit_and_build(self, edits: list[dict[str, Any]], append: str = "", source: str = "agent") -> tuple[ck.Model, str]:
+        """Apply exact-text edits to the CURRENT script and rebuild, atomically: concurrent edit calls (parallel tool
+        use) are serialised and each one is applied to the latest script. Raises script_edit.Refused or
+        ck.CadError; on failure the previous design is untouched."""
+        async with self.model_lock:
+            if self.model is None:
+                raise ck.CadError("no design yet")
+            code = script_edit.apply_edits(self.model.code, edits, append)
+            model = await asyncio.to_thread(ck.run_script, code, self.quality, self.workspace, self.parts)
+            self.model = model
+            (self.workspace / "model.py").write_text(code)
+            hid = str(int(time.time() * 1000))
+            (self.workspace / "history" / f"{hid}.py").write_text(code)
+            await self.emit({"type": "model", "mesh": model.mesh, "code": code, "summary": model.summary(6), "source": source,
+                             "history_id": hid, "history_len": len(self._history_files())})
+            await self.emit(self.design_state())
+            return model, code
+
     async def set_quality(self, quality: str) -> None:
         """Re-tessellate the exact shapes for display at a different preset (no rebuild, no history)."""
         if quality not in ck.QUALITY:
@@ -890,11 +908,9 @@ class CadAgent:
             if agent.model is None:
                 return {"content": [{"type": "text", "text": "No design yet: use build_model first."}], "is_error": True}
             try:
-                code = script_edit.apply_edits(agent.model.code, list(args.get("edits") or []), args.get("append") or "")
+                model, code = await agent.edit_and_build(list(args.get("edits") or []), args.get("append") or "")
             except script_edit.Refused as e:
                 return {"content": [{"type": "text", "text": f"EDIT REFUSED: {e}"}], "is_error": True}
-            try:
-                model = await agent.build(code)
             except ck.CadError as e:
                 return {"content": [{"type": "text", "text": f"BUILD FAILED (previous design kept)\n{e}{_build_hint(e)}"}], "is_error": True}
             except Exception as e:  # noqa: BLE001
@@ -1466,6 +1482,7 @@ class CadAgent:
             mcp_servers=mcp,
             allowed_tools=allowed,
             tools=builtin,
+            strict_mcp_config=True,                # only the servers configured here (cad + Settings ▸ MCP), not the user's claude.ai connectors
             permission_mode="dontAsk",
             include_partial_messages=True,
             cwd=str(self.workspace),

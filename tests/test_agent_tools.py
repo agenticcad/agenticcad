@@ -217,3 +217,18 @@ async def test_edit_model_replaces_appends_and_keeps_design_on_failure(ag):
     r = await T["edit_model"]({})
     assert not ok(r) and "no change" in text(r)
     assert ag.model.code == kept
+
+
+async def test_parallel_edit_model_calls_both_land(ag):
+    """Two edit_model calls issued together (parallel tool use / subagents) are serialised on the latest script:
+    both edits survive, no lost update."""
+    import asyncio
+    T = ag.tool_handlers
+    a = T["edit_model"]({"append": "pin_a = Pos(20, 0, plate_t) * Cylinder(2, 10, align=(Align.CENTER, Align.CENTER, Align.MIN))",
+                         "edits": [{"old": '"Plate": plate.part', "new": '"Plate": plate.part, "PinA": pin_a'}]})
+    b = T["edit_model"]({"append": "pin_b = Pos(-20, 0, plate_t) * Cylinder(2, 10, align=(Align.CENTER, Align.CENTER, Align.MIN))",
+                         "edits": [{"old": "result = {", "new": "result = {\"PinB\": pin_b, "}]})
+    ra, rb = await asyncio.gather(a, b)
+    assert ok(ra) and ok(rb), (text(ra), text(rb))
+    assert {x.name for x in ag.model.bodies} == {"Plate", "PinA", "PinB"}
+

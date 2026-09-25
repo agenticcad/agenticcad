@@ -62,3 +62,4 @@ def test_disconnected_edges_hint_and_no_builtin_shell(tmp_path):
     import inspect, agent as agent_mod
     src = inspect.getsource(agent_mod.CadAgent.start)
     assert "tools=builtin" in src and 'builtin: list[str] = []' in src
+    assert "strict_mcp_config=True" in src          # the user's claude.ai connectors never join the CAD session

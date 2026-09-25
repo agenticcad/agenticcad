@@ -5,6 +5,12 @@ features, patch bumps fix things. The version shown in the UI header comes from 
 
 ## [Unreleased]
 
+### Fixed
+- `edit_model` applies its edits and rebuilds under the model lock, so several edit calls issued together (parallel
+  tool use) are serialised on the latest script instead of overwriting each other.
+- The agent session only sees the MCP servers configured in the app (the built-in `cad` server and Settings ▸ MCP);
+  connectors attached to the user's claude.ai account no longer appear in the CAD session.
+
 ## [0.15.0] — 2026-09-25
 
 ### Added
