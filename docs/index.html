@@ -89,7 +89,7 @@ python3 -m venv .venv &amp;&amp; .venv/bin/pip install -r requirements.txt
     <figure class="fig"><img src="../assets/img/hero.png" alt="The AgenticCAD workspace"><figcaption>Side panel (Chat, Code, CAM, Design, Library) on the left; viewer with the ribbon, Browser tree, ViewCube and bottom toolbar on the right.</figcaption></figure>
     <ul>
       <li><b>Side panel</b>: Chat (the conversation with selection chips and images), Code (the script with syntax highlighting; edit and Run with <kbd>⌘↩</kbd> to rebuild without the agent; switch between <code>design.py</code> and <code>cam.py</code>), CAM (setup, operations, warnings, libraries, feeds calculator, G-code), Library. Drag the divider to resize, double-click to reset, <kbd>⌘B</kbd> to hide.</li>
-      <li><b>Viewer</b>: orbit, pan and zoom with the mouse; the <b>ViewCube</b> snaps to faces, edges and corners and its <code>⌂</code> is the home view. Bottom toolbar: Fit, Edges, display-mesh quality (draft / normal / fine), Undo, Toolpaths and Stock toggles.</li>
+      <li><b>Viewer</b>: left-drag orbits, right-drag (or <kbd>⌘</kbd>/<kbd>Ctrl</kbd>/<kbd>⇧</kbd> + drag) pans, wheel zooms; the <b>ViewCube</b> snaps to faces, edges and corners and its <code>⌂</code> is the home view. Bottom toolbar: Fit, Edges, display-mesh quality (draft / normal / fine), Undo, Toolpaths and Stock toggles.</li>
       <li><b>Browser</b>: the body tree with visibility dots, context menus (rename, delete, hide, zoom, export, save to library, move/rotate) and a Sketches section. <b>+ Body</b> and <b>+ Part</b> add primitives and library parts.</li>
       <li><b>File menu</b>: New (an empty design; a fresh install starts empty too), Open, Save, Save as, Import .py, Download .py, Import STEP, Export STEP, Export STL (resolution dialog), Shop drawings.</li>
       <li><b>Header</b>: design name (with <code>•</code> when unsaved), version badge (click for the changelog), Settings <code>⚙</code>.</li>
@@ -270,6 +270,10 @@ program.<span class="hl-f">add</span>(<span class="hl-f">contour</span>(setup, t
 
     <h2 id="shortcuts">Keyboard shortcuts</h2>
     <table class="table kbdt"><tr><th>Keys</th><th>Action</th></tr>
+      <tr><td>left-drag</td><td>orbit the view</td></tr>
+      <tr><td>right-drag, or <kbd>⌘</kbd>/<kbd>Ctrl</kbd>/<kbd>⇧</kbd> + left-drag</td><td>pan (move the view sideways); trackpads: hold the modifier and drag</td></tr>
+      <tr><td>wheel / two-finger scroll, middle-drag</td><td>zoom</td></tr>
+      <tr><td>ViewCube face, edge or corner · <kbd>⌂</kbd></td><td>snap to that view · home / fit</td></tr>
       <tr><td><kbd>B</kbd> <kbd>C</kbd> <kbd>O</kbd> <kbd>K</kbd></td><td>Box, Cylinder, Sphere, Sketch</td></tr>
       <tr><td><kbd>Q</kbd> <kbd>H</kbd> <kbd>F</kbd> <kbd>X</kbd> <kbd>L</kbd> <kbd>V</kbd></td><td>Press/Pull, Hole, Fillet, Chamfer, Shell, Move</td></tr>
       <tr><td><kbd>I</kbd></td><td>Measure</td></tr>
