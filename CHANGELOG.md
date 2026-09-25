@@ -5,6 +5,8 @@ features, patch bumps fix things. The version shown in the UI header comes from 
 
 ## [Unreleased]
 
+## [0.15.3] — 2026-09-25
+
 ### Added
 - Hovering a body row in the Browser highlights that body in the viewer.
 
