@@ -73,3 +73,33 @@ def test_auth_status_and_error_detection(tmp_path, monkeypatch):
     for txt in ("Failed to authenticate: OAuth session expired and could not be refreshed", "Invalid API key · Please run /login", "Not logged in"):
         assert agent.AUTH_ERROR_RE.search(txt), txt
     assert not agent.AUTH_ERROR_RE.search("Model OK: 1 body")
+
+
+def test_every_local_module_is_packaged():
+    """Briefcase only bundles what pyproject's `sources` lists. A repo-root module imported by the app but missing
+    from that list ships a broken installer (0.12.0 shipped without slicer.py)."""
+    import ast
+    import tomllib
+    root = Path(__file__).resolve().parents[1]
+    sources = tomllib.loads((root / "pyproject.toml").read_text())["tool"]["briefcase"]["app"]["agenticcad"]["sources"]
+    packaged = {Path(s).name for s in sources}
+    local = {p.stem for p in root.glob("*.py")}
+    seen, todo = set(), ["server", "agent"] + ["agenticcad.app"]
+    missing = set()
+    while todo:
+        mod = todo.pop()
+        if mod in seen:
+            continue
+        seen.add(mod)
+        path = root / f"{mod}.py" if mod in local else root / "src" / Path(*mod.split(".")).with_suffix(".py")
+        if not path.exists():
+            continue
+        for node in ast.walk(ast.parse(path.read_text())):
+            names = [a.name for a in node.names] if isinstance(node, ast.Import) else ([node.module] if isinstance(node, ast.ImportFrom) and node.module else [])
+            for n in names:
+                top = n.split(".")[0]
+                if top in local:
+                    todo.append(top)
+                    if f"{top}.py" not in packaged:
+                        missing.add(top)
+    assert not missing, f"imported by the app but not in pyproject [tool.briefcase.app.agenticcad].sources: {sorted(missing)}"

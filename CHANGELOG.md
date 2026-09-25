@@ -5,6 +5,12 @@ features, patch bumps fix things. The version shown in the UI header comes from 
 
 ## [Unreleased]
 
+## [0.12.1] — 2026-09-25
+
+### Fixed
+- The 0.12.0 desktop installers shipped without `slicer.py` (the Briefcase source list was not updated), so the
+  packaged app failed to start. Fixed, and a test now checks that every local module the app imports is packaged.
+
 ## [0.12.0] — 2026-09-25
 
 ### Added
