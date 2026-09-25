@@ -218,7 +218,9 @@ def test_real_slicer_api(tmp_path, monkeypatch):
     ws = tmp_path / "ws"; ws.mkdir()
     monkeypatch.setenv("AGENTICCAD_WORKSPACE", str(ws)); monkeypatch.setenv("AGENTICCAD_NO_AGENT", "1")
     import cad_kernel as ck
-    (ws / "model.py").write_text(ck.DEFAULT_CODE)
+    # these tests exercise the two-body demo saved as a named design (an unsaved demo working copy is upgraded to a blank start)
+    (ws / "designs").mkdir(exist_ok=True); (ws / "designs" / "demo.py").write_text(ck.DEFAULT_CODE)
+    (ws / "model.py").write_text(ck.DEFAULT_CODE); (ws / "state.json").write_text('{"design": "demo"}')
     for m in ("server", "agent"):
         sys.modules.pop(m, None)
     import server

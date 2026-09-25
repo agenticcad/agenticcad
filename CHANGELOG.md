@@ -5,6 +5,12 @@ features, patch bumps fix things. The version shown in the UI header comes from 
 
 ## [Unreleased]
 
+## [0.12.2] — 2026-09-25
+
+### Fixed
+- Workspaces created by versions before 0.11 still opened on the demo bracket. An unsaved, unedited demo working copy
+  is now upgraded to a blank design on start (an edited script or a saved design is kept).
+
 ## [0.12.1] — 2026-09-25
 
 ### Fixed

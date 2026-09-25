@@ -780,6 +780,8 @@ class CadAgent:
             self.design_name = name
             self.saved_code = (self.designs_dir / f"{name}.py").read_text()
             code = code or self.saved_code
+        if code is not None and self.design_name is None and code.strip() == ck.DEFAULT_CODE.strip():
+            code = None                            # the demo seeded by versions before 0.11: upgrade to a blank start
         fresh = code is None
         code = code or ck.NEW_DESIGN_CODE          # first run: an empty design, not a demo
         try:
