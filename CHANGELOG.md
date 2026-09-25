@@ -5,6 +5,9 @@ features, patch bumps fix things. The version shown in the UI header comes from 
 
 ## [Unreleased]
 
+### Fixed
+- The Parameters card no longer labels plain numbers "mm" (they may be angles or counts); only `x * inch` parameters carry an "in" badge.
+
 ## [0.16.0] — 2026-09-25
 
 ### Added

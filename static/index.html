@@ -1270,7 +1270,7 @@ function renderParams() {
   el.innerHTML = '';
   for (const p of paramsList) {
     const r = document.createElement('div'); r.className = 'prow';
-    r.innerHTML = `<label>${p.name}</label><span class="c">${p.comment || ''}</span><input type="number" step="any" value="${p.value}"><span class="u">${p.unit === 'in' ? 'in' : 'mm'}</span>`;
+    r.innerHTML = `<label>${p.name}</label><span class="c">${p.comment || ''}</span><input type="number" step="any" value="${p.value}">${p.unit === 'in' ? '<span class="u">in</span>' : ''}`;
     const inp = r.querySelector('input');
     inp.onchange = () => { const v = parseFloat(inp.value); if (!isFinite(v)) return; clearTimeout(paramTimer); paramTimer = setTimeout(() => api('/api/params', { values: { [p.name]: v } }).catch(e => addMsg('error', e.message)), 250); };
     inp.onkeydown = e => { if (e.key === 'ArrowUp' || e.key === 'ArrowDown') { e.preventDefault(); const step = e.shiftKey ? 10 : (e.altKey ? 0.1 : 1); inp.value = +(parseFloat(inp.value) + (e.key === 'ArrowUp' ? step : -step)).toFixed(4); inp.onchange(); } };
