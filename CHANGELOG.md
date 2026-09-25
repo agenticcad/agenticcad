@@ -5,6 +5,20 @@ features, patch bumps fix things. The version shown in the UI header comes from 
 
 ## [Unreleased]
 
+## [0.14.0] — 2026-09-25
+
+### Added
+- **Gears**: `spur_gear(module, teeth, thickness, bore, pressure_angle, hub_d, hub_h, keyway)`, `involute_gear_profile`,
+  `gear_dims`, `gear_centre_distance` are pre-imported in scripts (`gears.py`). The outline is one closed Polyline, so
+  it never produces build123d's "Edges are disconnected"; the build error now hints at the helpers when it happens.
+- Eval cases: spur gear, meshing gear train, seven-body gearbox built incrementally (all passing on Claude Opus 5.5).
+
+### Changed
+- The agent builds complex parts **one body at a time** (more than 3 bodies or ~80 lines → several `build_model`
+  calls with a one-line progress note), instead of one long script whose failure costs the whole attempt.
+- The agent session exposes **no built-in shell or file tools** (it had been able to call Bash); only WebFetch /
+  WebSearch when web tools are enabled, plus the CAD tools.
+
 ## [0.13.3] — 2026-09-25
 
 ### Changed
