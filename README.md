@@ -214,7 +214,7 @@ the ribbon gets a **Slice** button (`P`), ⚙ Settings gets a **3D printing** se
   weight/length, slicer warnings) and G-code / 3MF downloads; the model hides while previewing (toggle).
 - Not a slicer UI: for per-object settings, modifiers, painting or multi-plate work, open the 3MF in the slicer.
 
-## Settings (⚙ in the panel header)
+## Settings (⚙ next to the File menu)
 
 Model (default Claude Opus 5.5; any Claude model id, or the Claude Code default), effort (low…max), max steps per turn, thinking
 summary on/off, web tools on/off, extra standing instructions, and **MCP servers** (stdio / http / sse

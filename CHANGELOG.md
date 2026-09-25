@@ -5,6 +5,12 @@ features, patch bumps fix things. The version shown in the UI header comes from 
 
 ## [Unreleased]
 
+## [0.13.3] — 2026-09-25
+
+### Changed
+- The ⚙ Settings button sits next to the File menu in the viewer, so it is always reachable, including with the
+  side panel hidden (⌘B).
+
 ## [0.13.2] — 2026-09-25
 
 ### Fixed
