@@ -481,6 +481,7 @@ let ghostBodies = new Set();
 let hidden = new Set();     // hidden body ids (kept across rebuilds by path)
 let hiddenPaths = new Set();
 let hovered = -1;
+let hoverBody = -1;   // body row under the pointer in the Browser: the whole body lights up in the viewer
 let bbox = null;
 let firstLoad = true;
 let showEdges = true;
@@ -511,6 +512,7 @@ function loadMesh(data) {
     bodies.set(bd.id, { id: bd.id, name: bd.name, path: bd.path, mesh, lines, faceOfTri, ranges, colors, base: new THREE.Color(BODY_TINTS[i % BODY_TINTS.length]), faceIds: bd.faceRanges.map(r => r[0]), bboxMin: bd.bboxMin, bboxMax: bd.bboxMax, edgeLines });
   });
   model = { bodies, faces, tree: data.tree };
+  hoverBody = -1;
   // carry body visibility across rebuilds by path
   hidden = new Set([...bodies.values()].filter(b => hiddenPaths.has(b.path)).map(b => b.id));
   bbox = new THREE.Box3(new THREE.Vector3(...data.bboxMin), new THREE.Vector3(...data.bboxMax));
@@ -536,7 +538,7 @@ function paintFace(b, fid, color) {
 function applyColors(extraHighlight = []) {
   if (!model) return;
   for (const b of model.bodies.values()) {
-    const col = b.colors, base = selBodies.has(b.id) ? COLORS.bodySel : ghostBodies.has(b.id) ? COLORS.ghostBody : b.base;
+    const col = b.colors, base = selBodies.has(b.id) ? COLORS.bodySel : ghostBodies.has(b.id) ? COLORS.ghostBody : (hoverBody === b.id ? b.base.clone().lerp(COLORS.hover, 0.55) : b.base);
     for (let i = 0; i < col.length; i += 3) { col[i] = base.r; col[i+1] = base.g; col[i+2] = base.b; }
     if (hovered >= 0 && b.ranges.has(hovered) && !selFaces.has(hovered)) paintFace(b, hovered, COLORS.hover);
     for (const f of ghostFaces) paintFace(b, f, COLORS.ghost);
@@ -765,6 +767,8 @@ function renderTree() {
           applyColors(); renderChips(); renderTree();
         };
         row.ondblclick = () => { const bb = new THREE.Box3().setFromObject(b.mesh); const saved = bbox; bbox = bb; fitCamera(); bbox = saved; };
+        row.onpointerenter = () => { if (isHidden) return; hoverBody = n.body; applyColors(); };
+        row.onpointerleave = () => { if (hoverBody === n.body) { hoverBody = -1; applyColors(); } };
         el.appendChild(row);
       }
     }
