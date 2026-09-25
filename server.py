@@ -290,9 +290,9 @@ class LibAdd(BaseModel):
 
 
 class DrawBody(BaseModel):
-    material: str = ""
+    material: str = ""          # "" -> Settings ▸ Shop drawings
     density: float | None = None
-    sheet: str = "A4"
+    sheet: str = ""             # "" -> Settings ▸ Shop drawings
     notes: str = ""
 
 

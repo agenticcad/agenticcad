@@ -52,6 +52,10 @@
   #ctx div { padding:6px 10px; border-radius:5px; cursor:pointer; font-size:12px; }
   #ctx div:hover { background:var(--panel2); } #ctx div.danger:hover { background:#4a2020; color:var(--err); }
   #ctx hr { border:0; border-top:1px solid var(--line); margin:4px 0; }
+  #slice-panel { position:absolute; z-index:3; left:50%; transform:translateX(-50%); bottom:58px; width:min(760px, calc(100% - 40px)); background:rgba(20,23,28,.94); border:1px solid var(--line); border-radius:10px; padding:8px 12px; font-size:12px; box-shadow:0 8px 30px rgba(0,0,0,.45); }
+  #slice-panel .sp-hd { display:flex; align-items:center; gap:8px; margin-bottom:4px; } #slice-panel .sp-hd #print-out { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  #slice-panel .sp-row { display:flex; align-items:center; gap:8px; margin:4px 0; } #slice-panel .sp-row input[type=range] { flex:1; } #print-layer-v { min-width:150px; text-align:right; }
+  #print-legend { display:flex; flex-wrap:wrap; gap:4px 10px; font-size:11px; } #slice-panel .kv { grid-template-columns:90px 1fr 90px 1fr; margin-top:4px; }
   #hover { position:absolute; z-index:2; left:10px; bottom:10px; max-width:32%; background:rgba(20,23,28,.85); border:1px solid var(--line); padding:4px 8px; border-radius:6px; color:var(--muted); pointer-events:none; }
   #stats { position:absolute; z-index:2; right:10px; bottom:10px; max-width:30%; color:var(--muted); font-size:11px; text-align:right; pointer-events:none; }
   #side { width:var(--side-w, 440px); min-width:280px; max-width:70vw; flex:none; display:flex; flex-direction:column; border-left:1px solid var(--line); background:var(--panel); }
@@ -284,6 +288,7 @@
       <div class="rg"><div class="rgl">Create</div><div class="rgb" id="rg-create"></div></div>
       <div class="rg"><div class="rgl">Modify</div><div class="rgb" id="rg-modify"></div></div>
       <div class="rg"><div class="rgl">Inspect</div><div class="rgb" id="rg-inspect"></div></div>
+      <div class="rg"><div class="rgl">Output</div><div class="rgb" id="rg-output"></div></div>
     </div>
     <div id="tip"></div>
     <div id="cmd"></div>
@@ -302,6 +307,12 @@
     </div>
     <div id="sketch-items"><div class="hd muted" style="font-size:11px;text-transform:uppercase">Items · Esc cancels shape · ⌫ deletes last</div><div id="sk-list"></div></div>
 
+    <div id="slice-panel" style="display:none">
+      <div class="sp-hd"><b>3D printing preview</b><span id="print-out" class="muted"></span><a class="btn small" href="/api/slicer/gcode">G-code</a><a class="btn small" href="/api/slicer/3mf">3MF</a><button class="btn small" id="print-clear" title="Close the preview">✕</button></div>
+      <div class="sp-row"><span class="muted">Layer</span><input type="range" id="print-layer" min="1" max="1" value="1" step="1"><span id="print-layer-v" class="muted"></span></div>
+      <div class="sp-row"><div id="print-legend"></div><label class="muted" style="margin-left:auto;display:flex;align-items:center;gap:6px;white-space:nowrap"><input type="checkbox" id="print-hide-model" checked> hide model</label></div>
+      <div class="kv" id="print-stats"></div>
+    </div>
     <div id="hover">click a face to reference it in chat · shift-click for multiple</div>
     <div id="stats"></div>
     <input type="file" id="filepick" accept=".py,text/x-python" style="display:none">
@@ -344,29 +355,8 @@
           <div id="measure-out" class="kv" style="margin-top:6px"></div>
           <div class="modal-field" style="margin-top:6px"><label>Density</label><select id="measure-density"></select></div>
         </div>
-        <div class="cam-sec"><h4>Shop drawings <button class="btn small primary" id="draw-make">Generate</button></h4>
-          <div class="modal-field"><label>Material</label><input id="draw-material" placeholder="e.g. Aluminium 6061" style="flex:1;background:var(--bg);color:var(--text);border:1px solid var(--line);border-radius:6px;padding:6px;font:inherit"></div>
-          <div class="modal-field"><label>Sheet</label><select id="draw-sheet"><option>A4</option><option>A3</option></select></div>
+        <div class="cam-sec"><h4>Shop drawings <span class="muted" id="draw-hint">ribbon ▸ Drawings · options in ⚙ Settings</span></h4>
           <div id="draw-files" class="muted">no drawings yet</div>
-        </div>
-        <div class="cam-sec" id="print-sec" style="display:none"><h4>3D printing <span class="muted" id="print-slicer"></span><button class="btn small primary" id="print-slice">Slice</button></h4>
-          <div class="modal-field"><label>Printer</label><select id="print-machine" style="flex:1;min-width:0"></select></div>
-          <div class="modal-field"><label>Quality</label><select id="print-process" style="flex:1;min-width:0"></select></div>
-          <div class="modal-field"><label>Filament</label><select id="print-filament" style="flex:1;min-width:0"></select></div>
-          <div class="modal-field"><label>Body</label><select id="print-body" style="flex:1;min-width:0"><option value="">whole design</option></select></div>
-          <div class="modal-field"><label>Layer height</label><input id="print-lh" type="number" step="0.02" min="0.05" max="1" placeholder="profile" style="width:80px;background:var(--bg);color:var(--text);border:1px solid var(--line);border-radius:6px;padding:4px 6px;font:inherit"><span class="muted">mm</span></div>
-          <div class="modal-field"><label>Infill</label><input id="print-infill" type="number" step="5" min="0" max="100" placeholder="profile" style="width:80px;background:var(--bg);color:var(--text);border:1px solid var(--line);border-radius:6px;padding:4px 6px;font:inherit"><span class="muted">%</span></div>
-          <div class="modal-field"><label>Walls</label><input id="print-walls" type="number" step="1" min="1" max="10" placeholder="profile" style="width:80px;background:var(--bg);color:var(--text);border:1px solid var(--line);border-radius:6px;padding:4px 6px;font:inherit"><span class="muted">loops</span></div>
-          <div class="modal-field"><label>Supports</label><label style="width:auto;display:flex;align-items:center;gap:6px;color:var(--text)"><input type="checkbox" id="print-support"> enable</label>
-            <label style="width:auto;color:var(--muted)">Brim</label><select id="print-brim"><option value="">profile</option><option value="no_brim">none</option><option value="outer_only">outer</option><option value="outer_and_inner">outer + inner</option><option value="auto_brim">auto</option></select></div>
-          <div id="print-out" class="muted" style="margin-top:6px">Slices with the slicer installed on this computer and shows the layers here. The agent can do it too: <i>"slice this for my printer at 0.28 mm"</i>.</div>
-          <div id="print-result" style="display:none">
-            <div class="kv" id="print-stats" style="margin-top:6px"></div>
-            <div class="modal-field" style="margin-top:6px"><label>Layer</label><input type="range" id="print-layer" min="1" max="1" value="1" step="1" style="flex:1"><span id="print-layer-v" class="muted" style="min-width:110px;text-align:right"></span></div>
-            <div id="print-legend" style="display:flex;flex-wrap:wrap;gap:4px 10px;font-size:11px;margin:4px 0"></div>
-            <div class="modal-field"><label></label><label style="width:auto;display:flex;align-items:center;gap:6px;color:var(--text)"><input type="checkbox" id="print-hide-model" checked> hide model while previewing</label></div>
-            <div style="display:flex;gap:6px;margin-top:4px"><a class="btn small" href="/api/slicer/gcode">G-code</a><a class="btn small" href="/api/slicer/3mf">3MF</a><button class="btn small" id="print-clear">Clear preview</button></div>
-          </div>
         </div>
       </div>
     </div>
@@ -876,7 +866,7 @@ async function fileAction(act) {
     else if (act === 'import') { document.getElementById('filepick').click(); }
     else if (act === 'step') { window.open('/api/export/step'); }
     else if (act === 'importstep') { document.getElementById('steppick').click(); }
-    else if (act === 'drawings') { document.querySelector('[data-pane=design]').click(); await makeDrawings(); }
+    else if (act === 'drawings') { await makeDrawings(); }
     else if (act === 'stl') { await exportStlBox(); }
   } catch (e) { addMsg('error', e.message); }
 }
@@ -1004,13 +994,13 @@ function renderChips() {
   }
 }
 
-// ------------------------------------------------------------------ 3D printing: sliced layers from the external slicer
+// ------------------------------------------------------------------ 3D printing: sliced layers from the external slicer (options live in Settings)
 const sliceGroup = new THREE.Group(); sliceGroup.renderOrder = 6; scene.add(sliceGroup);
-let sliceData = null, sliceLines = null, showLayers = true, sliceHidden = new Set(), printProfiles = null;
+let sliceData = null, sliceLines = null, showLayers = true, sliceHidden = new Set(), slicerInfo = null;
 const sliceMat = new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.95 });
 function clearSlice(keepData) {
   if (sliceLines) { sliceGroup.remove(sliceLines); sliceLines.geometry.dispose(); sliceLines = null; }
-  if (!keepData) { sliceData = null; document.getElementById('print-result').style.display = 'none'; document.getElementById('layers-toggle').style.display = 'none'; }
+  if (!keepData) { sliceData = null; document.getElementById('slice-panel').style.display = 'none'; document.getElementById('layers-toggle').style.display = 'none'; }
   applyModelVisibility();
 }
 function applyModelVisibility() { if (model) applyVisibility(); }
@@ -1037,8 +1027,8 @@ function setSliceLayer(k) {
 }
 function loadSlice(m) {
   sliceData = m.layers; const r = m.result;
-  const st = document.getElementById('print-stats'); const t = r.time_s >= 3600 ? `${Math.floor(r.time_s / 3600)} h ${Math.floor(r.time_s % 3600 / 60)} min` : `${Math.floor(r.time_s / 60)} min ${Math.round(r.time_s % 60)} s`;
-  st.innerHTML = [['Printer', r.machine], ['Quality', r.process], ['Filament', r.filament], ['Layers', `${r.layers} · ${r.height_mm.toFixed(2)} mm tall`], ['Time', t],
+  const t = r.time_s >= 3600 ? `${Math.floor(r.time_s / 3600)} h ${Math.floor(r.time_s % 3600 / 60)} min` : `${Math.floor(r.time_s / 60)} min ${Math.round(r.time_s % 60)} s`;
+  document.getElementById('print-stats').innerHTML = [['Printer', r.machine], ['Quality', r.process], ['Filament', r.filament], ['Layers', `${r.layers} · ${r.height_mm.toFixed(2)} mm tall`], ['Time', t],
     ['Filament', `${r.filament_g.toFixed(1)} g · ${(r.filament_mm / 1000).toFixed(2)} m`], ...(Object.keys(r.overrides).length ? [['Overrides', Object.entries(r.overrides).map(([k, v]) => `${k}=${v}`).join(', ')]] : []),
     ...(r.warnings.length ? [['Warnings', r.warnings.join('; ')]] : []), ...(sliceData.truncated ? [['Note', 'preview truncated (very large G-code)']] : [])]
     .map(([k, v]) => `<div>${k}</div><div>${v}</div>`).join('');
@@ -1047,48 +1037,30 @@ function loadSlice(m) {
     b.innerHTML = `<span style="width:10px;height:10px;border-radius:2px;background:${sliceData.colors[i]};display:inline-block"></span>${ty}`;
     b.onclick = () => { if (sliceHidden.has(ty)) sliceHidden.delete(ty); else sliceHidden.add(ty); buildSliceGeometry(); b.style.opacity = sliceHidden.has(ty) ? .45 : 1; }; lg.appendChild(b); });
   const sl = document.getElementById('print-layer'); sl.max = sliceData.layers.length; sl.value = sliceData.layers.length;
-  document.getElementById('print-result').style.display = ''; document.getElementById('layers-toggle').style.display = '';
-  document.getElementById('print-out').textContent = r.summary; document.getElementById('print-out').className = '';
+  document.getElementById('slice-panel').style.display = ''; document.getElementById('layers-toggle').style.display = '';
+  const o = document.getElementById('print-out'); o.textContent = `${r.layers} layers · ${t} · ${r.filament_g.toFixed(1)} g`; o.title = r.summary;
   buildSliceGeometry(); sliceGroup.visible = showLayers;
-  if (!m.restore) { addMsg('system', r.summary); document.querySelector('[data-pane=design]').click(); }
+  if (!m.restore) addMsg('system', r.summary);
 }
 document.getElementById('print-layer').oninput = e => setSliceLayer(+e.target.value);
 document.getElementById('print-hide-model').onchange = applyModelVisibility;
-document.getElementById('print-clear').onclick = () => { clearSlice(false); document.getElementById('print-out').textContent = 'preview cleared'; };
+document.getElementById('print-clear').onclick = () => clearSlice(false);
 document.getElementById('layers-toggle').onclick = e => { showLayers = !showLayers; e.currentTarget.classList.toggle('active', showLayers); sliceGroup.visible = showLayers; applyModelVisibility(); };
-async function loadPrintProfiles(machine) {
-  const pe = document.getElementById('print-process'), fe = document.getElementById('print-filament');
-  pe.innerHTML = fe.innerHTML = '<option value="">loading…</option>';
-  try {
-    const pf = await api('/api/slicer/profiles?machine=' + encodeURIComponent(machine)); printProfiles = pf;
-    pe.innerHTML = pf.processes.map(p => `<option ${p.name === pf.default_process ? 'selected' : ''}>${p.name}</option>`).join('') || '<option value="">(none compatible)</option>';
-    fe.innerHTML = pf.filaments.map(f => `<option ${f.name === pf.default_filament ? 'selected' : ''}>${f.name}</option>`).join('') || '<option value="">(none compatible)</option>';
-  } catch (e) { pe.innerHTML = fe.innerHTML = '<option value="">—</option>'; document.getElementById('print-out').textContent = e.message; }
+function setupPrinting(m) {
+  slicerInfo = m.installed ? m : null;
+  document.querySelector('[data-tool=slice]').style.display = m.installed ? '' : 'none';
+  if (!m.installed) clearSlice(false);
 }
-async function setupPrinting(m) {
-  const sec = document.getElementById('print-sec'); sec.style.display = m.installed ? '' : 'none';
-  if (!m.installed) { clearSlice(false); return; }
-  document.getElementById('print-slicer').textContent = `${m.slicer.name} ${m.slicer.version || ''}`.trim();
-  const me = document.getElementById('print-machine');
-  if (!me.options.length) {
-    try {
-      const { machines, default: def } = await api('/api/slicer/machines');
-      me.innerHTML = machines.map(x => `<option ${x.name === def ? 'selected' : ''}>${x.name}</option>`).join('');
-      if (me.value) loadPrintProfiles(me.value);
-    } catch (e) { document.getElementById('print-out').textContent = e.message; }
-    me.onchange = () => loadPrintProfiles(me.value);
-  }
+let slicing = false;
+async function runSlice() {
+  if (!slicerInfo) { addMsg('system', 'no slicer installed (OrcaSlicer or Bambu Studio)'); return; }
+  if (slicing) return;
+  slicing = true; const b = document.querySelector('[data-tool=slice]'); b.classList.add('active'); setStatusHint('slicing…');
+  try { await api('/api/slicer/slice', {}); }
+  catch (e) { addMsg('error', 'slicing failed: ' + e.message); }
+  finally { slicing = false; b.classList.remove('active'); setStatusHint(''); }
 }
-function fillPrintBodies() { const be = document.getElementById('print-body'); const cur = be.value; be.innerHTML = '<option value="">whole design</option>' + (model ? [...model.bodies.values()].map(b => `<option ${b.path === cur ? 'selected' : ''} value="${b.path}">${b.name}</option>`).join('') : ''); }
-document.getElementById('print-slice').onclick = async () => {
-  const v = id => document.getElementById(id).value;
-  const overrides = {}; if (v('print-lh')) overrides.layer_height = +v('print-lh'); if (v('print-infill') !== '') overrides.sparse_infill_density = +v('print-infill');
-  if (v('print-walls')) overrides.wall_loops = +v('print-walls'); if (document.getElementById('print-support').checked) overrides.enable_support = true; if (v('print-brim')) overrides.brim_type = v('print-brim');
-  const out = document.getElementById('print-out'); out.className = 'muted'; out.textContent = 'slicing…'; document.getElementById('print-slice').disabled = true;
-  try { await api('/api/slicer/slice', { machine: v('print-machine'), process: v('print-process') || null, filament: v('print-filament') || null, body: v('print-body') || null, overrides }); }
-  catch (e) { out.textContent = e.message; addMsg('error', 'slicing failed: ' + e.message); }
-  finally { document.getElementById('print-slice').disabled = false; }
-};
+function setStatusHint(t) { const h = document.getElementById('hover'); if (t) { h.dataset.prev = h.textContent; h.textContent = t; } else if (h.dataset.prev != null) { h.textContent = h.dataset.prev; delete h.dataset.prev; } }
 
 // ------------------------------------------------------------------ CAM: toolpaths, stock, simulation, library
 const camGroup = new THREE.Group(); scene.add(camGroup);
@@ -1414,20 +1386,20 @@ async function measureBodies(ids) {
 }
 (async () => { try { const d = document.getElementById('measure-density'); d.innerHTML = ['aluminium', 'steel', 'stainless', 'brass', 'titanium', 'pla', 'petg', 'abs', 'nylon', 'acrylic', 'hdpe', 'delrin', 'plywood', 'mdf', 'hardwood', 'softwood'].map(m => `<option>${m}</option>`).join(''); } catch {} })();
 
-// drawings
+// drawings (ribbon ▸ Drawings; material and sheet come from Settings)
+let drawing = false;
 async function makeDrawings() {
-  const material = document.getElementById('draw-material').value, sheet = document.getElementById('draw-sheet').value;
-  const dens = { aluminium: 2.7, steel: 7.85, stainless: 7.9, brass: 8.5, titanium: 4.43, pla: 1.24, petg: 1.27, abs: 1.04, nylon: 1.15, acrylic: 1.18, hdpe: 0.95, delrin: 1.41, plywood: 0.6, mdf: 0.75, hardwood: 0.7, softwood: 0.5 };
-  const density = dens[(material || '').toLowerCase().split(/[ ,]/)[0]] || null;
+  if (drawing) return;
+  drawing = true; const b = document.querySelector('[data-tool=drawings]'); b.classList.add('active');
   document.getElementById('draw-files').textContent = 'generating…';
-  try { const r = await api('/api/drawings', { material, density, sheet }); renderDrawings(r.design, r.files); if (r.files[0]) window.open(`/api/drawings/${r.design}/${r.files[0].svg}`); }
+  try { const r = await api('/api/drawings', {}); renderDrawings(r.design, r.files); if (r.files[0]) window.open(`/api/drawings/${r.design}/${r.files[0].svg}`); addMsg('system', `shop drawings: ${r.files.length} sheet(s) · Design tab`); }
   catch (e) { addMsg('error', e.message); document.getElementById('draw-files').textContent = ''; }
+  finally { drawing = false; b.classList.remove('active'); }
 }
 function renderDrawings(design, files) {
   const el = document.getElementById('draw-files'); el.className = ''; el.innerHTML = '';
   for (const f of files) { const r = document.createElement('div'); r.className = 'librow'; r.innerHTML = `<span class="nm">${f.body}</span><a class="btn small" target="_blank" href="/api/drawings/${design}/${f.svg}">SVG</a>` + (f.dxf ? `<a class="btn small" href="/api/drawings/${design}/${f.dxf}">DXF</a>` : ''); el.appendChild(r); }
 }
-document.getElementById('draw-make').onclick = makeDrawings;
 
 // part library (first-class: Library tab, Browser "+ Part", body menu "Save to library…")
 let libParts = [];
@@ -1721,6 +1693,8 @@ const ICO = {
   move: '<path d="M12 2v20M2 12h20"/><path d="M9 5l3-3 3 3M9 19l3 3 3-3M5 9l-3 3 3 3M19 9l3 3-3 3"/>',
   measure: '<path d="M3 17 17 3l4 4L7 21 3 17Z"/><path d="M8 12l2 2M11 9l2 2M14 6l2 2"/>',
   check: '<path d="M5 12l4 4L19 6"/>', close: '<path d="M6 6l12 12M18 6 6 18"/>',
+  drawings: '<path d="M5 3h9l5 5v13H5z"/><path d="M14 3v5h5"/><path d="M8 12h8M8 16h8"/>',
+  slice: '<path d="M12 3 3 8l9 5 9-5-9-5Z"/><path d="M3 12l9 5 9-5"/><path d="M3 16l9 5 9-5"/>',
 };
 const svg = (k, size = 20) => `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">${ICO[k]}</svg>`;
 const TOOLS = {
@@ -1735,6 +1709,8 @@ const TOOLS = {
   shell:    { group: 'modify', label: 'Shell',      key: 'L', hint: 'Click the faces to open. Leave none selected for a hollow body.', picks: 'faces', steps: ['Open faces', 'Thickness'] },
   move:     { group: 'modify', label: 'Move',       key: 'V', hint: 'Choose a body, then offsets and rotation.', picks: 'body', steps: ['Body', 'Offset'] },
   measure:  { group: 'inspect', label: 'Measure',   key: 'I', hint: 'Hover snaps to vertices and edges. Click two things for distance and angle.', picks: 'none' },
+  drawings: { group: 'output', label: 'Drawings',  key: 'D', hint: 'Shop drawings (SVG + DXF) with the material and sheet from ⚙ Settings.', picks: 'none' },
+  slice:    { group: 'output', label: 'Slice',     key: 'P', hint: 'Slice for 3D printing with the printer and options from ⚙ Settings; layers show in the viewer.', picks: 'none' },
 };
 let tool = null;   // { kind, picks: [snap...] }
 const cmdEl = document.getElementById('cmd');
@@ -1744,12 +1720,15 @@ for (const [k, t] of Object.entries(TOOLS)) {
   b.innerHTML = `<span class="ic">${svg(k)}</span><span class="lb">${t.label}</span>`;
   b.onmouseenter = () => showTip(b, t); b.onmouseleave = hideTip;
   b.onclick = () => activateTool(k);
+  if (k === 'slice') b.style.display = 'none';
   document.getElementById('rg-' + t.group).appendChild(b);
 }
 placeTree();
 function activateTool(k) {
   if (k === 'sketch') { if (tool) endTool(); if (measuring) setMeasuring(false); sk ? endSketch() : startSketch(null); return; }
   if (k === 'measure') { if (tool) endTool(); setMeasuring(!measuring); return; }
+  if (k === 'drawings') { makeDrawings(); return; }
+  if (k === 'slice') { runSlice(); return; }
   tool && tool.kind === k ? endTool() : startTool(k);
 }
 // tooltip
@@ -1961,6 +1940,24 @@ async function openSettings() {
     <label>Extra instructions</label><textarea id="s-extra" rows="3" placeholder="house rules, your machine, preferred materials…"></textarea>
     <label>API key</label><div style="display:flex;gap:6px;align-items:center"><input id="s-key" type="password" autocomplete="off" placeholder="${st.api_key_set ? '•••••••• (set — leave blank to keep)' : 'optional: sk-ant-… instead of the Claude Code login'}" style="flex:1">${st.api_key_set ? '<button class="btn small" id="s-key-clear" type="button">Clear</button>' : ''}</div>
   </div>
+  <div style="margin-top:12px;border-top:1px solid var(--line);padding-top:10px"><b style="font-size:12px">Shop drawings</b><span class="muted" style="margin-left:8px">ribbon ▸ Drawings (D)</span></div>
+  <div class="set-grid" style="margin-top:6px">
+    <label>Material</label><input id="s-dmat" placeholder="e.g. Aluminium 6061 (sets the density in the title block)" value="${(st.drawings || {}).material || ''}">
+    <label>Sheet</label><select id="s-dsheet"><option ${(st.drawings || {}).sheet !== 'A3' ? 'selected' : ''}>A4</option><option ${(st.drawings || {}).sheet === 'A3' ? 'selected' : ''}>A3</option></select>
+  </div>
+  <div id="s-print-sec" style="display:${slicerInfo ? '' : 'none'}">
+    <div style="margin-top:12px;border-top:1px solid var(--line);padding-top:10px"><b style="font-size:12px">3D printing</b><span class="muted" style="margin-left:8px">${slicerInfo ? slicerInfo.slicer.name + ' ' + (slicerInfo.slicer.version || '') : ''} · ribbon ▸ Slice (P)</span></div>
+    <div class="set-grid" style="margin-top:6px">
+      <label>Printer</label><select id="s-pmach"><option value="">loading…</option></select>
+      <label>Quality</label><select id="s-pproc"><option value="">(printer default)</option></select>
+      <label>Filament</label><select id="s-pfil"><option value="">(printer default)</option></select>
+      <label>Layer height</label><div style="display:flex;gap:6px;align-items:center"><input id="s-plh" type="number" step="0.02" min="0.05" max="1" placeholder="profile" style="width:90px" value="${(st.print || {}).layer_height ?? ''}"><span class="muted">mm</span>
+        <label style="margin-left:14px;color:var(--muted)">Infill</label><input id="s-pinf" type="number" step="5" min="0" max="100" placeholder="profile" style="width:90px" value="${(st.print || {}).sparse_infill_density ?? ''}"><span class="muted">%</span>
+        <label style="margin-left:14px;color:var(--muted)">Walls</label><input id="s-pwall" type="number" step="1" min="1" max="10" placeholder="profile" style="width:90px" value="${(st.print || {}).wall_loops ?? ''}"></div>
+      <label>Supports</label><div style="display:flex;gap:6px;align-items:center"><label style="color:var(--text);display:flex;align-items:center;gap:6px"><input type="checkbox" id="s-psup" ${(st.print || {}).enable_support ? 'checked' : ''}> enable</label>
+        <label style="margin-left:14px;color:var(--muted)">Brim</label><select id="s-pbrim">${[['', 'profile'], ['no_brim', 'none'], ['outer_only', 'outer'], ['outer_and_inner', 'outer + inner'], ['auto_brim', 'auto']].map(([v, l]) => `<option value="${v}" ${v === ((st.print || {}).brim_type || '') ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
+    </div>
+  </div>
   <div style="margin-top:10px;display:flex;align-items:center"><b style="font-size:12px">MCP servers</b><span class="muted" style="margin-left:8px">tools become mcp__&lt;name&gt;__*</span><button class="btn small" id="s-mcp-add" style="margin-left:auto">+ Add</button></div>
   <div id="s-mcp"></div>
   <div class="muted" style="margin-top:8px">Status: ${status.connected ? 'connected' : 'not connected'} · model ${status.model} · effort ${status.effort}${status.session_id ? ' · session ' + status.session_id.slice(0, 8) : ''}${status.mcp_error ? ' · ' + status.mcp_error : ''}</div>`;
@@ -1984,13 +1981,35 @@ async function openSettings() {
   d.querySelector('#s-mcp-add').onclick = () => editJson('New MCP server', { name: 'my-server', type: 'stdio', command: 'npx', args: ['-y', '@modelcontextprotocol/server-filesystem', '/path'], env: {}, enabled: true },
     async obj => { const { name, ...cfg } = obj; if (!name) return; st.mcp_servers = st.mcp_servers || {}; st.mcp_servers[name] = cfg; renderMcp(); });
   renderMcp();
+  if (slicerInfo) {
+    const pm = d.querySelector('#s-pmach'), pp = d.querySelector('#s-pproc'), pf = d.querySelector('#s-pfil'); const cur = st.print || {};
+    const fillProfiles = async (machine, keep) => {
+      pp.innerHTML = pf.innerHTML = '<option value="">loading…</option>';
+      try {
+        const r = await api('/api/slicer/profiles?machine=' + encodeURIComponent(machine));
+        pp.innerHTML = '<option value="">(printer default)</option>' + r.processes.map(x => `<option ${keep && x.name === cur.process ? 'selected' : ''}>${x.name}</option>`).join('');
+        pf.innerHTML = '<option value="">(printer default)</option>' + r.filaments.map(x => `<option ${keep && x.name === cur.filament ? 'selected' : ''}>${x.name}</option>`).join('');
+      } catch (e) { pp.innerHTML = pf.innerHTML = '<option value="">—</option>'; }
+    };
+    try {
+      const { machines, default: def } = await api('/api/slicer/machines');
+      const sel = cur.machine || def || '';
+      pm.innerHTML = '<option value="">(slicer default' + (def ? ': ' + def : '') + ')</option>' + machines.map(x => `<option ${x.name === sel ? 'selected' : ''}>${x.name}</option>`).join('');
+      if (sel) fillProfiles(sel, sel === cur.machine);
+      pm.onchange = () => { if (pm.value) fillProfiles(pm.value, false); else { pp.innerHTML = pf.innerHTML = '<option value="">(printer default)</option>'; } };
+    } catch (e) { pm.innerHTML = '<option value="">—</option>'; }
+  }
   let clearKey = false; const kc = d.querySelector('#s-key-clear'); if (kc) kc.onclick = () => { clearKey = true; kc.textContent = 'will clear'; };
   const collect = () => ({ model: sel.value === '__custom' ? custom.value.trim() : sel.value, effort: d.querySelector('#s-effort').value, max_turns: parseInt(d.querySelector('#s-turns').value) || 60,
     thinking_display: d.querySelector('#s-think').value, web: d.querySelector('#s-web').checked, extra_prompt: d.querySelector('#s-extra').value, mcp_servers: st.mcp_servers || {},
-    api_key: clearKey ? '' : (d.querySelector('#s-key').value.trim() || '__keep__') });
-  const r = await openModal('Agent settings', d, [['Cancel', null], ['Save', () => ({ s: collect(), restart: false })], ['Save & restart agent', () => ({ s: collect(), restart: true }), true]]);
+    api_key: clearKey ? '' : (d.querySelector('#s-key').value.trim() || '__keep__'),
+    drawings: { material: d.querySelector('#s-dmat').value.trim(), sheet: d.querySelector('#s-dsheet').value },
+    print: slicerInfo ? { machine: d.querySelector('#s-pmach').value, process: d.querySelector('#s-pproc').value, filament: d.querySelector('#s-pfil').value,
+      layer_height: d.querySelector('#s-plh').value || null, sparse_infill_density: d.querySelector('#s-pinf').value || null, wall_loops: d.querySelector('#s-pwall').value || null,
+      enable_support: d.querySelector('#s-psup').checked, brim_type: d.querySelector('#s-pbrim').value } : (st.print || {}) });
+  const r = await openModal('Settings', d, [['Cancel', null], ['Save', () => ({ s: collect(), restart: false }), true], ['Save & restart agent', () => ({ s: collect(), restart: true })]]);
   if (!r) return;
-  try { await api('/api/settings', { settings: r.s, restart: r.restart }); addMsg('system', r.restart ? 'settings saved · agent restarting' : 'settings saved (apply with Save & restart)'); }
+  try { await api('/api/settings', { settings: r.s, restart: r.restart }); addMsg('system', r.restart ? 'settings saved · agent restarting' : 'settings saved (drawing and printing options apply now; agent options after Save & restart)'); }
   catch (e) { addMsg('error', e.message); }
 }
 
@@ -2007,7 +2026,7 @@ function connect() {
       case 'model':
         loadMesh(m.mesh); loadSketches(m.mesh.sketches); document.getElementById('undo').disabled = (m.history_len ?? 2) < 2; loadParams(); if (measuring) { mPicks = []; hideMeasureLine(); }
         designCode = m.code;
-        fillPrintBodies(); if (sliceData && m.source !== 'requality') { const o = document.getElementById('print-out'); o.className = 'muted'; o.textContent = 'model changed since the last slice — slice again'; } applyModelVisibility();
+        if (sliceData && m.source !== 'requality') { document.getElementById('print-out').textContent = 'model changed since the last slice — slice again (P)'; } applyModelVisibility();
         if (codeWhich === 'design' && (!codeDirty || m.source === 'user')) { codeEl.value = m.code; codeDirty = false; }
         document.getElementById('codeerr').textContent = '';
         if (m.source === 'user') addMsg('system', 'model rebuilt from Code panel');

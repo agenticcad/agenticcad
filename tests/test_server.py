@@ -169,3 +169,20 @@ def test_setup_page_and_cli_probe(client):
     j = r.json()
     assert set(j) >= {"found", "path", "connected", "searched", "workspace"}
     assert isinstance(j["searched"], list) and j["searched"]
+
+
+def test_drawing_and_print_settings_drive_the_buttons(client):
+    """Ribbon ▸ Drawings posts an empty body: material and sheet come from Settings. The nested groups validate."""
+    r = client.post("/api/settings", json={"settings": {"drawings": {"material": "Brass", "sheet": "A3"}, "print": {"layer_height": "0.28", "enable_support": True, "brim_type": "no_brim"}}}).json()
+    assert r["settings"]["drawings"] == {"material": "Brass", "sheet": "A3"}
+    assert r["settings"]["print"]["layer_height"] == 0.28 and r["settings"]["print"]["enable_support"] is True and r["settings"]["print"]["machine"] == ""
+    assert client.post("/api/settings", json={"settings": {"drawings": {"sheet": "Letter"}}}).status_code == 400
+    client.post("/api/design/new")
+    assert client.post("/api/drawings", json={}).status_code == 400          # empty design: clean error, not an empty sheet list
+    client.post("/api/design/open", json={"name": "demo"})
+    d = client.post("/api/drawings", json={}).json()
+    assert d["files"]
+    import xml.etree.ElementTree as ET
+    svg = client.get(f"/api/drawings/{d['design']}/{d['files'][0]['svg']}").text
+    assert "Brass" in svg and ET.fromstring(svg).attrib["width"].startswith("420")     # A3 landscape is 420 mm wide
+    client.post("/api/settings", json={"settings": {"drawings": {"material": "", "sheet": "A4"}}})

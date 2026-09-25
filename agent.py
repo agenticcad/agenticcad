@@ -658,9 +658,13 @@ class CadAgent:
             return {}
         return ck.measure(self.model, faces, points, bodies)
 
-    async def make_drawings(self, material: str = "", density: float | None = None, sheet: str = "A4", notes: str = "") -> list[dict[str, Any]]:
-        if self.model is None:
-            raise ck.CadError("no model")
+    async def make_drawings(self, material: str = "", density: float | None = None, sheet: str = "", notes: str = "") -> list[dict[str, Any]]:
+        """Empty material / sheet fall back to Settings ▸ Shop drawings (the ribbon button passes nothing)."""
+        if self.model is None or not self.model.bodies:
+            raise ck.CadError("nothing to draw: the design is empty")
+        dd = self.settings.get("drawings") or {}
+        material = material or dd.get("material") or ""
+        sheet = sheet or dd.get("sheet") or "A4"
         name = self.design_name or "untitled"
         out_dir = self.workspace / "drawings" / safe_name(name)
         for old in out_dir.glob("*"):
@@ -1065,7 +1069,7 @@ class CadAgent:
                                                 "sheet": {"type": "string", "enum": ["A4", "A3"], "default": "A4"}, "notes": {"type": "string"}}, "required": []})
         async def make_drawings(args: dict[str, Any]) -> dict[str, Any]:
             try:
-                res = await agent.make_drawings(args.get("material") or "", args.get("density"), args.get("sheet") or "A4", args.get("notes") or "")
+                res = await agent.make_drawings(args.get("material") or "", args.get("density"), args.get("sheet") or "", args.get("notes") or "")
             except Exception as e:  # noqa: BLE001
                 return {"content": [{"type": "text", "text": f"failed: {e}"}], "is_error": True}
             lines = [f"{r['body']}: {r['svg']} (scale {r['scale']}), views " + ", ".join(f"{k} {v['w']:.1f}×{v['h']:.1f} {v['holes']} holes" for k, v in r["views"].items())
@@ -1224,9 +1228,15 @@ class CadAgent:
             raise slicer.SlicerError("no slicer installed (OrcaSlicer or Bambu Studio)")
         if self.model is None or not self.model.bodies:
             raise ck.CadError("nothing to slice: the design is empty")
-        machine = machine or slicer.default_machine(info)
+        pr = self.settings.get("print") or {}
+        machine = machine or pr.get("machine") or slicer.default_machine(info)
         if not machine:
             raise slicer.SlicerError("no printer chosen and the slicer has no default; pass `machine`")
+        if machine == pr.get("machine"):          # saved quality/filament only make sense for the saved printer
+            process = process or pr.get("process") or None
+            filament = filament or pr.get("filament") or None
+        saved = {k: pr.get(k) for k in self.PRINT_OVERRIDE_KEYS if pr.get(k) not in (None, "", False)}
+        overrides = {**saved, **{k: v for k, v in (overrides or {}).items() if v is not None}}
         out = self.workspace / "slicing"
         out.mkdir(exist_ok=True)
         paths = await asyncio.to_thread(ck.export, self.model, out, "model", ["stl"], 0.02, 0.1, body)
@@ -1247,7 +1257,11 @@ class CadAgent:
         "mcp_servers": {},                 # name -> {type: stdio|http|sse, command, args, env, url, headers, enabled}
         "extra_prompt": "",                # appended to the system prompt (house rules, machine notes...)
         "api_key": "",                     # Anthropic API key (alternative to the Claude Code login); kept in settings.json (0600)
+        "drawings": {"material": "", "sheet": "A4"},   # shop-drawing defaults (ribbon Drawings button, agent tool without args)
+        "print": {"machine": "", "process": "", "filament": "", "layer_height": None, "sparse_infill_density": None,
+                  "wall_loops": None, "enable_support": False, "brim_type": ""},   # 3D-printing defaults (ribbon Slice button)
     }
+    PRINT_OVERRIDE_KEYS = ("layer_height", "sparse_infill_density", "wall_loops", "enable_support", "brim_type")
     MODELS = ["claude-opus-5-5", "claude-fable-5-1", "claude-sonnet-5", "claude-opus-5", "claude-opus-4-8", "claude-haiku-4-5"]
 
     def _settings_path(self) -> Path:
@@ -1259,6 +1273,8 @@ class CadAgent:
             st.update(json.loads(self._settings_path().read_text()))
         except Exception:
             pass
+        for k in ("drawings", "print"):            # nested groups: keep new default keys when an older settings.json lacks them
+            st[k] = {**self.DEFAULT_SETTINGS[k], **(st.get(k) or {})}
         return st
 
     def save_settings(self, patch: dict[str, Any]) -> dict[str, Any]:
@@ -1266,6 +1282,13 @@ class CadAgent:
         if st.get("effort") not in ("", "low", "medium", "high", "xhigh", "max"):
             raise ValueError("effort must be one of low, medium, high, xhigh, max")
         st["max_turns"] = int(st.get("max_turns") or 60)
+        st["drawings"] = {**self.DEFAULT_SETTINGS["drawings"], **{k: v for k, v in (st.get("drawings") or {}).items() if k in self.DEFAULT_SETTINGS["drawings"]}}
+        if st["drawings"]["sheet"] not in ("A4", "A3"):
+            raise ValueError("drawings.sheet must be A4 or A3")
+        st["print"] = {**self.DEFAULT_SETTINGS["print"], **{k: v for k, v in (st.get("print") or {}).items() if k in self.DEFAULT_SETTINGS["print"]}}
+        for k in ("layer_height", "sparse_infill_density", "wall_loops"):
+            v = st["print"].get(k)
+            st["print"][k] = None if v in (None, "") else float(v)
         for name, cfg in (st.get("mcp_servers") or {}).items():
             t = cfg.get("type") or ("http" if cfg.get("url") else "stdio")
             if t == "stdio" and not cfg.get("command"):

@@ -5,6 +5,17 @@ features, patch bumps fix things. The version shown in the UI header comes from 
 
 ## [Unreleased]
 
+## [0.13.0] — 2026-09-25
+
+### Changed
+- **Drawings and slicing are one-click ribbon buttons.** A new *Output* ribbon group has **Drawings** (`D`) and, when a
+  slicer is installed, **Slice** (`P`). Their options moved into ⚙ Settings: *Shop drawings* (material, sheet) and
+  *3D printing* (printer, quality, filament, layer height, infill, walls, supports, brim). The agent's `make_drawings`
+  and `slice_for_printing` start from the same settings when called without arguments.
+- The sliced-layer preview is a floating panel over the viewer (layer slider, feature legend, stats, G-code/3MF, ✕)
+  instead of a Design-tab section. The Design tab keeps Parameters, Measure and the list of drawing files.
+- Generating drawings on an empty design is a clean error instead of an empty result.
+
 ## [0.12.2] — 2026-09-25
 
 ### Fixed

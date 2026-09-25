@@ -123,7 +123,7 @@ Deleting the last body at a level is refused.
   face distance, plane gap, centre distance, angle between normals, hole axis spacing; click bodies in the
   Browser for volume/mass/centre of mass, two bodies for clearance or interference volume. Agent tools:
   `measure`, `mass_properties` (material names or g/cm³).
-- **Shop drawings** (Design tab or File ▸ Shop drawings…): third-angle front/top/right + iso with hidden
+- **Shop drawings** (ribbon ▸ Drawings, `D`, or File ▸ Shop drawings…; material and sheet in ⚙ Settings): third-angle front/top/right + iso with hidden
   lines, overall dimensions, hole callouts (n× Ø, THRU/depth), lettered holes with a coordinate table,
   title block (size, mass, scale, date). SVG per body + assembly, plus DXF of the view geometry
   ([drawing.py](drawing.py)). Agent tool: `make_drawings`.
@@ -196,22 +196,22 @@ Agent-native, like the CAD side: a second script per design, `cam.py`, written b
 ## 3D printing (external slicer)
 
 AgenticCAD does not bundle a slicer. If **OrcaSlicer** (or Bambu Studio, same CLI) is installed on the computer
-the Design tab grows a **3D printing** section and the agent gets two extra tools; otherwise neither exists.
+the ribbon gets a **Slice** button (`P`), ⚙ Settings gets a **3D printing** section and the agent gets two extra tools; otherwise none of them exist.
 
 - **Detection**: `/Applications/OrcaSlicer.app` (macOS), `Program Files\OrcaSlicer` (Windows), `orca-slicer` on PATH
   (Linux); override with `AGENTICCAD_SLICER=/path/to/exe[::/path/to/profiles]`. Printer, quality and filament
   lists come from the slicer's own profiles (system vendors + your user presets); the printer selected in the
   slicer is preselected.
-- **Options**: printer, quality (process) profile, filament, one body or the whole design, layer height, infill %,
-  wall loops, supports, brim. Anything else stays as the chosen profile says. The agent uses the same options:
-  *"slice this for my Ender 3 at 0.28 mm with supports"*.
+- **Options** (Settings ▸ 3D printing, set once): printer, quality (process) profile, filament, layer height, infill %,
+  wall loops, supports, brim. Anything else stays as the chosen profile says. Slice then takes one click; the agent uses
+  the same defaults and can override them per request: *"slice this for my Ender 3 at 0.28 mm with supports"*.
 - **How**: the design is exported as STL (0.02 mm), the profiles' `inherits` chains are flattened (the CLI needs
   flat JSON), your overrides applied, and the slicer is run headless (`--slice 0 --arrange 1 --export-3mf`).
   Outputs land in `workspace/slicing/` (G-code + 3MF, downloadable from the section).
 - **Preview**: the G-code is parsed into extrusion segments per layer, mapped back from bed to model coordinates
   using the 3MF placement, coloured by feature (walls, infill, top/bottom, support, skirt...) and drawn in the
-  viewer with a layer slider and a per-feature legend; the model hides while previewing (toggle). Stats: layers,
-  height, estimated time, filament weight/length, and slicer warnings.
+  viewer with a floating panel: layer slider, per-feature legend, stats (layers, height, estimated time, filament
+  weight/length, slicer warnings) and G-code / 3MF downloads; the model hides while previewing (toggle).
 - Not a slicer UI: for per-object settings, modifiers, painting or multi-plate work, open the 3MF in the slicer.
 
 ## Settings (⚙ in the panel header)

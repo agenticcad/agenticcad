@@ -245,3 +245,26 @@ def test_real_slicer_api(tmp_path, monkeypatch):
         assert c.post("/api/slicer/slice", json={"machine": "No Such Printer 0.4"}).status_code == 400
     for m in ("server", "agent"):
         sys.modules.pop(m, None)
+
+
+async def test_slice_defaults_come_from_settings(tmp_path, monkeypatch, fake_tree):
+    """Ribbon ▸ Slice passes nothing: printer, profiles and overrides come from Settings ▸ 3D printing; explicit
+    arguments win, and saved quality/filament are ignored when a different printer is named."""
+    monkeypatch.setattr(slicer, "find_slicer", lambda refresh=False: fake_tree)
+    a = _agent(tmp_path)
+    a.save_settings({"print": {"machine": "Acme One 0.4 nozzle", "process": "My draft", "filament": "Generic PETG", "layer_height": 0.3, "enable_support": True, "brim_type": "outer_only"}})
+    await a.build(PLATE, source="user")
+    with pytest.raises(slicer.SlicerError, match="slicer failed"):          # fake exe exits 3, but the inputs were written
+        await a.slice_model()
+    out = a.workspace / "slicing"
+    proc = json.loads((out / "process.json").read_text()); fil = json.loads((out / "filament.json").read_text())
+    assert proc["name"] == "My draft" and fil["name"] == "Generic PETG"
+    assert (proc["layer_height"], proc["enable_support"], proc["brim_type"]) == ("0.3", "1", "outer_only")
+    with pytest.raises(slicer.SlicerError):
+        await a.slice_model(overrides={"layer_height": 0.12, "enable_support": False})
+    proc = json.loads((out / "process.json").read_text())
+    assert (proc["layer_height"], proc["enable_support"], proc["brim_type"]) == ("0.12", "0", "outer_only")
+    a.save_settings({"print": {"machine": "Other One", "process": "My draft"}})
+    with pytest.raises(slicer.SlicerError):
+        await a.slice_model(machine="Acme One 0.4 nozzle")               # different printer: saved process not applied
+    assert json.loads((out / "process.json").read_text())["name"] == "0.20mm Standard @Acme"
