@@ -5,6 +5,12 @@ features, patch bumps fix things. The version shown in the UI header comes from 
 
 ## [Unreleased]
 
+## [0.13.2] — 2026-09-25
+
+### Fixed
+- Tool-call chips in a long chat collapsed into thin lines: the chat is a flex column and the chips (which clip their
+  content) were allowed to shrink once the conversation overflowed. Chat items no longer shrink; the list scrolls.
+
 ## [0.13.1] — 2026-09-25
 
 ### Changed

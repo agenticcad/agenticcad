@@ -83,6 +83,7 @@
   .pane { flex:1; display:none; flex-direction:column; min-height:0; }
   .pane.active { display:flex; }
   #messages { flex:1; overflow-y:auto; padding:12px; display:flex; flex-direction:column; gap:10px; }
+  #messages > * { flex-shrink:0; }   /* a long chat must scroll, never squash items (tool chips have overflow:hidden and would collapse to lines) */
   .msg { max-width:100%; padding:8px 11px; border-radius:10px; white-space:normal; word-wrap:break-word; }
   .msg.user { background:#2b3a52; align-self:flex-end; white-space:pre-wrap; }
   .msg.assistant { background:var(--panel2); align-self:flex-start; }
@@ -94,8 +95,12 @@
   .msg.system { color:var(--muted); font-size:12px; align-self:center; text-align:center; }
   .msg.error { color:var(--err); font-size:12px; }
   .tool { border:1px solid var(--line); border-radius:8px; font-size:12px; overflow:hidden; }
-  .tool summary { padding:6px 10px; cursor:pointer; color:var(--muted); list-style:none; display:flex; gap:8px; align-items:center; }
-  .tool summary::before { content:"▸"; font-size:10px; } .tool[open] summary::before { content:"▾"; }
+  /* WebKit (the desktop app's window) drops a <summary> whose display is not list-item/block, leaving an empty bordered line —
+     so the summary stays a block and the flex row lives in a child span */
+  .tool summary { padding:6px 10px; cursor:pointer; color:var(--muted); list-style:none; display:block; }
+  .tool summary::-webkit-details-marker { display:none; }
+  .tool summary .row { display:flex; gap:8px; align-items:center; }
+  .tool summary .row::before { content:"▸"; font-size:10px; } .tool[open] summary .row::before { content:"▾"; }
   .tool .name { color:var(--accent2); font-family:ui-monospace,Menlo,monospace; }
   .tool .state { margin-left:auto; } .tool .state.ok { color:var(--ok);} .tool .state.err { color:var(--err);} .tool .state.run { color:var(--accent); }
   .tool pre { margin:0; padding:8px 10px; background:#0f1216; max-height:260px; overflow:auto; font-size:11px; white-space:pre-wrap; border-top:1px solid var(--line); }
@@ -967,7 +972,7 @@ function toolChip(id, name) {
   let el = toolEls.get(id);
   if (el) return el;
   el = document.createElement('details'); el.className = 'tool';
-  el.innerHTML = `<summary><span class="name">${name}</span><span class="args"></span><span class="state run">running…</span></summary>`;
+  el.innerHTML = `<summary><span class="row"><span class="name">${name}</span><span class="args"></span><span class="state run">running…</span></span></summary>`;
   messagesEl.appendChild(el); toolEls.set(id, el); scroll(); return el;
 }
 function summarizeInput(name, input) {
