@@ -209,7 +209,7 @@
   .mcp-row .nm { flex:1; } .mcp-row .st { font-size:11px; padding:1px 6px; border-radius:10px; background:var(--panel2); color:var(--muted); }
   .mcp-row .st.connected { color:var(--ok); } .mcp-row .st.failed, .mcp-row .st.needs-auth { color:var(--err); }
   /* ---- modelling ribbon */
-  #ribbon { position:absolute; z-index:4; top:8px; left:74px; display:flex; flex-wrap:wrap; gap:2px; padding:4px 6px 3px; background:linear-gradient(180deg, rgba(34,39,47,.96), rgba(26,30,36,.96)); border:1px solid #333a45; border-radius:10px; box-shadow:0 6px 24px rgba(0,0,0,.35), inset 0 1px 0 rgba(255,255,255,.04); max-width:calc(100% - 205px); }
+  #ribbon { position:absolute; z-index:4; top:8px; left:150px; display:flex; flex-wrap:wrap; gap:2px; padding:4px 6px 3px; background:linear-gradient(180deg, rgba(34,39,47,.96), rgba(26,30,36,.96)); border:1px solid #333a45; border-radius:10px; box-shadow:0 6px 24px rgba(0,0,0,.35), inset 0 1px 0 rgba(255,255,255,.04); max-width:calc(100% - 205px); }
   #ribbon .rg { display:flex; flex-direction:column; align-items:center; padding:0 5px; border-right:1px solid #2c333d; } #ribbon .rg:last-child { border-right:0; }
   #cmd input[type=number]::-webkit-outer-spin-button, #cmd input[type=number]::-webkit-inner-spin-button { -webkit-appearance:none; margin:0; } #cmd input[type=number] { -moz-appearance:textfield; }
   #ribbon .rgl { font-size:9.5px; letter-spacing:.6px; text-transform:uppercase; color:#6f7a88; margin-top:1px; order:2; }
@@ -276,8 +276,10 @@
           <div data-act="stl">Export STL…</div>
           <hr>
           <div data-act="drawings">Shop drawings…</div>
+          <hr>
+          <div data-act="settings">Settings…</div>
         </div></div>
-      <button class="btn" id="settings-btn" title="Settings: agent, drawings, 3D printing">⚙</button>
+      <button class="btn" id="settings-btn" title="Settings: agent, drawings, 3D printing" style="display:inline-flex;align-items:center;gap:6px"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.2"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>Settings</button>
     </div>
     <div id="cubewrap" title="Click a face, edge or corner to look from there · drag to orbit"><canvas id="cube" width="220" height="220"></canvas>
       <button class="btn" id="home" title="Home view (fit)">⌂</button></div>
@@ -594,7 +596,7 @@ function resize() {
   renderer.setSize(w, h, true); camera.aspect = w / h; camera.updateProjectionMatrix();
 }
 window.addEventListener('resize', resize); resize();
-function placeTree() { const rb = document.getElementById('ribbon'); if (!rb) return; const y = rb.offsetTop + rb.offsetHeight + 10; document.getElementById('tree').style.top = y + 'px'; document.getElementById('cmd').style.top = Math.max(150, y) + 'px'; }
+function placeTree() { const rb = document.getElementById('ribbon'); if (!rb) return; const tb = document.getElementById('toolbar'); rb.style.left = (tb.offsetLeft + tb.offsetWidth + 10) + 'px'; const y = rb.offsetTop + rb.offsetHeight + 10; document.getElementById('tree').style.top = y + 'px'; document.getElementById('cmd').style.top = Math.max(150, y) + 'px'; }
 window.addEventListener('resize', placeTree); setTimeout(placeTree, 0);
 // the Parameters card stacks under the Browser and follows its height
 function placeParams() { const t = document.getElementById('tree'), c = document.getElementById('params-card'); c.style.top = (t.offsetTop + t.offsetHeight + 8) + 'px'; c.style.maxHeight = Math.max(80, viewerEl.clientHeight - t.offsetTop - t.offsetHeight - 60) + 'px'; }
@@ -872,6 +874,7 @@ async function fileAction(act) {
     else if (act === 'step') { window.open('/api/export/step'); }
     else if (act === 'importstep') { document.getElementById('steppick').click(); }
     else if (act === 'drawings') { await makeDrawings(); }
+    else if (act === 'settings') { openSettings(); }
     else if (act === 'stl') { await exportStlBox(); }
   } catch (e) { addMsg('error', e.message); }
 }

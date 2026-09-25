@@ -5,6 +5,12 @@ features, patch bumps fix things. The version shown in the UI header comes from 
 
 ## [Unreleased]
 
+## [0.15.2] — 2026-09-25
+
+### Fixed
+- The Settings button was hidden under the ribbon in the desktop window (the ribbon sat at a fixed offset). The ribbon
+  now starts after the toolbar, the button is labelled "Settings" with an icon, and File ▸ Settings… opens it too.
+
 ## [0.15.1] — 2026-09-25
 
 ### Fixed
