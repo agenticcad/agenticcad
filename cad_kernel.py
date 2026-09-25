@@ -25,6 +25,7 @@ from typing import Any
 import build123d as b3d
 from build123d import Compound, Face, Edge, Shape, Vector
 import threads as thr
+import gears
 
 # OCP (the OCCT bindings bundled with build123d) is used for display meshing so we
 # can pull exact surface normals and adaptive curve samples straight off the B-rep.
@@ -307,6 +308,7 @@ def script_namespace() -> dict[str, Any]:
     ns["import_step"] = import_step
     ns["from_library"] = from_library
     ns.update(thr.namespace())
+    ns.update(gears.namespace())
     return ns
 
 

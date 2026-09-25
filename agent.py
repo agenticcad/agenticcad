@@ -95,6 +95,11 @@ Rules
   and any dimension callouts from them; dimensions given in the text override what you estimate. Say which
   dimensions you estimated. If a critical dimension is missing, pick a sensible value, state it, and continue
   rather than stalling. The image files are also saved in the workspace (paths given) if you need to re-read them.
+- Build complex parts incrementally, one body (or one feature group) per `build_model` call: start with the
+  main body, build, check the summary (and a screenshot if the shape matters), then add the next body while
+  keeping the earlier code unchanged. Never deliver a 200-line multi-body script in one go: a failure deep in
+  it costs the whole attempt, and the user sees nothing until the end. Mention what you are building next in
+  one short line between steps.
 - If a build fails, read the traceback, fix the code and rebuild; do not ask the user to debug Python.
 - Keep replies short: say what you changed and any assumption you made. No code in replies unless asked;
   the code lives in the tool call and the user can open it in the Code panel.
@@ -128,6 +133,15 @@ Rules
   "M4×0.7 ↧8"; `bolt("M4", 16, head="hex"|"socket"|"none", real=False)` (head above z=0, shank down −Z, so
   `Pos(x, y, surface_z) * bolt(...)` sits on a surface), `nut("M4")`, `washer("M4")`. Prefer cosmetic threads
   (fast, clean STEP); use real=True only when the user wants the helix (3D printing, visual).
+- Gears (pre-imported): `spur_gear(module, teeth, thickness, bore=0, pressure_angle=20, hub_d=0, hub_h=0, keyway=(w, depth))`
+  returns a true involute spur gear solid (Z up, tooth 0 on +X); `involute_gear_profile(module, teeth)` gives the
+  closed Face; `gear_centre_distance(module, za, zb)` and `gear_dims(module, teeth)` for meshing/layout. Always use
+  these instead of hand-rolling involute flanks. Meshing gears share module and pressure angle; rotate one by half a
+  tooth pitch (180/teeth degrees) so teeth interleave.
+- Closed profiles from your own points: build ONE ordered point list around the outline and close it with
+  `make_face(Polyline(*pts, close=True))` (or `Spline` for smooth curves). Assembling a Wire from separately
+  constructed Line/Arc/Spline pieces fails with "Edges are disconnected" as soon as two end points differ by
+  a rounding error, so avoid that pattern.
 
 build123d cheat sheet (builder mode)
 ```
@@ -229,6 +243,15 @@ def claude_auth_status(cli: str | None = None, api_key: str | None = None) -> di
 def safe_name(name: str) -> str:
     name = SAFE_NAME.sub("", name or "").strip().rstrip(".")
     return name[:80] or "untitled"
+
+
+def _build_hint(e: BaseException) -> str:
+    """One-line pointers for failure modes the agent keeps hitting."""
+    t = str(e).lower()
+    if "disconnected" in t:
+        return ("\nHINT: build closed profiles as one ordered point list with make_face(Polyline(*pts, close=True)); "
+                "for gears use the pre-imported spur_gear() / involute_gear_profile().")
+    return ""
 
 
 class CadAgent:
@@ -818,9 +841,9 @@ class CadAgent:
             try:
                 model = await agent.build(args["code"])
             except ck.CadError as e:
-                return {"content": [{"type": "text", "text": f"BUILD FAILED\n{e}"}], "is_error": True}
+                return {"content": [{"type": "text", "text": f"BUILD FAILED\n{e}{_build_hint(e)}"}], "is_error": True}
             except Exception as e:  # noqa: BLE001
-                return {"content": [{"type": "text", "text": f"BUILD FAILED\n{type(e).__name__}: {e}"}],
+                return {"content": [{"type": "text", "text": f"BUILD FAILED\n{type(e).__name__}: {e}{_build_hint(e)}"}],
                         "is_error": True}
             return {"content": [{"type": "text", "text": model.summary(25)}]}
 
@@ -1362,8 +1385,9 @@ class CadAgent:
         st = self.settings
         mcp = self._mcp_configs()
         allowed = ["mcp__cad__*"] + [f"mcp__{n}__*" for n in mcp if n != "cad"]
+        builtin: list[str] = []                    # no Bash/Edit/Write/Read: the agent works through the CAD tools only
         if st.get("web", True):
-            allowed += ["WebFetch", "WebSearch"]
+            allowed += ["WebFetch", "WebSearch"]; builtin = ["WebFetch", "WebSearch"]
         prompt = SYSTEM_PROMPT
         if len(mcp) > 1:
             prompt += "\n\nExternal MCP servers connected (their tools are prefixed mcp__<server>__): " + ", ".join(n for n in mcp if n != "cad") + "."
@@ -1382,6 +1406,7 @@ class CadAgent:
             system_prompt=prompt,
             mcp_servers=mcp,
             allowed_tools=allowed,
+            tools=builtin,
             permission_mode="dontAsk",
             include_partial_messages=True,
             cwd=str(self.workspace),

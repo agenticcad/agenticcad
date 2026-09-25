@@ -273,6 +273,15 @@ the helix via bd_warehouse), `bolt(size, length, head=hex|socket|none, real=Fals
 Tapped holes are registered per build: the model summary lists them and shop drawings call them out
 ("M4×0.7 THRU" instead of "Ø3.3").
 
+## Gears ([gears.py](gears.py))
+
+Pre-imported in scripts: `spur_gear(module, teeth, thickness, bore=0, pressure_angle=20, hub_d=0, hub_h=0,
+keyway=(w, depth))` → involute spur gear solid (Z up, tooth 0 on +X); `involute_gear_profile(module, teeth)` → closed
+Face; `gear_dims(module, teeth)` (pitch, outside, root, base diameters); `gear_centre_distance(module, za, zb)`.
+The outline is one closed Polyline, so it never hits build123d's "Edges are disconnected" (the classic failure of
+hand-rolled involutes, which the build error now hints about). The agent is told to build complex parts one body per
+`build_model` call and to use these helpers rather than derive tooth flanks itself.
+
 ## Versioning
 
 `version.py` holds the version (shown as a badge in the header; click it for the changelog). Every

@@ -22,6 +22,10 @@ result = {"Plate": bp.part}
      {"type": "circle", "cx": 10, "cy": 0, "r": 3, "mode": "subtract"}])
 
 
+def _bc(b):
+    return ((b.bbox_min[0] + b.bbox_max[0]) / 2, (b.bbox_min[1] + b.bbox_max[1]) / 2)
+
+
 def thread_checks(run: Run):
     m = run.model
     if m is None:
@@ -205,6 +209,17 @@ CASES: list[Case] = [
          graders=[no_agent_error(), expect_bodies(["Base", "Post"], count=2), expect_bbox((40, 40, 5), body="Base"),
                   expect_bbox((10, 10, 30), body="Post"),
                   lambda run: [check("post starts at z=5", abs(run.model.body_by_name("Post").bbox_min[2] - 5) < 0.2, str(run.model.body_by_name("Post").bbox_min))]]),
+    Case("cad_spur_gear", tags=["cad", "gears"],
+         prompt="Make a spur gear: module 2, 20 teeth, 20° pressure angle, 10 mm thick, with an 8 mm bore. One body named Gear.",
+         graders=[no_agent_error(), expect_bodies(["Gear"], count=1), expect_bbox((44, 44, 10), body="Gear", tol=0.3),
+                  expect_script_contains("spur_gear"),
+                  lambda run: [check("bore Ø8 present", any(abs(f.radius - 4) < 0.05 for f in run.model.faces if f.kind == "CYLINDER"), "no Ø8 cylinder face")]]),
+    Case("cad_gear_train_incremental", tags=["cad", "gears", "incremental"],
+         prompt="Build a two-gear train on a 4 mm base plate: a 20-tooth and a 12-tooth spur gear, module 2, both 8 mm thick, 6 mm bores, meshing correctly on the plate. Plate 80 × 50 mm. Bodies: Plate, Gear20, Gear12.",
+         graders=[no_agent_error(), expect_bodies(["Plate", "Gear20", "Gear12"], count=3),
+                  lambda run: [check("gears mesh without overlap", abs(run.model.shape.volume - sum(b.shape.volume for b in run.model.bodies)) < 1.0, "bodies overlap"),
+                               check("centre distance 32 mm", abs(math.dist(_bc(run.model.body_by_name("Gear20")), _bc(run.model.body_by_name("Gear12"))) - 32) < 0.5, "wrong spacing"),
+                               check("built incrementally (≥2 build_model calls)", sum(1 for t in run.tools_used if t.endswith("build_model")) >= 2, f"tools {run.tools_used}")]]),
     Case("cad_parametric", tags=["cad", "params"],
          prompt="Model an L-shaped angle bracket: 50 long, 30 tall, 20 wide, 4 mm thick, with a 3 mm inside fillet. Expose the length, height, width and thickness as parameters at the top of the script.",
          graders=[no_agent_error(), expect_bbox((50, 20, 30), tol=1.0), expect_params(), expect_face_kinds("CYLINDER"),

@@ -33,7 +33,7 @@ icon = "src/agenticcad/resources/agenticcad"
 sources = [
     "src/agenticcad",
     "server.py", "agent.py", "cad_kernel.py", "cam_kernel.py", "cam_data.py", "drawing.py",
-    "library.py", "script_edit.py", "slicer.py", "threads.py", "version.py",
+    "gears.py", "library.py", "script_edit.py", "slicer.py", "threads.py", "version.py",
     "static", "CHANGELOG.md",
 ]
 requires = [
