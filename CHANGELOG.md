@@ -5,6 +5,8 @@ features, patch bumps fix things. The version shown in the UI header comes from 
 
 ## [Unreleased]
 
+## [0.15.1] — 2026-09-25
+
 ### Fixed
 - `edit_model` applies its edits and rebuilds under the model lock, so several edit calls issued together (parallel
   tool use) are serialised on the latest script instead of overwriting each other.
