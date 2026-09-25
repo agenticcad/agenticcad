@@ -18,6 +18,8 @@ from cases import CASES  # noqa: E402
 async def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--filter", default="", help="substring of case id or tag")
+    ap.add_argument("--ids", default="", help="comma-separated case ids (exact)")
+    ap.add_argument("--label", default="", help="tag for the result files, e.g. legacy / edit")
     ap.add_argument("--model", default=None)
     ap.add_argument("--repeat", type=int, default=1)
     ap.add_argument("--parallel", type=int, default=3)
@@ -26,6 +28,9 @@ async def main() -> int:
     args = ap.parse_args()
 
     cases = [c for c in CASES if not args.filter or args.filter in c.id or args.filter in c.tags]
+    if args.ids:
+        want = [x.strip() for x in args.ids.split(",") if x.strip()]
+        cases = [c for c in CASES if c.id in want]
     if not cases:
         print("no cases match", args.filter); return 2
     jobs = [c for c in cases for _ in range(args.repeat)]
@@ -46,7 +51,7 @@ async def main() -> int:
     runs = await asyncio.gather(*(one(c) for c in jobs))
     total_cost = sum(r.cost for r in runs)
     passed = sum(1 for r in runs if r.passed)
-    stamp = time.strftime("%Y%m%d-%H%M%S")
+    stamp = time.strftime("%Y%m%d-%H%M%S") + (f"-{args.label}" if args.label else "")
     out = Path(args.out); out.mkdir(parents=True, exist_ok=True)
     data = {"stamp": stamp, "model": args.model or "default", "elapsed_s": round(time.time() - t0, 1),
             "passed": passed, "total": len(runs), "cost_usd": round(total_cost, 3),

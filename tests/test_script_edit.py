@@ -66,3 +66,20 @@ def test_add_body_into_dict_and_plain_result():
     assert [b.path for b in ck.run_script(out).bodies] == ["Body1", "Pin"]
     out = se.add_body("x = 1\n", "p", "Box(1,1,1)", "P")   # no result at all
     assert ck.run_script(out).bodies[0].path == "P"
+
+
+def test_apply_edits_unit():
+    code = "a = 1\nb = 2\nresult = {'A': Box(a, a, a)}\n"
+    out = se.apply_edits(code, [{"old": "a = 1", "new": "a = 5"}], "c = 3")
+    assert out == "a = 5\nb = 2\nc = 3\n\nresult = {'A': Box(a, a, a)}\n"
+    assert se.apply_edits("x = 1\n", [], "y = 2") == "x = 1\n\ny = 2\n"      # no result line: appended at the end
+    with pytest.raises(se.Refused, match="occurs 2 times"):
+        se.apply_edits("a = 1\na = 1\nresult = a\n", [{"old": "a = 1", "new": "a = 2"}])
+    with pytest.raises(se.Refused, match="not found"):
+        se.apply_edits(code, [{"old": "zzz", "new": ""}])
+    with pytest.raises(se.Refused, match="indentation differs"):
+        se.apply_edits(code, [{"old": "    b = 2", "new": "b = 3"}])
+    with pytest.raises(se.Refused, match="empty"):
+        se.apply_edits(code, [{"old": "", "new": "x"}])
+    with pytest.raises(se.Refused, match="no change"):
+        se.apply_edits(code, [], "")

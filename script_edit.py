@@ -10,6 +10,8 @@ caller can hand the job to the agent instead.
 """
 from __future__ import annotations
 
+import re
+
 import ast
 
 
@@ -395,3 +397,34 @@ def wrap_body_expr(code: str, path: str, template: str) -> str:
         return out
     new = template.replace("{expr}", old)
     return (b[:start] + new.encode("utf-8") + b[end:]).decode("utf-8")
+
+
+_RESULT_LINE = re.compile(r"^result\s*=", re.M)
+
+
+def apply_edits(code: str, edits: list[dict], append: str = "") -> str:
+    """Exact-text replacements (each `old` must occur exactly once) applied in order, then `append` inserted before the
+    final top-level `result = ...` line (or at the end). Raises Refused on ambiguity, no match, or no change."""
+    out = code
+    for i, e in enumerate(edits):
+        old, new = str(e.get("old", "")), str(e.get("new", ""))
+        if not old:
+            raise Refused(f"edit {i + 1}: `old` is empty")
+        n = out.count(old)
+        if n == 0:
+            hint = " (leading/trailing whitespace or indentation differs?)" if old.strip() and out.count(old.strip()) else ""
+            raise Refused(f"edit {i + 1}: `old` not found in the current script{hint}; call get_code and copy the text exactly")
+        if n > 1:
+            raise Refused(f"edit {i + 1}: `old` occurs {n} times; include more surrounding lines so it is unique")
+        out = out.replace(old, new, 1)
+    if append and append.strip():
+        block = append.strip("\n") + "\n"
+        ms = list(_RESULT_LINE.finditer(out))
+        if ms:
+            pos = ms[-1].start()
+            out = out[:pos] + block + ("\n" if not block.endswith("\n\n") else "") + out[pos:]
+        else:
+            out = out.rstrip("\n") + "\n\n" + block
+    if out == code:
+        raise Refused("no change: the edits leave the script identical")
+    return out

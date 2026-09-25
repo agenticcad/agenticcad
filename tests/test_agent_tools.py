@@ -191,3 +191,29 @@ async def test_tools_without_model(ag):
     assert text(await T["get_code"]({})) == ""
     r = await T["save_design"]({})
     assert not ok(r)
+
+
+async def test_edit_model_replaces_appends_and_keeps_design_on_failure(ag):
+    """edit_model changes the current script in place: exact unique replacements, code appended before `result`,
+    all-or-nothing on a failed build, and clear refusals for ambiguous or missing text."""
+    T = ag.tool_handlers
+    before = ag.model.code
+    r = await T["edit_model"]({"edits": [{"old": "plate_l, plate_w, plate_t = 60, 40, 8", "new": "plate_l, plate_w, plate_t = 80, 40, 8"}]})
+    assert ok(r) and "80.00" in text(r) and "script is now" in text(r)
+    assert ag.model.code.startswith("plate_l, plate_w, plate_t = 80, 40, 8") and ag.model.code != before
+    r = await T["edit_model"]({"append": "pin = Pos(30, 0, plate_t) * Cylinder(3, 12, align=(Align.CENTER, Align.CENTER, Align.MIN))",
+                               "edits": [{"old": 'result = {"Plate": plate.part}', "new": 'result = {"Plate": plate.part, "Pin": pin}'}]})
+    assert ok(r) and "2 bodies" in text(r)
+    assert ag.model.code.index("pin = Pos") < ag.model.code.index("result = {")            # appended before result
+    kept = ag.model.code
+    r = await T["edit_model"]({"edits": [{"old": "Cylinder(3, 12", "new": "Cylinder(3, 0"}]})   # zero-volume body
+    assert not ok(r) and "previous design kept" in text(r) and ag.model.code == kept
+    r = await T["edit_model"]({"edits": [{"old": "Cylinder(", "new": "Sphere("}]})
+    assert not ok(r) and "occurs 2 times" in text(r)
+    r = await T["edit_model"]({"edits": [{"old": "nothing like this", "new": "x"}]})
+    assert not ok(r) and "not found" in text(r)
+    r = await T["edit_model"]({"edits": [{"old": "  plate_l", "new": "  plate_l"}]})
+    assert not ok(r) and ("not found" in text(r) or "no change" in text(r))
+    r = await T["edit_model"]({})
+    assert not ok(r) and "no change" in text(r)
+    assert ag.model.code == kept

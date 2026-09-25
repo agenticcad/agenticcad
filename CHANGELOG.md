@@ -5,6 +5,21 @@ features, patch bumps fix things. The version shown in the UI header comes from 
 
 ## [Unreleased]
 
+## [0.15.0] — 2026-09-25
+
+### Added
+- **`edit_model` tool**: the agent changes the existing script in place (exact-text replacements that must match
+  once, plus code appended before `result`) and rebuilds; a failed build leaves the previous design untouched.
+  `build_model` is now for new designs and full rewrites only. Measured on a 150-line, 19-body design with a two-line
+  change request (3 runs each, Claude Opus 5.5): whole-script rebuild $0.32 / 33 s per change, `edit_model`
+  $0.09 / 12 s — about 3.5× cheaper and 3× faster. On 30–60-line scripts the difference is within noise.
+- Eval cases `cad_long_script_edit` (the measurement above) and an A/B switch `AGENTICCAD_LEGACY_BUILD=1` that
+  restores the pre-0.15 tools and prompt for comparisons; `evals/run.py --ids a,b --label x`.
+
+### Changed
+- Incremental building of multi-body parts is now stated in the `build_model` tool description as well as the
+  prompt; the seven-body gearbox eval passes 3/3 (first body with `build_model`, the rest via `edit_model`).
+
 ## [0.14.0] — 2026-09-25
 
 ### Added

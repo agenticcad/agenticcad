@@ -66,8 +66,11 @@ def find_claude_cli() -> str | None:
 
 
 SYSTEM_PROMPT = """You are AgenticCAD, a CAD copilot. The user talks to you; you build and modify a
-parametric 3D design by writing build123d (Python, OCCT-based) code and calling the `build_model`
-tool with the COMPLETE script every time (there is one design script; each build replaces it).
+parametric 3D design by writing build123d (Python, OCCT-based) code. There is one design script.
+`build_model` takes a COMPLETE script and replaces it: use it for the first version or a full rewrite.
+`edit_model` changes the existing script in place (exact-text replacements and appended code, then a rebuild):
+use it for every change to an existing design, including adding bodies. Do not resend a whole script to change
+one line.
 
 Rules
 - Units are millimetres, Z is up. Keep dimensions as named variables at the top of the script.
@@ -97,7 +100,8 @@ Rules
   rather than stalling. The image files are also saved in the workspace (paths given) if you need to re-read them.
 - Build complex parts incrementally. Anything with more than 3 bodies, or that would take more than ~80
   lines, goes in stages: build the main body first, check the summary (and a screenshot if the shape matters),
-  then add the next body or feature group in a further `build_model` call, keeping the earlier code unchanged.
+  then add the next body or feature group with `edit_model` (append the code, add the body to `result`), so
+  the earlier code is never retyped.
   Never deliver a 200-line multi-body script in one go: a failure deep in it costs the whole attempt, and the
   user sees nothing until the end. Say what you are building next in one short line between steps.
 - If a build fails, read the traceback, fix the code and rebuild; do not ask the user to debug Python.
@@ -244,6 +248,26 @@ def safe_name(name: str) -> str:
     name = SAFE_NAME.sub("", name or "").strip().rstrip(".")
     return name[:80] or "untitled"
 
+
+# A/B switch for evals: the pre-0.15 behaviour (no edit_model, whole-script rebuilds, no incremental rule).
+LEGACY_BUILD = os.environ.get("AGENTICCAD_LEGACY_BUILD") == "1"
+LEGACY_PROMPT_SWAPS = [
+    ("""parametric 3D design by writing build123d (Python, OCCT-based) code. There is one design script.
+`build_model` takes a COMPLETE script and replaces it: use it for the first version or a full rewrite.
+`edit_model` changes the existing script in place (exact-text replacements and appended code, then a rebuild):
+use it for every change to an existing design, including adding bodies. Do not resend a whole script to change
+one line.
+""", """parametric 3D design by writing build123d (Python, OCCT-based) code and calling the `build_model`
+tool with the COMPLETE script every time (there is one design script; each build replaces it).
+"""),
+    ("""- Build complex parts incrementally. Anything with more than 3 bodies, or that would take more than ~80
+  lines, goes in stages: build the main body first, check the summary (and a screenshot if the shape matters),
+  then add the next body or feature group with `edit_model` (append the code, add the body to `result`), so
+  the earlier code is never retyped.
+  Never deliver a 200-line multi-body script in one go: a failure deep in it costs the whole attempt, and the
+  user sees nothing until the end. Say what you are building next in one short line between steps.
+""", ""),
+]
 
 def _build_hint(e: BaseException) -> str:
     """One-line pointers for failure modes the agent keeps hitting."""
@@ -835,7 +859,9 @@ class CadAgent:
         @tool("build_model",
               "Replace the design script with a complete build123d script and rebuild it. The script must "
               "assign `result` (a shape, or a dict of name -> shape / nested dict for bodies and components). "
-              "Returns a geometry summary or the Python traceback.",
+              "Returns a geometry summary or the Python traceback. For a NEW design with more than 3 bodies, put "
+              "only the first body (or sub-assembly) here and add the others one at a time with edit_model. To "
+              "change an existing design use edit_model, not this.",
               {"code": str})
         async def build_model(args: dict[str, Any]) -> dict[str, Any]:
             try:
@@ -846,6 +872,35 @@ class CadAgent:
                 return {"content": [{"type": "text", "text": f"BUILD FAILED\n{type(e).__name__}: {e}{_build_hint(e)}"}],
                         "is_error": True}
             return {"content": [{"type": "text", "text": model.summary(25)}]}
+
+        @tool("edit_model",
+              "Edit the CURRENT design script in place and rebuild: the normal way to change an existing design "
+              "(much cheaper and safer than resending the whole script). `edits`: list of {old, new} exact-text "
+              "replacements; each `old` must occur exactly once in the current script (include enough surrounding "
+              "lines to make it unique, keep indentation; `new` may be empty to delete). `append`: code inserted just "
+              "before the final top-level `result = ...` line (new bodies, helper functions); add new bodies to "
+              "`result` with an edit in the same call. Edits are applied in order, then the script is rebuilt. If the "
+              "build fails nothing is applied and the previous design stays; the traceback is returned.",
+              {"type": "object",
+               "properties": {"edits": {"type": "array", "items": {"type": "object", "properties": {"old": {"type": "string"}, "new": {"type": "string"}},
+                                                                    "required": ["old", "new"]}},
+                              "append": {"type": "string"}},
+               "required": []})
+        async def edit_model(args: dict[str, Any]) -> dict[str, Any]:
+            if agent.model is None:
+                return {"content": [{"type": "text", "text": "No design yet: use build_model first."}], "is_error": True}
+            try:
+                code = script_edit.apply_edits(agent.model.code, list(args.get("edits") or []), args.get("append") or "")
+            except script_edit.Refused as e:
+                return {"content": [{"type": "text", "text": f"EDIT REFUSED: {e}"}], "is_error": True}
+            try:
+                model = await agent.build(code)
+            except ck.CadError as e:
+                return {"content": [{"type": "text", "text": f"BUILD FAILED (previous design kept)\n{e}{_build_hint(e)}"}], "is_error": True}
+            except Exception as e:  # noqa: BLE001
+                return {"content": [{"type": "text", "text": f"BUILD FAILED (previous design kept)\n{type(e).__name__}: {e}{_build_hint(e)}"}],
+                        "is_error": True}
+            return {"content": [{"type": "text", "text": model.summary(25) + f"\n(script is now {code.count(chr(10)) + 1} lines)"}]}
 
         @tool("inspect_model",
               "List bodies and faces of the current design. Faces have id, body, type, area, centre, normal, "
@@ -1226,7 +1281,7 @@ class CadAgent:
 
             slicing_tools = [slicer_info, slice_for_printing]
 
-        tools = [build_model, inspect_model, screenshot, export_model, get_code, save_design,
+        tools = [build_model, *([] if LEGACY_BUILD else [edit_model]), inspect_model, screenshot, export_model, get_code, save_design,
                  cam_context, build_cam, get_cam_code, export_gcode, feeds_speeds, save_machine, save_tool,
                  get_parameters, set_parameters, measure_tool, mass_properties, make_drawings, library_tool, sketch_tool] + slicing_tools
         self.tool_handlers = {t.name: t.handler for t in tools}     # name -> async handler (tests call these directly)
@@ -1389,6 +1444,10 @@ class CadAgent:
         if st.get("web", True):
             allowed += ["WebFetch", "WebSearch"]; builtin = ["WebFetch", "WebSearch"]
         prompt = SYSTEM_PROMPT
+        if LEGACY_BUILD:
+            for new, legacy in LEGACY_PROMPT_SWAPS:
+                assert new in prompt, "legacy swap out of date"
+                prompt = prompt.replace(new, legacy)
         if len(mcp) > 1:
             prompt += "\n\nExternal MCP servers connected (their tools are prefixed mcp__<server>__): " + ", ".join(n for n in mcp if n != "cad") + "."
         if slicer.find_slicer() is not None:

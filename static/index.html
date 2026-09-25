@@ -977,6 +977,7 @@ function toolChip(id, name) {
 }
 function summarizeInput(name, input) {
   if (name === 'build_model') return `${(input.code || '').split('\n').length} lines`;
+  if (name === 'edit_model') return `${(input.edits || []).length} edit(s)` + (input.append ? ` + ${input.append.split('\n').length} appended lines` : '');
   if (name === 'screenshot') return `${input.view || 'iso'}${input.highlight_faces?.length ? ' · faces ' + input.highlight_faces.join(',') : ''}`;
   return Object.entries(input || {}).map(([k, v]) => `${k}=${JSON.stringify(v)}`).join(' ').slice(0, 80);
 }

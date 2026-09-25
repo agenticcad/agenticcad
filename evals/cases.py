@@ -199,6 +199,35 @@ def volume_dropped_by(expected: float, rel: float = 0.15, from_code: str = ""):
     return g
 
 
+
+def _long_script(n_posts: int = 14) -> str:
+    """A realistic long design (~150 lines): plate, posts, ribs, many named bodies with comments. Used to measure
+    edit_model against whole-script rebuilds."""
+    lines = ["# Fixture plate with posts and ribs — long script", "plate_l, plate_w, plate_t = 160, 100, 6", "post_d, post_h = 8, 30",
+             "rib_w, rib_h = 4, 10", "", "with BuildPart() as plate_bp:", "    Box(plate_l, plate_w, plate_t)",
+             "    with Locations((plate_l / 2 - 8, plate_w / 2 - 8), (-plate_l / 2 + 8, plate_w / 2 - 8), (plate_l / 2 - 8, -plate_w / 2 + 8), (-plate_l / 2 + 8, -plate_w / 2 + 8)):",
+             "        Hole(4.5)", "plate = plate_bp.part", ""]
+    names = []
+    for i in range(n_posts):
+        x = -60 + (i % 7) * 20; y = -25 if i < 7 else 25
+        lines += [f"# Post {i + 1}: standing on the plate at ({x}, {y})", f"post{i + 1}_x, post{i + 1}_y = {x}, {y}",
+                  f"with BuildPart() as p{i + 1}:", f"    with Locations((post{i + 1}_x, post{i + 1}_y, plate_t / 2)):",
+                  f"        Cylinder(post_d / 2, post_h, align=(Align.CENTER, Align.CENTER, Align.MIN))",
+                  f"    with Locations((post{i + 1}_x, post{i + 1}_y, plate_t / 2 + post_h)):",
+                  f"        Cylinder(post_d / 2 - 1.5, 4, align=(Align.CENTER, Align.CENTER, Align.MIN))",
+                  f"post{i + 1} = p{i + 1}.part", ""]
+        names.append(f'"Post{i + 1}": post{i + 1}')
+    for j in range(4):
+        y = -40 + j * 26
+        lines += [f"# Rib {j + 1}: stiffener under the plate", f"rib{j + 1} = Pos(0, {y}, -plate_t / 2 - rib_h / 2) * Box(plate_l - 20, rib_w, rib_h)", ""]
+        names.append(f'"Rib{j + 1}": rib{j + 1}')
+    lines += ["result = {\"Plate\": plate, " + ", ".join(names) + "}", ""]
+    return "\n".join(lines)
+
+
+LONG_SCRIPT = _long_script()
+
+
 CASES: list[Case] = [
     Case("cad_box_hole", tags=["cad"],
          prompt="Make a 20 × 30 × 10 mm block centred on the origin with a Ø5 through hole down the centre (Z axis). Single body called Block.",
@@ -224,7 +253,14 @@ CASES: list[Case] = [
          graders=[no_agent_error(), expect_bodies(["Plate", "ShaftA", "ShaftB", "GearA", "GearB", "CollarA", "CollarB"], count=7),
                   expect_holes(4, diameter=4.5),
                   lambda run: [check("gears mesh without overlap", abs(run.model.shape.volume - sum(b.shape.volume for b in run.model.bodies)) < 1.0, "bodies overlap"),
-                               check("built incrementally (≥2 build_model calls)", sum(1 for t in run.tools_used if t.endswith("build_model")) >= 2, f"tools {run.tools_used}")]]),
+                               check("built incrementally (build_model then ≥1 edit_model)", sum(1 for t in run.tools_used if t.endswith("edit_model")) >= 1 and sum(1 for t in run.tools_used if t.endswith("build_model")) >= 1, f"tools {run.tools_used}")]]),
+    Case("cad_long_script_edit", tags=["cad", "longscript"],
+         prompt="Make the base plate 8 mm thick instead of 6, and add a Ø5 mm hole through the plate at the centre (0, 0). Keep everything else exactly as it is.",
+         initial_code=LONG_SCRIPT,
+         graders=[no_agent_error(), expect_bodies(["Plate"], count=19),
+                  expect_bbox((160, 100, 8), body="Plate", tol=0.3),
+                  lambda run: [check("Ø5 hole present", any(abs(f.radius - 2.5) < 0.05 for f in run.model.faces if f.kind == "CYLINDER"), "no Ø5 cylinder face"),
+                               check("posts untouched", run.model.body_by_name("Post14") is not None and abs(run.model.body_by_name("Post14").bbox_max[2] - (4 + 30 + 4)) < 0.5, "post moved or missing")]]),
     Case("cad_parametric", tags=["cad", "params"],
          prompt="Model an L-shaped angle bracket: 50 long, 30 tall, 20 wide, 4 mm thick, with a 3 mm inside fillet. Expose the length, height, width and thickness as parameters at the top of the script.",
          graders=[no_agent_error(), expect_bbox((50, 20, 30), tol=1.0), expect_params(), expect_face_kinds("CYLINDER"),

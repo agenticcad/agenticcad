@@ -57,6 +57,7 @@ redistributes it; `agent.find_claude_cli()` locates the user's own install.
 | tool | purpose |
 |---|---|
 | `build_model(code)` | replace the script, rebuild, return summary (bbox, volume, largest faces) or traceback |
+| `edit_model(edits?, append?)` | change the existing script in place (exact-text replacements + code appended before `result`), rebuild; nothing applied if the build fails |
 | `inspect_model(kind?, near?, limit?)` | list faces: id, type, area, centre, normal, size, radius |
 | `screenshot(view, highlight_faces?, show_edges?)` | browser renders a 1024×768 PNG returned as an image block |
 | `export_model(name?, formats?)` | STEP / STL into `workspace/exports/` |
@@ -303,6 +304,9 @@ Pre-1.0: minor bump for features, patch bump for fixes. `/api/version` serves bo
 .venv/bin/python evals/run.py --filter cam --model claude-sonnet-5 --repeat 3
 ```
 
+- **A/B evals**: `AGENTICCAD_LEGACY_BUILD=1 .venv/bin/python evals/run.py --ids cad_long_script_edit --repeat 3 --label legacy`
+  vs the same without the variable measures whole-script rebuilds against `edit_model` (cost and wall time per case are
+  in the result JSON/MD under `evals/results/`).
 - **Unit tests** (`tests/`): kernel (bodies, ids, exact normals, exports, measurement), script editing
   (params, rename/delete/add), CAM (holes, sections, every op, arc post, machine checks, feeds, and an
   independent fine-grid engagement audit of the adaptive op), drawings, library, and the FastAPI/WebSocket
