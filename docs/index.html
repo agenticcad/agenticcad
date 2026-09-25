@@ -7,7 +7,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M16 3 28 9.5v13L16 29 4 22.5v-13L16 3Z' fill='none' stroke='%234ea1ff' stroke-width='2'/%3E%3Ccircle cx='16' cy='16' r='4' fill='%23ff8c42'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="../assets/site.css?v=0.15.3">
+<link rel="stylesheet" href="../assets/site.css?v=0.16.0">
 <style>
   .docs{display:grid;grid-template-columns:250px 1fr;gap:56px;padding:44px 0 80px}
   .toc{position:sticky;top:76px;align-self:start;max-height:calc(100vh - 100px);overflow:auto;font-size:13px;padding-right:8px}
@@ -39,7 +39,7 @@
 <div class="wrap docs">
   <aside class="toc" id="toc">
     <div class="g">Start</div><a href="#overview">Overview</a><a href="#desktop">Desktop app</a><a href="#install">Install from source</a><a href="#workspace">The workspace</a>
-    <div class="g">Design</div><a href="#script">Design as script</a><a href="#chat">Chat and selection</a><a href="#images">Reference images</a><a href="#bodies">Bodies and the Browser</a><a href="#ribbon">Ribbon tools</a><a href="#sketches">Sketches</a><a href="#threads">Threads</a><a href="#gears">Gears</a><a href="#params">Parameters</a><a href="#measure">Measure</a><a href="#drawings">Shop drawings</a><a href="#library">Part library</a><a href="#step">STEP import and export</a><a href="#printing">3D printing</a><a href="#fidelity">Fidelity</a>
+    <div class="g">Design</div><a href="#script">Design as script</a><a href="#chat">Chat and selection</a><a href="#images">Reference images</a><a href="#bodies">Bodies and the Browser</a><a href="#ribbon">Ribbon tools</a><a href="#sketches">Sketches</a><a href="#units">Units</a><a href="#threads">Threads</a><a href="#gears">Gears</a><a href="#params">Parameters</a><a href="#measure">Measure</a><a href="#drawings">Shop drawings</a><a href="#library">Part library</a><a href="#step">STEP import and export</a><a href="#printing">3D printing</a><a href="#fidelity">Fidelity</a>
     <div class="g">CAM</div><a href="#cam">CAM overview</a><a href="#machines">Machines and tools</a><a href="#ops">Operations</a><a href="#adaptive">Adaptive clearing</a><a href="#post">Post and G-code</a>
     <div class="g">Agent</div><a href="#settings">Settings and MCP</a><a href="#tools">Agent tools reference</a>
     <div class="g">Reference</div><a href="#shortcuts">Keyboard shortcuts</a><a href="#architecture">Architecture</a><a href="#files">Files and API</a><a href="#versioning">Versioning</a><a href="#tests">Tests and evals</a><a href="#gaps">Known gaps and roadmap</a><a href="#licence">Licence</a>
@@ -155,8 +155,12 @@ sketch1 = _sketch1.sketch
 <span class="hl-c"># /sketch:sketch1</span></code></pre>
     <p>So <code>sketch1</code> is a normal build123d <code>Sketch</code> that you or the agent can <code>extrude</code>, cut with (<code>part - extrude(sketch1, amount=-h)</code>) or <code>revolve</code>. The JSON header lets the editor reopen it (Browser ▸ Sketches ▸ double-click). Sketches render as cyan outlines. The agent edits sketches only through its <code>sketch</code> tool, in the same item format, so anything it draws stays editable by you.</p>
 
+    <h2 id="units">Units</h2>
+    <p>Everything is stored in millimetres, but you work in whichever unit you like. <b>Settings ▸ Units</b> is <i>automatic</i> by default: a US timezone means inches, anywhere else millimetres; or force mm or in. That choice sets how the viewer stats, measurements, parameters and shop drawings read, and how the agent interprets a number you give without a unit. In scripts <code>inch</code> (= 25.4), <code>IN</code>, <code>ft</code>, <code>thou</code> and <code>mm</code> are pre-imported, so <code>plate_l = 2.5 * inch</code> can sit next to <code>plate_t = 6</code>; the Parameters card shows each one in its own unit and writes edits back the same way. <code>make_drawings(units="in")</code> dimensions one sheet differently from the default.</p>
+
     <h2 id="threads">Threads</h2>
     <p><code>threads.py</code> carries ISO metric tables (pitch, tap drill, clearance fine/medium/coarse, hex and socket head sizes, nuts, washers) and helpers available in every script:</p>
+    <p><b>Inch threads too.</b> Unified sizes work everywhere a size is accepted: <code>1/4-20</code>, <code>#10-32</code>, <code>3/8-16</code> (a bare <code>3/8</code> means the coarse series). <code>thread("1/4-20")</code> gives major, pitch, tpi, tap drill and ASME close/normal/loose clearance holes in mm; <code>tap</code>, <code>bolt</code>, <code>nut</code> and <code>washer</code> use ASME B18 hardware tables, and drawings call out <code>1/4-20 UNC THRU</code> alongside <code>M4×0.7</code>.</p>
     <table class="table"><tr><th>Helper</th><th>What it does</th></tr>
       <tr><td><code>iso("M4")</code>, <code>tap_drill</code>, <code>clearance_dia</code></td><td>table lookups</td></tr>
       <tr><td><code>tap(part, "M4", at=(x, y, z), depth=6 | through=True, real=False, axis=(0, 0, -1))</code></td><td>cuts the tap-drill hole from the surface point along the axis and registers the thread; <code>real=True</code> models the helix via bd_warehouse</td></tr>
@@ -360,7 +364,7 @@ program.<span class="hl-f">add</span>(<span class="hl-f">contour</span>(setup, t
   </main>
 </div>
 <footer><div class="wrap"><span>© 2026 AgenticCAD · PolyForm Noncommercial 1.0.0</span><a href="../terms.html">Terms</a><a href="../privacy.html">Privacy</a><a href="#" data-cookie-settings>Cookie settings</a><a href="https://github.com/agenticcad/agenticcad">GitHub</a><a href="../tutorials/">Tutorials</a><a href="../index.html">Home</a></div></footer>
-<script src="../assets/site.js?v=0.15.3"></script>
+<script src="../assets/site.js?v=0.16.0"></script>
 <script>
   const links = [...document.querySelectorAll('.toc a')], heads = links.map(a => document.querySelector(a.getAttribute('href')));
   const io = new IntersectionObserver(() => { let cur = 0; heads.forEach((h, i) => { if (h && h.getBoundingClientRect().top < 120) cur = i; }); links.forEach((a, i) => a.classList.toggle('on', i === cur)); }, { rootMargin: '-100px 0px -70% 0px', threshold: [0, 1] });
