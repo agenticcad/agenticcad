@@ -27,6 +27,10 @@
   .fig{border:1px solid var(--line);border-radius:12px;overflow:hidden;margin:14px 0 22px}
   .fig img{display:block;width:100%}
   .fig figcaption{padding:8px 12px;font-size:12px;color:var(--muted);border-top:1px solid var(--line);background:var(--bg2)}
+  .arch{width:100%;height:auto;display:block;margin:0 0 1.2em;background:var(--bg2);border:1px solid var(--line);border-radius:12px;padding:8px;box-sizing:border-box}
+  .arch text{font-family:var(--sans);font-size:12.5px;fill:var(--text)} .arch .t{font-weight:600;font-size:13.5px} .arch .m{fill:var(--muted);font-size:11px;font-weight:400} .arch .mono{font-family:var(--mono);font-size:11.5px}
+  .arch rect.box{fill:var(--panel);stroke:var(--line2)} .arch rect.inner{fill:var(--panel2);stroke:var(--line)} .arch rect.pill{fill:rgba(78,161,255,.1);stroke:var(--blue)} .arch rect.ws{fill:rgba(255,209,102,.08);stroke:var(--yellow)} .arch rect.opt{fill:rgba(76,211,122,.08);stroke:var(--ok)}
+  .arch line{stroke:var(--muted);stroke-width:1.5}
   @media(max-width:900px){.docs{grid-template-columns:1fr;gap:20px}.toc{position:static;max-height:none;display:flex;flex-wrap:wrap;gap:2px}.toc .g{width:100%}}
 </style>
 </head>
@@ -38,22 +42,25 @@
     <div class="g">Design</div><a href="#script">Design as script</a><a href="#chat">Chat and selection</a><a href="#images">Reference images</a><a href="#bodies">Bodies and the Browser</a><a href="#ribbon">Ribbon tools</a><a href="#sketches">Sketches</a><a href="#threads">Threads</a><a href="#params">Parameters</a><a href="#measure">Measure</a><a href="#drawings">Shop drawings</a><a href="#library">Part library</a><a href="#step">STEP import and export</a><a href="#printing">3D printing</a><a href="#fidelity">Fidelity</a>
     <div class="g">CAM</div><a href="#cam">CAM overview</a><a href="#machines">Machines and tools</a><a href="#ops">Operations</a><a href="#adaptive">Adaptive clearing</a><a href="#post">Post and G-code</a>
     <div class="g">Agent</div><a href="#settings">Settings and MCP</a><a href="#tools">Agent tools reference</a>
-    <div class="g">Reference</div><a href="#shortcuts">Keyboard shortcuts</a><a href="#files">Files and API</a><a href="#versioning">Versioning</a><a href="#tests">Tests and evals</a><a href="#gaps">Known gaps and roadmap</a><a href="#licence">Licence</a>
+    <div class="g">Reference</div><a href="#shortcuts">Keyboard shortcuts</a><a href="#architecture">Architecture</a><a href="#files">Files and API</a><a href="#versioning">Versioning</a><a href="#tests">Tests and evals</a><a href="#gaps">Known gaps and roadmap</a><a href="#licence">Licence</a>
   </aside>
   <main class="doc">
-    <div class="eyebrow">Documentation · v0.9.x</div>
+    <div class="eyebrow">Documentation · v0.12.x</div>
     <h1>AgenticCAD documentation</h1>
     <p class="lead">Everything the app does, how it stores it, and how to drive it by chat, by hand, or from the agent's tools. For a guided walk-through, start with the <a href="../tutorials/">tutorials</a>.</p>
 
     <h2 id="overview">Overview</h2>
-    <p>AgenticCAD is a browser CAD/CAM workspace with a Claude agent inside it. A <b>design is a Python script</b> written against <a href="https://build123d.readthedocs.io">build123d</a>; the exact OCCT kernel executes it and the three.js viewer shows the result. The agent edits that script through tools; you edit it through chat, through the Fusion-style ribbon, the parameters panel and the sketch editor, or directly in the Code tab. All routes end in the same file.</p>
-<pre><code>browser (three.js viewer · ribbon · sketch editor · chat)  ⇄ websocket ⇄  server.py (FastAPI)
-                                                                    ├─ agent.py       Claude Agent SDK session + in-process MCP tools
-                                                                    ├─ cad_kernel.py  build123d exec, exact B-rep, display meshing, export
-                                                                    ├─ cam_kernel.py  2.5D / 3D toolpaths, GRBL post
-                                                                    ├─ drawing.py · threads.py · library.py · script_edit.py
-                                                                    └─ workspace/     designs, library, machines, tools, history, exports</code></pre>
-    <div class="callout">Single machine, single user. One design and one agent session per server process. See <a href="#gaps">known gaps</a>.</div>
+    <p>AgenticCAD is a desktop CAD app with a Claude agent built in. You describe the part you want, the agent models it, and you watch it appear in a 3D viewer. From there you steer it however is quickest: keep talking, point at faces and bodies in the viewer, tweak dimensions in a parameters panel, or use a Fusion-style ribbon to press, pull, hole, fillet and sketch by hand.</p>
+    <p>Every design is exact solid geometry, so what you export is production-ready: STEP for other CAD tools and suppliers, STL at the resolution you choose for 3D printing, shop drawings with hole tables, and, if you have OrcaSlicer installed, a sliced print preview with time and filament estimates. An experimental CAM mode generates GRBL toolpaths for small mills and routers.</p>
+    <ul>
+      <li><b>Say it</b>: “a 60×40×8 plate with a 24 mm boss and four M4 holes”.</li>
+      <li><b>Point at it</b>: click a face or body, then “make this 2 mm thicker”.</li>
+      <li><b>Tweak it</b>: every dimension is a named parameter you can nudge; the model rebuilds instantly.</li>
+      <li><b>Do it by hand</b>: ribbon tools, sketches on any face, ISO threads, measure and mass properties.</li>
+      <li><b>Keep it reproducible</b>: the whole design lives in one readable Python script that you can open, edit, save to the part library and version.</li>
+    </ul>
+    <p>You need a Mac or Windows PC, the app (or the source), and a Claude sign-in: either <a href="#desktop">Claude Code</a> logged into your Anthropic account or an API key. Nothing else is required; the slicer is optional and only used if it is already on your machine.</p>
+    <div class="callout">One design and one agent conversation open at a time, on your own machine. For how the pieces fit together, see <a href="#architecture">Architecture</a>.</div>
 
     <h2 id="desktop">Desktop app</h2>
     <div class="dlbox" style="flex-wrap:wrap"><div class="ico"><svg viewBox="0 0 24 24"><path d="M12 3v12M6 9l6 6 6-6M4 20h16"/></svg></div>
@@ -268,6 +275,42 @@ program.<span class="hl-f">add</span>(<span class="hl-f">contour</span>(setup, t
       <tr><td><kbd>⌘↩</kbd></td><td>run the script in the Code tab</td></tr>
       <tr><td><kbd>⏎</kbd> / <kbd>⇧⏎</kbd></td><td>send / newline in chat</td></tr></table>
 
+    <h2 id="architecture">Architecture</h2>
+    <p>A local server runs the kernel and the agent; the browser (or the desktop window) is the UI. There is no cloud component other than Claude itself, and the slicer is whatever you already have installed.</p>
+    <svg class="arch" viewBox="0 0 960 440" role="img" aria-label="Architecture: the browser or desktop window talks over WebSocket and HTTP to a local FastAPI server, which hosts the Claude agent session and its CAD tools, the build123d/OCCT kernel, the CAM kernel, the slicer bridge and the drawing, thread and library modules; the server stores everything in a workspace folder; the agent talks to Claude; the slicer bridge drives an installed OrcaSlicer.">
+      <defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--muted)"/></marker></defs>
+      <!-- browser -->
+      <rect class="box" x="20" y="70" width="240" height="250" rx="12"/>
+      <text class="t" x="36" y="94">Your browser / desktop window</text>
+      <rect class="inner" x="36" y="108" width="208" height="40" rx="8"/><text x="48" y="126">3D viewer</text><text class="m" x="48" y="141">three.js · face, edge and body picking</text>
+      <rect class="inner" x="36" y="156" width="208" height="40" rx="8"/><text x="48" y="174">Ribbon and sketch editor</text><text class="m" x="48" y="189">press/pull, holes, fillets, sketches</text>
+      <rect class="inner" x="36" y="204" width="208" height="40" rx="8"/><text x="48" y="222">Chat</text><text class="m" x="48" y="237">describe, point, attach photos</text>
+      <rect class="inner" x="36" y="252" width="208" height="40" rx="8"/><text x="48" y="270">Code, Design, CAM, Library</text><text class="m" x="48" y="285">script, parameters, measure, drawings</text>
+      <!-- link -->
+      <line x1="262" y1="195" x2="368" y2="195" marker-start="url(#ah)" marker-end="url(#ah)"/>
+      <text class="m" x="315" y="182" text-anchor="middle">WebSocket · HTTP</text>
+      <text class="m" x="315" y="212" text-anchor="middle">localhost only</text>
+      <!-- server -->
+      <rect class="box" x="370" y="70" width="570" height="250" rx="12"/>
+      <text class="t" x="386" y="94">Local server <tspan class="mono m">server.py · FastAPI</tspan></text>
+      <rect class="inner" x="386" y="108" width="538" height="34" rx="8"/><text class="mono" x="398" y="130">agent.py</text><text class="m" x="510" y="130">Claude Agent SDK session · the agent's CAD tools (MCP)</text>
+      <rect class="inner" x="386" y="150" width="538" height="34" rx="8"/><text class="mono" x="398" y="172">cad_kernel.py</text><text class="m" x="510" y="172">runs the script · build123d on the exact OCCT B-rep · STEP, STL</text>
+      <rect class="inner" x="386" y="192" width="538" height="34" rx="8"/><text class="mono" x="398" y="214">cam_kernel.py</text><text class="m" x="510" y="214">2.5D / 3D toolpaths · GRBL post (experimental)</text>
+      <rect class="inner" x="386" y="234" width="538" height="34" rx="8"/><text class="mono" x="398" y="256">slicer.py</text><text class="m" x="510" y="256">hands an STL to your slicer · reads the G-code back as layers</text>
+      <rect class="inner" x="386" y="276" width="538" height="34" rx="8"/><text class="mono" x="398" y="298">drawing · threads · library</text><text class="m" x="640" y="298">shop drawings · ISO threads · part library</text>
+      <!-- claude -->
+      <rect class="pill" x="720" y="14" width="220" height="34" rx="17"/><text class="t" x="830" y="36" text-anchor="middle">Claude</text>
+      <text class="m" x="706" y="36" text-anchor="end">via Claude Code sign-in or API key</text>
+      <line x1="655" y1="108" x2="760" y2="50" marker-start="url(#ah)" marker-end="url(#ah)"/>
+      <!-- workspace -->
+      <rect class="pill ws" x="370" y="376" width="340" height="48" rx="10"/><text class="t mono" x="386" y="396">workspace/</text><text class="m" x="386" y="413">designs · library · machines · tools · history · exports · slicing</text>
+      <line x1="540" y1="322" x2="540" y2="374" marker-start="url(#ah)" marker-end="url(#ah)"/>
+      <!-- slicer -->
+      <rect class="pill opt" x="740" y="376" width="200" height="48" rx="10"/><text class="t" x="840" y="396" text-anchor="middle">OrcaSlicer</text><text class="m" x="840" y="413" text-anchor="middle">optional · your own install</text>
+      <line x1="840" y1="322" x2="840" y2="374" marker-start="url(#ah)" marker-end="url(#ah)"/>
+    </svg>
+    <p>The design itself is one Python script written against <a href="https://build123d.readthedocs.io">build123d</a>. The agent edits it through its tools; chat, the ribbon, the parameters panel and the sketch editor all edit the same file, so every route stays reproducible. One server process holds one design and one agent session.</p>
+
     <h2 id="files">Files and API</h2>
     <table class="table"><tr><th>Path</th><th>Contents</th></tr>
       <tr><td><code>workspace/designs/*.py</code>, <code>*.cam.py</code></td><td>designs and their CAM scripts; <code>state.json</code> remembers the open one</td></tr>
@@ -286,7 +329,7 @@ program.<span class="hl-f">add</span>(<span class="hl-f">contour</span>(setup, t
 .venv/bin/python evals/run.py            <span class="hl-c"># agent evals: real agent, headless, graded; ~$5 per run</span>
 .venv/bin/python evals/run.py --filter cam --model claude-sonnet-5 --repeat 3</code></pre>
     <ul>
-      <li><b>Unit tests</b> (123) cover the kernel (bodies, ids, exact normals, exports, measurement), script editing, CAM (holes, sections, every op, arc post, machine checks, feeds, and an independent engagement audit of the adaptive op), drawings, the library, threads, sketches, and the FastAPI/WebSocket API with the Claude session disabled.</li>
+      <li><b>Unit tests</b> (136) cover the kernel (bodies, ids, exact normals, exports, measurement), script editing, CAM (holes, sections, every op, arc post, machine checks, feeds, and an independent engagement audit of the adaptive op), drawings, the library, threads, sketches, and the FastAPI/WebSocket API with the Claude session disabled.</li>
       <li><b>Evals</b> (26 cases) run the real agent in a throwaway workspace, one fresh session per case, graded by deterministic geometry, program and answer checks (bbox, bodies, holes, volume, parameters, script contents, op parameters, G-code validity, tools used, answer regex). Results land in <code>evals/results/&lt;stamp&gt;.json|md</code> with pass rate, cost, steps and time per case. Add a case by appending to <code>evals/cases.py</code>.</li>
     </ul>
 
