@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M16 3 28 9.5v13L16 29 4 22.5v-13L16 3Z' fill='none' stroke='%234ea1ff' stroke-width='2'/%3E%3Ccircle cx='16' cy='16' r='4' fill='%23ff8c42'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="assets/site.css?v=0.12.1">
+<link rel="stylesheet" href="assets/site.css?v=0.13.0">
 <style>
   .hero{position:relative;padding:90px 0 40px;overflow:hidden}
   .hero .bgrid{position:absolute;inset:0;background-image:linear-gradient(rgba(255,255,255,.035) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.035) 1px,transparent 1px);background-size:56px 56px;mask-image:radial-gradient(ellipse 70% 60% at 50% 20%,#000 30%,transparent 75%);-webkit-mask-image:radial-gradient(ellipse 70% 60% at 50% 20%,#000 30%,transparent 75%)}
@@ -212,7 +212,7 @@ result = {<span class="hl-s">"Plate"</span>: _plate3.<span class="hl-f">fillet</
         <p class="muted">Most parts stop here. File ▸ Export gives you what a slicer or another CAD package needs, and the Design tab turns the model into a drawing you can hand to someone.</p>
         <ul class="checks">
           <li><b>STL for 3D printing</b>, tessellated only at export, at the resolution you choose in the dialog (or the agent picks a tolerance). One file for everything or one per body, so multi-part prints come out as separate meshes.</li>
-          <li><b>Slice without leaving the app</b>: if OrcaSlicer (or Bambu Studio) is installed, pick printer, quality, filament, layer height, infill and supports, hit Slice, and the layers appear in the viewer with a slider, feature colours, time and filament estimates, plus G-code and 3MF. Or just say “slice this for my Ender 3 at 0.28 mm”.</li>
+          <li><b>Slice without leaving the app</b>: if OrcaSlicer (or Bambu Studio) is installed, set your printer, filament, layer height, infill and supports once in Settings, hit Slice on the ribbon, and the layers appear in the viewer with a slider, feature colours, time and filament estimates, plus G-code and 3MF. Or just say “slice this for my Ender 3 at 0.28 mm”.</li>
           <li><b>STEP, exact</b>: cylinders stay cylinders and bodies stay separate solids, so it opens cleanly in Fusion, FreeCAD, SolidWorks or a supplier's quoting tool.</li>
           <li><b>Shop drawings</b> from the exact model: third-angle front, top, right and iso with hidden lines, overall dimensions, hole callouts and a lettered hole table, title block with mass and scale. SVG and DXF.</li>
           <li><b>Ask for it</b>: “export an STL at 0.05 mm for the Pin only” or “make drawings in aluminium” works too, because export and drawings are agent tools.</li>
@@ -288,7 +288,7 @@ result = {<span class="hl-s">"Plate"</span>: _plate3.<span class="hl-f">fillet</
 </div></footer>
 
 <script type="importmap">{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/" } }</script>
-<script src="assets/site.js?v=0.12.1"></script>
+<script src="assets/site.js?v=0.13.0"></script>
 <script type="module">
 import { createViewer, hlPython, hlGcode } from './assets/viewer.js';
 import { ICONS, RIBBON } from './assets/ribbon.js';

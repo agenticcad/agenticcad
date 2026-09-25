@@ -7,7 +7,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M16 3 28 9.5v13L16 29 4 22.5v-13L16 3Z' fill='none' stroke='%234ea1ff' stroke-width='2'/%3E%3Ccircle cx='16' cy='16' r='4' fill='%23ff8c42'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="../assets/site.css?v=0.12.1">
+<link rel="stylesheet" href="../assets/site.css?v=0.13.0">
 <style>
   .docs{display:grid;grid-template-columns:250px 1fr;gap:56px;padding:44px 0 80px}
   .toc{position:sticky;top:76px;align-self:start;max-height:calc(100vh - 100px);overflow:auto;font-size:13px;padding-right:8px}
@@ -88,7 +88,7 @@ python3 -m venv .venv &amp;&amp; .venv/bin/pip install -r requirements.txt
     <h2 id="workspace">The workspace</h2>
     <figure class="fig"><img src="../assets/img/hero.png" alt="The AgenticCAD workspace"><figcaption>Side panel (Chat, Code, CAM, Design, Library) on the left; viewer with the ribbon, Browser tree, ViewCube and bottom toolbar on the right.</figcaption></figure>
     <ul>
-      <li><b>Side panel</b>: Chat (the conversation with selection chips and images), Code (the script with syntax highlighting; edit and Run with <kbd>⌘↩</kbd> to rebuild without the agent; switch between <code>design.py</code> and <code>cam.py</code>), CAM (setup, operations, warnings, libraries, feeds calculator, G-code), Design (parameters, measure, drawings, import), Library. Drag the divider to resize, double-click to reset, <kbd>⌘B</kbd> to hide.</li>
+      <li><b>Side panel</b>: Chat (the conversation with selection chips and images), Code (the script with syntax highlighting; edit and Run with <kbd>⌘↩</kbd> to rebuild without the agent; switch between <code>design.py</code> and <code>cam.py</code>), CAM (setup, operations, warnings, libraries, feeds calculator, G-code), Design (parameters, measure, drawing files), Library. Drag the divider to resize, double-click to reset, <kbd>⌘B</kbd> to hide.</li>
       <li><b>Viewer</b>: orbit, pan and zoom with the mouse; the <b>ViewCube</b> snaps to faces, edges and corners and its <code>⌂</code> is the home view. Bottom toolbar: Fit, Edges, display-mesh quality (draft / normal / fine), Undo, Toolpaths and Stock toggles.</li>
       <li><b>Browser</b>: the body tree with visibility dots, context menus (rename, delete, hide, zoom, export, save to library, move/rotate) and a Sketches section. <b>+ Body</b> and <b>+ Part</b> add primitives and library parts.</li>
       <li><b>File menu</b>: New (an empty design; a fresh install starts empty too), Open, Save, Save as, Import .py, Download .py, Import STEP, Export STEP, Export STL (resolution dialog), Shop drawings.</li>
@@ -172,7 +172,7 @@ sketch1 = _sketch1.sketch
     <p>Press <kbd>I</kbd> (or 📐 in the Design tab). The cursor snaps <b>vertex &gt; edge &gt; face point</b> with a live readout: line length, arc radius and sweep, circle Ø. Two picks give the distance with the closest points drawn and labelled, Δxyz, and the angle (line–line, line–plane, plane–plane) with parallel and perpendicular flags; two circles give centre spacing; two planes give the gap. Click bodies in the Browser for volume, mass and centre of mass (material names or g/cm³), two bodies for clearance or interference volume. <kbd>⌫</kbd> or right-click removes the last pick, <kbd>Esc</kbd> clears. Agent tools: <code>measure</code> (faces, edges, points, bodies), <code>mass_properties</code>.</p>
 
     <h2 id="drawings">Shop drawings</h2>
-    <p>Design tab or File ▸ Shop drawings…: third-angle front, top and right views plus an isometric, with hidden lines (OCCT HLR projection), overall dimensions, hole callouts (n× Ø, THRU or depth, thread labels), lettered holes with a coordinate table, and a title block with size, mass, scale and date. One SVG per body plus an assembly sheet, and a DXF of the view geometry, written to <code>workspace/drawings/</code>. Agent tool: <code>make_drawings</code>.</p>
+    <p>Ribbon ▸ <b>Drawings</b> (<kbd>D</kbd>) or File ▸ Shop drawings…, with the material and sheet size from ⚙ Settings ▸ Shop drawings: third-angle front, top and right views plus an isometric, with hidden lines (OCCT HLR projection), overall dimensions, hole callouts (n× Ø, THRU or depth, thread labels), lettered holes with a coordinate table, and a title block with size, mass, scale and date. One SVG per body plus an assembly sheet, and a DXF of the view geometry, written to <code>workspace/drawings/</code>. Agent tool: <code>make_drawings</code>.</p>
     <figure class="fig" style="background:#fff"><img src="../assets/img/drawing.svg" alt="Generated drawing"><figcaption>A generated sheet.</figcaption></figure>
 
     <h2 id="library">Part library</h2>
@@ -188,12 +188,12 @@ sketch1 = _sketch1.sketch
     <p>File ▸ Import STEP… (or drop a <code>.step</code> on the viewer) adds it as a new body (<code>import_step("file.step")</code> is added to the script, the file is copied to <code>workspace/imports/</code>), as a new design, or straight into the library. Export: File ▸ Export STEP (exact, bodies stay separate solids) and Export STL (dialog: resolution and all-or-one body). Agent: <code>export_model(name, formats, tolerance, angular_tolerance, body)</code>. API: <code>/api/export/{step|stl}</code>.</p>
 
     <h2 id="printing">3D printing</h2>
-    <p>If <b>OrcaSlicer</b> (or Bambu Studio) is installed on your computer, the Design tab gains a <b>3D printing</b> section and the agent gains the <code>slice_for_printing</code> tool. AgenticCAD does not bundle a slicer; without one the section and the tool simply do not exist.</p>
+    <p>If <b>OrcaSlicer</b> (or Bambu Studio) is installed on your computer, the ribbon gains a <b>Slice</b> button (<kbd>P</kbd>), ⚙ Settings gains a <b>3D printing</b> section and the agent gains the <code>slice_for_printing</code> tool. AgenticCAD does not bundle a slicer; without one none of these exist.</p>
     <ul>
-      <li><b>Options</b>: printer, quality profile, filament (all read from the slicer's own profiles, with the printer you last used in the slicer preselected), one body or the whole design, layer height, infill %, wall loops, supports, brim. Everything else comes from the chosen profile.</li>
-      <li><b>Slice</b> exports the design as STL, runs the slicer headless and shows the result: layers, height, estimated time, filament weight and length, and any slicer warnings. G-code and 3MF download buttons appear next to the stats.</li>
-      <li><b>Preview</b>: the toolpaths are drawn in the viewer in model coordinates, coloured by feature (outer/inner walls, infill, top and bottom surfaces, supports, skirt). Drag the layer slider to scrub through the print; click legend entries to hide a feature; the model hides while previewing (untick to overlay). The <b>Layers</b> toolbar button toggles the preview.</li>
-      <li><b>Agent</b>: <i>"slice this for my Ender 3 at 0.28 mm, 15% infill, with supports"</i>. The agent reads printer and filament names from the slicer rather than guessing, and reports the estimates back in chat.</li>
+      <li><b>Set it up once</b> in Settings ▸ 3D printing: printer, quality profile and filament (all read from the slicer's own profiles, with the printer you last used in the slicer preselected), plus layer height, infill %, wall loops, supports and brim. Everything else comes from the chosen profile.</li>
+      <li><b>Slice</b> exports the design as STL, runs the slicer headless and opens a preview panel over the viewer: layers, height, estimated time, filament weight and length, any slicer warnings, and G-code / 3MF download buttons.</li>
+      <li><b>Preview</b>: the toolpaths are drawn in model coordinates, coloured by feature (outer/inner walls, infill, top and bottom surfaces, supports, skirt). Drag the layer slider to scrub through the print; click legend entries to hide a feature; the model hides while previewing (untick to overlay). The <b>Layers</b> toolbar button toggles the preview, ✕ closes it.</li>
+      <li><b>Agent</b>: <i>"slice this for my Ender 3 at 0.28 mm, 15% infill, with supports"</i>. The agent starts from your saved settings, reads printer and filament names from the slicer rather than guessing, and reports the estimates back in chat.</li>
       <li>Override detection with <code>AGENTICCAD_SLICER=/path/to/slicer[::/path/to/profiles]</code>. Outputs are kept in <code>workspace/slicing/</code>.</li>
     </ul>
     <div class="callout">This is a hand-off, not a slicer UI: for per-object settings, modifiers, paint-on supports or multi-plate layouts, open the exported 3MF in the slicer.</div>
@@ -240,7 +240,7 @@ program.<span class="hl-f">add</span>(<span class="hl-f">contour</span>(setup, t
     <p><code>Program.gcode()</code> writes the GRBL dialect: header comments (machine, stock, origin, time, warnings), <code>G21 G90 G94 G17</code>, <code>G54</code>, <code>M3 S</code>, <code>G0</code>/<code>G1</code> with F on change, <b>G2/G3 arcs</b> fitted to circular runs (chord-sagitta checked, ≤180° per arc, collinear moves merged), <code>M6</code>/<code>M0</code> tool-change pauses, <code>M30</code>. Checks: machine travel, spindle range, feeds clamped, cutting below the stock bottom, multiple tools with <code>tool_change: none</code>. Download from the CAM tab or <code>/api/gcode</code>; the agent's <code>export_gcode</code> writes to <code>workspace/exports/</code> and reports line, move, arc and tool-change counts. Not yet: 4-axis, canned drilling cycles (GRBL has none), thread milling.</p>
 
     <h2 id="settings">Settings and MCP</h2>
-    <p><code>⚙</code> in the panel header: Claude model (default Claude Opus 5.5; any model id, or the Claude Code default), effort (low … max), max steps per turn, thinking summaries, web tools, extra standing instructions, and <b>MCP servers</b> (stdio, http or sse configs as JSON with enable toggles and live connection status from the session). Saved to <code>workspace/settings.json</code>; “Save &amp; restart agent” starts a fresh session with the new options and tells the agent its earlier history is gone. API: <code>GET/POST /api/settings</code>, <code>GET /api/agent/status</code>, <code>POST /api/agent/restart</code>.</p>
+    <p><code>⚙</code> in the panel header: Claude model (default Claude Opus 5.5; any model id, or the Claude Code default), effort (low … max), max steps per turn, thinking summaries, web tools, extra standing instructions, and <b>MCP servers</b> (stdio, http or sse configs as JSON with enable toggles and live connection status from the session). Saved to <code>workspace/settings.json</code>; “Save &amp; restart agent” starts a fresh session with the new options and tells the agent its earlier history is gone. API: <code>GET/POST /api/settings</code>, <code>GET /api/agent/status</code>, <code>POST /api/agent/restart</code>. Settings also holds the <b>Shop drawings</b> defaults (material, sheet) and, when a slicer is installed, the <b>3D printing</b> defaults (printer, quality, filament, layer height, infill, walls, supports, brim) used by the ribbon buttons and by the agent.</p>
 
     <h2 id="tools">Agent tools reference</h2>
     <p>The agent runs in a Claude Agent SDK session with an in-process MCP server named <code>cad</code>. It has no shell; everything it knows about the model comes back from these tools.</p>
@@ -268,6 +268,7 @@ program.<span class="hl-f">add</span>(<span class="hl-f">contour</span>(setup, t
       <tr><td><kbd>B</kbd> <kbd>C</kbd> <kbd>O</kbd> <kbd>K</kbd></td><td>Box, Cylinder, Sphere, Sketch</td></tr>
       <tr><td><kbd>Q</kbd> <kbd>H</kbd> <kbd>F</kbd> <kbd>X</kbd> <kbd>L</kbd> <kbd>V</kbd></td><td>Press/Pull, Hole, Fillet, Chamfer, Shell, Move</td></tr>
       <tr><td><kbd>I</kbd></td><td>Measure</td></tr>
+      <tr><td><kbd>D</kbd> <kbd>P</kbd></td><td>Shop drawings, Slice for 3D printing (with the options in Settings)</td></tr>
       <tr><td><kbd>↵</kbd> / <kbd>Esc</kbd> / <kbd>⌫</kbd></td><td>OK / cancel / drop last pick in a command dialog</td></tr>
       <tr><td><kbd>↑</kbd><kbd>↓</kbd>, <kbd>⇧</kbd>, <kbd>⌥</kbd></td><td>nudge a numeric field by 1, 10, 0.1</td></tr>
       <tr><td><kbd>⇧</kbd>-click</td><td>add to the selection</td></tr>
@@ -350,7 +351,7 @@ program.<span class="hl-f">add</span>(<span class="hl-f">contour</span>(setup, t
   </main>
 </div>
 <footer><div class="wrap"><span>© 2026 AgenticCAD · PolyForm Noncommercial 1.0.0</span><a href="../terms.html">Terms</a><a href="../privacy.html">Privacy</a><a href="#" data-cookie-settings>Cookie settings</a><a href="https://github.com/agenticcad/agenticcad">GitHub</a><a href="../tutorials/">Tutorials</a><a href="../index.html">Home</a></div></footer>
-<script src="../assets/site.js?v=0.12.1"></script>
+<script src="../assets/site.js?v=0.13.0"></script>
 <script>
   const links = [...document.querySelectorAll('.toc a')], heads = links.map(a => document.querySelector(a.getAttribute('href')));
   const io = new IntersectionObserver(() => { let cur = 0; heads.forEach((h, i) => { if (h && h.getBoundingClientRect().top < 120) cur = i; }); links.forEach((a, i) => a.classList.toggle('on', i === cur)); }, { rootMargin: '-100px 0px -70% 0px', threshold: [0, 1] });
