@@ -78,7 +78,7 @@ redistributes it; `agent.find_claude_cli()` locates the user's own install.
   marker where that face was; click it to select the same face again (matched by type and centre,
   since ids are renumbered on every rebuild).
 - Navigation: Fusion-style **ViewCube** top-right — click a face, edge or corner to look from there
-  (animated, keeps zoom), drag it to orbit, `⌂` for the home/fit view. Orbit/pan/zoom with the mouse as usual.
+  (animated, keeps zoom), drag it to orbit, `⌂` for the home/fit view. Left-drag orbits, right-drag (or ⌘/Ctrl/⇧ + left-drag on a trackpad) pans, wheel zooms.
 - Bottom toolbar: Fit, Edges, display-mesh quality, Undo (revert to previous build).
 - File menu: New / Open / Save / Save as / Import .py / Download .py / **Export STEP** / **Export STL…**
   (dialog: resolution + all-or-one body).
