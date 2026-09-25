@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M16 3 28 9.5v13L16 29 4 22.5v-13L16 3Z' fill='none' stroke='%234ea1ff' stroke-width='2'/%3E%3Ccircle cx='16' cy='16' r='4' fill='%23ff8c42'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="assets/site.css?v=0.13.0">
+<link rel="stylesheet" href="assets/site.css?v=0.13.1">
 <style>
   .hero{position:relative;padding:90px 0 40px;overflow:hidden}
   .hero .bgrid{position:absolute;inset:0;background-image:linear-gradient(rgba(255,255,255,.035) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.035) 1px,transparent 1px);background-size:56px 56px;mask-image:radial-gradient(ellipse 70% 60% at 50% 20%,#000 30%,transparent 75%);-webkit-mask-image:radial-gradient(ellipse 70% 60% at 50% 20%,#000 30%,transparent 75%)}
@@ -156,7 +156,7 @@ python3 -m venv .venv &amp;&amp; .venv/bin/pip install -r requirements.txt
     <div class="grid g3" style="margin-top:36px" id="features">
       <div class="card reveal"><div class="num">01</div><h3>Describe</h3><p>“60 × 40 × 8 plate, four Ø5 holes 8 mm from the corners, a Ø20 boss with a Ø8 bore.” Attach a photo or a napkin sketch if you have one. The agent writes the model with named dimensions.</p></div>
       <div class="card reveal" style="transition-delay:.1s"><div class="num">02</div><h3>Point</h3><p>Click a face, an edge or a body and it becomes a chip on your message, with its exact type, centre, normal and size. The agent works on that face, not a guess.</p></div>
-      <div class="card reveal" style="transition-delay:.2s"><div class="num">03</div><h3>Tweak</h3><p>Press/pull, holes, fillets, chamfers, shells and sketches from a Fusion-style ribbon, or change a number in the Design tab. Written into the same script, undoable, visible to the agent.</p></div>
+      <div class="card reveal" style="transition-delay:.2s"><div class="num">03</div><h3>Tweak</h3><p>Press/pull, holes, fillets, chamfers, shells and sketches from a Fusion-style ribbon, or change a number in the Parameters card. Written into the same script, undoable, visible to the agent.</p></div>
     </div>
 
     <div class="split" style="margin:64px 0 26px">
@@ -190,7 +190,7 @@ result = {<span class="hl-s">"Plate"</span>: _plate3.<span class="hl-f">fillet</
       <div class="reveal">
         <div class="ribbon" id="ribbon-demo"></div>
         <p class="muted" style="font-size:13px;margin-top:14px">Hover a tool. Shortcuts match the app: <kbd>B</kbd> <kbd>C</kbd> <kbd>O</kbd> <kbd>K</kbd> create, <kbd>Q</kbd> <kbd>H</kbd> <kbd>F</kbd> <kbd>X</kbd> <kbd>L</kbd> <kbd>V</kbd> modify, <kbd>I</kbd> measure.</p>
-        <div class="frame" style="margin-top:18px"><img src="assets/img/design-tab.jpg" alt="Design tab: parameters, measure, drawings" loading="lazy"></div>
+        <div class="frame" style="margin-top:18px"><img src="assets/img/design-tab.jpg" alt="Parameters card, measure panel and a shop drawing" loading="lazy"></div>
       </div>
     </div>
 
@@ -209,7 +209,7 @@ result = {<span class="hl-s">"Plate"</span>: _plate3.<span class="hl-f">fillet</
       <div>
         <div class="eyebrow">Step 2 · Print it, or document it</div>
         <h2>Send it to the printer, or to the shop.</h2>
-        <p class="muted">Most parts stop here. File ▸ Export gives you what a slicer or another CAD package needs, and the Design tab turns the model into a drawing you can hand to someone.</p>
+        <p class="muted">Most parts stop here. File ▸ Export gives you what a slicer or another CAD package needs, and one press of Drawings on the ribbon turns the model into a drawing you can hand to someone.</p>
         <ul class="checks">
           <li><b>STL for 3D printing</b>, tessellated only at export, at the resolution you choose in the dialog (or the agent picks a tolerance). One file for everything or one per body, so multi-part prints come out as separate meshes.</li>
           <li><b>Slice without leaving the app</b>: if OrcaSlicer (or Bambu Studio) is installed, set your printer, filament, layer height, infill and supports once in Settings, hit Slice on the ribbon, and the layers appear in the viewer with a slider, feature colours, time and filament estimates, plus G-code and 3MF. Or just say “slice this for my Ender 3 at 0.28 mm”.</li>
@@ -288,7 +288,7 @@ result = {<span class="hl-s">"Plate"</span>: _plate3.<span class="hl-f">fillet</
 </div></footer>
 
 <script type="importmap">{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/" } }</script>
-<script src="assets/site.js?v=0.13.0"></script>
+<script src="assets/site.js?v=0.13.1"></script>
 <script type="module">
 import { createViewer, hlPython, hlGcode } from './assets/viewer.js';
 import { ICONS, RIBBON } from './assets/ribbon.js';

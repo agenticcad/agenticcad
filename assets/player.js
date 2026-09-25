@@ -14,7 +14,7 @@ export function mountPlayer(root, tut, { onDone, next } = {}) {
     <div class="pl-narr"><span class="n" data-narr-n>—</span><div data-narr>Press <b>Play</b> to start, or step with the arrows below.</div></div>
     <div class="pl-app">
       <div class="pl-side">
-        <div class="pl-hdr">${LOGO}<span>AgenticCAD</span><span class="ver">v0.13.0</span><span class="doc" data-doc>plate</span></div>
+        <div class="pl-hdr">${LOGO}<span>AgenticCAD</span><span class="ver">v0.13.1</span><span class="doc" data-doc>plate</span></div>
         <div class="pl-tabs"><span class="on">Chat</span><span>Code</span><span>CAM</span><span>Design</span><span>Library</span></div>
         <div class="pl-msgs" data-msgs></div>
         <div class="pl-design" data-design></div>
@@ -46,7 +46,7 @@ export function mountPlayer(root, tut, { onDone, next } = {}) {
   const sleep = ms => new Promise(res => { if (state.tok.c) return res(); const t = setTimeout(() => { state.timers.delete(t); res(); }, ms / state.speed); state.timers.add(t); });
   const cancel = () => { state.tok.c = true; state.tok = { c: false }; for (const t of state.timers) clearTimeout(t); state.timers.clear(); };
   const scroll = () => { msgs.scrollTop = msgs.scrollHeight; };
-  const KIND = { user: 'You', agent: 'Agent', tool: 'Tool call', model: 'Model', select: 'Select', note: 'Tip', code: 'Script', gcode: 'G-code', sketchmode: 'Sketch', ribbon: 'Ribbon', toolpaths: 'CAM', params: 'Design tab' };
+  const KIND = { user: 'You', agent: 'Agent', tool: 'Tool call', model: 'Model', select: 'Select', note: 'Tip', code: 'Script', gcode: 'G-code', sketchmode: 'Sketch', ribbon: 'Ribbon', toolpaths: 'CAM', params: 'Parameters' };
   const caption = (html, s, i) => { if (!html) return; narr.innerHTML = (s ? `<span class="k">${KIND[s.kind] || s.kind}</span>` : '') + md(html); narrN.textContent = i != null ? `${i + 1} / ${tut.steps.length}` : '—'; narr.parentElement.classList.remove('pulse'); void narr.offsetWidth; narr.parentElement.classList.add('pulse'); };
   const tab = name => root.querySelectorAll('.pl-tabs span').forEach(t => t.classList.toggle('on', t.textContent === name));
   const ribbonOn = id => root.querySelectorAll('[data-tool]').forEach(el => el.classList.toggle('on', el.dataset.tool === id));
@@ -146,7 +146,7 @@ export function mountPlayer(root, tut, { onDone, next } = {}) {
   function ui() {
     $('[data-st]').textContent = `step ${state.idx} / ${tut.steps.length}`;
     [...$('[data-prog]').children].forEach((el, i) => { el.classList.toggle('done', i < state.idx); el.classList.toggle('cur', i === state.idx - 1); });
-    const s = tut.steps[Math.max(0, state.idx - 1)]; $('[data-lab]').textContent = state.idx ? ({ params: 'Design tab', user: 'you type', agent: 'agent replies', tool: 'tool: ' + (s.name || ''), model: 'model rebuilt', select: 'you click a face', note: 'tip', code: 'the script', gcode: 'G-code', sketchmode: 'sketch mode', ribbon: 'ribbon: ' + (s.tool || ''), toolpaths: 'toolpaths' })[s.kind] : 'ready';
+    const s = tut.steps[Math.max(0, state.idx - 1)]; $('[data-lab]').textContent = state.idx ? ({ params: 'Parameters', user: 'you type', agent: 'agent replies', tool: 'tool: ' + (s.name || ''), model: 'model rebuilt', select: 'you click a face', note: 'tip', code: 'the script', gcode: 'G-code', sketchmode: 'sketch mode', ribbon: 'ribbon: ' + (s.tool || ''), toolpaths: 'toolpaths' })[s.kind] : 'ready';
     $('[data-play]').textContent = state.playing ? '❚❚ Pause' : (state.idx >= tut.steps.length ? '↻ Replay' : '▶ Play');
   }
   async function runStep(i, q) { const s = tut.steps[i]; caption(s.narr || s.caption || '', s, i); await IMPL[s.kind](s, q); }
