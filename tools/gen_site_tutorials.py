@@ -63,7 +63,7 @@ def tutorial_first_part():
                 {"kind": "agent", "text": f"Done — **Plate**: 60 × 40 × 8 plate, Ø20 × 15 boss with a Ø8 through bore, four Ø5 holes on a 44 × 24 pattern. Volume {m1.volume:,.0f} mm³. The dimensions are parameters at the top of the script (plate_l, boss_d, hole_d…), so say the word to change any of them.",
                  "narr": "The agent confirms what it built with numbers that came back from the kernel, not from its own arithmetic."},
                 {"kind": "params", "items": [["plate_l", 60], ["plate_w", 40], ["plate_t", 8], ["boss_d", 20], ["boss_h", 15], ["bore_d", 8], ["hole_d", 5], ["inset", 8]], "change": ["boss_h", 20],
-                 "narr": "Now without the agent: the Design tab lists every top-level number in the script as a field. Change boss_h from 15 to 20 and press Enter."},
+                 "narr": "Now without the agent: the Parameters card under the Browser lists every top-level number in the script as a field. Change boss_h from 15 to 20 and press Enter."},
                 {"kind": "model", "mesh": "m1b",
                  "narr": "The part rebuilt with a 20 mm boss. Only that literal in the script changed, and the agent is sent a note about it so it stays in sync."},
                 {"kind": "user", "text": "Set the boss back to 15 tall, fillet the four vertical corner edges 4 mm, then export a STEP.",

@@ -120,7 +120,7 @@ try:
         # 5 · drawings + export
         page.click(".tab[data-pane='chat']"); page.wait_for_timeout(500)
         say("Add a second body: a Ø8 × 30 mm pin named Pin standing on the plate next to the boss at (22, 0). Then make shop drawings in aluminium 6061 and export a STEP.", "drawings")
-        page.click(".tab[data-pane='design']"); page.wait_for_timeout(2500); mark("design_tab")
+        page.wait_for_timeout(2500)
         page.wait_for_timeout(1200); mark("end")
         page.screenshot(path=str(out / "live-last.png"))
         ctx.close(); browser.close()

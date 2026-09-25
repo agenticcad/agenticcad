@@ -114,9 +114,9 @@ Hide/Show, Zoom to, Export STEP/STL of that body. Rename and Delete rewrite the 
 that way (e.g. `result = part`, or auto-split solids) the request is handed to the agent instead.
 Deleting the last body at a level is refused.
 
-## Design tab: parameters, measure, drawings, library
+## Parameters, measure, drawings, library
 
-- **Parameters**: every top-level `name = number` in the script is an editable field (↑↓ ±1, ⇧ ±10, ⌥ ±0.1).
+- **Parameters**: every top-level `name = number` in the script is an editable field in the Parameters card under the Browser (↑↓ ±1, ⇧ ±10, ⌥ ±0.1).
   Changing one rewrites that literal in the script and rebuilds; the agent is told. Agent tools:
   `get_parameters`, `set_parameters`.
 - **Measure** (📐 or `M`): click up to two faces/points in the viewer → point distance with Δxyz, minimum

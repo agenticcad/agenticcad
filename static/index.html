@@ -52,6 +52,11 @@
   #ctx div { padding:6px 10px; border-radius:5px; cursor:pointer; font-size:12px; }
   #ctx div:hover { background:var(--panel2); } #ctx div.danger:hover { background:#4a2020; color:var(--err); }
   #ctx hr { border:0; border-top:1px solid var(--line); margin:4px 0; }
+  #params-card { position:absolute; z-index:2; left:10px; top:300px; width:230px; overflow:auto; background:rgba(28,32,39,.92); border:1px solid var(--line); border-radius:8px; padding:6px 8px; font-size:12px; }
+  #params-card .hd { color:var(--muted); font-size:11px; padding:2px 0 6px; letter-spacing:.3px; text-transform:uppercase; display:flex; gap:6px; align-items:baseline; }
+  #params-card .prow input { width:74px; } #params-card .prow .c { display:none; }
+  #measure-panel { position:absolute; z-index:3; left:50%; transform:translateX(-50%); bottom:58px; width:min(720px, calc(100% - 40px)); background:rgba(20,23,28,.94); border:1px solid var(--line); border-radius:10px; padding:8px 12px; font-size:12px; box-shadow:0 8px 30px rgba(0,0,0,.45); }
+  #measure-panel .sp-hd { display:flex; align-items:center; gap:10px; } #measure-panel #measure-hint { flex:1; min-width:0; font-size:11px; } #measure-panel .kv { margin-top:6px; grid-template-columns:110px 1fr 110px 1fr; } #measure-panel .kv:empty { display:none; }
   #slice-panel { position:absolute; z-index:3; left:50%; transform:translateX(-50%); bottom:58px; width:min(760px, calc(100% - 40px)); background:rgba(20,23,28,.94); border:1px solid var(--line); border-radius:10px; padding:8px 12px; font-size:12px; box-shadow:0 8px 30px rgba(0,0,0,.45); }
   #slice-panel .sp-hd { display:flex; align-items:center; gap:8px; margin-bottom:4px; } #slice-panel .sp-hd #print-out { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   #slice-panel .sp-row { display:flex; align-items:center; gap:8px; margin:4px 0; } #slice-panel .sp-row input[type=range] { flex:1; } #print-layer-v { min-width:150px; text-align:right; }
@@ -307,6 +312,12 @@
     </div>
     <div id="sketch-items"><div class="hd muted" style="font-size:11px;text-transform:uppercase">Items · Esc cancels shape · ⌫ deletes last</div><div id="sk-list"></div></div>
 
+    <div id="params-card" style="display:none"><div class="hd">Parameters <span class="muted" id="params-hint" style="text-transform:none;letter-spacing:0"></span></div><div id="params-body"></div></div>
+    <div id="measure-panel" style="display:none">
+      <div class="sp-hd"><b>Measure</b><span class="muted" id="measure-hint">hover snaps to vertices and edges · click two things for distance and angle · body rows for mass, two for clearance · ⌫ undo · Esc stop</span>
+        <label class="muted" style="display:flex;align-items:center;gap:6px;white-space:nowrap">Density <select id="measure-density"></select></label><button class="btn small" id="measure-toggle">Stop</button></div>
+      <div id="measure-out" class="kv"></div>
+    </div>
     <div id="slice-panel" style="display:none">
       <div class="sp-hd"><b>3D printing preview</b><span id="print-out" class="muted"></span><a class="btn small" href="/api/slicer/gcode">G-code</a><a class="btn small" href="/api/slicer/3mf">3MF</a><button class="btn small" id="print-clear" title="Close the preview">✕</button></div>
       <div class="sp-row"><span class="muted">Layer</span><input type="range" id="print-layer" min="1" max="1" value="1" step="1"><span id="print-layer-v" class="muted"></span></div>
@@ -326,9 +337,8 @@
       <div class="tab active" data-pane="chat">Chat</div>
       <div class="tab" data-pane="code">Code</div>
       <div class="tab" data-pane="cam">CAM</div>
-      <div class="tab" data-pane="design">Design</div>
       <div class="tab" data-pane="library">Library</div>
-      <button class="btn" id="settings-btn" title="Agent settings: model, effort, MCP servers">⚙</button>
+      <button class="btn" id="settings-btn" title="Settings: agent, drawings, 3D printing">⚙</button>
       <button class="btn" id="side-collapse" title="Hide panel (⌘B)">⟩</button>
     </div>
     <div class="pane active" id="pane-chat">
@@ -344,19 +354,6 @@
           <div id="status"><span class="dot"></span><span id="status-text">connecting…</span></div>
           <button class="btn danger" id="stop" style="display:none">Stop</button>
           <button class="btn primary" id="send">Send</button>
-        </div>
-      </div>
-    </div>
-    <div class="pane" id="pane-design">
-      <div id="design-body" style="flex:1;overflow:auto;padding:10px 12px">
-        <div class="cam-sec"><h4>Parameters <span class="muted" id="params-hint"></span></h4><div id="params-body" class="muted">no numeric parameters in the script</div></div>
-        <div class="cam-sec"><h4>Measure <button class="btn small" id="measure-toggle">Start</button></h4>
-          <div class="muted" id="measure-hint">Hover snaps to vertices and edges, otherwise a point on a face. Click two things for distance and angle. Click body rows for mass, two for clearance. ⌫ / right-click removes the last pick, Esc clears.</div>
-          <div id="measure-out" class="kv" style="margin-top:6px"></div>
-          <div class="modal-field" style="margin-top:6px"><label>Density</label><select id="measure-density"></select></div>
-        </div>
-        <div class="cam-sec"><h4>Shop drawings <span class="muted" id="draw-hint">ribbon ▸ Drawings · options in ⚙ Settings</span></h4>
-          <div id="draw-files" class="muted">no drawings yet</div>
         </div>
       </div>
     </div>
@@ -594,6 +591,9 @@ function resize() {
 window.addEventListener('resize', resize); resize();
 function placeTree() { const rb = document.getElementById('ribbon'); if (!rb) return; const y = rb.offsetTop + rb.offsetHeight + 10; document.getElementById('tree').style.top = y + 'px'; document.getElementById('cmd').style.top = Math.max(150, y) + 'px'; }
 window.addEventListener('resize', placeTree); setTimeout(placeTree, 0);
+// the Parameters card stacks under the Browser and follows its height
+function placeParams() { const t = document.getElementById('tree'), c = document.getElementById('params-card'); c.style.top = (t.offsetTop + t.offsetHeight + 8) + 'px'; c.style.maxHeight = Math.max(80, viewerEl.clientHeight - t.offsetTop - t.offsetHeight - 60) + 'px'; }
+new ResizeObserver(placeParams).observe(document.getElementById('tree')); window.addEventListener('resize', placeParams); setTimeout(placeParams, 0);
 new ResizeObserver(() => resize()).observe(viewerEl);   // panel resize / collapse also resizes the viewer
 
 // ---- side panel: resizable + collapsible (remembered per browser)
@@ -1241,9 +1241,10 @@ async function loadParams() {
   try { const { params } = await fetch('/api/params').then(r => r.json()); paramsList = params; renderParams(); } catch {}
 }
 function renderParams() {
-  const el = document.getElementById('params-body');
-  if (!paramsList.length) { el.className = 'muted'; el.textContent = 'no numeric parameters in the script (top-level name = number)'; return; }
-  el.className = ''; el.innerHTML = '';
+  const el = document.getElementById('params-body'), card = document.getElementById('params-card');
+  card.style.display = paramsList.length ? '' : 'none'; setTimeout(placeParams, 0);
+  if (!paramsList.length) { el.innerHTML = ''; return; }
+  el.innerHTML = '';
   for (const p of paramsList) {
     const r = document.createElement('div'); r.className = 'prow';
     r.innerHTML = `<label>${p.name}</label><span class="c">${p.comment || ''}</span><input type="number" step="any" value="${p.value}">`;
@@ -1252,7 +1253,7 @@ function renderParams() {
     inp.onkeydown = e => { if (e.key === 'ArrowUp' || e.key === 'ArrowDown') { e.preventDefault(); const step = e.shiftKey ? 10 : (e.altKey ? 0.1 : 1); inp.value = +(parseFloat(inp.value) + (e.key === 'ArrowUp' ? step : -step)).toFixed(4); inp.onchange(); } };
     el.appendChild(r);
   }
-  document.getElementById('params-hint').textContent = `${paramsList.length} · ↑↓ ±1, ⇧ ±10, ⌥ ±0.1`;
+  document.getElementById('params-hint').textContent = `↑↓ ±1 · ⇧ ±10 · ⌥ ±0.1`;
 }
 
 // measure mode: snap to vertex > edge > face point; two picks -> distance + angle, drawn in the viewer
@@ -1266,7 +1267,8 @@ function mkLine(pts, mat) { const l = new THREE.Line(new THREE.BufferGeometry().
 function setMeasuring(on) {
   measuring = on; document.body.classList.toggle('measuring', on); if (typeof syncRibbon === 'function') syncRibbon();
   document.getElementById('measure-btn').classList.toggle('active', on); document.getElementById('measure-toggle').textContent = on ? 'Stop' : 'Start';
-  if (on) { document.querySelector('[data-pane=design]').click(); } else { clearMeasure(); clearHover(); }
+  document.getElementById('measure-panel').style.display = on ? '' : 'none';
+  if (!on) { clearMeasure(); clearHover(); }
 }
 function clearMeasure() { mPicks = []; while (mGroup.children.length) mGroup.remove(mGroup.children[0]); measureState.mid = null; measureOut.innerHTML = ''; }
 function measureUndo() { if (!mPicks.length) return; mPicks.pop(); redrawPicks(); if (mPicks.length === 1) measureRequest(); else { measureState.mid = null; measureOut.innerHTML = ''; } }
@@ -1391,14 +1393,12 @@ let drawing = false;
 async function makeDrawings() {
   if (drawing) return;
   drawing = true; const b = document.querySelector('[data-tool=drawings]'); b.classList.add('active');
-  document.getElementById('draw-files').textContent = 'generating…';
-  try { const r = await api('/api/drawings', {}); renderDrawings(r.design, r.files); if (r.files[0]) window.open(`/api/drawings/${r.design}/${r.files[0].svg}`); addMsg('system', `shop drawings: ${r.files.length} sheet(s) · Design tab`); }
-  catch (e) { addMsg('error', e.message); document.getElementById('draw-files').textContent = ''; }
+  try { const r = await api('/api/drawings', {}); renderDrawings(r.design, r.files); if (r.files[0]) window.open(`/api/drawings/${r.design}/${r.files[0].svg}`); }
+  catch (e) { addMsg('error', e.message); }
   finally { drawing = false; b.classList.remove('active'); }
 }
 function renderDrawings(design, files) {
-  const el = document.getElementById('draw-files'); el.className = ''; el.innerHTML = '';
-  for (const f of files) { const r = document.createElement('div'); r.className = 'librow'; r.innerHTML = `<span class="nm">${f.body}</span><a class="btn small" target="_blank" href="/api/drawings/${design}/${f.svg}">SVG</a>` + (f.dxf ? `<a class="btn small" href="/api/drawings/${design}/${f.dxf}">DXF</a>` : ''); el.appendChild(r); }
+  const el = addMsg('system', ''); el.innerHTML = `shop drawings for <b>${design}</b>: ` + files.map(f => `${f.body} <a target="_blank" href="/api/drawings/${design}/${f.svg}">SVG</a>` + (f.dxf ? ` <a href="/api/drawings/${design}/${f.dxf}">DXF</a>` : '')).join(' · ') + ` · in workspace/drawings/${design}`;
 }
 
 // part library (first-class: Library tab, Browser "+ Part", body menu "Save to library…")

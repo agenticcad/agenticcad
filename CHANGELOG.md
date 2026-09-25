@@ -5,6 +5,13 @@ features, patch bumps fix things. The version shown in the UI header comes from 
 
 ## [Unreleased]
 
+## [0.13.1] — 2026-09-25
+
+### Changed
+- **The Design tab is gone.** Parameters live in a card under the Browser (shown only when the script has numeric
+  parameters); Measure opens a panel over the viewer with the readout, density and Stop; shop-drawing files are listed
+  as links in chat. The side panel is Chat, Code, CAM, Library.
+
 ## [0.13.0] — 2026-09-25
 
 ### Changed
