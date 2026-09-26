@@ -1,5 +1,6 @@
 # Install the released Windows MSI on a clean Windows runner and smoke-test the installed app through its local API.
-# Runs after every package build, or by hand for any release tag. Free on this public repo.
+# Runs after every package build, or by hand for any release tag. Free on this public repo (Actions minutes);
+# the agent test spends a few cents of API usage from the ANTHROPIC_API_KEY secret, which forks never receive.
 name: smoke-windows
 on:
   workflow_dispatch:
@@ -8,6 +9,8 @@ on:
   workflow_call:
     inputs:
       tag: { type: string, required: true }
+    secrets:
+      ANTHROPIC_API_KEY: { required: false }
 permissions:
   contents: read
 jobs:
@@ -34,9 +37,17 @@ jobs:
           if (-not $exe) { "AgenticCAD.exe not found"; exit 1 }
           "installed at $($exe.FullName)"
           "EXE=$($exe.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append
-      - name: start the installed app and smoke-test it (one step, the runner kills leftover processes between steps)
+      - name: install Claude Code (Anthropic's Windows installer), as users do
         shell: pwsh
         run: |
+          irm https://claude.ai/install.ps1 | iex
+          & "$env:USERPROFILE\.local\bin\claude.exe" --version
+      - name: start the installed app and smoke-test it (one step, the runner kills leftover processes between steps)
+        shell: pwsh
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}   # read only by agent_smoke.py; the app gets it via Settings, not its env
+        run: |
+          $key = $env:ANTHROPIC_API_KEY; Remove-Item Env:ANTHROPIC_API_KEY -ErrorAction SilentlyContinue   # keep it out of the app's environment
           $env:AGENTICCAD_WORKSPACE = "$env:RUNNER_TEMP\agenticcad-ws"; $env:PORT = "8799"
           $proc = Start-Process -FilePath $env:EXE -PassThru -RedirectStandardOutput app-out.log -RedirectStandardError app-err.log
           $up = $false
@@ -48,6 +59,7 @@ jobs:
           "server up after $i s; app still running: $(-not $proc.HasExited)"
           python tools/ci/smoke.py http://127.0.0.1:8799 "${{ inputs.tag }}"
           $rc = $LASTEXITCODE
+          if ($rc -eq 0) { $env:ANTHROPIC_API_KEY = $key; python tools/ci/agent_smoke.py http://127.0.0.1:8799; $rc = $LASTEXITCODE }   # skips itself without the secret
           "app still running after the tests: $(-not $proc.HasExited)"
           exit $rc
       - name: app logs
