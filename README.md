@@ -10,7 +10,7 @@ clearing, contours with tabs, drilling, 3D finishing), shop drawings, STEP/STL a
 
 > Website, docs and simulated tutorials: **https://agenticcad.github.io/agenticcad/**
 
-> Free for non-commercial use under the PolyForm Noncommercial 1.0.0 licence. Commercial use is A$100 per user per year — see [Licence](#licence).
+> Free for non-commercial use under the PolyForm Noncommercial 1.0.0 licence. Commercial use is A$99 per user per year — see [Licence](#licence).
 
 ```
 browser (three.js viewer · ribbon · sketch editor · chat)  <-- websocket -->  server.py (FastAPI)
@@ -383,6 +383,6 @@ AgenticCAD is **free for non-commercial use** under the
 and use by charities, schools and public institutions. See the LICENSE file for the exact terms.
 
 **Commercial use** (using it in a business, in products or services, or as part of paid work) needs a
-commercial licence: **A$100 per user per year**, one licence per person who uses it, same software.
+commercial licence: **A$99 per user per year**, one licence per person who uses it, same software.
 Buy online for the number of users you need; the receipt is your licence record and there is nothing to
 enter in the app. Volume or site licences: **agenticcad@prodevelop.com.au**. Details: https://agenticcad.github.io/agenticcad/#licence
