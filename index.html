@@ -132,7 +132,7 @@
             <a class="btn primary" href="https://github.com/agenticcad/agenticcad/releases/latest" data-dl="win">Windows · x64 <small data-dl-asset-size></small></a>
             <a class="btn" href="https://github.com/agenticcad/agenticcad/releases/latest" data-dl="src">Source zip <small data-dl-asset-size></small></a>
           </div>
-          <div class="dlprice"><div><b>Free</b> for personal, hobby, research and educational use</div><div class="sep"></div><div><b>A$100</b> per user, per year for commercial use · <a href="#licence">how to buy</a></div></div>
+          <div class="dlprice"><div><b>Free</b> for personal, hobby, research and educational use</div><div class="sep"></div><div><b>A$100</b> + tax per user, per year for commercial use · <a href="https://buy.stripe.com/cNi00c5H2gYL8tbaNM3Nm00" target="_blank" rel="noopener" data-buy="download-box">buy licences</a></div></div>
           <p class="dlnote"><b>Needs Claude Code.</b> The app does not bundle Anthropic's Claude Code; install it once (free, one command) and sign in with your Claude account or API key. The app walks you through it on first launch. <a href="docs/#desktop">Details</a>.</p>
           <p class="dlnote muted"><span data-dl-note="mac"></span> <span data-dl-note="win"></span> Intel Macs and Linux: use the source zip for now.</p>
         </div>
@@ -269,7 +269,7 @@ result = {<span class="hl-s">"Plate"</span>: _plate3.<span class="hl-f">fillet</
     <h2>Free to make things. A$100 a year to make money with it.</h2>
     <div class="grid g2" style="margin-top:28px">
       <div class="card reveal"><div class="ico"><svg viewBox="0 0 24 24"><path d="M12 3 4 7v6c0 4.4 3.4 7.6 8 8 4.6-.4 8-3.6 8-8V7l-8-4Z"/><path d="m9 12 2 2 4-4"/></svg></div><h3>Non-commercial · free</h3><p>Personal projects, hobby making, research, education, and use by charities, schools and public institutions. Full source, every feature, no account, no telemetry. <a href="https://github.com/agenticcad/agenticcad/blob/main/LICENSE">PolyForm Noncommercial 1.0.0</a>.</p></div>
-      <div class="card reveal accent"><div class="ico"><svg viewBox="0 0 24 24"><path d="M4 7h16v13H4zM8 7V4h8v3"/><path d="M12 11v5M10 13h4"/></svg></div><h3>Commercial · A$100 per user, per year</h3><p>Using it in a business, in products or services, or as part of paid work. One licence per person who uses it, billed yearly in Australian dollars, same software. Buy online with the number of users you need; the receipt is your licence record, nothing to install or enter. Questions and volume or site licences: <a href="mailto:agenticcad@prodevelop.com.au?subject=AgenticCAD%20commercial%20licence">agenticcad@prodevelop.com.au</a>. <a href="terms.html">Terms of sale</a>.</p></div>
+      <div class="card reveal accent"><div class="ico"><svg viewBox="0 0 24 24"><path d="M4 7h16v13H4zM8 7V4h8v3"/><path d="M12 11v5M10 13h4"/></svg></div><h3>Commercial · A$100 per user, per year</h3><p>Using it in a business, in products or services, or as part of paid work. One licence per person who uses it, billed yearly in Australian dollars, same software. Buy online with the number of users you need; tax is added at checkout where it applies, and the receipt is your licence record, nothing to install or enter. Questions and volume or site licences: <a href="mailto:agenticcad@prodevelop.com.au?subject=AgenticCAD%20commercial%20licence">agenticcad@prodevelop.com.au</a>. <a href="terms.html">Terms of sale</a>.</p><p style="margin-top:16px"><a class="btn primary" href="https://buy.stripe.com/cNi00c5H2gYL8tbaNM3Nm00" target="_blank" rel="noopener" data-buy="licence-card">Buy licences · A$100 + tax per user / year</a></p></div>
     </div>
   </div>
 </section>
@@ -282,7 +282,7 @@ result = {<span class="hl-s">"Plate"</span>: _plate3.<span class="hl-f">fillet</
 </section>
 
 <footer><div class="wrap">
-  <span>© 2026 AgenticCAD · PolyForm Noncommercial 1.0.0 · commercial A$100/user/year</span><a href="#licence">Licensing</a><a href="terms.html">Terms</a><a href="privacy.html">Privacy</a><a href="#" data-cookie-settings>Cookie settings</a>
+  <span>© 2026 AgenticCAD · PolyForm Noncommercial 1.0.0 · commercial A$100 + tax per user/year</span><a href="#licence">Licensing</a><a href="terms.html">Terms</a><a href="privacy.html">Privacy</a><a href="#" data-cookie-settings>Cookie settings</a>
   <a href="https://github.com/agenticcad/agenticcad">GitHub</a><a href="docs/">Documentation</a><a href="tutorials/">Tutorials</a><a href="https://github.com/agenticcad/agenticcad/issues">Issues</a><a href="https://github.com/agenticcad/agenticcad/blob/main/CHANGELOG.md">Changelog</a>
   <span style="margin-left:auto">Built with build123d · OCCT · three.js · Claude Agent SDK</span>
 </div></footer>
@@ -350,6 +350,7 @@ const promo = document.getElementById('promo'), promoBtn = document.getElementBy
 if (promo && promoBtn) {
   const start = () => { promo.play(); };
   promoBtn.onclick = start;
+  document.querySelectorAll('[data-buy]').forEach(a => a.addEventListener('click', () => import('./assets/analytics.js').then(m => m.track('begin_checkout', { location: a.dataset.buy, currency: 'AUD', value: 100 }))));
   promo.addEventListener('play', () => { promo.closest('.frame').classList.add('playing'); import('./assets/analytics.js').then(m => m.track('video_start', { video: 'promo-60s' })); }, { once: true });
   promo.addEventListener('ended', () => { promo.closest('.frame').classList.remove('playing'); import('./assets/analytics.js').then(m => m.track('video_complete', { video: 'promo-60s' })); });
 }
