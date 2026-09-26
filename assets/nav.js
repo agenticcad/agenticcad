@@ -7,7 +7,7 @@ export function nav(root = '', active = '') {
   document.currentScript?.remove();
   const el = document.createElement('header'); el.className = 'nav';
   el.innerHTML = `<div class="wrap">
-    <a class="brand" href="${root}index.html">${LOGO}<span>AgenticCAD</span><span class="ver" data-version>v0.16.0</span></a>
+    <a class="brand" href="${root}index.html">${LOGO}<span>AgenticCAD</span><span class="ver" data-version>v0.16.1</span></a>
     <nav>${L('index.html#start', 'Get started', 'start')}${L('index.html#features', 'Features', 'features')}${L('docs/', 'Docs', 'docs')}${L('tutorials/', 'Tutorials', 'tutorials')}<a href="${root}index.html#download" class="dl" title="Download AgenticCAD">Download <span data-dl-ver>latest</span></a>
       <a class="gh" href="https://github.com/agenticcad/agenticcad">${GH} GitHub</a></nav></div>`;
   document.body.prepend(el);

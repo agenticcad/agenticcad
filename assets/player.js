@@ -14,7 +14,7 @@ export function mountPlayer(root, tut, { onDone, next } = {}) {
     <div class="pl-narr"><span class="n" data-narr-n>—</span><div data-narr>Press <b>Play</b> to start, or step with the arrows below.</div></div>
     <div class="pl-app">
       <div class="pl-side">
-        <div class="pl-hdr">${LOGO}<span>AgenticCAD</span><span class="ver">v0.16.0</span><span class="doc" data-doc>plate</span></div>
+        <div class="pl-hdr">${LOGO}<span>AgenticCAD</span><span class="ver">v0.16.1</span><span class="doc" data-doc>plate</span></div>
         <div class="pl-tabs"><span class="on">Chat</span><span>Code</span><span>CAM</span><span>Library</span></div>
         <div class="pl-msgs" data-msgs></div>
         <div class="pl-comp"><div class="pl-chips" data-chips></div><div class="pl-input" data-input></div><div class="row"><span>📎 attach · ⏎ send · ⇧⏎ newline</span><b data-send>Send</b></div></div>
