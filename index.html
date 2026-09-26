@@ -96,7 +96,7 @@
       <a class="btn" href="https://github.com/agenticcad/agenticcad">Source on GitHub</a>
     </div>
     <div class="frame video"><div class="bar"><i></i><i></i><i></i><span>60-second tour — a real session, real agent, only the thinking time sped up</span></div>
-      <video id="promo" controls playsinline preload="metadata" poster="assets/img/promo-poster.jpg" width="1920" height="1080"><source src="assets/video/agenticcad-promo-1080p.mp4" type="video/mp4">Your browser can't play this video. <a href="assets/video/agenticcad-promo-1080p.mp4">Download it</a> instead.</video>
+      <video id="promo" controls playsinline preload="metadata" poster="assets/img/promo-poster.jpg" width="1920" height="1080"><source src="assets/video/agenticcad-promo-1080p.mp4?v=2" type="video/mp4">Your browser can't play this video. <a href="assets/video/agenticcad-promo-1080p.mp4">Download it</a> instead.</video>
       <button class="play" id="promo-play" aria-label="Play the tour"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg><span>Watch the 60-second tour</span></button>
     </div>
     <p class="muted" style="font-size:13px;margin:14px 0 0">Sound on. A real session with the real agent; only the thinking time is sped up.</p>
@@ -104,8 +104,8 @@
 </section>
 
 <div class="ticker"><div class="track">
-  <span>Describe a part in plain words</span><span>Point at faces, edges and bodies in chat</span><span>Fusion-style ribbon for hand tweaks</span><span>Sketches on any face</span><span>ISO threads</span><span>Exact STEP, tolerance-controlled STL</span><span>Shop drawings with hole tables</span><span>Slice for 3D printing with your installed OrcaSlicer, layers in the viewer</span><span>Experimental GRBL CAM</span><span>Parametric part library</span><span>Pick your Claude model, plug in MCP servers</span><span>Unit tests and graded agent evals</span>
-  <span>Describe a part in plain words</span><span>Point at faces, edges and bodies in chat</span><span>Fusion-style ribbon for hand tweaks</span><span>Sketches on any face</span><span>ISO threads</span><span>Exact STEP, tolerance-controlled STL</span><span>Shop drawings with hole tables</span><span>Slice for 3D printing with your installed OrcaSlicer, layers in the viewer</span><span>Experimental GRBL CAM</span><span>Parametric part library</span><span>Pick your Claude model, plug in MCP servers</span><span>Unit tests and graded agent evals</span>
+  <span>Describe a part in plain words</span><span>Point at faces, edges and bodies in chat</span><span>Fusion-style ribbon for hand tweaks</span><span>Sketches on any face</span><span>ISO and inch (UNC/UNF) threads</span><span>Inches or millimetres</span><span>Exact STEP, tolerance-controlled STL</span><span>Shop drawings with hole tables</span><span>Slice for 3D printing with your installed OrcaSlicer, layers in the viewer</span><span>Experimental GRBL CAM</span><span>Parametric part library</span><span>Pick your Claude model, plug in MCP servers</span><span>Unit tests and graded agent evals</span>
+  <span>Describe a part in plain words</span><span>Point at faces, edges and bodies in chat</span><span>Fusion-style ribbon for hand tweaks</span><span>Sketches on any face</span><span>ISO and inch (UNC/UNF) threads</span><span>Inches or millimetres</span><span>Exact STEP, tolerance-controlled STL</span><span>Shop drawings with hole tables</span><span>Slice for 3D printing with your installed OrcaSlicer, layers in the viewer</span><span>Experimental GRBL CAM</span><span>Parametric part library</span><span>Pick your Claude model, plug in MCP servers</span><span>Unit tests and graded agent evals</span>
 </div></div>
 
 <section id="start" class="install">
@@ -189,14 +189,14 @@ result = {<span class="hl-s">"Plate"</span>: _plate3.<span class="hl-f">fillet</
       </div>
       <div class="reveal">
         <div class="ribbon" id="ribbon-demo"></div>
-        <p class="muted" style="font-size:13px;margin-top:14px">Hover a tool. Shortcuts match the app: <kbd>B</kbd> <kbd>C</kbd> <kbd>O</kbd> <kbd>K</kbd> create, <kbd>Q</kbd> <kbd>H</kbd> <kbd>F</kbd> <kbd>X</kbd> <kbd>L</kbd> <kbd>V</kbd> modify, <kbd>I</kbd> measure.</p>
-        <div class="frame" style="margin-top:18px"><img src="assets/img/design-tab.jpg" alt="Parameters card, measure panel and a shop drawing" loading="lazy"></div>
+        <p class="muted" style="font-size:13px;margin-top:14px">Hover a tool. Shortcuts match the app: <kbd>B</kbd> <kbd>C</kbd> <kbd>O</kbd> <kbd>K</kbd> create, <kbd>Q</kbd> <kbd>H</kbd> <kbd>F</kbd> <kbd>X</kbd> <kbd>L</kbd> <kbd>V</kbd> modify, <kbd>I</kbd> measure, <kbd>D</kbd> drawings, <kbd>P</kbd> slice.</p>
+        <div class="frame" style="margin-top:18px"><img src="assets/img/params-measure.jpg" alt="The Parameters card under the Browser and a live measurement between two faces" loading="lazy"></div>
       </div>
     </div>
 
     <div class="mini">
       <div class="card reveal cyan"><div class="ico"><svg viewBox="0 0 24 24"><path d="M4 4h16v16H4z"/><circle cx="14" cy="14" r="3"/><path d="M8 8h4"/></svg></div><h3>Sketches on any face</h3><p>Select a face, press <kbd>K</kbd>: rectangles, circles, polygons and slots with grid snap. Stored as an editable block that is also a real <code>Sketch</code> the agent can extrude, cut or revolve.</p></div>
-      <div class="card reveal yellow"><div class="ico"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/><path d="M12 4v2M12 18v2M4 12h2M18 12h2"/></svg></div><h3>ISO threads</h3><p>Tap drill, clearance, hex and socket heads, nuts and washers from the tables. <code>tap(part, "M4", …)</code> cuts the hole and drawings call it out as M4×0.7.</p></div>
+      <div class="card reveal yellow"><div class="ico"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/><path d="M12 4v2M12 18v2M4 12h2M18 12h2"/></svg></div><h3>Metric and inch threads</h3><p>ISO metric (M4) and Unified inch (1/4-20, #10-32): tap drill, clearance, hex and socket heads, nuts and washers from the tables. <code>tap(part, "M4", …)</code> cuts the hole and drawings call it out as M4×0.7.</p></div>
       <div class="card reveal"><div class="ico"><svg viewBox="0 0 24 24"><path d="M3 17 17 3l4 4L7 21H3z"/><path d="m13 7 4 4M9 11l4 4"/></svg></div><h3>Parameters and measure</h3><p>Every top-level number is a field. Measure snaps to vertices, edges and faces: lengths, radii, angles, hole spacing, mass, clearance between bodies.</p></div>
       <div class="card reveal accent"><div class="ico"><svg viewBox="0 0 24 24"><path d="M12 3 20 7.5v9L12 21l-8-4.5v-9L12 3Z"/><path d="M12 12 20 7.5M12 12v9M12 12 4 7.5"/></svg></div><h3>Exact B-rep, not triangles</h3><p>Planes, cylinders, cones, spheres, tori and B-splines from OCCT. The display mesh has exact normals; the geometry underneath is analytic.</p></div>
     </div>
@@ -238,7 +238,7 @@ result = {<span class="hl-s">"Plate"</span>: _plate3.<span class="hl-f">fillet</
       <div class="card reveal"><div class="ico"><svg viewBox="0 0 24 24"><path d="m8 9-4 3 4 3M16 9l4 3-4 3M14 5l-4 14"/></svg></div><h3>Design as script</h3><p>Rename, delete and add bodies, set parameters, sketch blocks and ribbon operations are AST rewrites of the same file. Every build is kept in history; Undo steps back through it.</p></div>
       <div class="card reveal cyan"><div class="ico"><svg viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/><path d="M3 20h18"/></svg></div><h3>Tested, and evaluated</h3><p>123 unit and API tests run in seconds with no Claude calls. 26 agent evals run the real agent headless and grade geometry, programs and answers deterministically, with cost and steps per case.</p></div>
     </div>
-    <div class="frame reveal" style="margin-top:28px"><div class="bar"><i></i><i></i><i></i><span>Library tab — parametric and STEP parts</span></div><img src="assets/img/library-tab.jpg" alt="Part library tab" loading="lazy"></div>
+    <div class="frame reveal" style="margin-top:28px"><div class="bar"><i></i><i></i><i></i><span>Library tab — parametric and STEP parts</span></div><img src="assets/img/library-tab.jpg?v=2" alt="Part library tab with parametric parts and thumbnails" loading="lazy"></div>
   </div>
 </section>
 
@@ -351,8 +351,8 @@ if (promo && promoBtn) {
   const start = () => { promo.play(); };
   promoBtn.onclick = start;
   document.querySelectorAll('[data-buy]').forEach(a => a.addEventListener('click', () => import('./assets/analytics.js').then(m => m.track('begin_checkout', { location: a.dataset.buy, currency: 'AUD', value: 99 }))));
-  promo.addEventListener('play', () => { promo.closest('.frame').classList.add('playing'); import('./assets/analytics.js').then(m => m.track('video_start', { video: 'promo-60s' })); }, { once: true });
-  promo.addEventListener('ended', () => { promo.closest('.frame').classList.remove('playing'); import('./assets/analytics.js').then(m => m.track('video_complete', { video: 'promo-60s' })); });
+  promo.addEventListener('play', () => { promo.closest('.frame').classList.add('playing'); import('./assets/analytics.js').then(m => m.track('video_start', { video: 'promo-v2' })); }, { once: true });
+  promo.addEventListener('ended', () => { promo.closest('.frame').classList.remove('playing'); import('./assets/analytics.js').then(m => m.track('video_complete', { video: 'promo-v2' })); });
 }
 
 // ---- tutorial cards

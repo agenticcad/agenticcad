@@ -11,6 +11,8 @@ export const ICONS = {
   shell: `<svg viewBox="0 0 24 24"><path d="M4 4h16v16H4z"/><path d="M8 8h8v12H8z"/></svg>`,
   move: `<svg viewBox="0 0 24 24"><path d="M12 3v18M3 12h18"/><path d="m9 6 3-3 3 3M9 18l3 3 3-3M6 9 3 12l3 3M18 9l3 3-3 3"/></svg>`,
   measure: `<svg viewBox="0 0 24 24"><path d="M3 17 17 3l4 4L7 21H3z"/><path d="m13 7 2 2M10 10l2 2M7 13l2 2"/></svg>`,
+  drawings: `<svg viewBox="0 0 24 24"><path d="M5 3h9l5 5v13H5z"/><path d="M14 3v5h5"/><path d="M8 12h8M8 16h8"/></svg>`,
+  slice: `<svg viewBox="0 0 24 24"><path d="M12 3 3 8l9 5 9-5-9-5Z"/><path d="M3 12l9 5 9-5"/><path d="M3 16l9 5 9-5"/></svg>`,
 };
 export const RIBBON = [
   { name: 'Create', tools: [
@@ -27,4 +29,7 @@ export const RIBBON = [
     { id: 'move', icon: 'move', label: 'Move', key: 'V', tip: 'Move — pick a body, then translate / rotate' } ] },
   { name: 'Inspect', tools: [
     { id: 'measure', icon: 'measure', label: 'Measure', key: 'I', tip: 'Measure — snaps to vertices, edges and faces; two picks give distance and angle' } ] },
+  { name: 'Output', tools: [
+    { id: 'drawings', icon: 'drawings', label: 'Drawings', key: 'D', tip: 'Drawings — shop drawings (SVG + DXF) with the material and sheet from Settings' },
+    { id: 'slice', icon: 'slice', label: 'Slice', key: 'P', tip: 'Slice — with your installed OrcaSlicer; layers, time and filament in the viewer' } ] },
 ];

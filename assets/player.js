@@ -15,15 +15,15 @@ export function mountPlayer(root, tut, { onDone, next } = {}) {
     <div class="pl-app">
       <div class="pl-side">
         <div class="pl-hdr">${LOGO}<span>AgenticCAD</span><span class="ver">v0.16.0</span><span class="doc" data-doc>plate</span></div>
-        <div class="pl-tabs"><span class="on">Chat</span><span>Code</span><span>CAM</span><span>Design</span><span>Library</span></div>
+        <div class="pl-tabs"><span class="on">Chat</span><span>Code</span><span>CAM</span><span>Library</span></div>
         <div class="pl-msgs" data-msgs></div>
-        <div class="pl-design" data-design></div>
         <div class="pl-comp"><div class="pl-chips" data-chips></div><div class="pl-input" data-input></div><div class="row"><span>📎 attach · ⏎ send · ⇧⏎ newline</span><b data-send>Send</b></div></div>
       </div>
       <div class="pl-view">
         <div class="vw" data-vw></div>
         <div class="pl-ribbon"><div class="ribbon" data-ribbon>${RIBBON.map(g => `<div class="grp"><div class="row">${g.tools.map(t => `<div class="tb" data-tool="${t.id}">${ICONS[t.icon]}<span>${t.label}</span><kbd>${t.key}</kbd></div>`).join('')}</div><div class="cap">${g.name}</div></div>`).join('')}</div></div>
         <div class="pl-browser" data-browser><div class="t"><span>Browser</span><span>+ Part</span></div><div data-tree><div class="row"><i></i><span>—</span></div></div></div>
+        <div class="pl-design" data-design></div>
         <div class="pl-cube">${CUBE}</div>
         <div class="pl-cmd" data-cmd></div>
         <div class="pl-sketch" data-sketch></div>
@@ -132,8 +132,8 @@ export function mountPlayer(root, tut, { onDone, next } = {}) {
     if (!q) { viewer.viewFrom([1, -1.15, 1.3], 700); const t0 = performance.now(), D = 4500 / state.speed; while (performance.now() - t0 < D) { if (state.tok.c) return; viewer.setToolpathProgress((performance.now() - t0) / D); await sleep(30 * state.speed); } viewer.setToolpathProgress(1); }
   }
   async function stepParams(s, q) {
-    tab('Design'); hidePanel();
-    design.innerHTML = `<div class="t">Parameters</div>` + s.items.map(([k, v]) => `<div class="prow" data-p="${k}"><label>${k}</label><span>${v}</span></div>`).join('') + `<div class="sec"><b>Measure</b>📐 pick faces, edges, points · <b style="margin-top:8px">Shop drawings</b>Generate SVG + DXF · <b style="margin-top:8px">Import</b>STEP…</div>`;
+    hidePanel();
+    design.innerHTML = `<div class="t">Parameters <em>↑↓ ±1 · ⇧ ±10</em></div>` + s.items.map(([k, v]) => `<div class="prow" data-p="${k}"><label>${k}</label><span>${v}</span></div>`).join('');
     design.classList.add('show');
     const row = design.querySelector(`[data-p="${s.change[0]}"]`); const val = row.querySelector('span');
     if (!q) { await sleep(900); if (state.tok.c) return; row.classList.add('hot'); await sleep(500); const to = String(s.change[1]); for (let i = 1; i <= to.length; i++) { if (state.tok.c) return; val.textContent = to.slice(0, i); await sleep(220); } await sleep(400); }

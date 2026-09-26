@@ -45,7 +45,7 @@
     <div class="g">Reference</div><a href="#shortcuts">Keyboard shortcuts</a><a href="#architecture">Architecture</a><a href="#files">Files and API</a><a href="#versioning">Versioning</a><a href="#tests">Tests and evals</a><a href="#gaps">Known gaps and roadmap</a><a href="#licence">Licence</a>
   </aside>
   <main class="doc">
-    <div class="eyebrow">Documentation · v0.12.x</div>
+    <div class="eyebrow">Documentation · v0.16.x</div>
     <h1>AgenticCAD documentation</h1>
     <p class="lead">Everything the app does, how it stores it, and how to drive it by chat, by hand, or from the agent's tools. For a guided walk-through, start with the <a href="../tutorials/">tutorials</a>.</p>
 
@@ -56,7 +56,7 @@
       <li><b>Say it</b>: “a 60×40×8 plate with a 24 mm boss and four M4 holes”.</li>
       <li><b>Point at it</b>: click a face or body, then “make this 2 mm thicker”.</li>
       <li><b>Tweak it</b>: every dimension is a named parameter you can nudge; the model rebuilds instantly.</li>
-      <li><b>Do it by hand</b>: ribbon tools, sketches on any face, ISO threads, measure and mass properties.</li>
+      <li><b>Do it by hand</b>: ribbon tools, sketches on any face, ISO and inch threads, measure and mass properties.</li>
       <li><b>Keep it reproducible</b>: the whole design lives in one readable Python script that you can open, edit, save to the part library and version.</li>
     </ul>
     <p>You need a Mac or Windows PC, the app (or the source), and a Claude sign-in: either <a href="#desktop">Claude Code</a> logged into your Anthropic account or an API key. Nothing else is required; the slicer is optional and only used if it is already on your machine.</p>
@@ -69,7 +69,8 @@
     <p>The desktop app is the same program in a native window with Python bundled. Two things to know:</p>
     <ul>
       <li><b>Claude Code is required and not included.</b> AgenticCAD drives Anthropic's Claude Code command-line tool and is not permitted to redistribute it. On first launch the app checks for it (on PATH and in the official install locations) and, if missing, shows a setup page with the install command for your platform and the sign-in step. Install: macOS and Linux <code>curl -fsSL https://claude.ai/install.sh | bash</code>; Windows PowerShell <code>irm https://claude.ai/install.ps1 | iex</code>. Then sign in once: run <code>claude</code> in a terminal and choose Log in (Claude Pro or Max), or paste an Anthropic API key on the app's setup page or in Settings. The app runs Claude Code headless, so it cannot show the login prompt itself; when a login expires it shows a "not signed in" banner with those two options instead of failing silently. The npm-based install on Windows (<code>claude.cmd</code>) cannot be launched by a desktop app; use the installer above.</li>
-      <li><b>The builds are unsigned for now.</b> macOS: the app is ad-hoc signed, so the first launch needs right-click → Open, or System Settings → Privacy &amp; Security → Open Anyway. Windows: SmartScreen shows "Windows protected your PC"; choose More info → Run anyway. Signed builds will follow.</li>
+      <li><b>The installers show the licence first.</b> macOS uses a standard <code>.pkg</code> installer and Windows an <code>.msi</code>; both show the licence and terms and ask you to agree before installing (free for non-commercial use, a licence per user for commercial use).</li>
+      <li><b>The builds are unsigned for now.</b> macOS: if the installer is blocked, right-click it → Open, or System Settings → Privacy &amp; Security → Open Anyway. Windows: SmartScreen shows "Windows protected your PC"; choose More info → Run anyway. Signed builds will follow.</li>
     </ul>
     <p>Your data lives in the OS user-data folder: <code>~/Library/Application Support/AgenticCAD</code> on macOS, <code>%LOCALAPPDATA%\AgenticCAD\AgenticCAD</code> on Windows (designs, library, machines, tools, history, exports, settings). Set <code>AGENTICCAD_WORKSPACE</code> to move it. The app picks a free localhost port; the UI is the same page you would see from a source install, so everything else in these docs applies. Intel Macs and Linux: run from source below.</p>
 
@@ -86,7 +87,7 @@ python3 -m venv .venv &amp;&amp; .venv/bin/pip install -r requirements.txt
       <tr><td><code>AGENTICCAD_NO_AGENT=1</code></td><td>Run the server without a Claude session (used by the tests).</td></tr></table>
 
     <h2 id="workspace">The workspace</h2>
-    <figure class="fig"><img src="../assets/img/hero.png" alt="The AgenticCAD workspace"><figcaption>Side panel (Chat, Code, CAM, Design, Library) on the left; viewer with the ribbon, Browser tree, ViewCube and bottom toolbar on the right.</figcaption></figure>
+    <figure class="fig"><img src="../assets/img/workspace.jpg" alt="The AgenticCAD workspace in a real session"><figcaption>A real session: the viewer with File and Settings, the ribbon (Create, Modify, Inspect, Output), the Browser and Parameters cards, the ViewCube and a 3D-printing preview; the side panel (Chat, Code, CAM, Library) shows the agent's tool calls.</figcaption></figure>
     <ul>
       <li><b>Side panel</b>: Chat (the conversation with selection chips and images), Code (the script with syntax highlighting; edit and Run with <kbd>⌘↩</kbd> to rebuild without the agent; switch between <code>design.py</code> and <code>cam.py</code>), CAM (setup, operations, warnings, libraries, feeds calculator, G-code), Library. Drag the divider to resize, double-click to reset, <kbd>⌘B</kbd> to hide.</li>
       <li><b>Viewer</b>: left-drag orbits, right-drag (or <kbd>⌘</kbd>/<kbd>Ctrl</kbd>/<kbd>⇧</kbd> + drag) pans, wheel zooms; the <b>ViewCube</b> snaps to faces, edges and corners and its <code>⌂</code> is the home view. Bottom toolbar: Fit, Edges, display-mesh quality (draft / normal / fine), Undo, Toolpaths and Stock toggles.</li>

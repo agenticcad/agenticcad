@@ -11,7 +11,7 @@ export async function release() {
   const assets = (rel && rel.assets) || [];
   const find = re => assets.find(a => re.test(a.name));
   const kinds = {
-    mac: { asset: find(/\.dmg$/i), label: 'macOS (Apple Silicon)', note: 'macOS: the build is ad-hoc signed, so on first launch right-click → Open, or System Settings → Privacy & Security → Open Anyway.' },
+    mac: { asset: find(/\.pkg$/i) || find(/\.dmg$/i), label: 'macOS (Apple Silicon)', note: 'macOS: the installer is not notarised yet, so if macOS blocks it, right-click → Open, or System Settings → Privacy & Security → Open Anyway.' },
     win: { asset: find(/\.msi$/i), label: 'Windows (x64)', note: 'Windows: the installer is unsigned, so SmartScreen shows "More info → Run anyway".' },
     src: { asset: find(/^agenticcad-.*\.zip$/), label: 'source zip', note: 'Source: Python 3.12, unzip, then the three install lines.' },
   };
