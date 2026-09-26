@@ -103,3 +103,19 @@ def test_every_local_module_is_packaged():
                     if f"{top}.py" not in packaged:
                         missing.add(top)
     assert not missing, f"imported by the app but not in pyproject [tool.briefcase.app.agenticcad].sources: {sorted(missing)}"
+
+
+def test_installer_licence_files_are_in_sync():
+    """Both installers show the licence: Windows merges pyproject license-files into LICENSE.rtf; the macOS .pkg shows
+    packaging/macos-installer/LICENSE, which must be exactly INSTALLER-TERMS.txt followed by LICENSE."""
+    import tomllib
+    root = Path(__file__).resolve().parents[1]
+    pp = tomllib.loads((root / "pyproject.toml").read_text())
+    assert pp["project"]["license-files"] == ["packaging/INSTALLER-TERMS.txt", "LICENSE"]
+    mac = pp["tool"]["briefcase"]["app"]["agenticcad"]["macOS"]
+    assert mac["installer_resources"] == "packaging/macos-installer"
+    assert "briefcase package macOS -p pkg" in (root / ".github" / "workflows" / "package.yml").read_text()
+    terms = (root / "packaging" / "INSTALLER-TERMS.txt").read_text()
+    assert (root / "packaging" / "macos-installer" / "LICENSE").read_text() == terms + (root / "LICENSE").read_text()
+    from version import __version__  # noqa: F401  (terms mention no version, so they don't need bumping)
+    assert "A$99" in terms and "terms.html" in terms and "PolyForm Noncommercial" in terms

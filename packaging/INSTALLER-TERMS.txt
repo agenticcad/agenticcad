@@ -1,0 +1,17 @@
+AgenticCAD — licence and terms
+
+By installing or using AgenticCAD you agree to the following.
+
+1. Free for non-commercial use. AgenticCAD is licensed under the PolyForm Noncommercial License 1.0.0 (the full text follows below). Personal projects, hobby making, research, education, and use by charities, schools and public institutions are free.
+
+2. Commercial use needs a licence. Using AgenticCAD in a business, in products or services, or as part of paid work requires a commercial licence for each person who uses it: A$99 plus applicable tax per user per year, bought at https://agenticcad.github.io/agenticcad/#licence. Commercial licences are sold through Link (Stripe) and are governed by the Terms of Sale at https://agenticcad.github.io/agenticcad/terms.html, including a 14-day change-of-mind refund.
+
+3. Claude is separate. AgenticCAD drives Anthropic's Claude Code, which you install and sign in to yourself, or an Anthropic API key you provide. That usage is between you and Anthropic under Anthropic's terms and is not included in any AgenticCAD price.
+
+4. Your designs are yours. You are responsible for checking parts, drawings, toolpaths and G-code before you manufacture anything or run a machine. The software is provided as described in the licence and the Terms of Sale; nothing here limits rights you have under the Australian Consumer Law or other consumer law that cannot be excluded.
+
+AgenticCAD is made by Michael Orzel (ABN 16 536 206 127), trading as AgenticCAD, Australia.
+Contact: agenticcad@prodevelop.com.au
+
+------------------------------------------------------------
+

@@ -9,7 +9,7 @@ name = "agenticcad"
 version = "0.16.0"
 description = "Agent-native CAD/CAM: describe it, point at it, export STEP, STL and G-code"
 license = "PolyForm-Noncommercial-1.0.0"
-license-files = ["LICENSE"]
+license-files = ["packaging/INSTALLER-TERMS.txt", "LICENSE"]   # Windows MSI licence page: Briefcase merges these into LICENSE.rtf
 requires-python = ">=3.12"
 
 [tool.briefcase]
@@ -60,6 +60,9 @@ cleanup_paths = [
 ]
 
 [tool.briefcase.app.agenticcad.macOS]
+# PKG installer (not DMG; CI passes `-p pkg`) so macOS shows the licence with Agree / Disagree; our LICENSE and welcome
+# page overlay the template
+installer_resources = "packaging/macos-installer"
 universal_build = false
 min_os_version = "14.0"   # numpy/scipy arm64 wheels are macosx_14_0
 requires = ["pyobjc-core", "pyobjc-framework-Cocoa", "pyobjc-framework-WebKit", "pyobjc-framework-Security"]

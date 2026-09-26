@@ -121,6 +121,27 @@ try:
         page.click(".tab[data-pane='chat']"); page.wait_for_timeout(500)
         say("Add a second body: a Ø8 × 30 mm pin named Pin standing on the plate next to the boss at (22, 0). Then make shop drawings in aluminium 6061 and export a STEP.", "drawings")
         page.wait_for_timeout(2500)
+
+        # 6 · slice for 3D printing with the installed slicer (ribbon Slice / P), scrub the layers
+        if page.evaluate("getComputedStyle(document.querySelector('[data-tool=slice]')).display !== 'none'"):
+            page.evaluate("document.activeElement && document.activeElement.blur()")
+            orbit(-120, 20, ms=900)
+            mark("slice")
+            for attempt in range(2):                                                # the slicer CLI occasionally fails once; retry
+                page.keyboard.press("p")
+                page.wait_for_function("document.getElementById('slice-panel').style.display === '' || [...document.querySelectorAll('.msg.error')].some(m => m.textContent.includes('slicing failed'))", timeout=120_000)
+                if page.evaluate("document.getElementById('slice-panel').style.display === ''"):
+                    break
+                print("slice failed:", page.evaluate("[...document.querySelectorAll('.msg.error')].pop().textContent"), flush=True)
+                page.evaluate("document.querySelectorAll('.msg.error').forEach(m => m.remove())"); page.wait_for_timeout(1500)
+            else:
+                raise RuntimeError("slicing failed twice")
+            page.wait_for_timeout(700)
+            n = page.evaluate("+document.getElementById('print-layer').max")
+            for k in range(1, 61):                                                  # grow the print from the bed up
+                page.evaluate("v => { const s = document.getElementById('print-layer'); s.value = v; s.dispatchEvent(new Event('input')); }", max(1, round(n * k / 60)))
+                page.wait_for_timeout(60)
+            page.wait_for_timeout(1800); mark("sliced")
         page.wait_for_timeout(1200); mark("end")
         page.screenshot(path=str(out / "live-last.png"))
         ctx.close(); browser.close()

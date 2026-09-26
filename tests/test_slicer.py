@@ -268,3 +268,23 @@ async def test_slice_defaults_come_from_settings(tmp_path, monkeypatch, fake_tre
     with pytest.raises(slicer.SlicerError):
         await a.slice_model(machine="Acme One 0.4 nozzle")               # different printer: saved process not applied
     assert json.loads((out / "process.json").read_text())["name"] == "0.20mm Standard @Acme"
+
+
+def test_relative_paths_are_resolved(fake_tree, tmp_path, monkeypatch):
+    """The slicer CLI runs with cwd = the slicing folder, so a relative workspace path must be made absolute first
+    (a relative AGENTICCAD_WORKSPACE made OrcaSlicer report 'No such file: …/model.stl')."""
+    import subprocess as sp
+    seen = {}
+    real = sp.run
+    def fake_run(cmd, cwd=None, **kw):
+        seen["cmd"], seen["cwd"] = cmd, cwd
+        return real(["true"], capture_output=True, text=True)
+    monkeypatch.setattr(slicer.subprocess, "run", fake_run)
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "ws").mkdir(); (tmp_path / "ws" / "m.stl").write_bytes(b"solid x\nendsolid x\n")
+    with pytest.raises(slicer.SlicerError):
+        slicer.slice_file(fake_tree, "ws/m.stl", "Acme One 0.4 nozzle", None, None, {}, "ws/out")
+    assert Path(seen["cmd"][-1]).is_absolute() and Path(seen["cmd"][-1]).exists()
+    assert Path(seen["cwd"]).is_absolute()
+    settings = seen["cmd"][seen["cmd"].index("--load-settings") + 1].split(";")
+    assert all(Path(x).is_absolute() for x in settings)

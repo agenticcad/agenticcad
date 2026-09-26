@@ -5,6 +5,18 @@ features, patch bumps fix things. The version shown in the UI header comes from 
 
 ## [Unreleased]
 
+### Added
+- **Licence acceptance at install.** The macOS download is now a standard `.pkg` installer (a `.dmg` can't carry a
+  licence step) with a welcome page and the licence and terms behind Agree / Disagree; the Windows `.msi` shows the same
+  text in its licence dialog. The text is `packaging/INSTALLER-TERMS.txt` (free for non-commercial use, A$99 + tax per
+  user per year for commercial use, Claude usage is separate, consumer law) followed by the PolyForm licence. CI checks
+  both installers contain it.
+- `tools/promo/screens.py` regenerates the site screenshots from the real app; the promo recorder now shows slicing.
+
+### Fixed
+- Slicing failed with "No such file … model.stl" when the workspace path was relative: the slicer runs inside the
+  slicing folder, so paths are now made absolute first.
+
 ### Fixed
 - The Parameters card no longer labels plain numbers "mm" (they may be angles or counts); only `x * inch` parameters carry an "in" badge.
 

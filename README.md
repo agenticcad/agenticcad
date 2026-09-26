@@ -1,6 +1,6 @@
 # AgenticCAD — agent-native CAD/CAM
 
-![AgenticCAD](docs/screenshot.png)
+![AgenticCAD in a real session: ribbon, Browser and Parameters cards, agent tool calls, 3D-printing preview](docs/screenshot.jpg)
 
 Describe the part; a Claude agent writes [build123d](https://build123d.readthedocs.io) code, the exact
 OCCT kernel builds it, and the browser shows it live. Click faces, edges and bodies to reference them in
@@ -23,11 +23,11 @@ browser (three.js viewer · ribbon · sketch editor · chat)  <-- websocket --> 
 
 ## Run
 
-**Desktop app** (macOS Apple Silicon `.dmg`, Windows `.msi`): download from the
+**Desktop app** (macOS Apple Silicon `.pkg`, Windows `.msi`; both show the licence and terms to accept during install): download from the
 [website](https://agenticcad.github.io/agenticcad/#download) or the [releases](https://github.com/agenticcad/agenticcad/releases).
 The app **requires [Claude Code](https://docs.anthropic.com/en/docs/claude-code/setup) installed separately**
 (it is Anthropic's tool and is not bundled); the app shows a setup page with the install and sign-in steps if
-it is missing, and a "not signed in" banner with two fixes (run `claude` and log in, or paste an API key in Settings) when the login has expired. Builds are unsigned for now (macOS: right-click → Open; Windows: SmartScreen → More info → Run anyway).
+it is missing, and a "not signed in" banner with two fixes (run `claude` and log in, or paste an API key in Settings) when the login has expired. Builds are unsigned for now (macOS: if the installer is blocked, right-click → Open or System Settings → Privacy & Security → Open Anyway; Windows: SmartScreen → More info → Run anyway).
 Data lives in the OS user-data folder (`~/Library/Application Support/AgenticCAD`, `%LOCALAPPDATA%\AgenticCAD`).
 
 **From source:**
@@ -314,7 +314,7 @@ Pre-1.0: minor bump for features, patch bump for fixes. `/api/version` serves bo
 
 ```bash
 .venv/bin/python -m pytest -q            # 123 unit/API tests, ~20 s, no Claude calls
-.venv/bin/python evals/run.py            # agent evals, 26 cases, ~$3.50, ~2 min (3-4 in parallel); needs a Claude login or API key
+.venv/bin/python evals/run.py            # agent evals, 31 cases, ~$4, a few minutes (3 in parallel); needs a Claude login or API key
 .venv/bin/python evals/run.py --filter cam --model claude-sonnet-5 --repeat 3
 ```
 
@@ -334,7 +334,7 @@ Pre-1.0: minor bump for features, patch bump for fixes. `/api/version` serves bo
 
 ## Status, gaps and roadmap
 
-**Status (v0.9.x):** working end to end on a single machine for a single user — design by chat, by
+**Status (v0.16.x):** working end to end on a single machine for a single user — design by chat, by
 hand, or both; multi-body designs; sketches; threads; measurement; drawings; part library; CAM with a
 GRBL post; settings for model/effort/MCP servers; unit tests and graded agent evals. Treat it as a
 capable prototype, not a shipped product: the modelling kernel is exact and the toolpaths are checked,

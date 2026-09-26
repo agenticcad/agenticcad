@@ -63,7 +63,9 @@ CAPS = [("start", 0.6, "send:plate", "Describe <em>it.</em>", "Plain words in. A
         ("done:plate", 0.3, "click_face", "Real geometry, <em>live.</em>", "Every face is exact B-rep; the script is yours to keep."),
         ("click_face", 0.0, "done:chamfer", "Point <em>at it.</em>", "Click a face. The agent works on exactly that geometry."),
         ("ribbon_pull", 0.0, "filleted", "Tweak it <em>by hand.</em>", "Fusion-style tools. Every click is written into the script."),
-        ("send:drawings", -0.5, "end", "Drawings and <em>exports.</em>", "Ask, or use the Design tab. Exact STEP, STL, shop drawings.")]
+        ("send:drawings", -0.5, "slice" if "slice" in events else "end", "Drawings and <em>exports.</em>", "Ask, or press Drawings. Exact STEP, STL, shop drawings.")]
+if "slice" in events:
+    CAPS.append(("slice", 0.0, "end", "Then <em>print it.</em>", "Your own OrcaSlicer, one click. Layers, time and filament, right here."))
 cap_html = """<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;800&display=swap" rel="stylesheet">
 <style>body{margin:0;width:1920px;height:1080px;background:transparent;font-family:Inter,sans-serif;overflow:hidden}
 .cap{position:absolute;left:70px;bottom:52px;display:flex;flex-direction:column;gap:4px;text-shadow:0 2px 18px rgba(0,0,0,.9),0 0 2px rgba(0,0,0,.9)}

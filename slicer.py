@@ -230,7 +230,8 @@ class SliceResult:
 
 def slice_file(info: SlicerInfo, stl_path: str | Path, machine: str, process: str | None, filament: str | None,
                overrides: dict[str, Any] | None, out_dir: str | Path, timeout: float = 900) -> SliceResult:
-    out_dir = Path(out_dir); out_dir.mkdir(parents=True, exist_ok=True)
+    out_dir = Path(out_dir).resolve(); out_dir.mkdir(parents=True, exist_ok=True)   # the CLI runs with cwd=out_dir, so every path must be absolute
+    stl_path = Path(stl_path).resolve()
     for old in out_dir.glob("*"):
         if old.suffix in (".gcode", ".3mf", ".log", ".json", ".md5"):
             old.unlink()
