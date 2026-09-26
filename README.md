@@ -1,6 +1,6 @@
 # AgenticCAD — agent-native CAD/CAM
 
-![AgenticCAD in a real session: ribbon, Browser and Parameters cards, agent tool calls, 3D-printing preview](docs/screenshot.jpg)
+![AgenticCAD in a real session: describe a part in chat, the exact model appears, click a face, tweak it with the ribbon](docs/demo.gif)
 
 Describe the part; a Claude agent writes [build123d](https://build123d.readthedocs.io) code, the exact
 OCCT kernel builds it, and the browser shows it live. Click faces, edges and bodies to reference them in
@@ -66,6 +66,8 @@ redistributes it; `agent.find_claude_cli()` locates the user's own install.
 | `slicer_info(machine?)`, `slice_for_printing(...)` | **only when a slicer is installed**: printers/profiles; slice for 3D printing and show the layers |
 
 ## UI
+
+![AgenticCAD in a real session: ribbon, Browser and Parameters cards, agent tool calls, 3D-printing preview](docs/screenshot.jpg)
 
 - Click a face → chip in the composer; the message gets a `[Selected geometry]` block with the face's
   type/centre/normal/size so the agent can select the same face in code. Shift-click for several.
