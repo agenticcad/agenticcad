@@ -321,6 +321,11 @@ Pre-1.0: minor bump for features, patch bump for fixes. `/api/version` serves bo
 - **A/B evals**: `AGENTICCAD_LEGACY_BUILD=1 .venv/bin/python evals/run.py --ids cad_long_script_edit --repeat 3 --label legacy`
   vs the same without the variable measures whole-script rebuilds against `edit_model` (cost and wall time per case are
   in the result JSON/MD under `evals/results/`).
+- **Windows install test** (`.github/workflows/smoke-windows.yml`, after every release build or by hand): installs the
+  released `.msi` on a clean Windows runner, installs Claude Code with Anthropic's installer, starts the installed app
+  and checks it through its API (`tools/ci/smoke.py`: build with inch threads and a gear, STEP/STL, inch drawings), then
+  gives it the `ANTHROPIC_API_KEY` repo secret through Settings and has the real agent build a part
+  (`tools/ci/agent_smoke.py`, a few cents per run). Forks never get the secret and skip the agent step.
 - **Unit tests** (`tests/`): kernel (bodies, ids, exact normals, exports, measurement), script editing
   (params, rename/delete/add), CAM (holes, sections, every op, arc post, machine checks, feeds, and an
   independent fine-grid engagement audit of the adaptive op), drawings, library, and the FastAPI/WebSocket
