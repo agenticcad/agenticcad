@@ -34,20 +34,22 @@ jobs:
           if (-not $exe) { "AgenticCAD.exe not found"; exit 1 }
           "installed at $($exe.FullName)"
           "EXE=$($exe.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append
-      - name: start the installed app and wait for its server
+      - name: start the installed app and smoke-test it (one step, the runner kills leftover processes between steps)
         shell: pwsh
         run: |
           $env:AGENTICCAD_WORKSPACE = "$env:RUNNER_TEMP\agenticcad-ws"; $env:PORT = "8799"
           $proc = Start-Process -FilePath $env:EXE -PassThru -RedirectStandardOutput app-out.log -RedirectStandardError app-err.log
-          "PID=$($proc.Id)" | Out-File -FilePath $env:GITHUB_ENV -Append
+          $up = $false
           for ($i = 0; $i -lt 120; $i++) {
-            try { Invoke-RestMethod http://127.0.0.1:8799/api/version -TimeoutSec 2 | ConvertTo-Json -Compress; exit 0 } catch { Start-Sleep 1 }
-            if ($proc.HasExited) { "app exited with $($proc.ExitCode)"; Get-Content app-out.log, app-err.log -ErrorAction SilentlyContinue; exit 1 }
+            try { Invoke-RestMethod http://127.0.0.1:8799/api/version -TimeoutSec 2 | Out-Null; $up = $true; break } catch { Start-Sleep 1 }
+            if ($proc.HasExited) { break }
           }
-          "server did not answer in 120 s"; Get-Content app-out.log, app-err.log -ErrorAction SilentlyContinue; exit 1
-      - name: smoke tests (build, threads, gear, STEP/STL, drawings)
-        shell: bash
-        run: python tools/ci/smoke.py http://127.0.0.1:8799 "${{ inputs.tag }}"
+          if (-not $up) { "server did not come up (exited: $($proc.HasExited) code: $($proc.ExitCode))"; exit 1 }
+          "server up after $i s; app still running: $(-not $proc.HasExited)"
+          python tools/ci/smoke.py http://127.0.0.1:8799 "${{ inputs.tag }}"
+          $rc = $LASTEXITCODE
+          "app still running after the tests: $(-not $proc.HasExited)"
+          exit $rc
       - name: app logs
         if: always()
         shell: pwsh
