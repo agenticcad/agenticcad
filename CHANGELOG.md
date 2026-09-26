@@ -5,6 +5,8 @@ features, patch bumps fix things. The version shown in the UI header comes from 
 
 ## [Unreleased]
 
+## [0.16.1] — 2026-09-26
+
 ### Added
 - **Licence acceptance at install.** The macOS download is now a standard `.pkg` installer (a `.dmg` can't carry a
   licence step) with a welcome page and the licence and terms behind Agree / Disagree; the Windows `.msi` shows the same
@@ -16,8 +18,6 @@ features, patch bumps fix things. The version shown in the UI header comes from 
 ### Fixed
 - Slicing failed with "No such file … model.stl" when the workspace path was relative: the slicer runs inside the
   slicing folder, so paths are now made absolute first.
-
-### Fixed
 - The Parameters card no longer labels plain numbers "mm" (they may be angles or counts); only `x * inch` parameters carry an "in" badge.
 
 ## [0.16.0] — 2026-09-25
