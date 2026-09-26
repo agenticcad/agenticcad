@@ -1,0 +1,54 @@
+# Install the released Windows MSI on a clean Windows runner and smoke-test the installed app through its local API.
+# Runs after every package build, or by hand for any release tag. Free on this public repo.
+name: smoke-windows
+on:
+  workflow_dispatch:
+    inputs:
+      tag: { description: "Release tag to test (e.g. v0.16.1)", required: true }
+  workflow_call:
+    inputs:
+      tag: { type: string, required: true }
+permissions:
+  contents: read
+jobs:
+  install-and-run:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install websocket-client
+      - name: download the installer from the release
+        shell: bash
+        env: { GH_TOKEN: "${{ github.token }}" }
+        run: gh release download "${{ inputs.tag }}" -R "${{ github.repository }}" -p '*.msi' -D dist && ls -la dist
+      - name: install silently, like a user would (licence accepted by /qn)
+        shell: pwsh
+        run: |
+          $msi = (Get-ChildItem dist\*.msi)[0].FullName
+          $p = Start-Process msiexec.exe -ArgumentList "/i `"$msi`" /qn /l*v install.log" -Wait -PassThru
+          "msiexec exit code: $($p.ExitCode)"
+          if ($p.ExitCode -ne 0) { Get-Content install.log -Tail 60; exit 1 }
+          $exe = Get-ChildItem -Recurse -Filter AgenticCAD.exe -ErrorAction SilentlyContinue "$env:ProgramFiles", "$env:LOCALAPPDATA\Programs" | Select-Object -First 1
+          if (-not $exe) { "AgenticCAD.exe not found"; exit 1 }
+          "installed at $($exe.FullName)"
+          "EXE=$($exe.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append
+      - name: start the installed app and wait for its server
+        shell: pwsh
+        run: |
+          $env:AGENTICCAD_WORKSPACE = "$env:RUNNER_TEMP\agenticcad-ws"; $env:PORT = "8799"
+          $proc = Start-Process -FilePath $env:EXE -PassThru -RedirectStandardOutput app-out.log -RedirectStandardError app-err.log
+          "PID=$($proc.Id)" | Out-File -FilePath $env:GITHUB_ENV -Append
+          for ($i = 0; $i -lt 120; $i++) {
+            try { Invoke-RestMethod http://127.0.0.1:8799/api/version -TimeoutSec 2 | ConvertTo-Json -Compress; exit 0 } catch { Start-Sleep 1 }
+            if ($proc.HasExited) { "app exited with $($proc.ExitCode)"; Get-Content app-out.log, app-err.log -ErrorAction SilentlyContinue; exit 1 }
+          }
+          "server did not answer in 120 s"; Get-Content app-out.log, app-err.log -ErrorAction SilentlyContinue; exit 1
+      - name: smoke tests (build, threads, gear, STEP/STL, drawings)
+        shell: bash
+        run: python tools/ci/smoke.py http://127.0.0.1:8799 "${{ inputs.tag }}"
+      - name: app logs
+        if: always()
+        shell: pwsh
+        run: Get-Content app-out.log, app-err.log -ErrorAction SilentlyContinue | Select-Object -Last 80

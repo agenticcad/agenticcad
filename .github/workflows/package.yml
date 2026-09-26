@@ -56,3 +56,8 @@ jobs:
         shell: bash
         env: { GH_TOKEN: "${{ github.token }}" }
         run: gh release upload "${{ github.event.release.tag_name || inputs.tag }}" dist/*.msi --clobber
+  windows-smoke:
+    needs: windows-x64
+    uses: ./.github/workflows/smoke-windows.yml
+    with:
+      tag: ${{ github.event.release.tag_name || inputs.tag }}
