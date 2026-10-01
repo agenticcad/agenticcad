@@ -4,6 +4,7 @@ from __future__ import annotations
 import base64
 import io
 import math
+import re
 
 import cad_kernel as ck
 import cam_kernel as cam
@@ -228,6 +229,206 @@ def _long_script(n_posts: int = 14) -> str:
 LONG_SCRIPT = _long_script()
 
 
+# ---- showcase assemblies (big multi-body models for the speed video)
+def _c3(b):
+    return tuple((lo + hi) / 2 for lo, hi in zip(b.bbox_min, b.bbox_max))
+
+
+def _size(b):
+    return tuple(hi - lo for lo, hi in zip(b.bbox_min, b.bbox_max))
+
+
+def no_overlaps(tol: float = 1.0):
+    """Real interference check: intersect every pair of bodies whose boxes overlap (a compound's volume can't show it)."""
+    def g(run: Run):
+        m = run.model
+        if m is None:
+            return [check("no interference", False, "no model")]
+        bad = []
+        bs = m.bodies
+        for i, a in enumerate(bs):
+            for b in bs[i + 1:]:
+                if any(a.bbox_max[k] <= b.bbox_min[k] + 1e-6 or b.bbox_max[k] <= a.bbox_min[k] + 1e-6 for k in range(3)):
+                    continue
+                x = a.shape & b.shape
+                v = x.volume if x is not None else 0.0
+                if v > tol:
+                    bad.append(f"{a.name}×{b.name} {v:.1f}mm³")
+        return [check("no interference between bodies", not bad, ", ".join(bad[:6]))]
+    return g
+
+
+def _dist_xz(a, b):
+    ca, cb = _c3(a), _c3(b)
+    return math.hypot(ca[0] - cb[0], ca[2] - cb[2])
+
+
+def _named(run: Run, *names):
+    m = run.model
+    got = {n: m.body_by_name(n) for n in names} if m else {}
+    missing = [n for n, b in got.items() if b is None] if m else list(names)
+    return got, missing
+
+
+def gearbox_checks(run: Run):
+    b, missing = _named(run, "Base", "FrontPlate", "Motor", "InputShaft", "IntermediateShaft", "OutputShaft",
+                        "Pinion1", "Gear1", "Pinion2", "Gear2")
+    if missing:
+        return [check("gearbox bodies present", False, f"missing {missing}")]
+    out = [check("stage 1 centre distance 42", abs(_dist_xz(b["Pinion1"], b["Gear1"]) - 42) < 0.3, f"{_dist_xz(b['Pinion1'], b['Gear1']):.2f}"),
+           check("stage 2 centre distance 42", abs(_dist_xz(b["Pinion2"], b["Gear2"]) - 42) < 0.3, f"{_dist_xz(b['Pinion2'], b['Gear2']):.2f}")]
+    for n, d in (("Pinion1", 24), ("Pinion2", 24), ("Gear1", 66), ("Gear2", 66)):
+        s = _size(b[n])
+        out.append(check(f"{n} Ø{d} × 10 along Y", abs(s[0] - d) < 0.8 and abs(s[2] - d) < 0.8 and abs(s[1] - 10) < 0.3, f"size {tuple(round(v, 1) for v in s)}"))
+    for g, sh in (("Pinion1", "InputShaft"), ("Gear1", "IntermediateShaft"), ("Pinion2", "IntermediateShaft"), ("Gear2", "OutputShaft")):
+        out.append(check(f"{g} on {sh}", _dist_xz(b[g], b[sh]) < 0.3, f"{_dist_xz(b[g], b[sh]):.2f}"))
+    ms = _size(b["Motor"])
+    out.append(check("Motor 42.3 square × 40", abs(ms[0] - 42.3) < 0.6 and abs(ms[2] - 42.3) < 0.6 and abs(ms[1] - 40) < 0.6, str(tuple(round(v, 1) for v in ms))))
+    out.append(check("Motor on the input axis", _dist_xz(b["Motor"], b["InputShaft"]) < 0.5, f"{_dist_xz(b['Motor'], b['InputShaft']):.2f}"))
+    radii = [round(f.radius, 2) for f in run.model.faces if f.kind == "CYLINDER"]
+    fp = b["FrontPlate"]
+    fp_r = [f.radius for f in run.model.faces if f.kind == "CYLINDER" and f.body_name == fp.name]
+    out.append(check("front plate: 4 motor screw holes Ø3.4", sum(1 for r in fp_r if abs(r - 1.7) < 0.05) >= 4, str(sorted(set(round(r, 2) for r in fp_r)))))
+    out.append(check("front plate: Ø22.5 motor pilot", any(abs(r - 11.25) < 0.05 for r in fp_r), str(sorted(set(radii)))[:120]))
+    return out
+
+
+def quad_checks(run: Run):
+    names = ["BottomPlate", "TopPlate", "FlightController", "Battery"] + [f"Motor{i}" for i in range(1, 5)] + [f"Prop{i}" for i in range(1, 5)]
+    b, missing = _named(run, *names)
+    if missing:
+        return [check("quad bodies present", False, f"missing {missing}")]
+    motors = [b[f"Motor{i}"] for i in range(1, 5)]
+    cs = [_c3(mo) for mo in motors]
+    diag = max(math.dist(p[:2], q[:2]) for p in cs for q in cs)
+    out = [check("220 mm motor-to-motor diagonal", abs(diag - 220) < 1.0, f"{diag:.1f}"),
+           check("motors sit on the bottom plate top (z=5)", all(abs(mo.bbox_min[2] - 5) < 0.3 for mo in motors), str([round(mo.bbox_min[2], 2) for mo in motors])),
+           check("motors Ø28 × 18", all(abs(_size(mo)[0] - 28) < 0.5 and abs(_size(mo)[2] - 18) < 0.5 for mo in motors), str([tuple(round(v, 1) for v in _size(mo)) for mo in motors]))]
+    props = [b[f"Prop{i}"] for i in range(1, 5)]
+    over = [min(motors, key=lambda mo: math.dist(_c3(mo)[:2], _c3(p)[:2])) for p in props]
+    tips = [2 * max(math.hypot(v.X - _c3(mo)[0], v.Y - _c3(mo)[1]) for v in p.shape.tessellate(0.05)[0]) for p, mo in zip(props, over)]   # mesh: rounded tips have no vertex at the tip
+    out.append(check("props 127 mm tip to tip", all(125.5 <= t <= 130 for t in tips), str([round(t, 1) for t in tips])))
+    out.append(check("props centred over their motors, above them",
+                     len({id(mo) for mo in over}) == 4 and all(math.dist(_c3(p)[:2], _c3(mo)[:2]) < 1.0 and p.bbox_min[2] >= mo.bbox_max[2] - 0.3 for p, mo in zip(props, over)),
+                     str([(round(math.dist(_c3(p)[:2], _c3(mo)[:2]), 2), round(p.bbox_min[2], 2)) for p, mo in zip(props, over)])))
+    fc = _size(b["FlightController"])
+    out.append(check("flight controller 36 × 36 × 1.6", abs(fc[0] - 36) < 0.5 and abs(fc[1] - 36) < 0.5 and abs(fc[2] - 1.6) < 0.2, str(tuple(round(v, 2) for v in fc))))
+    out.append(check("battery sits on the top plate", abs(b["Battery"].bbox_min[2] - b["TopPlate"].bbox_max[2]) < 0.3, f"{b['Battery'].bbox_min[2]:.2f} vs {b['TopPlate'].bbox_max[2]:.2f}"))
+    bp = b["BottomPlate"].shape
+    m3 = cam.holes(bp, 3.05, 3.35); m5 = cam.holes(bp, 4.85, 5.15)
+    want3 = [(c[0] + dx, c[1] + dy) for c in cs for dx in (-8, 8) for dy in (-8, 8)]            # 16 × 16 motor patterns...
+    want3 += [(dx, dy) for dx in (-15.25, 15.25) for dy in (-15.25, 15.25)]                    # ...and the 30.5 stack
+    rot3 = [(c[0] + r * math.cos(a), c[1] + r * math.sin(a)) for c in cs for r in (8 * math.sqrt(2),)   # pattern may be turned 45°
+            for a in (math.atan2(c[1], c[0]) + math.pi / 4 + k * math.pi / 2 for k in range(4))]
+    has = lambda pts: sum(any(math.dist(q, (h.x, h.y)) < 0.4 for h in m3) for q in pts)  # noqa: E731
+    n_motor = max(has(want3[:16]), has(rot3))
+    out.append(check("bottom plate: Ø3.2 motor patterns (16) and stack holes (4)", n_motor == 16 and has(want3[16:]) == 4,
+                     f"motor {n_motor}/16, stack {has(want3[16:])}/4, {len(m3)} Ø3.2 holes in all"))
+    out.append(check("bottom plate: Ø5 shaft hole under each motor", all(any(math.dist(c[:2], (h.x, h.y)) < 0.4 for h in m5) for c in cs), f"{len(m5)} Ø5 holes"))
+    return out
+
+
+# ---- showcase: NEMA 17 stepper + planetary gearhead, every part modelled (reference: evals/reference/planetary_gearhead.py)
+def _teeth(shape, r, z, c=(0.0, 0.0), n=720):
+    from build123d import Vector
+    ins = [shape.is_inside(Vector(c[0] + r * math.cos(2 * math.pi * k / n), c[1] + r * math.sin(2 * math.pi * k / n), z)) for k in range(n)]
+    return sum(1 for k in range(n) if ins[k] and not ins[k - 1])
+
+
+def _first_tooth_angle(shape, r, z, n=1440):
+    from build123d import Vector
+    ins = [shape.is_inside(Vector(r * math.cos(2 * math.pi * k / n), r * math.sin(2 * math.pi * k / n), z)) for k in range(n)]
+    return next(360 * k / n for k in range(n) if ins[k] and not ins[k - 1])
+
+
+def interference_free(strict: float = 0.05, fastener: float = 6.0):
+    """Pairwise solid intersection. Mating real threads (a body named *Screw*) may overlap by up to `fastener` mm³."""
+    def g(run: Run):
+        m = run.model
+        if m is None:
+            return [check("no interference", False, "no model")]
+        bad = []
+        bs = m.bodies
+        for i, a in enumerate(bs):
+            for b in bs[i + 1:]:
+                if any(a.bbox_max[k] <= b.bbox_min[k] + 1e-6 or b.bbox_max[k] <= a.bbox_min[k] + 1e-6 for k in range(3)):
+                    continue
+                try:
+                    x = a.shape & b.shape
+                    v = x.volume if x is not None else 0.0
+                except ValueError:                     # empty intersection comes back as a null shape
+                    v = 0.0
+                tol = fastener if ("screw" in a.name.lower() or "screw" in b.name.lower()) else strict
+                if v > tol:
+                    bad.append(f"{a.path}×{b.path} {v:.2f}mm³")
+        return [check("no interference between any of the parts", not bad, "; ".join(bad[:8]) + (f" (+{len(bad) - 8})" if len(bad) > 8 else ""))]
+    return g
+
+
+GEARHEAD_NAMES = ["FrontCap", "Stator", "RearCap", "Shaft", "RotorCupA", "RotorCupB", "RotorMagnet"] + [f"Coil{i}" for i in range(1, 9)] + \
+    ["AdapterPlate", "RingGear", "Sun", "SetScrew", "Planet1", "Planet2", "Planet3", "CarrierRearPlate", "Carrier", "FrontCover",
+     "OutputKey"] + [f"HousingScrew{i}" for i in range(1, 5)]
+
+
+def gearhead_checks(run: Run):
+    m = run.model
+    b = {n: m.body_by_name(n) for n in GEARHEAD_NAMES}
+    missing = [n for n, x in b.items() if x is None]
+    out = [check("all named parts present", not missing, f"missing {missing}")]
+    if missing:
+        return out
+    zc = lambda x: (x.bbox_min[2] + x.bbox_max[2]) / 2  # noqa: E731
+    # gears: tooth counts on the pitch circles, coaxial sun, planets on a 10.8 radius 120° apart
+    out.append(check("sun: 18 teeth, on the motor axis", _teeth(b["Sun"].shape, 5.4, zc(b["Sun"]) + 2) == 18 and math.hypot(*_c3(b["Sun"])[:2]) < 0.05,
+                     f"{_teeth(b['Sun'].shape, 5.4, zc(b['Sun']) + 2)} teeth"))
+    pc = [_c3(b[f"Planet{i}"]) for i in (1, 2, 3)]
+    out.append(check("planets: 18 teeth each", all(_teeth(b[f"Planet{i}"].shape, 5.4, pc[i - 1][2], pc[i - 1][:2]) == 18 for i in (1, 2, 3)),
+                     str([_teeth(b[f"Planet{i}"].shape, 5.4, pc[i - 1][2], pc[i - 1][:2]) for i in (1, 2, 3)])))
+    rad = [math.hypot(p[0], p[1]) for p in pc]
+    angs = sorted(math.degrees(math.atan2(p[1], p[0])) % 360 for p in pc)
+    gaps = [(angs[(i + 1) % 3] - angs[i]) % 360 for i in range(3)]
+    out.append(check("planets on a 10.8 mm radius, 120° apart", all(abs(r - 10.8) < 0.1 for r in rad) and all(abs(gp - 120) < 0.5 for gp in gaps),
+                     f"radii {[round(r, 2) for r in rad]}, gaps {[round(gp, 1) for gp in gaps]}"))
+    rt = _teeth(b["RingGear"].shape, 16.2, zc(b["RingGear"]))
+    out.append(check("ring gear: 54 internal teeth", rt == 54, f"{rt}"))
+    # motor internals: 50-tooth rotor cups offset half a tooth, 8-pole stator with small teeth on the poles
+    za, zb = zc(b["RotorCupA"]), zc(b["RotorCupB"])
+    ta, tb = _teeth(b["RotorCupA"].shape, 10.85, za), _teeth(b["RotorCupB"].shape, 10.85, zb)
+    out.append(check("rotor cups: 50 teeth each", ta == 50 and tb == 50, f"{ta}, {tb}"))
+    off = (_first_tooth_angle(b["RotorCupB"].shape, 10.85, zb) - _first_tooth_angle(b["RotorCupA"].shape, 10.85, za)) % 7.2
+    out.append(check("rotor cups offset by half a tooth (3.6°)", abs(off - 3.6) < 0.6, f"{off:.2f}°"))
+    zs = zc(b["Stator"])
+    poles = _teeth(b["Stator"].shape, 14.0, zs)
+    out.append(check("stator: 8 poles", poles == 8, f"{poles}"))
+    ptee = max(_teeth(b["Stator"].shape, r, zs, n=2160) for r in (11.2, 11.3, 11.4, 11.5, 11.6))
+    out.append(check("stator poles carry small teeth (≥ 32 around the bore)", ptee >= 32, f"{ptee}"))
+    ss = _size(b["Stator"])
+    out.append(check("NEMA 17 frame 42.3 mm square", abs(ss[0] - 42.3) < 0.2 and abs(ss[1] - 42.3) < 0.2, str(tuple(round(v, 2) for v in ss))))
+    # bearings: real balls and raceway grooves
+    balls = [x for x in m.bodies if x.shape.faces() and all(f.geom_type.name == "SPHERE" for f in x.shape.faces())]
+    out.append(check("bearings have real balls (≥ 28)", len(balls) >= 28, f"{len(balls)} balls"))
+    torus = [x for x in m.bodies if "bearing" in x.path.lower() and any(f.geom_type.name == "TORUS" for f in x.shape.faces())]
+    out.append(check("bearing rings have raceway grooves (≥ 8 rings)", len(torus) >= 8, f"{len(torus)}"))
+    # fasteners: every screw carries a modelled helix; tapped holes are real threads too
+    screws = [x for x in m.bodies if "screw" in x.name.lower()]
+    helix = [x for x in screws if any(f.geom_type.name == "BSPLINE" for f in x.shape.faces())]
+    out.append(check("≥ 12 screws, all with real threads", len(screws) >= 12 and len(helix) == len(screws), f"{len(helix)}/{len(screws)} threaded"))
+    tapped = [t for t in m.threads if t.real and not t.external]
+    # tapped holes may come from tap(real=True) (registered) or from the agent's own helix geometry: accept either
+    helix_in = {n: sum(1 for f in b[n].shape.faces() if f.geom_type.name == "BSPLINE") for n in ("FrontCap", "Carrier", "FrontCover", "Sun")}
+    out.append(check("real tapped holes (≥ 12 registered, or helices in the front cap, carrier, cover and sun)",
+                     len(tapped) >= 12 or all(v > 0 for v in helix_in.values()), f"{len(tapped)} registered; helix faces {helix_in}"))
+    ks = sorted(_size(b["OutputKey"]))
+    out.append(check("3 × 3 × 12 output key", abs(ks[0] - 3) < 0.2 and abs(ks[1] - 3) < 0.2 and abs(ks[2] - 12) < 0.5, str([round(v, 2) for v in ks])))
+    gap = b["OutputKey"].shape.distance_to(b["Carrier"].shape)
+    kc = _c3(b["OutputKey"]); kr = math.hypot(kc[0], kc[1])
+    out.append(check("key seated in the output shaft keyway", gap < 0.05 and 2.5 < kr < 4.5, f"gap {gap:.2f} mm, key centre {kr:.2f} mm off axis"))
+    pins = [x for x in m.bodies if "connector" in x.path.lower() and "pin" in x.name.lower()]
+    out.append(check("connector with 6 pins", len(pins) == 6, f"{len(pins)}"))
+    out.append(check("says the ratio is 4:1", bool(re.search(r"\b4(\.0)?\s*:\s*1\b", run.text)), run.text[-200:]))
+    return out
+
+
 CASES: list[Case] = [
     Case("cad_box_hole", tags=["cad"],
          prompt="Make a 20 × 30 × 10 mm block centred on the origin with a Ø5 through hole down the centre (Z axis). Single body called Block.",
@@ -361,4 +562,52 @@ CASES: list[Case] = [
          prompt="CAM for the Bracket on the Generic 3018: face the stock and cut the outline through with the 6 mm endmill (2 tabs). Then export the G-code as bracket_run and tell me how many lines it has.",
          graders=[no_agent_error(), expect_program(["face", "contour"], min_ops=2), expect_tools_used("export_gcode"),
                   files_in("exports", "bracket_run*.nc"), expect_answer(r"\b\d{2,5}\s*lines")]),
+    Case("cad_showcase_gearbox", tags=["cad", "showcase", "gears"],
+         prompt=("Model a two-stage spur reduction gearbox, 9:1, as a multi-body assembly. All gears module 1.5, 20° pressure angle, 10 mm face width, 8 mm bores. "
+                 "Base: 160 × 90 × 8 mm plate centred on the origin, z 0 to 8, with four Ø6.6 mounting holes 10 mm in from each corner. "
+                 "FrontPlate and BackPlate: 140 mm long (X) × 70 mm tall × 6 mm thick side plates standing on the base, parallel to XZ, inner faces at y = ±30. "
+                 "Three Ø8 shafts along Y at z = 50: InputShaft at x = -42, IntermediateShaft at x = 0, OutputShaft at x = 42. Input and intermediate shafts run between the plates' outer faces (y -36 to 36); "
+                 "the output shaft runs from y -36 out the back to y 60. The plates get Ø8 bores where the shafts pass. "
+                 "Stage 1 at y = -12: a 14-tooth Pinion1 on the input shaft meshing with a 42-tooth Gear1 on the intermediate shaft. "
+                 "Stage 2 at y = +12: a 14-tooth Pinion2 on the intermediate shaft meshing with a 42-tooth Gear2 on the output shaft. "
+                 "Motor: a NEMA 17 body, 42.3 mm square × 40 mm, on the outside of the front plate (y -36 to -76), coaxial with the input shaft; "
+                 "the front plate gets its 4 × Ø3.4 screw holes on a 31 mm square and a Ø22.5 pilot hole instead of the input bore. "
+                 "Eleven bodies, none overlapping."),
+         graders=[no_agent_error(), expect_bodies(["Base", "FrontPlate", "BackPlate", "InputShaft", "IntermediateShaft", "OutputShaft",
+                                                   "Pinion1", "Gear1", "Pinion2", "Gear2", "Motor"], count=11),
+                  expect_holes(4, diameter=6.6, body="Base"), no_overlaps(), gearbox_checks]),
+    Case("cad_showcase_quad", tags=["cad", "showcase"],
+         prompt=("Model a 5-inch FPV quadcopter as separate bodies, X layout, 220 mm motor-to-motor diagonal, centred on the origin. "
+                 "BottomPlate: one 5 mm plate (z 0 to 5): an 80 × 40 mm centre with four 22 mm wide arms running diagonally out to the motors, with rounded ends. "
+                 "At each motor: four Ø3.2 holes on a 16 × 16 mm square and a Ø5 centre hole. In the centre: four Ø3.2 stack holes on a 30.5 mm square. "
+                 "Four Ø5 × 6 mm spacers (Spacer1-4) on the stack holes carry a 36 × 36 × 1.6 mm FlightController board. "
+                 "Four Ø5 × 25 mm standoffs (Standoff1-4) at (±34, ±15) carry a 2 mm, 80 × 40 mm TopPlate (z 30 to 32). "
+                 "A 75 × 35 × 30 mm Battery sits centred on the top plate. "
+                 "Motor1-4: Ø28 × 18 mm on the arm ends, sitting on the plate. Prop1-4: two-blade 5-inch props on top of each motor, "
+                 "127 mm tip to tip, blades 12 mm wide and 3 mm thick, with a Ø12 × 6 mm hub. Twenty bodies, none overlapping."),
+         graders=[no_agent_error(), expect_bodies(count=20), no_overlaps(), quad_checks]),
+    Case("cad_showcase_planetary", tags=["cad", "showcase", "gears", "threads"],
+         prompt=(
+             "Model a NEMA 17 stepper motor with a 4:1 planetary gearhead, every physical part as its own body, at production-drawing detail. "
+             "No simplified stand-ins: real involute gears, real bearings with balls, real helical threads on every screw and tapped hole. "
+             "Motor axis is Z, motor front face at z = 0. Components: Motor and Gearhead, bearings as sub-components.\n"
+             "MOTOR (40 mm hybrid stepper): FrontCap (aluminium, z -8 to 0, 42.3 mm square, chamfered corners, Ø22 × 2 mm pilot boss, "
+             "four M3 tapped holes 4.5 deep on the 31 mm square from the front and 3 deep from the back, a 625 bearing seat and end-winding pocket inside). "
+             "Stator (laminated, z -30 to -8, 42.3 square with chamfered corners, 8 poles with 6 small teeth on each pole face, 22.2 bore). "
+             "Coil1-Coil8 wound round the pole necks, end turns sitting in the cap pockets. RotorCupA and RotorCupB (50 teeth, Ø22, 9 mm long, "
+             "offset half a tooth) with an axially magnetised RotorMagnet between them. Shaft Ø5 from z -35 to +24 with a 0.5 mm D-flat on the last 15 mm. "
+             "FrontBearing and RearBearing: 625 (5 × 16 × 5). RearCap (z -40 to -30) with a JST-PH 6-pin Connector (housing and 6 pins) in a pocket in its side. "
+             "Four M3 × 35 socket screws from the back through the rear cap and stator into the front cap.\n"
+             "GEARHEAD (module 0.6, 20°): AdapterPlate (z 0 to 9, 42.3 square, pilot recess underneath). "
+             "RingGear (z 9 to 27, 42.3 square outside, 54 internal teeth; sketch the tooth profile and extrude it). "
+             "Sun (18 teeth, z 13 to 21.8, Ø10 hub below it, D-bore on the motor shaft, radial M3 SetScrew with hex socket on the flat). "
+             "Planet1-3 (18 teeth, 8 wide, z 13.5 to 21.5) on bronze bushings and Ø3 planet pins, thrust washers each side. "
+             "Two-plate planet carrier: CarrierRearPlate (Ø30 × 2) held by three M2 countersunk screws into posts on the Carrier, "
+             "whose front plate carries a Ø8 output shaft to z 60 with a keyway and a 3 × 3 × 12 OutputKey. "
+             "Output shaft in two 688 bearings (8 × 16 × 5) in the FrontCover (z 27 to 40, Ø22 pilot boss, four M3 mounting holes on a 28 mm circle), "
+             "with a spacer below them, an internal circlip and an E-clip on the shaft. "
+             "Four M3 × 40 socket HousingScrew1-4 through cover, ring and adapter into the motor.\n"
+             "Nothing may overlap anything else. Tell me the ratio when you are done."),
+         graders=[no_agent_error(), interference_free(), gearhead_checks,
+                  lambda run: [check("≥ 95 bodies", run.model is not None and len(run.model.bodies) >= 95, f"{len(run.model.bodies) if run.model else 0}")]]),
 ]
