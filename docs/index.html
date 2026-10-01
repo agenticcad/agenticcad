@@ -3,11 +3,11 @@
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Documentation — AgenticCAD</title>
-<meta name="description" content="AgenticCAD documentation: install, the workspace, design as script, chat and selection, ribbon tools, sketches, threads, parameters, measure, drawings, library, CAM, settings, agent tools, tests and evals.">
+<meta name="description" content="AgenticCAD documentation: install, the workspace, design as script, chat and selection, ribbon tools, sketches, threads, gears, the Design Kit, parameters, measure, drawings, library, CAM, settings, agent tools, tests and evals.">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M16 3 28 9.5v13L16 29 4 22.5v-13L16 3Z' fill='none' stroke='%234ea1ff' stroke-width='2'/%3E%3Ccircle cx='16' cy='16' r='4' fill='%23ff8c42'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="../assets/site.css?v=0.16.1">
+<link rel="stylesheet" href="../assets/site.css?v=0.17.0">
 <style>
   .docs{display:grid;grid-template-columns:250px 1fr;gap:56px;padding:44px 0 80px}
   .toc{position:sticky;top:76px;align-self:start;max-height:calc(100vh - 100px);overflow:auto;font-size:13px;padding-right:8px}
@@ -39,7 +39,7 @@
 <div class="wrap docs">
   <aside class="toc" id="toc">
     <div class="g">Start</div><a href="#overview">Overview</a><a href="#desktop">Desktop app</a><a href="#install">Install from source</a><a href="#workspace">The workspace</a>
-    <div class="g">Design</div><a href="#script">Design as script</a><a href="#chat">Chat and selection</a><a href="#images">Reference images</a><a href="#bodies">Bodies and the Browser</a><a href="#ribbon">Ribbon tools</a><a href="#sketches">Sketches</a><a href="#units">Units</a><a href="#threads">Threads</a><a href="#gears">Gears</a><a href="#params">Parameters</a><a href="#measure">Measure</a><a href="#drawings">Shop drawings</a><a href="#library">Part library</a><a href="#step">STEP import and export</a><a href="#printing">3D printing</a><a href="#fidelity">Fidelity</a>
+    <div class="g">Design</div><a href="#script">Design as script</a><a href="#chat">Chat and selection</a><a href="#images">Reference images</a><a href="#bodies">Bodies and the Browser</a><a href="#ribbon">Ribbon tools</a><a href="#sketches">Sketches</a><a href="#units">Units</a><a href="#threads">Threads</a><a href="#gears">Gears</a><a href="#kit">Design Kit</a><a href="#params">Parameters</a><a href="#measure">Measure</a><a href="#drawings">Shop drawings</a><a href="#library">Part library</a><a href="#step">STEP import and export</a><a href="#printing">3D printing</a><a href="#fidelity">Fidelity</a>
     <div class="g">CAM</div><a href="#cam">CAM overview</a><a href="#machines">Machines and tools</a><a href="#ops">Operations</a><a href="#adaptive">Adaptive clearing</a><a href="#post">Post and G-code</a>
     <div class="g">Agent</div><a href="#settings">Settings and MCP</a><a href="#tools">Agent tools reference</a>
     <div class="g">Reference</div><a href="#shortcuts">Keyboard shortcuts</a><a href="#architecture">Architecture</a><a href="#files">Files and API</a><a href="#versioning">Versioning</a><a href="#tests">Tests and evals</a><a href="#gaps">Known gaps and roadmap</a><a href="#licence">Licence</a>
@@ -173,6 +173,25 @@ sketch1 = _sketch1.sketch
     <h2 id="gears">Gears</h2>
     <p>Scripts can call <code>spur_gear(module, teeth, thickness, bore=0, pressure_angle=20, hub_d=0, hub_h=0, keyway=(w, depth))</code> for a true involute spur gear (Z up, tooth 0 on +X), <code>involute_gear_profile(module, teeth)</code> for the closed 2D outline, and <code>gear_dims(...)</code> / <code>gear_centre_distance(module, za, zb)</code> to lay out a train. Meshing gears share module and pressure angle; rotate one by half a tooth pitch so the teeth interleave. Ask for it in plain words: <i>“a 20-tooth module 2 gear, 10 thick, 8 mm bore, with a 20 mm hub”</i>.</p>
     <p>For complex assemblies the agent builds one body at a time, checking each build before adding the next, so a slip in one part does not cost the whole attempt.</p>
+    <p><b>Planetary sets.</b> <code>planetary_layout(module, sun, planet, n)</code> gives the ring tooth count, ratio, planet positions and the rotation each planet needs to mesh; it raises if the planets can't be equally spaced or would collide. Sketch a ring gear as the housing outline minus <code>involute_gear_profile(m, z_ring, addendum=1.25, clearance=0)</code> and extrude it, or use <code>kit.ring_gear</code> and <code>kit.planetary_stage</code>.</p>
+
+    <h2 id="kit">Design Kit</h2>
+    <p>Every script has a pre-imported <code>kit</code> of ready-made standard components, and the agent has a <code>kit</code> tool to search them together with design guides. It checks the kit before hand-modelling a standard part, then calls it in the script:</p>
+    <pre><code>motor = kit.nema_stepper(17, 40, detail="full")               <span class="hl-c"># dict of parts, front face at z = 0</span>
+stage = kit.planetary_stage(0.6, 18, 18, 3, face_width=8)     <span class="hl-c"># sun, phased planets, ring</span>
+result = {"Motor": motor, "Stage": kit.place(stage, Pos(0, 0, 13)),
+          "Bearing": kit.place(kit.ball_bearing("688ZZ"), Pos(0, 0, 29)),
+          "Screw": Pos(15.5, 15.5, 37) * kit.socket_screw("M3", 40, real=True)}</code></pre>
+    <table class="table"><tr><th>Category</th><th>Components</th></tr>
+      <tr><td>Fasteners</td><td>ISO socket, button and countersunk screws, set screws, hex bolts, nuts, washers (optional real threads), heat-set inserts, standoffs</td></tr>
+      <tr><td>Bearings, shafts</td><td>ball bearings by designation (608, 688ZZ, 6204-2RS, MR…) with rings, balls, cage and shields; circlips, E-clips, keys, collars, dowels and their cutters; rigid and jaw couplings</td></tr>
+      <tr><td>Transmission</td><td>spur and ring gears, complete planetary stages, GT2 pulleys, T8 lead screw and nut</td></tr>
+      <tr><td>Motors</td><td>NEMA 8 to 23 steppers (full internals for 14/17/23), hobby servos, 28BYJ-48, N20 gear motors</td></tr>
+      <tr><td>Electronics</td><td>Arduino Uno, Raspberry Pi 4 and Pico with exact mounting holes, fans with grille cutters, 18650 cells</td></tr>
+      <tr><td>Structure, enclosures</td><td>T-slot extrusions, corner brackets, T-nuts; a printable screw-lid box, bosses, vent slots, snap fits</td></tr>
+      <tr><td>Mechanisms, fluid</td><td>hinges, compression and extension springs on their real helix, knobs, pull handles, cams, links; O-rings with groove cutters, tube, push-fit fittings, hose barbs</td></tr></table>
+    <p>27 guides cover gears, bearings, shafts, springs, linkages, O-rings, fasteners, motors, boards, frames, enclosures, fits, materials, metric threads and stock sizes, FDM and resin printing, CNC, sheet metal, laser cutting, moulding and build123d pitfalls. Each workspace has its own kit layer in <code>workspace/kit/</code>: the agent adds notes to entries, saves guides and components there, and its <code>TOC.md</code> is regenerated with what the workspace uses most. Agent tool: <code>kit(action, ...)</code> with toc, search, read, note, save_guide, save_part.</p>
+    <p><b>Draft threads.</b> While the agent works, <code>real=True</code> threads build as plain cylinders so rebuilds stay fast; when its turn ends the app builds the design once with the real helices (⚙ Settings key <code>draft_threads</code>).</p>
 
     <h2 id="params">Parameters</h2>
     <p>Every top-level <code>name = number</code> in the script is a field in the <b>Parameters</b> card under the Browser (<kbd>↑</kbd><kbd>↓</kbd> ±1, <kbd>⇧</kbd> ±10, <kbd>⌥</kbd> ±0.1). Changing one rewrites that literal and rebuilds. Library parts saved as designs keep their parameters, so <code>from_library("bracket", width=30)</code> works. Agent tools: <code>get_parameters</code>, <code>set_parameters</code>. API: <code>GET/POST /api/params</code>.</p>
@@ -264,6 +283,7 @@ program.<span class="hl-f">add</span>(<span class="hl-f">contour</span>(setup, t
       <tr><td><code>measure(...)</code>, <code>mass_properties(...)</code></td><td>distances, angles, hole spacing; volume, mass, centre of mass, clearance</td></tr>
       <tr><td><code>make_drawings(material?)</code></td><td>shop drawings (SVG + DXF)</td></tr>
       <tr><td><code>library(action, ...)</code></td><td>list, search, get, insert, save_design, save_body, delete</td></tr>
+      <tr><td><code>kit(action, ...)</code></td><td>the Design Kit: toc, search and read components and guides; note, save_guide, save_part into the workspace's kit</td></tr>
       <tr><td><code>sketch(action, ...)</code></td><td>list, get, set, delete sketch blocks in the editor's item format</td></tr>
       <tr><td><code>slicer_info(machine?, search?)</code>, <code>slice_for_printing(machine?, process?, filament?, body?, layer_height?, ...)</code></td><td><b>only when a slicer is installed</b>: printers and compatible profiles; slice for 3D printing and show the layers in the viewer</td></tr>
       <tr><td><code>cam_context()</code></td><td>machines, tools, model facts, holes, current program</td></tr>
@@ -365,7 +385,7 @@ program.<span class="hl-f">add</span>(<span class="hl-f">contour</span>(setup, t
   </main>
 </div>
 <footer><div class="wrap"><span>© 2026 AgenticCAD · PolyForm Noncommercial 1.0.0</span><a href="../terms.html">Terms</a><a href="../privacy.html">Privacy</a><a href="#" data-cookie-settings>Cookie settings</a><a href="https://github.com/agenticcad/agenticcad">GitHub</a><a href="../tutorials/">Tutorials</a><a href="../index.html">Home</a></div></footer>
-<script src="../assets/site.js?v=0.16.1"></script>
+<script src="../assets/site.js?v=0.17.0"></script>
 <script>
   const links = [...document.querySelectorAll('.toc a')], heads = links.map(a => document.querySelector(a.getAttribute('href')));
   const io = new IntersectionObserver(() => { let cur = 0; heads.forEach((h, i) => { if (h && h.getBoundingClientRect().top < 120) cur = i; }); links.forEach((a, i) => a.classList.toggle('on', i === cur)); }, { rootMargin: '-100px 0px -70% 0px', threshold: [0, 1] });
