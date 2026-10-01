@@ -77,3 +77,54 @@ def test_drawing_calls_out_threads(workspace):
     assert "1× M4×0.7 ↧6" in svg and "1× M6×1 THRU" in svg
     rows = {r["thread"] for r in res[0]["holes"] if r["view"] == "top"}
     assert rows == {"M4×0.7 ↧6", "M6×1 THRU"}
+
+
+def test_helpers_are_safe_inside_builders_and_locations():
+    """bolt/tap/hole/... inside BuildPart + Locations must neither raise nor add to the builder."""
+    import cad_kernel as ck
+    m = ck.run_script('''
+blank = Box(10, 10, 10)
+with BuildPart() as bp:
+    Box(20, 20, 5)
+    with Locations((5, 5, 0), (-5, -5, 0)):
+        b = bolt("M3", 10, head="socket")
+        w = washer("M3")
+        t = tap(blank, "M3", at=(0, 0, 5), depth=4)
+result = {"Plate": bp.part, "Bolt": Pos(0, 0, 20) * b, "Tapped": Pos(-30, 0, 0) * t}
+''')
+    assert abs(m.body_by_name("Plate").volume - 20 * 20 * 5) < 1e-6
+    assert abs(m.body_by_name("Bolt").bbox_min[2] - 10) < 0.01
+
+
+def test_real_bolts_are_reused_and_independent():
+    from build123d import Pos
+    a = thr.bolt("M2", 5, head="socket", real=True)
+    b = thr.bolt("M2", 5, head="socket", real=True)
+    assert a is not b and abs(a.volume - b.volume) < 1e-9
+    moved = Pos(10, 0, 0) * a
+    assert abs(b.bounding_box().center().X) < 0.01 and abs(moved.bounding_box().center().X - 10) < 0.01
+
+
+def test_draft_mode_builds_real_threads_plain_and_counts_them():
+    code = '''
+s = kit.socket_screw("M3", 10, real=True)
+b = bolt("M2", 6, head="socket", real=True)
+p = tap(Box(10, 10, 6), "M3", at=(0, 0, 3), depth=4, real=True)
+result = {"S": s, "B": Pos(10, 0, 0) * b, "P": Pos(-15, 0, 0) * p}
+'''
+    draft = ck.run_script(code, threads="draft")
+    real = ck.run_script(code)
+    helix = lambda m: sum(1 for f in m.faces if f.kind == "BSPLINE")  # noqa: E731
+    assert draft.draft_threads >= 3 and helix(draft) == 0 and "built plain" in draft.summary()
+    assert real.draft_threads == 0 and helix(real) > 0 and "built plain" not in real.summary()
+    again = ck.run_script(code, threads="draft")                  # the cache must not hand a draft screw to a real build
+    assert helix(ck.run_script(code)) == helix(real) and again.draft_threads >= 1
+
+
+
+@pytest.mark.parametrize("size,depth", [("M2", 7), ("M2.5", 9), ("M4", 10), ("M5", 15)])
+def test_real_tapped_holes_stay_one_solid(size, depth):
+    """OCCT's fuse-then-clean silently returned an EMPTY part for these (M2 over ~5 mm, M4, M5)."""
+    from build123d import Align, Box
+    x = thr.tap(Box(14, 14, 20, align=(Align.CENTER, Align.CENTER, Align.MIN)), size, at=(0, 0, 20), depth=depth, real=True)
+    assert len(x.solids()) == 1 and x.volume > 3000 and any(f.geom_type.name == "BSPLINE" for f in x.faces())

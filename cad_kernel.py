@@ -129,6 +129,7 @@ class Model:
     warnings: list[str] = field(default_factory=list)
     threads: list[Any] = field(default_factory=list)      # threads.ThreadSpec registered by the script
     sketches: list[dict[str, Any]] = field(default_factory=list)   # top-level build123d Sketch objects
+    draft_threads: int = 0        # real=True threads built plain because the script ran in draft thread mode
 
     @property
     def shape(self) -> Shape:
@@ -170,6 +171,10 @@ class Model:
         ]
         for b in self.bodies:
             lines.append("  " + b.summary())
+        if self.draft_threads:
+            lines.append(f"Threads: {self.draft_threads} real=True thread(s) were built plain to keep this rebuild fast (draft "
+                         "threads during your turn); the app models the real helices once when your turn ends. Don't try to "
+                         "check helix geometry mid-turn.")
         if self.sketches:
             lines.append("Sketches (build123d Sketch objects; extrude(sk, amount=h), or part - extrude(sk, amount=-h) to cut): "
                          + "; ".join(f"{sk['name']}: {sk['faces']} face(s), area {sk['area']:.1f}mm², on plane origin ({fmt(sk['origin'])}) normal ({fmt(sk['normal'])})" for sk in self.sketches))
@@ -313,15 +318,31 @@ def script_namespace() -> dict[str, Any]:
     return ns
 
 
-def run_script(code: str, quality: str = "normal", workspace: Path | None = None, library=None) -> Model:
+_KITS: dict[str, Any] = {}
+
+
+def design_kit(workspace: Path | None):
+    """The Design Kit for a workspace (built-in components + guides, plus <workspace>/kit/). One per workspace."""
+    import designkit
+    key = str(workspace) if workspace else ""
+    if key not in _KITS:
+        _KITS[key] = designkit.Kit(workspace)
+    return _KITS[key]
+
+
+def run_script(code: str, quality: str = "normal", workspace: Path | None = None, library=None, threads: str = "real") -> Model:
     """Execute a build123d script. The script must assign `result`.
-    `workspace` / `library` bind import_step() and from_library() for this run."""
+    `workspace` / `library` bind import_step() and from_library() for this run.
+    threads="draft" builds real=True threads plain (fast iteration); model.draft_threads counts how many."""
     ns = script_namespace()
+    ns["kit"] = design_kit(workspace or _CTX_WORKSPACE.get() or WORKSPACE).namespace()
     buf = io.StringIO()
     tok_w = _CTX_WORKSPACE.set(workspace or _CTX_WORKSPACE.get() or WORKSPACE)
     tok_l = _CTX_LIBRARY.set(library or _CTX_LIBRARY.get() or LIBRARY)
     tok_t = thr.begin_registry()
+    tok_m = thr.begin_mode(threads)
     registered: list[Any] = []
+    draft_threads = 0
     try:
         with contextlib.redirect_stdout(buf):
             exec(compile(code, "model.py", "exec"), ns)
@@ -331,6 +352,7 @@ def run_script(code: str, quality: str = "normal", workspace: Path | None = None
         raise CadError("\n".join(lines) + ("\nstdout:\n" + buf.getvalue() if buf.getvalue() else ""))
     finally:
         registered = thr.end_registry(tok_t)
+        draft_threads = thr.end_mode(tok_m)
         _CTX_WORKSPACE.reset(tok_w); _CTX_LIBRARY.reset(tok_l)
 
     if "result" not in ns:
@@ -339,6 +361,7 @@ def run_script(code: str, quality: str = "normal", workspace: Path | None = None
     pairs = coerce_bodies(ns["result"])          # [] = an empty design (result = {} / None): allowed, nothing to show yet
     model = build_model(pairs, code, quality)
     model.stdout = buf.getvalue()
+    model.draft_threads = draft_threads
     model.threads = [t for t in registered if not t.external]
     model.sketches = collect_sketches(ns)
     model.mesh["sketches"] = model.sketches

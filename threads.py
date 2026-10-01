@@ -6,6 +6,8 @@ geometry for bolts, nuts, tapped holes, and a per-run registry so drawings can c
 """
 from __future__ import annotations
 
+import copy
+import functools
 import math
 from contextvars import ContextVar
 from dataclasses import dataclass
@@ -64,6 +66,24 @@ WASHER_IN = {"#4": (0.125, 0.312, 0.032), "#6": (0.156, 0.375, 0.049), "#8": (0.
 _UN_BY_SIZE = {}
 for _k in UN:
     _UN_BY_SIZE.setdefault(_k.split("-")[0], []).append(_k)
+
+
+
+def builder_safe(fn):
+    """Run a helper as if no BuildPart/BuildSketch/Locations block were open, so the shapes it makes are only
+    returned (never added to, or rejected by, the user's surrounding builder)."""
+    from build123d.build_common import Builder, LocationList
+
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        t1 = Builder._current.set(None)
+        t2 = LocationList._current.set(None)
+        try:
+            return fn(*args, **kwargs)
+        finally:
+            LocationList._current.reset(t2)
+            Builder._current.reset(t1)
+    return wrapper
 
 
 class ThreadError(Exception):
@@ -174,6 +194,36 @@ class ThreadSpec:
 
 
 _REGISTRY: ContextVar[list[ThreadSpec] | None] = ContextVar("agenticcad_threads", default=None)
+_MODE: ContextVar[str] = ContextVar("agenticcad_thread_mode", default="real")
+_DOWNGRADED: ContextVar[list[int] | None] = ContextVar("agenticcad_threads_downgraded", default=None)
+
+
+def thread_mode() -> str:
+    """"real" (real=True models the helix) or "draft" (real=True builds plain, for fast iteration)."""
+    return _MODE.get()
+
+
+def begin_mode(mode: str) -> tuple[Any, Any]:
+    if mode not in ("real", "draft"):
+        raise ThreadError("thread mode must be real | draft")
+    return _MODE.set(mode), _DOWNGRADED.set([0])
+
+
+def end_mode(tokens: tuple[Any, Any]) -> int:
+    """Reset the mode; returns how many real=True requests were built plain."""
+    n = (_DOWNGRADED.get() or [0])[0]
+    _MODE.reset(tokens[0]); _DOWNGRADED.reset(tokens[1])
+    return n
+
+
+def use_real(real: bool) -> bool:
+    """What a helper should do with real=True under the current mode (and count draft downgrades)."""
+    if real and _MODE.get() == "draft":
+        box = _DOWNGRADED.get()
+        if box is not None:
+            box[0] += 1
+        return False
+    return bool(real)
 
 
 def begin_registry() -> Any:
@@ -193,16 +243,62 @@ def _register(spec: ThreadSpec) -> None:
 
 
 # ---------------------------------------------------------------------------- geometry
+
+def _union(a, b):
+    """a ∪ b for thread geometry, robustly. With fine helices OCCT often fails in ways that are silent: `a + b`
+    (fuse then clean) can return an EMPTY shape (seen for M2 over ~5 mm, M4, M5), and a plain fuse can leave the
+    thread as a separate solid. Try a plain fuse, then fuzzy fuses, and keep the first result that is one solid per
+    solid of `a` with a sensible volume; clean it only if cleaning keeps it intact."""
+    n_a = max(1, len(a.solids()))
+    lo = a.volume * 0.5
+    best = None
+    for tol in (None, 1e-4, 1e-3):
+        try:
+            r = a.fuse(b, tol=tol) if tol else a.fuse(b)
+        except Exception:  # noqa: BLE001
+            continue
+        if not r.solids() or r.volume < lo:
+            continue
+        best = best or r
+        if len(r.solids()) <= n_a:
+            try:
+                c = r.clean()
+                if len(c.solids()) == len(r.solids()) and abs(c.volume - r.volume) <= 1e-3 * max(1.0, abs(r.volume)):
+                    return c
+            except Exception:  # noqa: BLE001
+                pass
+            return r
+    return best if best is not None else a.fuse(b)
+
+
 def _iso_thread(major: float, pitch: float, length: float, external: bool, end_finishes=("fade", "fade")):
     from bd_warehouse.thread import IsoThread
     return IsoThread(major_diameter=major, pitch=pitch, length=length, external=external, end_finishes=end_finishes)
 
 
+@builder_safe
 def bolt(size: str, length: float, head: str = "hex", real: bool = False, thread_length: float | None = None) -> Part:
     """A bolt with its head above z=0 and the shank going down −Z (so `Pos(x, y, surface_z) * bolt(...)`
-    sits on a surface). head: hex | socket | none. real=True models the thread (slower, many faces)."""
-    d = thread(size); s = d["size"]; major, pitch = d["major"], d["pitch"]
+    sits on a surface). head: hex | socket | none. real=True models the thread (slower, many faces; identical
+    real bolts are built once per process and reused). thread_length: threaded length from the tip (ISO 4762
+    socket screws are threaded 2d + 12 mm when longer than that; the rest is plain shank)."""
+    real = use_real(real)
+    d = thread(size); s = d["size"]; pitch = d["pitch"]
     tl = min(length, thread_length if thread_length is not None else length)
+    if head not in ("hex", "socket", "none"):
+        raise ThreadError("head must be hex | socket | none")
+    out = _bolt_solid(s, float(length), head, bool(real), float(tl)) if real else _bolt_build(s, float(length), head, False, float(tl))
+    _register(ThreadSpec(s, pitch, (0, 0, 0), (0, 0, -1), length, False, real, external=True))
+    return copy.copy(out) if real else out
+
+
+@functools.lru_cache(maxsize=64)
+def _bolt_solid(size: str, length: float, head: str, real: bool, tl: float) -> Part:
+    return _bolt_build(size, length, head, real, tl)
+
+
+def _bolt_build(size: str, length: float, head: str, real: bool, tl: float) -> Part:
+    d = thread(size); major, pitch = d["major"], d["pitch"]
     shank_len = length - tl
     parts = []
     if head == "hex":
@@ -221,18 +317,21 @@ def bolt(size: str, length: float, head: str = "hex", real: bool = False, thread
     if real:
         core = Pos(0, 0, -length) * Cylinder(d["minor"] / 2 + 0.05, tl, align=(Align.CENTER, Align.CENTER, Align.MIN))
         thr = Pos(0, 0, -length) * _iso_thread(major, pitch, tl, True, ("fade", "fade" if shank_len > 0 else "fade"))
-        parts.append(core + thr)
+        parts.append(_union(core, thr))
     else:
         parts.append(Pos(0, 0, -length) * Cylinder(major / 2, tl, align=(Align.CENTER, Align.CENTER, Align.MIN)))
     out = parts[0]
     for p in parts[1:]:
-        out = out + p
-    _register(ThreadSpec(s, pitch, (0, 0, 0), (0, 0, -1), length, False, real, external=True))
+        out = _union(out, p) if real else out + p
+    if not out.solids():
+        raise ThreadError(f"building the {size} × {length:g} bolt failed in the kernel; try real=False")
     return out
 
 
+@builder_safe
 def nut(size: str, real: bool = False) -> Part:
     """Hex nut sitting on z=0 (bottom face) going +Z."""
+    real = use_real(real)
     d = thread(size); s = d["size"]; af, h = _hardware(d, "nut")
     body = extrude(RegularPolygon(af / 2 / math.cos(math.pi / 6), 6), h)
     if real:
@@ -242,11 +341,13 @@ def nut(size: str, real: bool = False) -> Part:
     return body
 
 
+@builder_safe
 def washer(size: str) -> Part:
     inner, outer, t = _hardware(thread(size), "washer")
     return Cylinder(outer / 2, t, align=(Align.CENTER, Align.CENTER, Align.MIN)) - Cylinder(inner / 2, t * 3)
 
 
+@builder_safe
 def tapped_hole(size: str, depth: float, at=(0, 0, 0), through: bool = False, axis=(0, 0, -1)) -> Part:
     """A cosmetic CUTTER for a tapped hole (tap-drill diameter) starting at model point `at` going along `axis`.
     Subtract it: `part -= tapped_hole("M4", 10, at=(x, y, top_z))`. For real thread geometry use tap(part, ...)."""
@@ -260,10 +361,12 @@ def tapped_hole(size: str, depth: float, at=(0, 0, 0), through: bool = False, ax
     return cutter
 
 
+@builder_safe
 def tap(part: Part, size: str, at, depth: float | None = None, through: bool = False, real: bool = False,
         axis=(0, 0, -1), clearance_depth: float = 0.0) -> Part:
     """Cut (and, if real, thread) a tapped hole into `part` starting at model point `at`, going along `axis`.
     through=True cuts all the way. Registers the thread so drawings call it out (e.g. 'M4×0.7 THRU', '1/4-20 UNC THRU')."""
+    real = use_real(real)
     d = thread(size)
     ax = Vector(*axis).normalized()
     bb = part.bounding_box()
@@ -277,13 +380,35 @@ def tap(part: Part, size: str, at, depth: float | None = None, through: bool = F
     out = part - cutter
     if real:
         thr_len = length - 0.3 if not through else span
-        thr = _iso_thread(d["major"], d["pitch"], thr_len, False, ("fade", "fade"))
-        out = out + pl * (Pos(0, 0, -thr_len - 0.5) * thr)
+        thr = pl * (Pos(0, 0, -thr_len - 0.5) * _iso_thread(d["major"], d["pitch"], thr_len, False, ("fade", "fade")))
+        # keep only the thread where the part had material (through holes, holes that break into a bore or pocket)
+        try:
+            material = part & (pl * Cylinder(d["major"] / 2 + 0.3, length + 0.5, align=(Align.CENTER, Align.CENTER, Align.MAX)))
+            trimmed = thr & material if material is not None and material.solids() else None
+            if trimmed is not None and trimmed.solids():
+                thr = trimmed
+        except Exception:  # noqa: BLE001
+            pass
+        vol_before, n_before = out.volume, max(1, len(out.solids()))
+        joined = _union(out, thr)
+        if not joined.solids() or joined.volume < 0.5 * vol_before or len(joined.solids()) > n_before:
+            # Complex parts can defeat the boolean. Thread a small plug around the hole instead, then join the plug
+            # back along its plain cylindrical seam, which the kernel handles reliably.
+            region = pl * Pos(0, 0, -thr_len - 0.7) * Cylinder(d["major"] / 2 + 0.6, thr_len + 0.4, align=(Align.CENTER, Align.CENTER, Align.MIN))
+            try:
+                joined = _union(out - region, _union(out & region, thr))
+            except Exception:  # noqa: BLE001
+                pass
+        out = joined
+        if not out.solids() or out.volume < 0.5 * vol_before or len(out.solids()) > n_before:
+            raise ThreadError(f"modelling the real {d['size']} thread at {tuple(round(v, 3) for v in at)} failed in the kernel; "
+                              "use real=False for this hole (cosmetic thread) or a shorter depth")
     _register(ThreadSpec(d["size"], d["pitch"], tuple(float(v) for v in at), tuple(float(v) for v in ax),
                          None if through else float(depth), through, real))
     return out
 
 
+@builder_safe
 def hole(part: Part, diameter: float, at, depth: float | None = None, through: bool = False, axis=(0, 0, -1),
          counterbore: tuple[float, float] | None = None, countersink: float | None = None) -> Part:
     """Plain (untapped) hole from surface point `at` along `axis`. through=True cuts all the way.

@@ -63,3 +63,47 @@ def test_disconnected_edges_hint_and_no_builtin_shell(tmp_path):
     src = inspect.getsource(agent_mod.CadAgent.start)
     assert "tools=builtin" in src and 'builtin: list[str] = []' in src
     assert "strict_mcp_config=True" in src          # the user's claude.ai connectors never join the CAD session
+
+
+def test_helpers_are_safe_inside_builders():
+    """Calling the gear helpers inside BuildPart/BuildSketch must not add anything to that builder, and the
+    profile must be usable in a sketch (the way to make an internal ring gear: outline minus a tooth profile)."""
+    m = ck.run_script('''
+with BuildPart() as bp:
+    Box(50, 50, 5)
+    g = spur_gear(0.6, 18, 8, bore=5)
+with BuildSketch() as rs:
+    Circle(20)
+    add(involute_gear_profile(0.6, 54, addendum=1.25, clearance=0.0), mode=Mode.SUBTRACT)
+result = {"Plate": bp.part, "Gear": Pos(0, 0, 20) * g, "Ring": Pos(0, 0, 40) * extrude(rs.sketch, 8)}
+''')
+    assert abs(m.body_by_name("Plate").volume - 50 * 50 * 5) < 1e-6
+    assert abs(m.body_by_name("Ring").bbox_max[0] - 20) < 1e-6 and m.body_by_name("Ring").volume > 0
+
+
+@pytest.mark.parametrize("zs,zp,n", [(12, 18, 3), (15, 21, 3), (16, 16, 4), (18, 18, 3), (13, 17, 3), (11, 19, 3)])
+def test_planetary_layout_meshes_without_interference(zs, zp, n):
+    L = gears.planetary_layout(1.0, zs, zp, n)
+    assert L["ring_teeth"] == zs + 2 * zp and abs(L["ratio"] - (1 + L["ring_teeth"] / zs)) < 1e-12
+    m = ck.run_script(f'''
+L = planetary_layout(1.0, {zs}, {zp}, {n})
+with BuildSketch() as rs:
+    Circle(L["ring_teeth"] / 2 + 5)
+    add(Rot(0, 0, L["ring_rotation"]) * involute_gear_profile(1.0, L["ring_teeth"], addendum=1.25, clearance=0.0, backlash=-0.04), mode=Mode.SUBTRACT)
+res = {{"Ring": extrude(rs.sketch, 4), "Sun": spur_gear(1.0, {zs}, 4, backlash=0.04)}}
+for i, p in enumerate(L["planets"]):
+    res[f"P{{i}}"] = Pos(p["x"], p["y"], 0) * Rot(0, 0, p["rotation"]) * spur_gear(1.0, {zp}, 4, backlash=0.04)
+result = res
+''')
+    bs = m.bodies
+    for i, a in enumerate(bs):
+        for b in bs[i + 1:]:
+            x = a.shape & b.shape
+            assert (x.volume if x is not None else 0) < 0.01, (a.name, b.name)
+
+
+def test_planetary_layout_rejects_impossible_sets():
+    with pytest.raises(gears.GearError):
+        gears.planetary_layout(1.0, 14, 21, 3)        # 14 + 56 = 70, not divisible by 3
+    with pytest.raises(gears.GearError):
+        gears.planetary_layout(1.0, 6, 30, 3)         # planets overlap each other
