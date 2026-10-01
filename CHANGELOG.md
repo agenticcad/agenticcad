@@ -5,6 +5,41 @@ features, patch bumps fix things. The version shown in the UI header comes from 
 
 ## [Unreleased]
 
+## [0.17.0] — 2026-10-02
+
+### Added
+- **Design Kit.** Scripts get a pre-imported `kit` of ready-made standard components, and the agent a `kit` tool to
+  search and read them along with design guides. First set: ISO socket/button/countersunk screws, set screws, hex
+  bolts, nuts and washers (optional real threads); ball bearings by designation (608, 688ZZ, 6204-2RS, MR…) with
+  rings, raceways, balls, cages and shields; circlips, E-clips, keys, collars and dowels with their groove/keyway
+  cutters; spur and internal ring gears and complete planetary stages; NEMA 8–23 steppers, with full internals for
+  14/17/23; hobby servos, 28BYJ-48 and N20 gear motors; Arduino Uno, Raspberry Pi 4 and Pico boards with exact
+  mounting holes; fans with grille cutters; 18650 cells; T-slot extrusions, corner brackets and T-nuts; GT2 pulleys
+  and a T8 lead screw; rigid and jaw couplings; heat-set inserts and standoffs; a printable screw-lid enclosure,
+  bosses, vent slots and snap fits; hinges, compression and extension springs swept along their real helix, knobs,
+  pull handles, disc cams and link bars; O-rings with face/piston/rod groove cutters, tube, push-fit fittings and hose
+  barbs (63 components). 27 guides: gears, belts and lead screws, bearings, shafts, springs, linkages and cams, hinges,
+  O-ring grooves, fasteners and plastic fastening, motors, boards, extrusion frames, enclosures, FDM and resin
+  printing, CNC machining, sheet metal, laser cutting, injection moulding, fits, materials, metric threads, stock
+  sizes, face selection and build123d pitfalls. Each workspace has its own kit layer the agent adds notes, guides and components to; its
+  table of contents is generated and ranks what the workspace uses most. See `designkit/README.md`.
+- `planetary_layout(module, sun, planet, n)`: ring teeth, ratio, planet positions and mesh phasing, verified
+  interference-free for even and odd tooth counts.
+- Real-thread bolts are built once per process and reused; `thread_length` gives long screws a partial thread.
+- **Draft threads while the agent works.** During an agent turn, `real=True` threads build as plain cylinders (a
+  100-part gearhead rebuilds in 14 s instead of 72 s); when the turn ends the app builds the design once with the real
+  helices. Settings key `draft_threads` turns it off.
+
+### Fixed
+- **Real threads could silently vanish.** Fusing a modelled thread into a part could return an empty shape (M2 over
+  ~5 mm, M4, M5) or leave the thread as a loose solid, and through-holes left thread sticking out of the part. Threads
+  are now trimmed to the part's material, joined with a checked union (plain, then fuzzy, then locally around the
+  hole), and `tap` raises a clear error instead of ever returning an empty part.
+- If the final real-thread build at the end of an agent turn fails, the agent gets the error and one chance to fix it.
+- The gear and thread helpers (`spur_gear`, `involute_gear_profile`, `bolt`, `tap`, `hole`, `nut`, `washer`) now work
+  inside `BuildPart` / `BuildSketch` / `Locations` blocks. Before, they raised errors or silently merged into the
+  surrounding part.
+
 ## [0.16.1] — 2026-09-26
 
 ### Added

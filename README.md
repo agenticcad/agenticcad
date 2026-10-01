@@ -63,6 +63,7 @@ redistributes it; `agent.find_claude_cli()` locates the user's own install.
 | `export_model(name?, formats?)` | STEP / STL into `workspace/exports/` |
 | `get_code()` | current script |
 | `save_design(name?)` | save the script into `workspace/designs/` (only when the user asks) |
+| `kit(action, ...)` | the Design Kit: `toc`, `search`, `read` components and guides; `note`, `save_guide`, `save_part` into the workspace's kit |
 | `slicer_info(machine?)`, `slice_for_printing(...)` | **only when a slicer is installed**: printers/profiles; slice for 3D printing and show the layers |
 
 ## UI
@@ -289,6 +290,10 @@ cutter), `tap(part, size, at=.., depth=.. | through=True, real=False)` (cuts, an
 the helix via bd_warehouse), `bolt(size, length, head=hex|socket|none, real=False)`, `nut`, `washer`.
 Tapped holes are registered per build: the model summary lists them and shop drawings call them out
 ("M4×0.7 THRU" instead of "Ø3.3").
+Real threads are trimmed to the part's material and joined with a checked union, so a modelled tapped hole never
+silently empties the part. While the agent works, `real=True` threads build plain ("draft threads", about 5× faster
+rebuilds on a thread-heavy assembly) and the app models the real helices once at the end of the turn; the
+`draft_threads` setting turns that off.
 
 ## Gears ([gears.py](gears.py))
 
@@ -297,7 +302,28 @@ keyway=(w, depth))` → involute spur gear solid (Z up, tooth 0 on +X); `involut
 Face; `gear_dims(module, teeth)` (pitch, outside, root, base diameters); `gear_centre_distance(module, za, zb)`.
 The outline is one closed Polyline, so it never hits build123d's "Edges are disconnected" (the classic failure of
 hand-rolled involutes, which the build error now hints about). The agent is told to build complex parts one body per
-`build_model` call and to use these helpers rather than derive tooth flanks itself.
+`build_model` call and to use these helpers rather than derive tooth flanks itself. `planetary_layout(module, sun, planet, n)` gives the
+ring tooth count, ratio, planet positions and the mesh phasing (checked interference-free for even and odd tooth
+counts); sketch a ring gear as an outline minus `involute_gear_profile(m, z_ring, addendum=1.25, clearance=0)`, or use
+`kit.ring_gear` / `kit.planetary_stage`. All gear and thread helpers are safe inside `BuildPart`/`BuildSketch` blocks.
+
+## Design Kit ([designkit/](designkit/README.md))
+
+Scripts have a pre-imported `kit` of ready-made standard components, and the agent a `kit` tool to search and read
+them alongside design guides. 63 components (ISO fasteners with optional real threads, ball bearings by designation
+with balls and cages, circlips, keys and couplings, gears and planetary stages, GT2 pulleys and lead screws, NEMA
+steppers with full internals, servos, boards with exact mounting holes, fans, T-slot extrusions, printable enclosures,
+real helical springs, hinges, knobs, O-rings with groove cutters, fittings) and 27 guides (gears, bearings, fits,
+materials, threads, motors, boards, frames, enclosures, springs, linkages, O-rings, FDM/resin printing, CNC, sheet
+metal, laser cutting, moulding, build123d pitfalls). Each workspace has its own kit layer (`<workspace>/kit/`) where
+the agent adds notes, guides and components; its `TOC.md` is generated and lists what that workspace uses most.
+
+```python
+motor = kit.nema_stepper(17, 40, detail="full")               # dict of parts, front face at z = 0
+stage = kit.planetary_stage(0.6, 18, 18, 3, face_width=8)     # sun, phased planets, ring
+result = {"Motor": motor, "Stage": kit.place(stage, Pos(0, 0, 13)),
+          "Bearing": kit.place(kit.ball_bearing("688ZZ"), Pos(0, 0, 29))}
+```
 
 ## Versioning
 
@@ -316,7 +342,7 @@ Pre-1.0: minor bump for features, patch bump for fixes. `/api/version` serves bo
 
 ```bash
 .venv/bin/python -m pytest -q            # 123 unit/API tests, ~20 s, no Claude calls
-.venv/bin/python evals/run.py            # agent evals, 31 cases, ~$4, a few minutes (3 in parallel); needs a Claude login or API key
+.venv/bin/python evals/run.py            # agent evals, 34 cases (the 3 showcase assemblies are long: run them with --filter showcase); needs a Claude login or API key
 .venv/bin/python evals/run.py --filter cam --model claude-sonnet-5 --repeat 3
 ```
 
@@ -341,7 +367,7 @@ Pre-1.0: minor bump for features, patch bump for fixes. `/api/version` serves bo
 
 ## Status, gaps and roadmap
 
-**Status (v0.16.x):** working end to end on a single machine for a single user — design by chat, by
+**Status (v0.17.x):** working end to end on a single machine for a single user — design by chat, by
 hand, or both; multi-body designs; sketches; threads; measurement; drawings; part library; CAM with a
 GRBL post; settings for model/effort/MCP servers; unit tests and graded agent evals. Treat it as a
 capable prototype, not a shipped product: the modelling kernel is exact and the toolpaths are checked,
