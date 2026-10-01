@@ -116,6 +116,18 @@ Rules
 - Keep dimensions as top-level `name = number` assignments: they appear in the user's Parameters panel and
   `set_parameters` can change them without a rewrite. `import_step("file.step")` loads a STEP from
   workspace/imports (the user may have imported one; the script then already contains the line).
+  Design Kit: scripts have a pre-imported `kit` with ready-made standard components (ISO screws, nuts, set screws,
+  inserts and standoffs with optional real threads; ball bearings by designation with balls and cages; circlips,
+  E-clips, keys, collars, dowels and couplings; spur/ring gears, planetary stages, GT2 pulleys and lead screws; NEMA
+  steppers, servos and gear motors; Arduino/Raspberry Pi boards with exact mounting holes, fans; T-slot extrusions,
+  brackets and T-nuts; printable enclosures, bosses, vents and snap fits; hinges, real helical springs, knobs,
+  handles, cams and links; O-rings with groove cutters, tube and fittings) and design guides (gears, belts, bearings,
+  springs, linkages, O-rings, fits, materials, threads and stock sizes, fasteners, motors, boards, frames, enclosures,
+  FDM/resin printing, CNC, sheet metal, laser cutting, moulding, face selection, build123d pitfalls). Before hand-modelling a standard component or
+  designing in an unfamiliar area, `kit search` it, `kit read` the entry, then call it: `kit.ball_bearing("688ZZ")`.
+  Multi-part components return a dict of parts; move them with `kit.place(obj, Pos(...))` and put them in `result`
+  as a component. When you learn something reusable (a fix, a gotcha, a good recipe), `kit note` it on the entry,
+  or `kit save_guide` / `kit save_part` it into this workspace's kit.
   `from_library("part name", param=value)` instantiates a library part. The part library is a first-class source of
   geometry: before modelling a standard or previously made part (fasteners, bearings, brackets, anything reusable),
   `library search` it and `library insert` it rather than re-creating it; when you build something reusable, offer to
@@ -148,7 +160,12 @@ Rules
   returns a true involute spur gear solid (Z up, tooth 0 on +X); `involute_gear_profile(module, teeth)` gives the
   closed Face; `gear_centre_distance(module, za, zb)` and `gear_dims(module, teeth)` for meshing/layout. Always use
   these instead of hand-rolling involute flanks. Meshing gears share module and pressure angle; rotate one by half a
-  tooth pitch (180/teeth degrees) so teeth interleave.
+  tooth pitch (180/teeth degrees) so teeth interleave. Internal (ring) gear: sketch the housing outline and subtract
+  `Rot(0, 0, L["ring_rotation"]) * involute_gear_profile(m, L["ring_teeth"], addendum=1.25, clearance=0)` (its
+  tooth spaces are the ring's teeth), then extrude. Planetary: `L = planetary_layout(m, sun_teeth, planet_teeth, n)`
+  gives ring_teeth, ratio, centre_distance and per planet x, y and `rotation` (turn the planet by that about its own
+  axis, then move it to x, y); it raises if the planets can't be equally spaced or would collide.
+  The gear helpers are safe inside BuildPart/BuildSketch (they never add anything to the builder).
 - Closed profiles from your own points: build ONE ordered point list around the outline and close it with
   `make_face(Polyline(*pts, close=True))` (or `Spline` for smooth curves). Assembling a Wire from separately
   constructed Line/Arc/Spline pieces fails with "Edges are disconnected" as soon as two end points differ by
@@ -289,6 +306,7 @@ class CadAgent:
     def __init__(self, workspace: Path, emit: Emit,
                  screenshot_fn: Callable[[dict[str, Any]], Awaitable[str]]):
         self.workspace = workspace
+        self._agent_turn = False              # True while the agent is answering (builds use draft threads)
         self.designs_dir = workspace / "designs"
         self.designs_dir.mkdir(parents=True, exist_ok=True)
         self.emit = emit                     # broadcast an event to browsers
@@ -740,7 +758,7 @@ class CadAgent:
     # ------------------------------------------------------------------ model
     async def build(self, code: str, source: str = "agent", record: bool = True) -> ck.Model:
         async with self.model_lock:
-            model = await asyncio.to_thread(ck.run_script, code, self.quality, self.workspace, self.parts)
+            model = await asyncio.to_thread(ck.run_script, code, self.quality, self.workspace, self.parts, self._thread_mode())
             self.model = model
             (self.workspace / "model.py").write_text(code)
             hid = None
@@ -751,6 +769,8 @@ class CadAgent:
                              "summary": model.summary(6), "source": source, "history_id": hid,
                              "history_len": len(self._history_files())})
             await self.emit(self.design_state())
+            if record:
+                self._kit_used(code)
             if source == "user":
                 self.notes.append("The user edited and rebuilt the script by hand in the Code panel.")
             return model
@@ -763,7 +783,7 @@ class CadAgent:
             if self.model is None:
                 raise ck.CadError("no design yet")
             code = script_edit.apply_edits(self.model.code, edits, append)
-            model = await asyncio.to_thread(ck.run_script, code, self.quality, self.workspace, self.parts)
+            model = await asyncio.to_thread(ck.run_script, code, self.quality, self.workspace, self.parts, self._thread_mode())
             self.model = model
             (self.workspace / "model.py").write_text(code)
             hid = str(int(time.time() * 1000))
@@ -771,7 +791,31 @@ class CadAgent:
             await self.emit({"type": "model", "mesh": model.mesh, "code": code, "summary": model.summary(6), "source": source,
                              "history_id": hid, "history_len": len(self._history_files())})
             await self.emit(self.design_state())
+            self._kit_used(code)
             return model, code
+
+    def _thread_mode(self) -> str:
+        """Draft threads while the agent is working (4-5x faster rebuilds with real=True screws); real otherwise."""
+        return "draft" if self._agent_turn and self.settings.get("draft_threads", True) else "real"
+
+    async def finalize_threads(self) -> str | None:
+        """After an agent turn: if the current design was built with draft threads, build it once with the real ones.
+        Returns None when done (or nothing to do), else the build error (the design keeps its plain threads)."""
+        if self.model is None or not getattr(self.model, "draft_threads", 0):
+            return None
+        await self.emit({"type": "info", "text": f"modelling {self.model.draft_threads} real thread(s)…"})
+        try:
+            await self.build(self.model.code, source="agent", record=False)
+            return None
+        except Exception as e:  # noqa: BLE001
+            return str(e)
+
+    def _kit_used(self, code: str) -> None:
+        """Count Design Kit components this successfully built script calls (feeds the workspace kit's TOC)."""
+        try:
+            ck.design_kit(self.workspace).record_usage(code)
+        except Exception:  # noqa: BLE001 - usage stats must never break a build
+            pass
 
     async def set_quality(self, quality: str) -> None:
         """Re-tessellate the exact shapes for display at a different preset (no rebuild, no history)."""
@@ -1216,6 +1260,48 @@ class CadAgent:
             except Exception as e:  # noqa: BLE001
                 return {"content": [{"type": "text", "text": f"failed: {e}"}], "is_error": True}
 
+        @tool("kit", "The Design Kit: ready-made standard components (call them in scripts as kit.<name>(...)) and design guides. "
+              "action=toc (category?: the contents, most used first) | search (query, kind?: component|guide, category?, tags?) | "
+              "read (id: a guide's text, or a component's signature, parameters, standard, example and notes) | "
+              "note (id, text: add a dated lesson to an entry for next time) | save_guide (slug, title, category, summary, text, "
+              "tags?, related?: a markdown guide in this workspace's kit) | save_part (module, code: a Python module whose "
+              "functions are decorated @component(category=..., summary=..., tags=[...]) - build123d and helpers are pre-imported; "
+              "they become kit.<function>). Categories: " + ", ".join(__import__("designkit").CATEGORIES) + ".",
+              {"type": "object", "properties": {"action": {"type": "string", "enum": ["toc", "search", "read", "note", "save_guide", "save_part"]},
+                                                "query": {"type": "string"}, "id": {"type": "string"}, "kind": {"type": "string"},
+                                                "category": {"type": "string"}, "tags": {"type": "array", "items": {"type": "string"}},
+                                                "text": {"type": "string"}, "slug": {"type": "string"}, "title": {"type": "string"},
+                                                "summary": {"type": "string"}, "related": {"type": "array", "items": {"type": "string"}},
+                                                "module": {"type": "string"}, "code": {"type": "string"}}, "required": ["action"]})
+        async def kit_tool(args: dict[str, Any]) -> dict[str, Any]:
+            k = ck.design_kit(agent.workspace)
+            a = args["action"]
+
+            def ok(text: str) -> dict[str, Any]:
+                return {"content": [{"type": "text", "text": text}]}
+            try:
+                if a == "toc":
+                    return ok(k.toc(category=args.get("category")))
+                if a == "search":
+                    hits = k.search(args.get("query") or "", args.get("kind"), args.get("category"), args.get("tags"))
+                    return ok("\n".join(e.line(k.usage()) for e in hits) or "nothing matches; try other words or `toc`")
+                if a == "read":
+                    return ok(k.read(args.get("id") or ""))
+                if a == "note":
+                    eid = k.note(args.get("id") or "", args.get("text") or "")
+                    return ok(f"noted on {eid}")
+                if a == "save_guide":
+                    gid = await asyncio.to_thread(k.save_guide, args.get("slug") or args.get("title") or "guide", args.get("title") or "",
+                                                  args.get("category") or "", args.get("summary") or "", args.get("text") or "",
+                                                  args.get("tags"), args.get("related"))
+                    return ok(f"saved guide {gid}; the workspace TOC is updated")
+                if a == "save_part":
+                    names = await asyncio.to_thread(k.save_part, args.get("module") or "parts", args.get("code") or "")
+                    return ok("saved components: " + ", ".join(f"kit.{n}" for n in names) + "; the workspace TOC is updated")
+                return {"content": [{"type": "text", "text": f"unknown kit action {a!r}"}], "is_error": True}
+            except Exception as e:  # noqa: BLE001
+                return {"content": [{"type": "text", "text": f"failed: {e}"}], "is_error": True}
+
         @tool("sketch", "Read or edit UI-editable sketches (the `# sketch:NAME {...}` blocks). action=list | get (name) | "
               "set (name, plane, items: creates or replaces the block; the user can then edit it graphically) | delete (name). "
               "plane = {origin:[x,y,z], x_dir:[..], z_dir:[..], label}; items = list of {type:'rect',cx,cy,w,h,angle} | "
@@ -1308,7 +1394,7 @@ class CadAgent:
 
         tools = [build_model, *([] if LEGACY_BUILD else [edit_model]), inspect_model, screenshot, export_model, get_code, save_design,
                  cam_context, build_cam, get_cam_code, export_gcode, feeds_speeds, save_machine, save_tool,
-                 get_parameters, set_parameters, measure_tool, mass_properties, make_drawings, library_tool, sketch_tool] + slicing_tools
+                 get_parameters, set_parameters, measure_tool, mass_properties, make_drawings, library_tool, kit_tool, sketch_tool] + slicing_tools
         self.tool_handlers = {t.name: t.handler for t in tools}     # name -> async handler (tests call these directly)
         return create_sdk_mcp_server("cad", "0.4.0", tools=tools)
 
@@ -1355,6 +1441,7 @@ class CadAgent:
         "model": "claude-opus-5-5",        # default model; "" = the Claude Code default
         "effort": "",                      # "" = default; low | medium | high | xhigh | max
         "max_turns": 60,
+        "draft_threads": True,             # agent builds during a turn model real=True threads plain; real build at the end
         "thinking_display": "omitted",     # omitted | summarized (shows the thinking summary in chat)
         "web": True,                       # allow WebFetch / WebSearch
         "mcp_servers": {},                 # name -> {type: stdio|http|sse, command, args, env, url, headers, enabled}
@@ -1618,10 +1705,25 @@ class CadAgent:
                 await self.client.query(one_message())
             else:
                 await self.client.query(prompt)
+            self._agent_turn = True
             await self._pump()
+            for attempt in range(2):                     # real threads at the end; one chance for the agent to fix a failure
+                self._agent_turn = False
+                err = await self.finalize_threads()
+                if err is None:
+                    break
+                if attempt == 1:
+                    await self.emit({"type": "error", "text": f"The real threads failed to build, so the design keeps plain threads: {err}"})
+                    break
+                self._agent_turn = True
+                await self.client.query("[App] Your builds used draft threads; the final build with the real threads (real=True) "
+                                        f"failed:\n{err}\nFix the script so it also builds with real threads (for example make "
+                                        "that one hole or screw real=False), then finish; the app rebuilds with real threads again.")
+                await self._pump()
         except Exception as e:  # noqa: BLE001
             await self.emit({"type": "error", "text": f"{type(e).__name__}: {e}"})
         finally:
+            self._agent_turn = False
             self.busy = False
             await self.emit({"type": "status", "busy": False})
 

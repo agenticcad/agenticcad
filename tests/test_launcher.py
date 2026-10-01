@@ -84,6 +84,7 @@ def test_every_local_module_is_packaged():
     sources = tomllib.loads((root / "pyproject.toml").read_text())["tool"]["briefcase"]["app"]["agenticcad"]["sources"]
     packaged = {Path(s).name for s in sources}
     local = {p.stem for p in root.glob("*.py")}
+    local_pkgs = {p.parent.name for p in root.glob("*/__init__.py") if p.parent.name not in ("tests", "src", "build", "dist")}
     seen, todo = set(), ["server", "agent"] + ["agenticcad.app"]
     missing = set()
     while todo:
@@ -91,7 +92,8 @@ def test_every_local_module_is_packaged():
         if mod in seen:
             continue
         seen.add(mod)
-        path = root / f"{mod}.py" if mod in local else root / "src" / Path(*mod.split(".")).with_suffix(".py")
+        path = root / f"{mod}.py" if mod in local else (root / Path(*mod.split(".")).with_suffix(".py") if mod.split(".")[0] in local_pkgs
+                                                         else root / "src" / Path(*mod.split(".")).with_suffix(".py"))
         if not path.exists():
             continue
         for node in ast.walk(ast.parse(path.read_text())):
@@ -102,6 +104,11 @@ def test_every_local_module_is_packaged():
                     todo.append(top)
                     if f"{top}.py" not in packaged:
                         missing.add(top)
+                elif top in local_pkgs:
+                    if top not in packaged:
+                        missing.add(top)
+                    for sub in (root / top).rglob("*.py"):
+                        todo.append(".".join(sub.relative_to(root).with_suffix("").parts))
     assert not missing, f"imported by the app but not in pyproject [tool.briefcase.app.agenticcad].sources: {sorted(missing)}"
 
 

@@ -232,3 +232,45 @@ async def test_parallel_edit_model_calls_both_land(ag):
     assert ok(ra) and ok(rb), (text(ra), text(rb))
     assert {x.name for x in ag.model.bodies} == {"Plate", "PinA", "PinB"}
 
+
+
+async def test_kit_tool_search_read_note_save_and_usage(ag):
+    h = ag.tool_handlers["kit"]
+    r = await h({"action": "search", "query": "bearing 688"})
+    assert ok(r) and text(r).splitlines()[0].startswith("- `ball_bearing`")
+    r = await h({"action": "read", "id": "ball_bearing"})
+    assert ok(r) and "kit.ball_bearing(designation" in text(r)
+    assert ok(await h({"action": "note", "id": "ball_bearing", "text": "688ZZ is 5 wide"}))
+    assert "688ZZ is 5 wide" in text(await h({"action": "read", "id": "ball_bearing"}))
+    r = await h({"action": "save_guide", "slug": "belt-tension", "title": "Belt tension", "category": "transmission",
+                 "summary": "GT2 tension rules", "text": "Tension until it twangs.", "tags": ["gt2", "belt"]})
+    assert ok(r) and "transmission/belt-tension" in text(r)
+    r = await h({"action": "save_part", "module": "spacers", "code":
+                 '@component("shafts", "Plain spacer tube")\ndef spacer(d: float = 8, od: float = 12, length: float = 5):\n'
+                 '    return Cylinder(od / 2, length) - Cylinder(d / 2, length * 3)\n'})
+    assert ok(r) and "kit.spacer" in text(r)
+    r = await h({"action": "save_part", "module": "bad", "code": "x = 1"})
+    assert not ok(r)
+    # a successful build that calls kit components is counted, and the workspace TOC lists what was used
+    tr = await ag.tool_handlers["build_model"]({"code": "result = {'S': kit.spacer(), 'B': Pos(0, 0, 10) * kit.socket_screw('M3', 8)}"})
+    assert ok(tr)
+    toc = (ag.workspace / "kit" / "TOC.md").read_text()
+    assert "## Most used here" in toc and "`spacer`" in toc and "used 1×" in toc
+    r = await h({"action": "toc"})
+    assert ok(r) and "Design Kit contents" in text(r) and "`transmission/belt-tension`" in text(r)
+
+
+async def test_agent_turn_builds_draft_threads_then_finalizes_real(ag):
+    code = "result = {'S': kit.socket_screw('M3', 10, real=True), 'P': Pos(20, 0, 0) * Box(10, 10, 5)}"
+    ag._agent_turn = True
+    r = await ag.tool_handlers["build_model"]({"code": code})
+    assert ok(r) and "built plain" in text(r) and ag.model.draft_threads >= 1
+    ag._agent_turn = False
+    await ag.finalize_threads()
+    assert ag.model.draft_threads == 0 and any(f.kind == "BSPLINE" for f in ag.model.faces)
+    assert ag.model.code == code
+    ag.settings["draft_threads"] = False                          # the setting turns draft builds off
+    ag._agent_turn = True
+    r = await ag.tool_handlers["build_model"]({"code": code})
+    ag._agent_turn = False
+    assert ok(r) and ag.model.draft_threads == 0
