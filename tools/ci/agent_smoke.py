@@ -12,6 +12,10 @@ import urllib.request
 
 import websocket   # websocket-client
 
+# Windows runners print through cp1252; agent answers can contain any Unicode (−, Ø, …)
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
 base = sys.argv[1].rstrip("/")
 key = os.environ.get("ANTHROPIC_API_KEY", "")
 if not key:
