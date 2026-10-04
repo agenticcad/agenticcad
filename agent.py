@@ -273,7 +273,10 @@ polygons with holes (holes = islands for pocket, inner profiles for contour side
 shape, z, expand=tool.diameter) = what to clear at level z (expand lets the tool run off the stock edge); face_polygon(model.get_face(id)) uses a face the user clicked. Depths:
 z_bottom below the stock bottom means cutting into the spoilboard (fine for through-cuts with a sacrificial
 board, warn otherwise). Tool numbers matter for tool changes (GRBL: machine.tool_change='pause' emits M6/M0).
-Prefer the tool library's feeds/stepdown; override per op only with a reason. After build_cam, use `screenshot`
+Prefer the tool library's feeds/stepdown; override per op only with a reason. The user's own per-op tweaks from
+the CAM tab live in one line at the top of cam.py, `overrides({"Pocket": {"feed": 500, "stepover": 0.3}, "Face#2": {...}})`
+(keys = op names, "#2" for the second op with the same name; fields rpm, feed, plunge, stepdown, stepover as a
+fraction of Ø): always keep that line when you rewrite the script, and keep op names stable so it still matches. After build_cam, use `screenshot`
 to look at the toolpaths (they are drawn over the model; rapids red, cuts coloured per op).
 `export_gcode` writes the .nc file. `save_machine` / `save_tool` edit the libraries (JSON dicts; see cam_context).
 """
@@ -338,6 +341,38 @@ def _build_hint(e: BaseException) -> str:
         return ("\nHINT: build closed profiles as one ordered point list with make_face(Polyline(*pts, close=True)); "
                 "for gears use the pre-imported spur_gear() / involute_gear_profile().")
     return ""
+
+
+def _find_overrides(code: str) -> tuple[dict, tuple[int, int] | None]:
+    """The table of the top-level `overrides({...})` call in a CAM script and its line span (1-based, inclusive)."""
+    import ast
+    try:
+        tree = ast.parse(code)
+    except SyntaxError:
+        return {}, None
+    for node in tree.body:
+        if (isinstance(node, ast.Expr) and isinstance(node.value, ast.Call) and isinstance(node.value.func, ast.Name)
+                and node.value.func.id == "overrides" and node.value.args):
+            try:
+                table = ast.literal_eval(node.value.args[0])
+            except ValueError:
+                raise cam.CamError("the overrides({...}) line in cam.py is not a plain dict; edit it in the Code tab")
+            return dict(table or {}), (node.lineno, node.end_lineno)
+    return {}, None
+
+
+def _write_overrides(code: str, table: dict, span: tuple[int, int] | None) -> str:
+    def num(v: float):
+        return int(v) if float(v).is_integer() else round(float(v), 4)
+    body = ", ".join(f"{k!r}: {{" + ", ".join(f"{f!r}: {num(v)}" for f, v in vals.items()) + "}" for k, vals in table.items())
+    line = f"overrides({{{body}}})  # per-operation tool overrides (CAM tab)" if table else None
+    lines = code.splitlines()
+    if span:
+        a, b = span
+        lines[a - 1:b] = [line] if line else []
+    elif line:
+        lines.insert(0, line)
+    return "\n".join(lines) + ("\n" if code.endswith("\n") or not code else "")
 
 
 class CadAgent:
@@ -482,6 +517,24 @@ class CadAgent:
                          "summary": prog.summary(), "gcode_lines": prog.gcode().count("\n")})
         return prog
 
+    async def set_op_override(self, key: str, values: dict | None) -> cam.Program | None:
+        """CAM tab: set (or with empty/None values, clear) the tool overrides of one operation by rewriting the
+        `overrides({...})` line of cam.py, then rebuild."""
+        if not self.cam_code.strip():
+            raise cam.CamError("no CAM script")
+        table, span = _find_overrides(self.cam_code)
+        vals = {k: float(v) for k, v in (values or {}).items() if v not in (None, "") and k in cam.OVERRIDE_FIELDS}
+        if vals:
+            table[key] = vals
+        else:
+            table.pop(key, None)
+        code = _write_overrides(self.cam_code, table, span)
+        prog = await self.set_cam_code(code, source="user")
+        what = ", ".join(f"{k}={v:g}" for k, v in vals.items()) if vals else "cleared (tool defaults)"
+        self.notes.append(f"The user set per-operation overrides in the CAM tab for '{key}': {what}. They live in the "
+                          "`overrides({...})` line of cam.py; keep that line when you rewrite the script.")
+        return prog
+
     async def simulate(self, ops: list[int] | None = None, resolution: float | None = None):
         """Run the material-removal simulation (0-based op indices) and show it in the viewer."""
         import cam_sim
@@ -503,6 +556,7 @@ class CadAgent:
                    "bodies": {b.path: b.shape for b in self.model.bodies},
                    "tools": self.library.tool_map(), "machines": self.library.machines()})
         buf = io.StringIO()
+        cam.reset_overrides()
         try:
             with contextlib.redirect_stdout(buf):
                 exec(compile(code, "cam.py", "exec"), ns)
@@ -514,6 +568,7 @@ class CadAgent:
             raise cam.CamError("CAM script must assign `program = Program(setup, ...)`")
         if not prog.ops:
             raise cam.CamError("program has no operations (use program.add(...))")
+        prog.unused_overrides = cam.unused_overrides()
         return prog
 
     def cam_context(self) -> str:

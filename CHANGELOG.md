@@ -5,6 +5,26 @@ features, patch bumps fix things. The version shown in the UI header comes from 
 
 ## [Unreleased]
 
+## [0.19.0] — 2026-10-05
+
+### Added
+- **Per-operation tool settings.** Click an operation in the CAM tab to see the spindle speed, feed, plunge, stepdown
+  and stepover it runs with. Blank fields use the tool's values; typed values override them for that operation only,
+  and a calculator fills them for a material. They are stored as one `overrides({...})` line at the top of `cam.py`,
+  so they are saved with the design and the agent keeps them; overrides that no longer match an operation are flagged.
+- `POST /api/cam/feeds` computes feeds for a tool's values without saving it to the library.
+- **Stepdown caps per machine.** Machines have a `max_stepdown` by material (Settings ▸ Machines ▸ Max stepdown, e.g.
+  `aluminium=0.8, *=1.5`) that the feeds calculator respects and reports. The Makera Z1 (with and without the 4th axis)
+  caps aluminium at 0.8 mm, following Makera's "under 1 mm per pass", and the Generic 3018 gets aluminium 0.3 mm and
+  1 mm for other materials, as its notes already said. Existing workspaces receive these defaults once; a value you
+  change, even to blank, is kept.
+
+### Changed
+- **Machines and tools moved to Settings**, which is now a larger window with tabs (General, MCP servers, Drawings &
+  printing, Machines, Tools). Machines get a form (travel, feeds, spindle, collet, tool change, 4th axis, start/end
+  G-code, or JSON); tools an editable table with the feeds & speeds calculator. The CAM tab keeps the program:
+  setup, operations, simulation and G-code.
+
 ## [0.18.0] — 2026-10-04
 
 ### Added

@@ -10,6 +10,7 @@ from cam_kernel import Tool, Machine
 DEFAULT_MACHINES = [
     Machine(name="Generic 3018", travel={"x": 300, "y": 180, "z": 45}, max_feed={"x": 1500, "y": 1500, "z": 400},
             rapid=1500, spindle={"min": 1000, "max": 10000}, safe_z=5, clearance_z=15,
+            max_stepdown={"aluminium": 0.3, "*": 1.0},
             notes="Small desktop router. Light cuts: 0.5-1 mm stepdown in wood/plastic, ~0.3 mm in aluminium."),
     Machine(name="Shapeoko-class router", travel={"x": 800, "y": 800, "z": 80}, max_feed={"x": 5000, "y": 5000, "z": 1000},
             rapid=5000, spindle={"min": 8000, "max": 30000}, safe_z=5, clearance_z=20,
@@ -20,14 +21,14 @@ DEFAULT_MACHINES = [
     # 3600 deg/min or 1800 with A homing, Y soft limit -160 with the 4th axis), core-electronics.com.au (Air 4000 mm/min).
     Machine(name="Makera Z1", controller="makera", post="makera", travel={"x": 200, "y": 200, "z": 100},
             max_feed={"x": 1200, "y": 1200, "z": 600}, rapid=1200, spindle={"min": 0, "max": 13000},
-            tool_change="manual", safe_z=5, clearance_z=15, collet=3.175,
+            tool_change="manual", safe_z=5, clearance_z=15, collet=3.175, max_stepdown={"aluminium": 0.8},
             notes="Makera Z1 desktop CNC: 150 W spindle 0-13,000 rpm, 1/8\" collet as standard (other collets "
                   "available), manual quick tool change: M6 Tn moves to the change position, waits for the button and "
                   "measures the tool length. Firmware max rates X/Y 1200, Z 600 mm/min. Makera: aluminium < 1 mm per "
                   "pass; not for ferrous metals. Programs must be <= 63 characters per line (the post enforces it)."),
     Machine(name="Makera Z1 + 4th axis", controller="makera", post="makera", travel={"x": 200, "y": 159, "z": 100},
             max_feed={"x": 1200, "y": 1200, "z": 600}, rapid=1200, spindle={"min": 0, "max": 13000},
-            tool_change="manual", safe_z=5, clearance_z=15, collet=3.175,
+            tool_change="manual", safe_z=5, clearance_z=15, collet=3.175, max_stepdown={"aluminium": 0.8},
             rotary={"axis": "A", "about": "x", "max_diameter": 80, "max_length": 150, "max_speed": 1800, "installed": True},
             notes="Makera Z1 with the 4th axis module (Ø80 x 150 mm, ~2.5 Nm). A rotates about X; the work origin's "
                   "Y and Z must be on the rotary centreline (Makera's 4th-axis probing sets Z0 on the axis). With the "
@@ -75,6 +76,17 @@ class Library:
                 self.save_machine(asdict(m))
             seeded.add(m.name)
         seeded_p.write_text(json.dumps(sorted(seeded)))
+        # built-ins saved before a field existed get its default once (a value the user set, even {}, is kept)
+        for m in DEFAULT_MACHINES:
+            f = self.machines_dir / f"{_slug(m.name)}.json"
+            if m.max_stepdown and f.exists():
+                try:
+                    d = json.loads(f.read_text())
+                except Exception:
+                    continue
+                if d.get("name") == m.name and "max_stepdown" not in d:
+                    d["max_stepdown"] = m.max_stepdown
+                    f.write_text(json.dumps(d, indent=2))
         if not self.tools_path.exists():
             self.tools_path.write_text(json.dumps([asdict(t) for t in DEFAULT_TOOLS], indent=2))
 
@@ -135,6 +147,7 @@ class Library:
                    f"{m.rotary.get('max_speed')} deg/min") if m.rotary else ""
             lines.append(f"  - {m.name}: post {m.post}, travel {m.travel} mm, max feed {m.max_feed}, rapid {m.rapid}, spindle {m.spindle} rpm, "
                          f"tool_change={m.tool_change}, collet={m.collet or '-'}, safe_z={m.safe_z}, clearance_z={m.clearance_z}{rot}"
+                         + (f", max stepdown {m.max_stepdown} mm" if m.max_stepdown else "")
                          + (f" — {m.notes}" if m.notes else ""))
         lines.append("Tools:")
         for t in self.tools():

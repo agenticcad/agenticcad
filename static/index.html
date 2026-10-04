@@ -169,6 +169,15 @@
   .oprow { display:flex; align-items:center; gap:8px; padding:4px 2px; border-bottom:1px solid var(--line); font-size:12px; }
   .oprow:last-child { border-bottom:0; } .oprow .sw { width:10px; height:10px; border-radius:2px; flex:none; }
   .oprow .nm { flex:1; } .oprow .meta { color:var(--muted); font-size:11px; white-space:nowrap; }
+  .oprow .nm { cursor:pointer; } .oprow .nm:hover { color:var(--accent2); } .oprow .car { color:var(--muted); width:10px; flex:none; cursor:pointer; }
+  .oprow .ovb { font-size:10px; color:var(--accent); border:1px solid var(--accent); border-radius:8px; padding:0 5px; margin-left:4px; }
+  .opedit { padding:6px 4px 10px 24px; border-bottom:1px solid var(--line); font-size:12px; }
+  .opedit .ophd { color:var(--muted); }
+  .ovgrid { display:grid; grid-template-columns:72px 1fr 64px; gap:4px 8px; align-items:center; margin:6px 0; }
+  .ovgrid label { color:var(--muted); }
+  .ovgrid input, .opedit select { width:100%; box-sizing:border-box; background:var(--bg); color:var(--text); border:1px solid var(--line); border-radius:6px; padding:4px 6px; font:inherit; }
+  .ovgrid input.ov { border-color:var(--accent); color:var(--accent); }
+  .opedit .row { display:flex; gap:6px; align-items:center; flex-wrap:wrap; } .opedit .row select { width:auto; }
   .librow { display:flex; align-items:center; gap:8px; padding:4px 2px; border-bottom:1px solid var(--line); font-size:12px; }
   .librow:last-child { border-bottom:0; } .librow .nm { flex:1; } .librow .meta { color:var(--muted); font-size:11px; }
   .librow .btn { padding:1px 6px; font-size:11px; }
@@ -202,6 +211,29 @@
   body.sketching #sketch-svg { display:block; }
   body.sketching #viewer > canvas { cursor:crosshair; }
   #settings-btn { margin-right:4px; }
+  #modal .box.wide { width:min(980px, 94vw); max-height:88vh; height:88vh; }
+  .set-tabs { display:flex; gap:2px; border-bottom:1px solid var(--line); margin:-10px -14px 12px; padding:0 10px; position:sticky; top:-10px; background:var(--panel); z-index:2; }
+  .set-tabs button { background:none; border:0; border-bottom:2px solid transparent; color:var(--muted); padding:9px 12px 7px; cursor:pointer; font:inherit; font-size:12px; }
+  .set-tabs button:hover { color:var(--text); } .set-tabs button.on { color:var(--text); border-bottom-color:var(--accent2); }
+  .set-pane { display:none; } .set-pane.on { display:block; }
+  .set-h { font-size:12px; font-weight:600; margin:14px 0 6px; display:flex; align-items:center; gap:8px; } .set-h:first-child { margin-top:2px; } .set-h .muted { font-weight:400; }
+  .mach-wrap { display:grid; grid-template-columns:230px 1fr; gap:16px; align-items:start; }
+  .mach-list { border:1px solid var(--line); border-radius:8px; overflow:hidden; }
+  .mach-list .it { padding:7px 10px; cursor:pointer; border-bottom:1px solid var(--line); font-size:12px; } .mach-list .it:last-child { border-bottom:0; }
+  .mach-list .it:hover { background:var(--panel2); } .mach-list .it.on { background:var(--panel2); box-shadow:inset 3px 0 0 var(--accent2); }
+  .mach-list .it .sub { color:var(--muted); font-size:11px; } .mach-list .it .dot { color:var(--accent); }
+  .trip { display:flex; gap:6px; align-items:center; } .trip input { min-width:0; } .trip span { color:var(--muted); font-size:11px; white-space:nowrap; }
+  .tool-tbl { width:100%; border-collapse:collapse; font-size:12px; }
+  .tool-tbl th { text-align:left; color:var(--muted); font-weight:500; padding:4px 3px; border-bottom:1px solid var(--line); white-space:nowrap; font-size:11px; }
+  .tool-tbl td { padding:3px; border-bottom:1px solid var(--line); }
+  #modal .tool-tbl input, #modal .tool-tbl select { width:100%; box-sizing:border-box; background:var(--bg); color:var(--text); border:1px solid var(--line); border-radius:5px; padding:4px 5px; font:inherit; }
+  .tool-tbl input[type=number] { -moz-appearance:textfield; appearance:textfield; } .tool-tbl input::-webkit-inner-spin-button, .tool-tbl input::-webkit-outer-spin-button { -webkit-appearance:none; margin:0; }
+  #modal .fs-box input[type=range] { width:170px; flex:none; padding:0; border:0; background:none; }
+  .tool-tbl tr.dirty td:first-child { box-shadow:inset 3px 0 0 var(--accent); }
+  .fs-box { border:1px solid var(--line); border-radius:8px; padding:10px 12px; margin-top:14px; }
+  .fs-box .fs-row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; font-size:12px; } .fs-box .fs-row label { color:var(--muted); }
+  .fs-box select { background:var(--bg); color:var(--text); border:1px solid var(--line); border-radius:6px; padding:4px 6px; font:inherit; }
+  .set-err { color:var(--err); font-size:12px; min-height:16px; margin-top:6px; }
   .set-grid { display:grid; grid-template-columns:120px 1fr; gap:8px 10px; align-items:center; font-size:12px; }
   .set-grid label { color:var(--muted); }
   .set-grid textarea { min-height:70px !important; }
@@ -375,25 +407,13 @@
     </div>
     <div class="pane" id="pane-cam">
       <div id="cam-body">
-        <div id="cam-empty" class="cam-sec" style="color:var(--muted)">No CAM program yet. Ask the agent, e.g. <i>"Make a CAM program for the Generic 3018: face the stock, drill the holes, pocket the bore and cut the outline with 4 tabs."</i> The agent writes <code>cam.py</code> (see the Code tab) against the machine and tool libraries below.</div>
-        <div class="cam-sec" id="cam-setup" style="display:none"><h4>Setup</h4><div id="cam-setup-body"></div></div>
+        <div id="cam-empty" class="cam-sec" style="color:var(--muted)">No CAM program yet. Ask the agent, e.g. <i>"Make a CAM program for the Generic 3018: face the stock, drill the holes, pocket the bore and cut the outline with 4 tabs."</i> The agent writes <code>cam.py</code> (see the Code tab) against your machine and tool libraries. <div style="margin-top:8px"><button class="btn small" data-open-libs="machines">Machines &amp; tools…</button></div></div>
+        <div class="cam-sec" id="cam-setup" style="display:none"><h4>Setup <button class="btn small" data-open-libs="machines" title="Settings ▸ Machines / Tools">Machines &amp; tools…</button></h4><div id="cam-setup-body"></div></div>
         <div class="cam-sec" id="cam-simres" style="display:none"><h4>Simulation <button class="btn small" id="sim-clear">Hide</button></h4><div id="cam-simres-body" style="white-space:pre-wrap"></div></div>
-        <div class="cam-sec" id="cam-ops" style="display:none"><h4>Operations</h4><div id="cam-ops-body"></div><div id="cam-warn"></div></div>
+        <div class="cam-sec" id="cam-ops" style="display:none"><h4>Operations <span class="muted" style="text-transform:none;letter-spacing:0;font-weight:400">click an operation for its tool settings</span></h4><div id="cam-ops-body"></div><div id="cam-warn"></div></div>
         <div class="cam-sec" id="cam-gcode" style="display:none"><h4>G-code <span class="muted" id="cam-gcode-meta"></span></h4>
           <div class="row"><button class="btn primary" id="gcode-dl">⬇ Download .nc</button><button class="btn" id="gcode-preview">Preview</button></div>
           <pre id="gcode-pre" style="display:none"></pre></div>
-        <div class="cam-sec"><h4>Feeds &amp; speeds</h4>
-          <div class="modal-field"><label>Tool</label><select id="fs-tool"></select></div>
-          <div class="modal-field"><label>Material</label><select id="fs-material"></select></div>
-          <div class="modal-field"><label>Machine</label><select id="fs-machine"></select></div>
-          <div class="modal-field"><label>Aggression</label><input type="range" id="fs-aggr" min="0" max="1" step="0.05" value="0.5" style="flex:1"><span id="fs-aggr-v" class="muted">50%</span></div>
-          <div class="modal-field"><label>Engagement</label><input type="range" id="fs-ae" min="0.05" max="1" step="0.05" value="0.4" style="flex:1"><span id="fs-ae-v" class="muted">40% of Ø</span></div>
-          <div id="fs-out" class="kv" style="margin-top:6px"></div>
-          <div id="fs-notes" class="muted" style="margin-top:4px;white-space:pre-wrap"></div>
-          <div class="row" style="margin-top:6px"><button class="btn primary small" id="fs-apply">Apply to tool</button></div>
-        </div>
-        <div class="cam-sec"><h4>Machines <button class="btn small" id="machine-add">+ New</button></h4><div id="cam-machines"></div></div>
-        <div class="cam-sec"><h4>Tools <button class="btn small" id="tool-add">+ New</button></h4><div id="cam-tools"></div></div>
       </div>
       <div id="cam-sim" style="display:none">
         <button class="btn" id="sim-run" title="Simulate material removal for the visible operations">Simulate</button>
@@ -901,11 +921,12 @@ function setDesign(d) {
 }
 // modal helpers
 const modal = document.getElementById('modal'), mTitle = document.getElementById('modal-title'), mBody = document.getElementById('modal-body'), mRow = document.getElementById('modal-row');
+const KEEP_OPEN = Symbol('keep-open');
 function openModal(title, bodyEl, buttons) {
   return new Promise(res => {
     mTitle.textContent = title; mBody.innerHTML = ''; mBody.appendChild(bodyEl); mRow.innerHTML = '';
     const close = v => { modal.classList.remove('open'); res(v); };
-    for (const [label, value, primary] of buttons) { const b = document.createElement('button'); b.className = 'btn' + (primary ? ' primary' : ''); b.textContent = label; b.onclick = () => close(typeof value === 'function' ? value() : value); mRow.appendChild(b); }
+    for (const [label, value, primary] of buttons) { const b = document.createElement('button'); b.className = 'btn' + (primary ? ' primary' : ''); b.textContent = label; b.onclick = () => { const v = typeof value === 'function' ? value() : value; if (v !== KEEP_OPEN) close(v); }; mRow.appendChild(b); }
     modal.onclick = e => { if (e.target === modal) close(null); };
     modal.__close = close;
     modal.classList.add('open'); bodyEl.__close = close;
@@ -1133,7 +1154,6 @@ function loadProgram(p) {
   const od = new THREE.Mesh(new THREE.SphereGeometry(Math.max(0.6, Math.min(sx, sy) * 0.012), 16, 12), new THREE.MeshBasicMaterial({ color: 0xffffff }));
   originObj.add(od); originObj.position.set(...p.origin); camGroup.add(originObj);
   applyCamVisibility(); renderCamTab(); setupSim();
-  if (library.machines.length) { fsFillLibs(); fsCalc(); }
 }
 function applyCamVisibility() {
   for (const c of camOps) { c.cut.visible = c.rapid.visible = showTp && c.visible; }
@@ -1160,34 +1180,18 @@ function renderCamTab() {
     const ops = document.getElementById('cam-ops-body'); ops.innerHTML = '';
     program.ops.forEach((op, i) => {
       const r = document.createElement('div'); r.className = 'oprow';
-      r.innerHTML = `<input type="checkbox" ${camOps[i]?.visible ? 'checked' : ''}><span class="sw" style="background:${op.color}"></span><span class="nm">${i + 1}. ${op.name} <span class="muted">${op.kind}</span></span><span class="meta">T${op.tool.number} Ø${op.tool.diameter} · ${op.time.toFixed(1)} min</span>`;
+      const nov = Object.keys(op.overrides || {}).length, open = opOpen.has(op.key);
+      r.innerHTML = `<input type="checkbox" ${camOps[i]?.visible ? 'checked' : ''}><span class="car">${op.key ? (open ? '▾' : '▸') : ''}</span><span class="sw" style="background:${op.color}"></span><span class="nm">${i + 1}. ${op.name} <span class="muted">${op.kind}</span>${nov ? `<span class="ovb" title="${Object.entries(op.overrides).map(([k, v]) => k + ' ' + v).join(', ')}">override</span>` : ''}</span><span class="meta">T${op.tool.number} Ø${op.tool.diameter} · ${op.time.toFixed(1)} min</span>`;
       r.querySelector('input').onchange = e => { camOps[i].visible = e.target.checked; applyCamVisibility(); if (simRes) clearSim(); setupSim(); };
       r.title = Object.entries(op.params || {}).map(([k, v]) => `${k}=${Array.isArray(v) ? v.join('×') : (typeof v === 'number' ? +v.toFixed(3) : v)}`).join('  ');
+      if (op.key) for (const q of r.querySelectorAll('.nm, .car')) q.onclick = () => { opOpen.has(op.key) ? opOpen.delete(op.key) : opOpen.add(op.key); renderCamTab(); };
       ops.appendChild(r);
+      if (open) ops.appendChild(opEditor(op));
     });
     document.getElementById('cam-warn').textContent = (program.warnings || []).map(w => '⚠ ' + w).join('\n');
     document.getElementById('cam-gcode-meta').textContent = lastGcodeLines ? `${lastGcodeLines} lines` : '';
   }
-  // libraries
-  const mEl = document.getElementById('cam-machines'); mEl.innerHTML = '';
-  for (const m of library.machines) {
-    const r = document.createElement('div'); r.className = 'librow';
-    r.innerHTML = `<span class="nm">${m.name} <span class="meta">${m.travel.x}×${m.travel.y}×${m.travel.z} mm · ${m.spindle.min}–${m.spindle.max} rpm · ${m.tool_change}</span></span><button class="btn" data-a="edit">Edit</button><button class="btn" data-a="del">✕</button>`;
-    r.querySelector('[data-a=edit]').onclick = () => editJson('Machine', m, obj => api('/api/cam/machine', { machine: obj }));
-    r.querySelector('[data-a=del]').onclick = async () => { if (await confirmBox(`Delete machine '${m.name}'?`)) fetch('/api/cam/machine/' + encodeURIComponent(m.name), { method: 'DELETE' }); };
-    mEl.appendChild(r);
-  }
-  const tEl = document.getElementById('cam-tools'); tEl.innerHTML = '';
-  for (const t of library.tools) {
-    const r = document.createElement('div'); r.className = 'librow';
-    r.innerHTML = `<span class="nm">T${t.number} ${t.name} <span class="meta">${t.type} Ø${t.diameter} · ${t.rpm} rpm · F${t.feed}/${t.plunge} · ↓${t.stepdown} ↔${t.stepover}</span></span><button class="btn" data-a="edit">Edit</button><button class="btn" data-a="del">✕</button>`;
-    r.querySelector('[data-a=edit]').onclick = () => editJson('Tool', t, obj => api('/api/cam/tool', { tool: obj }));
-    r.querySelector('[data-a=del]').onclick = async () => { if (await confirmBox(`Delete tool T${t.number} ${t.name}?`)) fetch('/api/cam/tool/' + t.number, { method: 'DELETE' }); };
-    tEl.appendChild(r);
-  }
 }
-document.getElementById('machine-add').onclick = () => editJson('New machine', { name: 'My router', controller: 'grbl', units: 'mm', travel: { x: 300, y: 300, z: 60 }, max_feed: { x: 3000, y: 3000, z: 600 }, rapid: 3000, spindle: { min: 5000, max: 24000 }, tool_change: 'pause', coolant: false, safe_z: 5, clearance_z: 15, program_start: [], program_end: [], notes: '' }, obj => api('/api/cam/machine', { machine: obj }));
-document.getElementById('tool-add').onclick = () => editJson('New tool', { number: (Math.max(0, ...library.tools.map(t => t.number)) + 1), name: '4 mm flat endmill', type: 'flat', diameter: 4, flutes: 2, flute_length: 15, rpm: 12000, feed: 900, plunge: 250, stepdown: 1.5, stepover: 0.45, angle: 0, notes: '' }, obj => api('/api/cam/tool', { tool: obj }));
 async function editJson(title, obj, save) {
   const d = document.createElement('div'); d.innerHTML = `<textarea spellcheck="false"></textarea><div class="muted" id="json-err"></div>`;
   const ta = d.querySelector('textarea'); ta.value = JSON.stringify(obj, null, 2);
@@ -1195,6 +1199,49 @@ async function editJson(title, obj, save) {
   if (res === undefined) return editJson(title, safeParse(ta.value, obj), save);
   if (res) { try { await save(res); addMsg('system', `${title.toLowerCase()} saved`); } catch (e) { addMsg('error', e.message); } }
 }
+// per-operation tool settings: blank = the tool's (or script's) value; Apply writes cam.py's overrides({...}) line
+const opOpen = new Set();
+const OV_META = { rpm: ['Spindle', 'rpm'], feed: ['Feed', 'mm/min'], plunge: ['Plunge', 'mm/min'], stepdown: ['Stepdown', 'mm'], stepover: ['Stepover', '% of Ø'] };
+let camMaterials = [];
+fetch('/api/cam/materials').then(r => r.json()).then(r => { camMaterials = r.materials || []; }).catch(() => {});
+const ovShow = (k, v) => k === 'stepover' ? +(v * 100).toFixed(2) : +(+v).toFixed(3);
+const ovRead = (k, v) => k === 'stepover' ? v / 100 : v;
+function opEditor(op) {
+  const el = document.createElement('div'); el.className = 'opedit';
+  const t = op.base_tool || op.tool, def = op.defaults || {}, ov = op.overrides || {};
+  const lib = library.tools.find(x => x.number === t.number && x.name === t.name);
+  el.innerHTML = `<div class="ophd">T${t.number} ${t.name} · ${t.type} Ø${t.diameter} · ${t.flutes} fl${lib ? '' : ' · <i>set in the script</i>'} — blank fields use the tool's values (shown greyed)</div>
+    <div class="ovgrid">${Object.keys(def).map(k => `<label>${OV_META[k][0]}</label><input type="number" step="any" min="0" data-k="${k}" placeholder="${ovShow(k, def[k])}" value="${k in ov ? ovShow(k, ov[k]) : ''}" class="${k in ov ? 'ov' : ''}"><span class="muted">${OV_META[k][1]}</span>`).join('')}</div>
+    <div class="row"><span class="muted">Calculator</span><select data-mat>${camMaterials.map(m => `<option>${m}</option>`).join('')}</select><button class="btn small" data-a="calc" title="feeds & speeds for this tool in the material on ${program.machine}">Fill</button>
+      <span style="flex:1"></span><button class="btn small" data-a="reset" ${Object.keys(ov).length ? '' : 'disabled'} title="remove this operation's overrides">Reset</button><button class="btn small primary" data-a="apply">Apply</button></div>
+    <div class="muted" data-note style="margin-top:4px;white-space:pre-wrap"></div>`;
+  const inputs = [...el.querySelectorAll('input[data-k]')], note = el.querySelector('[data-note]');
+  const mark = i => i.classList.toggle('ov', i.value !== '' && Math.abs(ovRead(i.dataset.k, +i.value) - def[i.dataset.k]) > 1e-9);
+  inputs.forEach(i => { i.oninput = () => mark(i); i.onkeydown = e => { if (e.key === 'Enter') el.querySelector('[data-a=apply]').click(); }; });
+  if (camMaterials.includes('aluminium')) el.querySelector('[data-mat]').value = 'aluminium';
+  el.querySelector('[data-a=apply]').onclick = () => {
+    const values = {};
+    for (const i of inputs) {
+      if (i.value === '') continue;
+      const v = ovRead(i.dataset.k, +i.value);
+      if (!(v > 0) || (i.dataset.k === 'stepover' && v > 1)) { note.textContent = `${OV_META[i.dataset.k][0]}: enter a positive number${i.dataset.k === 'stepover' ? ' up to 100%' : ''}`; i.focus(); return; }
+      if (Math.abs(v - def[i.dataset.k]) > 1e-9) values[i.dataset.k] = v;
+    }
+    note.textContent = 'rebuilding…'; send({ type: 'set_override', key: op.key, values });
+  };
+  el.querySelector('[data-a=reset]').onclick = () => { note.textContent = 'rebuilding…'; send({ type: 'set_override', key: op.key, values: null }); };
+  el.querySelector('[data-a=calc]').onclick = async () => {
+    const mat = el.querySelector('[data-mat]').value, so = el.querySelector('input[data-k=stepover]');
+    const ae = so && so.value !== '' ? ovRead('stepover', +so.value) : (def.stepover || 0.4);
+    try {
+      const f = await api('/api/cam/feeds', { tool: t, material: mat, machine: program.machine, aggressiveness: 0.5, radial_engagement: Math.min(1, ae) });
+      for (const i of inputs) if (f[i.dataset.k] != null && i.dataset.k !== 'stepover') { i.value = ovShow(i.dataset.k, f[i.dataset.k]); mark(i); }
+      note.textContent = `${mat}: vc ${f.vc} m/min, chip load ${f.chipload} mm/tooth — press Apply to use these` + ((f.notes || []).length ? '\n' + f.notes.map(n => '· ' + n).join('\n') : '');
+    } catch (e) { note.textContent = e.message; }
+  };
+  return el;
+}
+document.addEventListener('click', e => { const b = e.target.closest('[data-open-libs]'); if (b) openSettings(b.dataset.openLibs); });
 function safeParse(t, fb) { try { return JSON.parse(t); } catch { return fb; } }
 document.getElementById('gcode-dl').onclick = () => window.open('/api/gcode');
 document.getElementById('gcode-preview').onclick = async () => { const pre = document.getElementById('gcode-pre'); pre.textContent = await fetch('/api/gcode/preview').then(r => r.text()); pre.style.display = pre.style.display === 'none' ? '' : 'none'; };
@@ -1373,38 +1420,6 @@ function drawSimFrame(f, final) {
 }
 
 // feeds & speeds calculator
-let fsResult = null;
-const fsEls = Object.fromEntries(['tool', 'material', 'machine', 'aggr', 'ae', 'out', 'notes', 'apply'].map(k => [k, document.getElementById('fs-' + k)]));
-fsEls.machine.addEventListener('change', () => { fsEls.machine.dataset.picked = '1'; });   // stop following the program's machine
-async function fsInit() {
-  try { const { materials } = await fetch('/api/cam/materials').then(r => r.json()); fsEls.material.innerHTML = materials.map(m => `<option ${m === 'aluminium' ? 'selected' : ''}>${m}</option>`).join(''); } catch {}
-}
-function fsFillLibs() {
-  const tv = fsEls.tool.value, mv = fsEls.machine.dataset.picked ? fsEls.machine.value : (program ? program.machine : fsEls.machine.value);
-  fsEls.tool.innerHTML = library.tools.map(t => `<option value="${t.number}" ${String(t.number) === tv ? 'selected' : ''}>T${t.number} ${t.name}</option>`).join('');
-  fsEls.machine.innerHTML = library.machines.map(m => `<option ${m.name === mv || (!mv && program && program.machine === m.name) ? 'selected' : ''}>${m.name}</option>`).join('');
-}
-async function fsCalc() {
-  if (!fsEls.tool.value || !fsEls.material.value) return;
-  fsEls['aggr-v'] = document.getElementById('fs-aggr-v'); fsEls['ae-v'] = document.getElementById('fs-ae-v');
-  fsEls['aggr-v'].textContent = Math.round(fsEls.aggr.value * 100) + '%'; fsEls['ae-v'].textContent = Math.round(fsEls.ae.value * 100) + '% of Ø';
-  try {
-    const r = await fetch(`/api/cam/feeds?tool=${fsEls.tool.value}&material=${encodeURIComponent(fsEls.material.value)}&machine=${encodeURIComponent(fsEls.machine.value)}&aggressiveness=${fsEls.aggr.value}&radial_engagement=${fsEls.ae.value}`);
-    const f = await r.json(); if (!r.ok) throw new Error(f.error);
-    fsResult = f;
-    fsEls.out.innerHTML = [['Surface speed', f.vc + ' m/min'], ['Spindle', f.rpm + ' rpm'], ['Chip load', f.chipload + ' mm/tooth'], ['Feed', f.feed + ' mm/min'], ['Plunge', f.plunge + ' mm/min'], ['Stepdown', f.stepdown + ' mm'], ['Stepover (rough)', Math.round(f.stepover * 100) + '% of Ø']].map(([k, v]) => `<div>${k}</div><div>${v}</div>`).join('');
-    fsEls.notes.textContent = (f.notes || []).map(n => '· ' + n).join('\n');
-  } catch (e) { fsEls.out.innerHTML = ''; fsEls.notes.textContent = e.message; fsResult = null; }
-}
-for (const k of ['tool', 'material', 'machine']) fsEls[k].onchange = fsCalc;
-for (const k of ['aggr', 'ae']) fsEls[k].oninput = fsCalc;
-fsEls.apply.onclick = async () => {
-  if (!fsResult) return;
-  const t = library.tools.find(x => String(x.number) === fsEls.tool.value); if (!t) return;
-  const nt = { ...t, rpm: fsResult.rpm, feed: fsResult.feed, plunge: fsResult.plunge, stepdown: fsResult.stepdown, stepover: fsResult.stepover, notes: ((t.notes || '').replace(/\s*\[.*?\]$/, '') + ` [${fsResult.material}: vc ${fsResult.vc} m/min, fz ${fsResult.chipload} mm]`).trim() };
-  try { await api('/api/cam/tool', { tool: nt }); addMsg('system', `feeds applied to T${t.number} ${t.name} (${fsResult.material})`); } catch (e) { addMsg('error', e.message); }
-};
-fsInit();
 
 // ------------------------------------------------------------------ Design tab: parameters, measure, drawings, library
 let paramsList = [];
@@ -2099,15 +2114,18 @@ renderer.domElement.addEventListener('pointerup', ev => {
 }, true);
 
 // ------------------------------------------------------------------ settings (model, effort, MCP servers)
-document.getElementById('settings-btn').onclick = openSettings;
-async function openSettings() {
+document.getElementById('settings-btn').onclick = () => openSettings();
+const SET_TABS = [['general', 'General'], ['mcp', 'MCP servers'], ['output', 'Drawings & printing'], ['machines', 'Machines'], ['tools', 'Tools']];
+let lastSetTab = 'general';
+async function openSettings(tab) {
   const [{ settings, models }, status] = await Promise.all([fetch('/api/settings').then(r => r.json()), fetch('/api/agent/status').then(r => r.json())]);
   const st = JSON.parse(JSON.stringify(settings));
   const d = document.createElement('div');
   const mcpStatus = Object.fromEntries((status.mcp || []).map(m => [m.name, m]));
   const isKnown = !st.model || models.includes(st.model);
   const modelOpts = ['', ...models].map(m => `<option value="${m}" ${m === (st.model || '') ? 'selected' : ''}>${m || '(Claude Code default)'}</option>`).join('') + `<option value="__custom" ${isKnown ? '' : 'selected'}>custom…</option>`;
-  d.innerHTML = `<div class="set-grid">
+  d.innerHTML = `<div class="set-tabs">${SET_TABS.map(([k, l]) => `<button type="button" data-tab="${k}">${l}</button>`).join('')}</div>
+  <div class="set-pane" data-pane="general"><div class="set-h">Agent</div><div class="set-grid">
     <label>Model</label><div style="display:flex;gap:6px"><select id="s-model" style="flex:1">${modelOpts}</select><input id="s-model-custom" placeholder="model id" value="${isKnown ? '' : st.model}" style="flex:1;${isKnown ? 'display:none' : ''}"></div>
     <label>Effort</label><select id="s-effort">${['', 'low', 'medium', 'high', 'xhigh', 'max'].map(e => `<option value="${e}" ${e === (st.effort || '') ? 'selected' : ''}>${e || '(default)'}</option>`).join('')}</select>
     <label>Max steps / turn</label><input id="s-turns" type="number" value="${st.max_turns}">
@@ -2117,13 +2135,16 @@ async function openSettings() {
     <label>Extra instructions</label><textarea id="s-extra" rows="3" placeholder="house rules, your machine, preferred materials…"></textarea>
     <label>API key</label><div style="display:flex;gap:6px;align-items:center"><input id="s-key" type="password" autocomplete="off" placeholder="${st.api_key_set ? '•••••••• (set — leave blank to keep)' : 'optional: sk-ant-… instead of the Claude Code login'}" style="flex:1">${st.api_key_set ? '<button class="btn small" id="s-key-clear" type="button">Clear</button>' : ''}</div>
   </div>
-  <div style="margin-top:12px;border-top:1px solid var(--line);padding-top:10px"><b style="font-size:12px">Shop drawings</b><span class="muted" style="margin-left:8px">ribbon ▸ Drawings (D)</span></div>
+  <div class="muted" style="margin-top:12px">Status: ${status.connected ? 'connected' : 'not connected'} · model ${status.model} · effort ${status.effort}${status.session_id ? ' · session ' + status.session_id.slice(0, 8) : ''}${status.mcp_error ? ' · ' + status.mcp_error : ''}</div></div>
+  <div class="set-pane" data-pane="output">
+  <div class="set-h">Shop drawings<span class="muted">ribbon ▸ Drawings (D)</span></div>
   <div class="set-grid" style="margin-top:6px">
     <label>Material</label><input id="s-dmat" placeholder="e.g. Aluminium 6061 (sets the density in the title block)" value="${(st.drawings || {}).material || ''}">
     <label>Sheet</label><select id="s-dsheet"><option ${(st.drawings || {}).sheet !== 'A3' ? 'selected' : ''}>A4</option><option ${(st.drawings || {}).sheet === 'A3' ? 'selected' : ''}>A3</option></select>
   </div>
-  <div id="s-print-sec" style="display:${slicerInfo ? '' : 'none'}">
-    <div style="margin-top:12px;border-top:1px solid var(--line);padding-top:10px"><b style="font-size:12px">3D printing</b><span class="muted" style="margin-left:8px">${slicerInfo ? slicerInfo.slicer.name + ' ' + (slicerInfo.slicer.version || '') : ''} · ribbon ▸ Slice (P)</span></div>
+  <div id="s-print-sec">
+    <div class="set-h">3D printing<span class="muted">${slicerInfo ? slicerInfo.slicer.name + ' ' + (slicerInfo.slicer.version || '') + ' · ribbon ▸ Slice (P)' : 'no slicer found (install OrcaSlicer or Bambu Studio to slice from the app)'}</span></div>
+    <div style="display:${slicerInfo ? '' : 'none'}">
     <div class="set-grid" style="margin-top:6px">
       <label>Printer</label><select id="s-pmach"><option value="">loading…</option></select>
       <label>Quality</label><select id="s-pproc"><option value="">(printer default)</option></select>
@@ -2134,10 +2155,17 @@ async function openSettings() {
       <label>Supports</label><div style="display:flex;gap:6px;align-items:center"><label style="color:var(--text);display:flex;align-items:center;gap:6px"><input type="checkbox" id="s-psup" ${(st.print || {}).enable_support ? 'checked' : ''}> enable</label>
         <label style="margin-left:14px;color:var(--muted)">Brim</label><select id="s-pbrim">${[['', 'profile'], ['no_brim', 'none'], ['outer_only', 'outer'], ['outer_and_inner', 'outer + inner'], ['auto_brim', 'auto']].map(([v, l]) => `<option value="${v}" ${v === ((st.print || {}).brim_type || '') ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
     </div>
-  </div>
-  <div style="margin-top:10px;display:flex;align-items:center"><b style="font-size:12px">MCP servers</b><span class="muted" style="margin-left:8px">tools become mcp__&lt;name&gt;__*</span><button class="btn small" id="s-mcp-add" style="margin-left:auto">+ Add</button></div>
-  <div id="s-mcp"></div>
-  <div class="muted" style="margin-top:8px">Status: ${status.connected ? 'connected' : 'not connected'} · model ${status.model} · effort ${status.effort}${status.session_id ? ' · session ' + status.session_id.slice(0, 8) : ''}${status.mcp_error ? ' · ' + status.mcp_error : ''}</div>`;
+  </div></div></div>
+  <div class="set-pane" data-pane="mcp">
+  <div class="set-h">MCP servers<span class="muted">their tools become mcp__&lt;name&gt;__* for the agent</span><button class="btn small" id="s-mcp-add" style="margin-left:auto">+ Add</button></div>
+  <div id="s-mcp"></div></div>
+  <div class="set-pane" data-pane="machines"></div>
+  <div class="set-pane" data-pane="tools"></div>
+  <div class="set-err" id="s-err"></div>`;
+  const showTab = k => { lastSetTab = k; for (const b of d.querySelectorAll('[data-tab]')) b.classList.toggle('on', b.dataset.tab === k); for (const p of d.querySelectorAll('[data-pane]')) p.classList.toggle('on', p.dataset.pane === k); };
+  d.querySelectorAll('[data-tab]').forEach(b => b.onclick = () => showTab(b.dataset.tab));
+  showTab(tab || lastSetTab);
+  const libEd = libraryEditor(d.querySelector('[data-pane=machines]'), d.querySelector('[data-pane=tools]'));
   d.querySelector('#s-extra').value = st.extra_prompt || '';
   const sel = d.querySelector('#s-model'), custom = d.querySelector('#s-model-custom');
   sel.onchange = () => { custom.style.display = sel.value === '__custom' ? '' : 'none'; };
@@ -2184,10 +2212,150 @@ async function openSettings() {
     print: slicerInfo ? { machine: d.querySelector('#s-pmach').value, process: d.querySelector('#s-pproc').value, filament: d.querySelector('#s-pfil').value,
       layer_height: d.querySelector('#s-plh').value || null, sparse_infill_density: d.querySelector('#s-pinf').value || null, wall_loops: d.querySelector('#s-pwall').value || null,
       enable_support: d.querySelector('#s-psup').checked, brim_type: d.querySelector('#s-pbrim').value } : (st.print || {}) });
-  const r = await openModal('Settings', d, [['Cancel', null], ['Save', () => ({ s: collect(), restart: false }), true], ['Save & restart agent', () => ({ s: collect(), restart: true })]]);
+  const errEl = d.querySelector('#s-err');
+  const check = restart => { const e = libEd.validate(); if (e) { errEl.textContent = e.msg; showTab(e.tab); return KEEP_OPEN; } return { s: collect(), restart }; };
+  const box = modal.querySelector('.box'); box.classList.add('wide');
+  const r = await openModal('Settings', d, [['Cancel', null], ['Save', () => check(false), true], ['Save & restart agent', () => check(true)]]);
+  box.classList.remove('wide');
   if (!r) return;
-  try { await api('/api/settings', { settings: r.s, restart: r.restart }); loadParams(); addMsg('system', r.restart ? 'settings saved · agent restarting' : 'settings saved (units, drawing and printing options apply now; the agent picks up model and unit changes after Save & restart)'); }
-  catch (e) { addMsg('error', e.message); }
+  try {
+    const libMsg = await libEd.commit();
+    await api('/api/settings', { settings: r.s, restart: r.restart }); loadParams();
+    addMsg('system', (r.restart ? 'settings saved · agent restarting' : 'settings saved') + (libMsg ? ' · ' + libMsg : ''));
+  } catch (e) { addMsg('error', e.message); }
+}
+
+// Settings ▸ Machines / Tools: edit working copies, write them to the library on Save
+const MACHINE_FIELDS = [
+  ['Name', 'name', 'text'], ['Post', 'post', 'select', [['grbl', 'GRBL'], ['makera', 'Makera (Z1 / Carvera Air firmware)']]],
+  ['Controller', 'controller', 'text'], ['Travel', 'travel', 'xyz', 'mm'], ['Max feed', 'max_feed', 'xyz', 'mm/min'], ['Rapid', 'rapid', 'num', 'mm/min'],
+  ['Spindle', 'spindle', 'minmax', 'rpm'], ['Collet', 'collet', 'num', 'mm, largest shank (0 = not checked)'],
+  ['Max stepdown', 'max_stepdown', 'kv', 'mm per pass by material for the feeds calculator, e.g. aluminium=0.8, *=1.5 (* = any other material; blank = no cap)'],
+  ['Safe Z', 'safe_z', 'num', 'mm above the stock for rapids'], ['Clearance Z', 'clearance_z', 'num', 'mm for start, end and tool changes'],
+  ['Tool change', 'tool_change', 'select', [['pause', 'pause (M0 + message)'], ['manual', 'manual (M6 Tn, machine measures the tool)'], ['none', 'none (single tool)'], ['split', 'split (one file per tool)']]],
+  ['Arcs', 'arcs', 'bool', 'emit G2/G3 where the path is circular'], ['Arc tolerance', 'arc_tolerance', 'num', 'mm'],
+  ['4th axis', 'rotary', 'rotary'], ['Start G-code', 'program_start', 'lines'], ['End G-code', 'program_end', 'lines'], ['Notes', 'notes', 'area']];
+const TOOL_TYPES = ['flat', 'ball', 'vbit', 'drill', 'chamfer'];
+function libraryEditor(mPane, tPane) {
+  const clone = o => JSON.parse(JSON.stringify(o));
+  const ms = library.machines.map(m => ({ orig: m.name, m: clone(m), dirty: false })), delM = [];
+  const ts = library.tools.map(t => ({ orig: t.number, t: clone(t), dirty: false })), delT = [];
+  let sel = Math.max(0, ms.findIndex(x => program && x.m.name === program.machine));
+  const inp = 'style="width:100%;box-sizing:border-box"';
+  const num = v => (v === '' || v == null || isNaN(+v)) ? 0 : +v;
+  function renderMachines() {
+    const cur = ms[sel];
+    mPane.innerHTML = `<div class="set-h">Machines<span class="muted">what the CAM post and checks use; the agent picks one by name</span></div>
+      <div class="mach-wrap"><div><div class="mach-list">${ms.map((x, i) => `<div class="it ${i === sel ? 'on' : ''}" data-i="${i}"><div>${x.m.name || '(unnamed)'}${x.dirty ? ' <span class="dot">●</span>' : ''}</div><div class="sub">${x.m.travel.x}×${x.m.travel.y}×${x.m.travel.z} · ${x.m.post}${x.m.rotary ? ' · 4th axis' : ''}</div></div>`).join('')}</div>
+        <div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap"><button class="btn small" data-a="new">+ New</button><button class="btn small" data-a="dup" ${cur ? '' : 'disabled'}>Duplicate</button><button class="btn small" data-a="del" ${cur ? '' : 'disabled'}>Delete</button></div></div>
+      <div>${cur ? `<div class="set-grid" id="m-form">${MACHINE_FIELDS.map(f => machineField(cur.m, f)).join('')}</div>
+        <div style="margin-top:10px"><button class="btn small" data-a="json">Edit as JSON…</button></div>` : '<div class="muted">No machines. Add one.</div>'}</div></div>`;
+    mPane.querySelectorAll('.it').forEach(e => e.onclick = () => { sel = +e.dataset.i; renderMachines(); });
+    mPane.querySelector('[data-a=new]').onclick = () => { ms.push({ orig: null, dirty: true, m: { name: 'My router', controller: 'grbl', post: 'grbl', units: 'mm', travel: { x: 300, y: 300, z: 60 }, max_feed: { x: 3000, y: 3000, z: 600 }, rapid: 3000, spindle: { min: 5000, max: 24000 }, tool_change: 'pause', coolant: false, safe_z: 5, clearance_z: 15, program_start: [], program_end: [], arcs: true, arc_tolerance: 0.05, notes: '', rotary: null, collet: 0 } }); sel = ms.length - 1; renderMachines(); };
+    const dup = mPane.querySelector('[data-a=dup]'); if (dup) dup.onclick = () => { const c = clone(cur.m); c.name += ' copy'; ms.push({ orig: null, dirty: true, m: c }); sel = ms.length - 1; renderMachines(); };
+    const del = mPane.querySelector('[data-a=del]'); if (del) del.onclick = async () => { if (!await confirmInline(del, `delete ${cur.m.name}`)) return; if (cur.orig) delM.push(cur.orig); ms.splice(sel, 1); sel = Math.max(0, sel - 1); renderMachines(); };
+    const js = mPane.querySelector('[data-a=json]'); if (js) js.onclick = () => {
+      const ta = document.createElement('textarea'); ta.value = JSON.stringify(cur.m, null, 2); ta.spellcheck = false; ta.style.cssText = 'width:100%;min-height:300px;margin-top:8px;background:#0f1216;color:var(--text);border:1px solid var(--line);border-radius:6px;font:12px/1.4 ui-monospace,Menlo,monospace;padding:8px';
+      const ok = document.createElement('button'); ok.className = 'btn small primary'; ok.textContent = 'Use JSON'; ok.style.marginTop = '6px';
+      ok.onclick = () => { try { cur.m = JSON.parse(ta.value); cur.dirty = true; renderMachines(); } catch (e) { ok.textContent = 'Use JSON — ' + e.message; } };
+      js.replaceWith(ta); ta.after(ok);
+    };
+    if (!cur) return;
+    mPane.querySelectorAll('#m-form [data-p]').forEach(e => {
+      const set = () => {
+        const [k, sub] = e.dataset.p.split('.'), m = cur.m, t = e.dataset.t;
+        const v = t === 'bool' ? e.checked : t === 'lines' ? e.value.split('\n').map(x => x.trim()).filter(Boolean) : t === 'num' ? num(e.value)
+          : t === 'kv' ? Object.fromEntries(e.value.split(',').map(x => x.split('=').map(y => y.trim())).filter(([a, b]) => a && +b > 0).map(([a, b]) => [a.toLowerCase(), +b])) : e.value;
+        if (k === 'rotary') {
+          if (!sub) { m.rotary = e.checked ? { axis: 'A', about: 'x', max_diameter: 80, max_length: 150, max_speed: 1800, installed: true } : null; cur.dirty = true; renderMachines(); return; }
+          m.rotary[sub] = v;
+        } else if (sub) m[k][sub] = v; else m[k] = v;
+        cur.dirty = true;
+        const it = mPane.querySelector(`.it[data-i="${sel}"]`); if (it) it.innerHTML = `<div>${m.name || '(unnamed)'} <span class="dot">●</span></div><div class="sub">${m.travel.x}×${m.travel.y}×${m.travel.z} · ${m.post}${m.rotary ? ' · 4th axis' : ''}</div>`;
+      };
+      e.oninput = set; e.onchange = set;
+    });
+  }
+  function machineField(m, [label, k, type, extra]) {
+    const v = m[k], N = (p, val, w) => `<input type="number" step="any" data-p="${p}" data-t="num" value="${val ?? ''}" ${w ? `style="width:${w}"` : inp}>`;
+    let h;
+    if (type === 'text') h = `<input data-p="${k}" data-t="text" value="${(v ?? '').toString().replace(/"/g, '&quot;')}">`;
+    else if (type === 'num') h = `<div class="trip">${N(k, v, '110px')}<span>${extra || ''}</span></div>`;
+    else if (type === 'xyz') h = `<div class="trip">${['x', 'y', 'z'].map(a => `<span>${a.toUpperCase()}</span>${N(k + '.' + a, (v || {})[a])}`).join('')}<span>${extra}</span></div>`;
+    else if (type === 'minmax') h = `<div class="trip"><span>min</span>${N(k + '.min', (v || {}).min)}<span>max</span>${N(k + '.max', (v || {}).max)}<span>${extra}</span></div>`;
+    else if (type === 'select') { const opts = extra.some(([o]) => o === v) ? extra : [[v, v], ...extra]; h = `<select data-p="${k}" data-t="text">${opts.map(([o, l]) => `<option value="${o}" ${o === v ? 'selected' : ''}>${l}</option>`).join('')}</select>`; }
+    else if (type === 'bool') h = `<label style="color:var(--text);display:flex;gap:6px;align-items:center"><input type="checkbox" data-p="${k}" data-t="bool" ${v ? 'checked' : ''} style="width:auto"> ${extra}</label>`;
+    else if (type === 'lines') h = `<textarea data-p="${k}" data-t="lines" rows="2" placeholder="one line each" style="min-height:44px !important;font-family:ui-monospace,Menlo,monospace">${(v || []).join('\n')}</textarea>`;
+    else if (type === 'kv') h = `<div><input data-p="${k}" data-t="kv" placeholder="aluminium=0.8, *=1.5" value="${Object.entries(v || {}).map(([a, b]) => a + '=' + b).join(', ')}"><div class="muted" style="font-size:11px;margin-top:3px">${extra}</div></div>`;
+    else if (type === 'area') h = `<textarea data-p="${k}" data-t="text" rows="3">${v || ''}</textarea>`;
+    else if (type === 'rotary') h = `<div><label style="color:var(--text);display:flex;gap:6px;align-items:center"><input type="checkbox" data-p="rotary" data-t="bool" ${v ? 'checked' : ''} style="width:auto"> rotary A axis (about X) fitted</label>${v ? `
+        <div class="trip" style="margin-top:6px"><span>max Ø</span>${N('rotary.max_diameter', v.max_diameter)}<span>max length</span>${N('rotary.max_length', v.max_length)}<span>max speed</span>${N('rotary.max_speed', v.max_speed)}<span>°/min</span></div>
+        <label style="color:var(--text);display:flex;gap:6px;align-items:center;margin-top:6px"><input type="checkbox" data-p="rotary.installed" data-t="bool" ${v.installed !== false ? 'checked' : ''} style="width:auto"> module installed on the machine now</label>` : ''}</div>`;
+    return `<label>${label}</label>${h}`;
+  }
+  const TCOLS = [['T#', 'number', 'num', '40px'], ['Name', 'name', 'text', ''], ['Type', 'type', 'type', '74px'], ['Ø mm', 'diameter', 'num', '58px'], ['Flutes', 'flutes', 'num', '46px'], ['Flute len', 'flute_length', 'num', '58px'],
+    ['RPM', 'rpm', 'num', '66px'], ['Feed', 'feed', 'num', '58px'], ['Plunge', 'plunge', 'num', '58px'], ['Stepdown', 'stepdown', 'num', '62px'], ['Stepover %', 'stepover', 'pct', '66px'], ['Angle °', 'angle', 'num', '52px']];
+  function renderTools() {
+    tPane.innerHTML = `<div class="set-h">Tool library<span class="muted">defaults every operation uses; override them per operation in the CAM tab</span><button class="btn small" data-a="tadd" style="margin-left:auto">+ Add tool</button></div>
+      <table class="tool-tbl"><tr>${TCOLS.map(([l, , , w]) => `<th style="${w ? 'width:' + w : ''}">${l}</th>`).join('')}<th style="width:24px"></th></tr>
+      ${ts.map((x, i) => `<tr data-i="${i}" class="${x.dirty ? 'dirty' : ''}">${TCOLS.map(([, k, t]) => `<td>${t === 'type' ? `<select data-k="${k}">${TOOL_TYPES.map(o => `<option ${o === x.t.type ? 'selected' : ''}>${o}</option>`).join('')}</select>`
+        : `<input data-k="${k}" data-t="${t}" ${t === 'text' ? '' : 'type="number" step="any"'} value="${t === 'pct' ? +(x.t[k] * 100).toFixed(2) : (x.t[k] ?? '').toString().replace(/"/g, '&quot;')}">`}</td>`).join('')}<td><button class="btn small" data-a="tdel" title="delete">✕</button></td></tr>`).join('')}</table>
+      <div class="fs-box"><div class="set-h" style="margin-top:0">Feeds &amp; speeds calculator<span class="muted">fills a tool's rpm, feed, plunge, stepdown and stepover for a material</span></div>
+        <div class="fs-row"><label>Tool</label><select data-f="tool">${ts.map((x, i) => `<option value="${i}">T${x.t.number} ${x.t.name}</option>`).join('')}</select>
+          <label>Material</label><select data-f="mat">${camMaterials.map(m => `<option ${m === 'aluminium' ? 'selected' : ''}>${m}</option>`).join('')}</select>
+          <label>Machine</label><select data-f="mach">${ms.map(x => `<option ${program && x.m.name === program.machine ? 'selected' : ''}>${x.m.name}</option>`).join('')}</select></div>
+        <div class="fs-row" style="margin-top:8px"><label>Aggression</label><input type="range" data-f="aggr" min="0" max="1" step="0.05" value="0.5"><span class="muted" data-f="aggr-v">50%</span>
+          <label style="margin-left:10px">Engagement</label><input type="range" data-f="ae" min="0.05" max="1" step="0.05" value="0.4"><span class="muted" data-f="ae-v">40% of Ø</span></div>
+        <div class="kv" data-f="out" style="margin-top:8px;grid-template-columns:110px 1fr 110px 1fr"></div><div class="muted" data-f="notes" style="white-space:pre-wrap;margin-top:4px"></div>
+        <div style="margin-top:8px"><button class="btn small primary" data-a="fsapply" disabled>Apply to tool</button></div></div>`;
+    tPane.querySelector('[data-a=tadd]').onclick = () => { const n = Math.max(0, ...ts.map(x => +x.t.number || 0)) + 1; ts.push({ orig: null, dirty: true, t: { number: n, name: '4 mm flat endmill', type: 'flat', diameter: 4, flutes: 2, flute_length: 15, rpm: 12000, feed: 900, plunge: 250, stepdown: 1.5, stepover: 0.45, angle: 0, notes: '' } }); renderTools(); };
+    tPane.querySelectorAll('tr[data-i]').forEach(tr => {
+      const x = ts[+tr.dataset.i];
+      tr.querySelectorAll('[data-k]').forEach(e => e.oninput = e.onchange = () => { const t = e.dataset.t; x.t[e.dataset.k] = t === 'text' || !t ? e.value : t === 'pct' ? num(e.value) / 100 : num(e.value); x.dirty = true; tr.classList.add('dirty'); });
+      tr.querySelector('[data-a=tdel]').onclick = () => { if (x.orig != null) delT.push(x.orig); ts.splice(+tr.dataset.i, 1); renderTools(); };
+    });
+    const F = k => tPane.querySelector(`[data-f="${k}"]`); let res = null;
+    const calc = async () => {
+      F('aggr-v').textContent = Math.round(F('aggr').value * 100) + '%'; F('ae-v').textContent = Math.round(F('ae').value * 100) + '% of Ø';
+      const x = ts[+F('tool').value]; if (!x) return;
+      try {
+        res = await api('/api/cam/feeds', { tool: x.t, material: F('mat').value, machine: F('mach').value, aggressiveness: +F('aggr').value, radial_engagement: +F('ae').value });
+        F('out').innerHTML = [['Surface speed', res.vc + ' m/min'], ['Spindle', res.rpm + ' rpm'], ['Chip load', res.chipload + ' mm/tooth'], ['Feed', res.feed + ' mm/min'], ['Plunge', res.plunge + ' mm/min'], ['Stepdown', res.stepdown + ' mm'], ['Stepover', Math.round(res.stepover * 100) + '% of Ø']].map(([k, v]) => `<div>${k}</div><div>${v}</div>`).join('');
+        F('notes').textContent = (res.notes || []).map(n => '· ' + n).join('\n'); tPane.querySelector('[data-a=fsapply]').disabled = false;
+      } catch (e) { res = null; F('out').innerHTML = ''; F('notes').textContent = e.message; tPane.querySelector('[data-a=fsapply]').disabled = true; }
+    };
+    for (const k of ['tool', 'mat', 'mach']) F(k).onchange = calc; for (const k of ['aggr', 'ae']) F(k).oninput = calc;
+    tPane.querySelector('[data-a=fsapply]').onclick = () => {
+      const i = +F('tool').value, x = ts[i]; if (!res || !x) return;
+      Object.assign(x.t, { rpm: res.rpm, feed: res.feed, plunge: res.plunge, stepdown: res.stepdown, stepover: res.stepover, notes: ((x.t.notes || '').replace(/\s*\[.*?\]$/, '') + ` [${res.material}: vc ${res.vc} m/min, fz ${res.chipload} mm]`).trim() });
+      x.dirty = true; renderTools(); F('tool').value = i; calc();
+    };
+    if (ts.length) calc();
+  }
+  async function confirmInline(btn, what) { if (btn.dataset.armed) return true; btn.dataset.armed = '1'; btn.textContent = 'Click again to ' + what; setTimeout(() => { if (btn.isConnected) { delete btn.dataset.armed; btn.textContent = 'Delete'; } }, 3000); return false; }
+  renderMachines(); renderTools();
+  return {
+    validate() {
+      const names = ms.map(x => (x.m.name || '').trim());
+      if (names.some(n => !n)) return { tab: 'machines', msg: 'Every machine needs a name.' };
+      const dn = names.find((n, i) => names.indexOf(n) !== i); if (dn) return { tab: 'machines', msg: `Two machines are called '${dn}'.` };
+      for (const x of ms) { const m = x.m; if (!(m.travel.x > 0 && m.travel.y > 0 && m.travel.z > 0)) return { tab: 'machines', msg: `${m.name}: travel must be positive.` }; if (!(m.spindle.max >= m.spindle.min)) return { tab: 'machines', msg: `${m.name}: spindle max below min.` }; }
+      const nums = ts.map(x => +x.t.number);
+      if (nums.some(n => !Number.isInteger(n) || n < 1)) return { tab: 'tools', msg: 'Tool numbers must be whole numbers from 1.' };
+      const dt = nums.find((n, i) => nums.indexOf(n) !== i); if (dt) return { tab: 'tools', msg: `Two tools are T${dt}.` };
+      for (const x of ts) { const t = x.t; if (!(t.name || '').trim()) return { tab: 'tools', msg: `T${t.number} needs a name.` }; if (!(t.diameter > 0 && t.feed > 0 && t.plunge > 0 && t.rpm > 0 && t.stepdown > 0)) return { tab: 'tools', msg: `T${t.number} ${t.name}: diameter, rpm, feed, plunge and stepdown must be positive.` }; if (!(t.stepover > 0 && t.stepover <= 1)) return { tab: 'tools', msg: `T${t.number} ${t.name}: stepover must be 1–100% of Ø.` }; }
+      return null;
+    },
+    async commit() {
+      let n = 0;
+      for (const name of delM) { await fetch('/api/cam/machine/' + encodeURIComponent(name), { method: 'DELETE' }); n++; }
+      for (const x of ms.filter(x => x.dirty)) { await api('/api/cam/machine', { machine: x.m }); if (x.orig && x.orig !== x.m.name) await fetch('/api/cam/machine/' + encodeURIComponent(x.orig), { method: 'DELETE' }); n++; }
+      const keep = new Set(ts.map(x => +x.t.number));
+      for (const num_ of delT) if (!keep.has(num_)) { await fetch('/api/cam/tool/' + num_, { method: 'DELETE' }); n++; }
+      for (const x of ts.filter(x => x.dirty)) { x.t.number = +x.t.number; await api('/api/cam/tool', { tool: x.t }); if (x.orig != null && x.orig !== x.t.number && !keep.has(x.orig)) await fetch('/api/cam/tool/' + x.orig, { method: 'DELETE' }); n++; }
+      return n ? `${n} library change${n > 1 ? 's' : ''}` : '';
+    },
+  };
 }
 
 // ------------------------------------------------------------------ websocket
@@ -2225,7 +2393,7 @@ function connect() {
       case 'sliced': loadSlice(m); break;
       case 'library_parts': libParts = m.parts; renderLibrary(); break;
       case 'drawings': renderDrawings(m.design, m.files); break;
-      case 'library': library = { machines: m.machines, tools: m.tools }; renderCamTab(); fsFillLibs(); fsCalc(); break;
+      case 'library': library = { machines: m.machines, tools: m.tools }; renderCamTab(); break;
       case 'cam':
         camCode = m.code || ''; lastGcodeLines = m.gcode_lines || 0; loadProgram(m.program);
         if (codeWhich === 'cam' && (!codeDirty || m.source === 'user')) { codeEl.value = camCode; codeDirty = false; }
@@ -2244,7 +2412,6 @@ function connect() {
         messagesEl.innerHTML = ''; toolEls.clear(); currentBubble = null; currentText = '';
         thinkingEl.style.display = 'none';
         if (codeWhich === 'cam') { codeEl.value = ''; codeDirty = false; }
-        delete fsEls.machine.dataset.picked;
         break;
       case 'agent_missing_cli': location.href = '/setup'; break;
       case 'agent_auth_required': showAuthBanner(m.text); break;

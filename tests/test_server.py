@@ -141,11 +141,23 @@ def test_cam_simulate_api(client):
         while not m.get("program"):                          # the first one is the on-connect state
             m = wait_for(ws, "cam")
         assert m["program"]["machine"] == "Makera Z1"
+        ws.send_json({"type": "set_override", "key": "Face", "values": {"feed": 432}})
+        m = wait_for(ws, "cam")
+        assert m["program"]["ops"][0]["overrides"] == {"feed": 432} and m["code"].startswith("overrides({'Face'")
+        ws.send_json({"type": "set_override", "key": "Face", "values": None})
+        assert wait_for(ws, "cam")["program"]["ops"][0]["overrides"] == {}
     r = client.post("/api/cam/simulate", json={"ops": [0]}).json()
     assert r["mode"] == "zmap" and r["ops"] == [0] and r["frames"][0] == 0 and "removed" in r["summary"]
     f = client.get(f"/api/cam/sim/frame/{len(r['frames']) - 1}").json()
     assert f["upto"] == r["frames"][-1] and "zhi" in f["data"] and "gouge" in f["data"]
     assert client.post("/api/cam/simulate", json={"ops": [5]}).status_code == 400
+
+
+def test_cam_feeds_for_unsaved_tool(client):
+    t = {"type": "flat", "diameter": 3.175, "flutes": 2, "flute_length": 12}
+    r = client.post("/api/cam/feeds", json={"tool": t, "material": "aluminium", "machine": "Makera Z1"})
+    assert r.status_code == 200 and 0 < r.json()["rpm"] <= 13000 and r.json()["feed"] > 0
+    assert client.post("/api/cam/feeds", json={"tool": t, "material": "kryptonite"}).status_code == 400
 
 
 def test_settings_and_status_api(client):

@@ -79,6 +79,13 @@ class Machine:
     #   "max_speed": deg/min, "installed": bool}. The rotary axis is parallel to machine X.
     rotary: dict | None = None
     collet: float = 0.0                     # largest tool shank the spindle takes (mm); 0 = unchecked
+    # stepdown caps for the feeds calculator, mm per pass by material ("*" = any other material); {} = no cap
+    max_stepdown: dict = field(default_factory=dict)
+
+    def stepdown_cap(self, material: str) -> float | None:
+        caps = {MATERIAL_ALIASES.get(str(k).lower().strip(), str(k).lower().strip()): v for k, v in self.max_stepdown.items()}
+        v = caps.get(material, caps.get("*"))
+        return float(v) if v else None
 
 
 # =============================================================================
@@ -313,6 +320,10 @@ class Op:
     params: dict = field(default_factory=dict)
     warnings: list[str] = field(default_factory=list)
     setup: Any = None                                         # the Setup the moves are in (set by PathBuilder)
+    key: str = ""                                             # stable id for per-operation overrides ("Pocket", "Pocket#2")
+    base_tool: Any = None                                     # the tool as the script passed it (before overrides)
+    overrides: dict = field(default_factory=dict)             # applied per-op overrides {rpm, feed, plunge, stepdown, stepover}
+    defaults: dict = field(default_factory=dict)              # what those values are without the overrides
 
     @property
     def uses_a(self) -> bool:
@@ -1403,6 +1414,10 @@ def feeds(tool: Tool, material: str, machine: Machine | None = None, aggressiven
     stepdown = round(min(mat["stepdown"] * d, tool.flute_length), 3)
     if tool.type == "ball":
         stepdown = round(stepdown * 0.6, 3)
+    cap = machine.stepdown_cap(key) if machine is not None else None
+    if cap and stepdown > cap:
+        notes.append(f"stepdown capped at {cap:g} mm for {key} on {machine.name} (wanted {stepdown:g}; machine setting)")
+        stepdown = round(cap, 3)
     if mat.get("notes"):
         notes.append(mat["notes"])
     if key == "mild-steel" and machine is not None and machine.spindle["min"] > 3000:
@@ -1524,6 +1539,8 @@ class Program:
             if not (m.spindle["min"] <= t.rpm <= m.spindle["max"]):
                 w.append(f"{op.name}: {t.label()} rpm {t.rpm} outside spindle range {m.spindle}")
             w += [f"{op.name}: {x}" for x in op.warnings]
+        for k in getattr(self, "unused_overrides", []):
+            w.append(f"override for '{k}' matches no operation (renamed or removed?)")
         tools = {op.tool.number for op in self.ops}
         if len(tools) > 1 and m.tool_change == "none":
             w.append(f"program uses {len(tools)} tools but machine tool_change is 'none'")
@@ -1590,6 +1607,8 @@ class Program:
                 moves = [[m[0], round(float(q[0]), 4), round(float(q[1]), 4), round(float(q[2]), 4), m[4]] + ([m[5]] if len(m) > 5 else [])
                          for m, q in zip(op.moves, M)]
             ops.append({"name": op.name, "kind": op.kind, "color": op.color, "tool": asdict(op.tool), "setup": si,
+                        "key": op.key, "overrides": op.overrides, "defaults": op.defaults,
+                        "base_tool": asdict(op.base_tool) if op.base_tool is not None else None,
                         "moves": moves, "time": round(op.time_minutes(self.machine), 2), "params": op.params, "uses_a": op.uses_a})
         return {
             "name": self.name, "machine": st0.machine.name,
@@ -1952,3 +1971,104 @@ def post_makera(prog: Program) -> str:
 
 # 4th-axis toolpaths live in cam_rotary (imported last: it builds on everything above)
 from cam_rotary import radial_map, rotary_finish, rotary_rough, rotary_wrap  # noqa: E402,F401
+
+
+# ---------------------------------------------------------------- per-operation overrides
+# The CAM tab writes one line at the top of cam.py:  overrides({"Pocket": {"feed": 500}, "Face": {"rpm": 11000}})
+# Every operation created afterwards looks itself up by key (its name, "#2", "#3"… for repeats) and runs with those
+# tool values instead of the tool's (or the script's explicit stepdown/stepover). Everything else comes from the tool.
+OVERRIDE_FIELDS = ("rpm", "feed", "plunge", "stepdown", "stepover")
+OP_FIELDS = {"face": OVERRIDE_FIELDS, "pocket": OVERRIDE_FIELDS, "adaptive": OVERRIDE_FIELDS,
+             "contour": ("rpm", "feed", "plunge", "stepdown"), "drill": ("rpm", "plunge"),
+             "parallel3d": ("rpm", "feed", "plunge", "stepover"), "rotary_rough": OVERRIDE_FIELDS,
+             "rotary_finish": ("rpm", "feed", "plunge", "stepover"), "rotary_wrap": OVERRIDE_FIELDS}
+_OV: dict[str, Any] = {"table": {}, "seen": {}, "depth": 0, "used": set()}
+
+
+def overrides(table: dict | None = None) -> None:
+    """Per-operation tool overrides, keyed by operation name ("Pocket", or "Pocket#2" for the second op with that name):
+    {"Pocket": {"rpm": 11000, "feed": 600, "plunge": 150, "stepdown": 0.8, "stepover": 0.3}} (stepover = fraction of Ø).
+    Written by the CAM tab; put it before the operations. Values not given come from the tool / the script."""
+    bad = []
+    for k, v in (table or {}).items():
+        if not isinstance(v, dict):
+            raise CamError(f"overrides: '{k}' must map to a dict of {OVERRIDE_FIELDS}")
+        for f_, x in v.items():
+            if f_ not in OVERRIDE_FIELDS:
+                bad.append(f"{k}.{f_}")
+            elif not isinstance(x, (int, float)) or x <= 0 or (f_ == "stepover" and x > 1):
+                raise CamError(f"overrides: {k}.{f_} = {x!r} (must be > 0{'; stepover is a fraction of Ø ≤ 1' if f_ == 'stepover' else ''})")
+    if bad:
+        raise CamError(f"overrides: unknown field(s) {bad}; use {OVERRIDE_FIELDS}")
+    _OV["table"] = {k: dict(v) for k, v in (table or {}).items()}
+
+
+def reset_overrides() -> None:
+    """Start of a CAM script run: no overrides, op keys numbered from 1 again."""
+    _OV.update(table={}, seen={}, depth=0, used=set())
+
+
+def unused_overrides() -> list[str]:
+    return [k for k in _OV["table"] if k not in _OV["used"]]
+
+
+def _op_defaults(kind: str, tool: Tool, a: dict) -> dict:
+    sd, so = a.get("stepdown"), a.get("stepover")
+    if kind == "adaptive":
+        so = 0.15 if so is None else so
+        if not sd and a.get("z_top") is not None and a.get("z_bottom") is not None:
+            sd = max(min(tool.flute_length * 0.9, a["z_top"] - a["z_bottom"]), 0.1)
+    elif kind == "parallel3d":
+        so = so or min(tool.stepover, 0.2)
+    elif kind == "rotary_finish":
+        so = so or (0.15 if tool.type == "ball" else tool.stepover)
+    d = {"rpm": tool.rpm, "feed": tool.feed, "plunge": tool.plunge, "stepdown": sd or tool.stepdown, "stepover": so or tool.stepover}
+    return {k: round(float(d[k]), 4) for k in OP_FIELDS.get(kind, OVERRIDE_FIELDS)}
+
+
+def _overridable(fn, kind: str):
+    import functools
+    import inspect
+    from dataclasses import replace
+    sig = inspect.signature(fn)
+
+    @functools.wraps(fn)
+    def wrapper(*args, **kw):
+        if _OV["depth"]:                                   # an op built inside another (rotary_wrap -> pocket): pass through
+            return fn(*args, **kw)
+        b = sig.bind(*args, **kw)
+        name = b.arguments.get("name", sig.parameters["name"].default)
+        n = _OV["seen"][name] = _OV["seen"].get(name, 0) + 1
+        key = name if n == 1 else f"{name}#{n}"
+        tool = b.arguments["tool"]
+        fields = OP_FIELDS.get(kind, OVERRIDE_FIELDS)
+        defaults = _op_defaults(kind, tool, b.arguments)
+        ov = {k: float(v) for k, v in (_OV["table"].get(key) or {}).items() if k in fields}
+        if key in _OV["table"]:
+            _OV["used"].add(key)
+        if ov:
+            b.arguments["tool"] = replace(tool, **ov)
+            for k in ("stepdown", "stepover"):
+                if k in ov and k in sig.parameters:
+                    b.arguments[k] = ov[k]
+        _OV["depth"] += 1
+        try:
+            op = fn(*b.args, **b.kwargs)
+        finally:
+            _OV["depth"] -= 1
+        op.key, op.base_tool, op.overrides, op.defaults = key, tool, ov, defaults
+        return op
+    wrapper.__wrapped_op__ = True
+    return wrapper
+
+
+face = _overridable(face, "face")
+contour = _overridable(contour, "contour")
+pocket = _overridable(pocket, "pocket")
+adaptive = _overridable(adaptive, "adaptive")
+drill = _overridable(drill, "drill")
+parallel3d = _overridable(parallel3d, "parallel3d")
+rotary_rough = _overridable(rotary_rough, "rotary_rough")
+rotary_finish = _overridable(rotary_finish, "rotary_finish")
+rotary_wrap = _overridable(rotary_wrap, "rotary_wrap")
+PUBLIC_API.append("overrides")

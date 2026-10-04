@@ -379,3 +379,30 @@ async def test_press_pull_refuses_curved_faces_and_empty_bodies_fail_loudly(ag):
     assert ag.model.volume > 0
     with pytest.raises(ck.CadError, match="no volume"):
         await ag.build("result = {'Ghost': Box(10, 10, 10) - Box(20, 20, 20)}\n")   # empty solid must not build silently
+
+
+# ------------------------------------------------------------------ CAM tab: per-operation overrides
+CAM_FACE = ("part = bodies['Plate']\nst = Setup(machines['Makera Z1'], Stock.from_model(part, margin=2, top=1))\n"
+            "program = Program(st)\nprogram.add(face(st, tools[3], z_top=st.stock.top, z_bottom=st.stock.top - 1))\n"
+            "program.add(face(st, tools[3], z_top=st.stock.top - 1, z_bottom=st.stock.top - 2, name='Face'))\n")
+
+
+async def test_set_op_override_rewrites_script_and_rebuilds(ag):
+    await build(ag)
+    await ag.set_cam_code(CAM_FACE)
+    t3 = ag.library.tool_map()[3]
+    prog = await ag.set_op_override("Face#2", {"feed": 400, "stepover": 0.25})
+    assert ag.cam_code.splitlines()[0].startswith("overrides({'Face#2': {'feed': 400, 'stepover': 0.25}})")
+    assert prog.ops[1].tool.feed == 400 and prog.ops[0].tool.feed == t3.feed
+    prog = await ag.set_op_override("Face", {"rpm": 9000})
+    assert "'Face': {'rpm': 9000}" in ag.cam_code.splitlines()[0] and ag.cam_code.count("overrides(") == 1
+    assert prog.ops[0].tool.rpm == 9000 and prog.ops[1].tool.feed == 400
+    prog = await ag.set_op_override("Face#2", None)                     # back to the tool's values
+    assert prog.ops[1].tool.feed == t3.feed and "Face#2" not in ag.cam_code
+    prog = await ag.set_op_override("Face", {})
+    assert "overrides(" not in ag.cam_code and ag.cam_code.startswith("part = bodies")
+    assert any("per-operation overrides" in n for n in ag.notes)
+    # a multi-line overrides call written by the agent is still found and replaced, not duplicated
+    await ag.set_cam_code('overrides({\n    "Face": {"feed": 300},\n})\n' + CAM_FACE)
+    await ag.set_op_override("Face", {"feed": 350})
+    assert ag.cam_code.count("overrides(") == 1 and ag.program.ops[0].tool.feed == 350

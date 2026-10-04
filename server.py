@@ -239,6 +239,25 @@ async def cam_feeds(tool: int, material: str, machine: str | None = None, aggres
         return JSONResponse({"error": str(e)}, status_code=400)
 
 
+class FeedsBody(BaseModel):
+    tool: dict                            # a tool's fields (need not be saved in the library)
+    material: str
+    machine: str | None = None
+    aggressiveness: float = 0.5
+    radial_engagement: float | None = None
+
+
+@app.post("/api/cam/feeds")
+async def cam_feeds_for(body: FeedsBody):
+    from cam_data import _tool_from
+    try:
+        t = _tool_from({"number": 0, "name": "tool", **body.tool})
+        m = agent.library.machines().get(body.machine or "")
+        return cam.feeds(t, body.material, m, body.aggressiveness, body.radial_engagement)
+    except (cam.CamError, ValueError, TypeError) as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+
+
 @app.get("/api/gcode")
 async def gcode_download():
     if agent.program is None:
@@ -637,6 +656,13 @@ async def _dispatch(ws: WebSocket, msg: dict) -> None:
         try:
             await agent.set_cam_code(msg.get("code", ""), rebuild=bool(msg.get("code", "").strip()), source="user")
             agent.notes.append("The user edited and rebuilt the CAM script by hand in the Code panel.")
+        except cam.CamError as e:
+            await ws.send_text(json.dumps({"type": "cam_error", "text": str(e)}))
+        except Exception as e:  # noqa: BLE001
+            await ws.send_text(json.dumps({"type": "cam_error", "text": f"{type(e).__name__}: {e}"}))
+    elif t == "set_override":
+        try:
+            await agent.set_op_override(str(msg.get("key") or ""), msg.get("values"))
         except cam.CamError as e:
             await ws.send_text(json.dumps({"type": "cam_error", "text": str(e)}))
         except Exception as e:  # noqa: BLE001

@@ -246,3 +246,58 @@ def test_sim_refuses_mixed_rotary_and_flat(machines, shaft):
     with pytest.raises(cam.CamError, match="separately"):
         cam_sim.simulate(p)
     assert cam_sim.simulate(p, ops=[0]).mode == "radial"
+
+
+# ------------------------------------------------------------------ per-operation overrides
+
+def test_overrides_apply_by_op_key_and_report_unused(machines, plate):
+    st = cam.Setup(machines["Makera Z1"], cam.Stock.from_model(plate, margin=3, top=1))
+    t = flat()
+    cam.reset_overrides()
+    cam.overrides({"Pocket": {"feed": 333, "stepover": 0.2}, "Face#2": {"rpm": 9000}, "Gone": {"feed": 100}})
+    p = cam.Program(st)
+    p.add(cam.face(st, t, z_top=st.stock.top, z_bottom=st.stock.top - 0.5))
+    p.add(cam.face(st, t, z_top=st.stock.top - 0.5, z_bottom=st.stock.top - 1))
+    p.add(cam.pocket(st, t, cam.rect(-10, -5, 10, 5), z_top=12, z_bottom=10, stepover=0.5))
+    p.unused_overrides = cam.unused_overrides()
+    f1, f2, pk = p.ops
+    assert [o.key for o in p.ops] == ["Face", "Face#2", "Pocket"]
+    assert f1.overrides == {} and f1.tool.rpm == t.rpm
+    assert f2.tool.rpm == 9000 and f2.base_tool.rpm == t.rpm
+    # the override beats both the tool and the script's explicit stepover=0.5; defaults show what it would have been
+    assert pk.tool.feed == 333 and pk.defaults["stepover"] == 0.5 and pk.params["stepover"] == pytest.approx(0.2 * t.diameter, abs=1e-3)
+    assert all(m[4] <= 333 for m in pk.moves if m[0] == cam.FEED)
+    assert any("'Gone' matches no operation" in w for w in p.check())
+    pay = p.to_payload()["ops"][2]
+    assert pay["key"] == "Pocket" and pay["overrides"]["feed"] == 333 and pay["base_tool"]["feed"] == t.feed
+    with pytest.raises(cam.CamError, match="stepover"):
+        cam.overrides({"Pocket": {"stepover": 40}})
+    with pytest.raises(cam.CamError, match="unknown field"):
+        cam.overrides({"Pocket": {"speed": 4}})
+    cam.reset_overrides()
+
+
+def test_override_fields_per_kind_and_nested_ops(machines, shaft):
+    m = machines["Makera Z1 + 4th axis"]
+    st = cam.Setup(m, cam.Stock.cylinder(32, 62, x0=-1), rotary=True)
+    cam.reset_overrides()
+    cam.overrides({"Wrapped": {"feed": 222}, "Drill": {"stepdown": 9}})
+    import shapely
+    op = cam.rotary_wrap(st, flat(), [shapely.box(10, -3, 20, 3)], depth=0.5)
+    assert op.key == "Wrapped" and op.tool.feed == 222 and cam.unused_overrides() == ["Drill"]   # inner pocket not double-counted
+    flat_st = cam.Setup(machines["Makera Z1"], cam.Stock.block(20, 20, 5))
+    d = cam.drill(flat_st, flat(), [(5, 5)], z_top=5, z_bottom=0)
+    assert set(d.defaults) == {"rpm", "plunge"} and d.overrides == {}       # stepdown is not a drill setting
+    cam.reset_overrides()
+
+
+def test_machine_stepdown_cap_in_feeds(machines):
+    t = flat()
+    z1 = machines["Makera Z1"]
+    f = cam.feeds(t, "aluminium", z1)
+    assert f["stepdown"] == 0.8 and any("capped" in n for n in f["notes"])
+    assert cam.feeds(t, "plywood", z1)["stepdown"] > 0.8                      # only the materials listed are capped
+    from dataclasses import replace
+    m = replace(z1, max_stepdown={"aluminum": 0.5, "*": 2.0})                # aliases and a catch-all
+    assert cam.feeds(t, "alu", m)["stepdown"] == 0.5 and cam.feeds(t, "plywood", m)["stepdown"] == 2.0
+    assert cam.feeds(t, "aluminium", replace(z1, max_stepdown={}))["stepdown"] > 0.8

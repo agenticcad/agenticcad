@@ -174,9 +174,16 @@ Agent-native, like the CAD side: a second script per design, `cam.py`, written b
 [cam_kernel.py](cam_kernel.py) and built with the `build_cam` tool. Saved with the design as `<name>.cam.py`.
 
 - **Libraries**: `workspace/machines/*.json` (travel, max feeds, rapid, spindle range, safe/clearance Z,
-  tool-change policy `pause|none|split`, start/end G-code blocks) and `workspace/tools.json` (flat / ball /
-  V-bit / drill with feeds, plunge, stepdown, stepover). Edit in the CAM tab (JSON) or ask the agent
-  (`save_machine`, `save_tool`).
+  tool-change policy `pause|manual|none|split`, collet, 4th axis, `max_stepdown` per material for the feeds
+  calculator, start/end G-code blocks) and `workspace/tools.json`
+  (flat / ball / V-bit / drill with feeds, plunge, stepdown, stepover). Edit them in **Settings ▸ Machines** (a form
+  per machine, or JSON) and **Settings ▸ Tools** (an editable table with the feeds & speeds calculator), or ask the
+  agent (`save_machine`, `save_tool`).
+- **Per-operation tool settings**: click an operation in the CAM tab to see its tool's spindle speed, feed, plunge,
+  stepdown and stepover. Blank fields use the tool's values; anything you type overrides them for that operation
+  only (with a calculator to fill them for a material). Overrides are one line at the top of `cam.py`,
+  `overrides({"Pocket": {"feed": 500, "stepover": 0.3}})`, keyed by operation name (`"Face#2"` for the second op
+  with the same name), so they are saved with the design and the agent keeps them.
 - **Geometry from the exact B-rep**: `section(part, z)`, `silhouette`, `stock_minus(setup, part, z)`,
   `holes(part)` (vertical round holes from concave cylindrical faces, with through detection),
   `face_polygon(model.get_face(id))` for a clicked face.
@@ -186,15 +193,15 @@ Agent-native, like the CAD side: a second script per design, `cam.py`, written b
   change pauses, M30). WCS origin choices: stock-top-left / stock-top-center / stock-bottom-left /
   stock-bottom-center / model-origin / (x, y, z). Checks: machine travel, spindle range, feeds clamped,
   cutting below stock bottom, multi-tool with `tool_change=none`.
-- **UI**: CAM tab (setup, operations with colour/visibility, warnings, G-code download/preview, machine
-  and tool libraries), toolpaths + stock + WCS origin drawn in the viewer (rapids red dashed),
+- **UI**: CAM tab (setup, operations with colour/visibility and per-op tool settings, warnings, simulation, G-code
+  download/preview), toolpaths + stock + WCS origin drawn in the viewer (rapids red dashed),
   simulation slider with a tool marker, Code tab switch to `cam.py`.
 - **Arcs**: the post fits G2/G3 to circular runs (chord-sagitta checked, ≤180° per arc; `machine.arcs`,
   `machine.arc_tolerance`) and merges collinear moves. **Lead-in/out**: tangential quarter arcs on contours
   (`lead=`), start mid-way along the longest straight edge. **Adaptive**: see above. **Rest machining**:
   `rest_from=` on `pocket` / `adaptive` (2.5D, morphological opening) and `parallel3d` (3D tip-map difference).
   **Feeds & speeds**: `feeds(tool, material, machine)` / `apply_feeds(...)`, 13 materials, spindle and feed
-  clamping, radial chip thinning; CAM-tab calculator with "Apply to tool"; agent tool `feeds_speeds`.
+  clamping, radial chip thinning; calculator in Settings ▸ Tools ("Apply to tool") and per operation in the CAM tab; agent tool `feeds_speeds`.
 - **Setups**: a program can have several `Setup`s (`orient="top" | "bottom" | "front" | "back" | "left" |
   "right"`), each with its own WCS (G54, G55, …). Moves are in the setup frame; `setup.view(part)` gives the part
   as the machine sees it for `section`/`holes`. Between setups the post stops the spindle, parks and pauses for the
@@ -242,7 +249,7 @@ the ribbon gets a **Slice** button (`P`), ⚙ Settings gets a **3D printing** se
 Model (default Claude Opus 5.5; any Claude model id, or the Claude Code default), effort (low…max), max steps per turn, thinking
 summary on/off, web tools on/off, extra standing instructions, and **MCP servers** (stdio / http / sse
 configs as JSON, enable toggles, live connection status from the session). Saved to
-`workspace/settings.json`; "Save & restart agent" starts a fresh session with the new options (the agent
+`workspace/settings.json`. Tabs: General, MCP servers, Drawings & printing, Machines, Tools (the CAM libraries). "Save & restart agent" starts a fresh session with the new options (the agent
 is told its earlier chat history is gone). API: `GET/POST /api/settings`, `GET /api/agent/status`,
 `POST /api/agent/restart`.
 
