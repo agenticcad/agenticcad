@@ -129,6 +129,25 @@ def test_cam_library_api(client):
     assert client.delete("/api/cam/tool/99").json()["deleted"]
 
 
+def test_cam_simulate_api(client):
+    assert client.post("/api/cam/simulate", json={}).status_code in (200, 400)
+    code = ("part = bodies['Bracket']\nstock = Stock.from_model(part, margin=2, top=1)\n"
+            "setup = Setup(machines['Makera Z1'], stock)\nprogram = Program(setup)\n"
+            "program.add(face(setup, tools[1], z_top=stock.top, z_bottom=stock.top - 1))\n")
+    with client.websocket_connect("/ws") as ws:
+        wait_for(ws, "model")
+        ws.send_json({"type": "run_cam", "code": code})
+        m = wait_for(ws, "cam")
+        while not m.get("program"):                          # the first one is the on-connect state
+            m = wait_for(ws, "cam")
+        assert m["program"]["machine"] == "Makera Z1"
+    r = client.post("/api/cam/simulate", json={"ops": [0]}).json()
+    assert r["mode"] == "zmap" and r["ops"] == [0] and r["frames"][0] == 0 and "removed" in r["summary"]
+    f = client.get(f"/api/cam/sim/frame/{len(r['frames']) - 1}").json()
+    assert f["upto"] == r["frames"][-1] and "zhi" in f["data"] and "gouge" in f["data"]
+    assert client.post("/api/cam/simulate", json={"ops": [5]}).status_code == 400
+
+
 def test_settings_and_status_api(client):
     s = client.get("/api/settings").json()
     assert "model" in s["settings"] and "claude-opus-5" in s["models"]

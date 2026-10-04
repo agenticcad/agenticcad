@@ -105,8 +105,12 @@ async def test_save_open_new_import_and_dirty(ag):
     assert [d["name"] for d in ag.list_designs()] == [name]
     await ag.set_cam_code("program = None", rebuild=False)
     assert ag.dirty                                    # CAM script differs from the saved one
+    ag.notes.append("stale note about the old design"); ag.session_id = "old"
     await ag.new_design()
     assert ag.design_name is None and ag.model.code == ck.NEW_DESIGN_CODE
+    # File > New is a clean start: no CAM program/script/simulation, and the conversation is reset
+    assert ag.program is None and ag.cam_code == "" and ag.sim is None
+    assert ag.notes == [] and ag.session_id is None and ag.client is None and ag.rec.last("chat_reset") is not None
     await ag.open_design(name)
     assert ag.design_name == name and ag.model.code == PLATE and not ag.dirty
     with pytest.raises(ck.CadError):

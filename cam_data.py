@@ -14,6 +14,36 @@ DEFAULT_MACHINES = [
     Machine(name="Shapeoko-class router", travel={"x": 800, "y": 800, "z": 80}, max_feed={"x": 5000, "y": 5000, "z": 1000},
             rapid=5000, spindle={"min": 8000, "max": 30000}, safe_z=5, clearance_z=20,
             notes="Trim-router spindle; GRBL 1.1 with Carbide/Shapeoko defaults."),
+] + [
+    # Makera machines. Sources: makera.com product pages (work area, 4th axis size, spindle, collets), the Makera Z1
+    # firmware (github.com/MakeraInc/MakeraZ1Firmware: configZ1.default max rates 1200/1200/600 mm/min, A max
+    # 3600 deg/min or 1800 with A homing, Y soft limit -160 with the 4th axis), core-electronics.com.au (Air 4000 mm/min).
+    Machine(name="Makera Z1", controller="makera", post="makera", travel={"x": 200, "y": 200, "z": 100},
+            max_feed={"x": 1200, "y": 1200, "z": 600}, rapid=1200, spindle={"min": 0, "max": 13000},
+            tool_change="manual", safe_z=5, clearance_z=15, collet=3.175,
+            notes="Makera Z1 desktop CNC: 150 W spindle 0-13,000 rpm, 1/8\" collet as standard (other collets "
+                  "available), manual quick tool change: M6 Tn moves to the change position, waits for the button and "
+                  "measures the tool length. Firmware max rates X/Y 1200, Z 600 mm/min. Makera: aluminium < 1 mm per "
+                  "pass; not for ferrous metals. Programs must be <= 63 characters per line (the post enforces it)."),
+    Machine(name="Makera Z1 + 4th axis", controller="makera", post="makera", travel={"x": 200, "y": 159, "z": 100},
+            max_feed={"x": 1200, "y": 1200, "z": 600}, rapid=1200, spindle={"min": 0, "max": 13000},
+            tool_change="manual", safe_z=5, clearance_z=15, collet=3.175,
+            rotary={"axis": "A", "about": "x", "max_diameter": 80, "max_length": 150, "max_speed": 1800, "installed": True},
+            notes="Makera Z1 with the 4th axis module (Ø80 x 150 mm, ~2.5 Nm). A rotates about X; the work origin's "
+                  "Y and Z must be on the rotary centreline (Makera's 4th-axis probing sets Z0 on the axis). With the "
+                  "module fitted the firmware limits Y to about 159 mm. A max 1800 deg/min used (3600 without A homing)."),
+    Machine(name="Carvera Air", controller="makera", post="makera", travel={"x": 300, "y": 200, "z": 130},
+            max_feed={"x": 4000, "y": 4000, "z": 2000}, rapid=4000, spindle={"min": 0, "max": 13000},
+            tool_change="manual", safe_z=5, clearance_z=15, collet=3.175,
+            notes="Makera Carvera Air: 200 W spindle 0-13,000 rpm, 1/8\" collet integrated (1/4\", 6 mm, 4 mm "
+                  "optional), manual quick tool changer, ball screws, max travel 4000 mm/min. Same Makera firmware "
+                  "family as the Z1 (M6 Tn change + automatic tool length, 63-character lines)."),
+    Machine(name="Carvera Air + 4th axis", controller="makera", post="makera", travel={"x": 300, "y": 200, "z": 130},
+            max_feed={"x": 4000, "y": 4000, "z": 2000}, rapid=4000, spindle={"min": 0, "max": 13000},
+            tool_change="manual", safe_z=5, clearance_z=15, collet=3.175,
+            rotary={"axis": "A", "about": "x", "max_diameter": 92, "max_length": 200, "max_speed": 2400, "installed": True},
+            notes="Carvera Air with the harmonic-drive 4th axis module (Ø92 x 200 mm, ~10 Nm, 2400 deg/min). Work "
+                  "origin Y/Z on the rotary centreline."),
 ]
 
 DEFAULT_TOOLS = [
@@ -31,9 +61,20 @@ class Library:
         self.machines_dir = workspace / "machines"
         self.tools_path = workspace / "tools.json"
         self.machines_dir.mkdir(parents=True, exist_ok=True)
-        if not any(self.machines_dir.glob("*.json")):
-            for m in DEFAULT_MACHINES:
+        # seed each built-in machine once per workspace (so new built-ins appear in old workspaces, but a machine the
+        # user deleted stays deleted)
+        seeded_p = self.machines_dir / ".seeded.json"
+        try:
+            seeded = set(json.loads(seeded_p.read_text())) if seeded_p.exists() else set()
+        except Exception:
+            seeded = set()
+        if not seeded:
+            seeded = {m.name for m in self.machines().values()}
+        for m in DEFAULT_MACHINES:
+            if m.name not in seeded and not (self.machines_dir / f"{_slug(m.name)}.json").exists():
                 self.save_machine(asdict(m))
+            seeded.add(m.name)
+        seeded_p.write_text(json.dumps(sorted(seeded)))
         if not self.tools_path.exists():
             self.tools_path.write_text(json.dumps([asdict(t) for t in DEFAULT_TOOLS], indent=2))
 
@@ -90,8 +131,10 @@ class Library:
     def describe(self) -> str:
         lines = ["Machines:"]
         for m in self.machines().values():
-            lines.append(f"  - {m.name}: travel {m.travel} mm, max feed {m.max_feed}, rapid {m.rapid}, spindle {m.spindle} rpm, "
-                         f"tool_change={m.tool_change}, safe_z={m.safe_z}, clearance_z={m.clearance_z}"
+            rot = (f", 4th axis {m.rotary.get('axis', 'A')} about X: Ø{m.rotary.get('max_diameter')} x {m.rotary.get('max_length')} mm, "
+                   f"{m.rotary.get('max_speed')} deg/min") if m.rotary else ""
+            lines.append(f"  - {m.name}: post {m.post}, travel {m.travel} mm, max feed {m.max_feed}, rapid {m.rapid}, spindle {m.spindle} rpm, "
+                         f"tool_change={m.tool_change}, collet={m.collet or '-'}, safe_z={m.safe_z}, clearance_z={m.clearance_z}{rot}"
                          + (f" — {m.notes}" if m.notes else ""))
         lines.append("Tools:")
         for t in self.tools():

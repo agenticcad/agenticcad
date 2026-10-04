@@ -255,6 +255,29 @@ async def gcode_preview(lines: int = 400):
     return PlainTextResponse("\n".join(g[:lines]) + (f"\n; ... {len(g) - lines} more lines" if len(g) > lines else ""))
 
 
+class SimBody(BaseModel):
+    ops: list[int] | None = None          # 0-based op indices; None = all
+    resolution: float | None = None
+
+
+@app.post("/api/cam/simulate")
+async def cam_simulate(body: SimBody):
+    if agent.program is None:
+        return JSONResponse({"error": "no CAM program"}, status_code=400)
+    try:
+        res = await agent.simulate(body.ops, body.resolution)
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"error": str(e)}, status_code=400)
+    return res.to_payload() | {"ops": agent.sim_ops}
+
+
+@app.get("/api/cam/sim/frame/{k}")
+async def cam_sim_frame(k: int):
+    if agent.sim is None:
+        return JSONResponse({"error": "no simulation"}, status_code=404)
+    return agent.sim.frame_payload(k)
+
+
 # ---------------------------------------------------------------- parameters / measure / drawings / library / imports
 class ParamsBody(BaseModel):
     values: dict

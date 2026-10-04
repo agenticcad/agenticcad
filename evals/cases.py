@@ -138,6 +138,70 @@ with BuildPart() as bp:
 result = {"Dome": bp.part}
 """
 
+# ---------------------------------------------------------------- Makera / multi-setup / 4th axis (2026-10-04)
+TWO_SIDED = """# plate machined from both sides: recess on top, counterbore from below
+plate = Box(60, 40, 12, align=(Align.CENTER, Align.CENTER, Align.MIN))
+plate = plate - Pos(0, 0, 12) * Box(30, 20, 8)          # top recess, 4 deep
+plate = plate - Pos(10, 0, 0) * Cylinder(6, 6)          # Ø12 counterbore 3 deep in the bottom face
+result = {"Plate": plate}
+"""
+SHAFT = """# stepped shaft along X with a flat (for 4th-axis evals)
+shaft = Rot(0, 90, 0) * Cylinder(10, 60, align=(Align.CENTER, Align.CENTER, Align.MIN))
+shaft = shaft + Rot(0, 90, 0) * Pos(0, 0, 20) * Cylinder(14, 20, align=(Align.CENTER, Align.CENTER, Align.MIN))
+shaft = shaft - Pos(50, 0, 13) * Box(14, 30, 10)
+result = {"Shaft": shaft}
+"""
+
+
+def simulated_clean(max_left: float | None = None, ops: list[int] | None = None):
+    """Run the material-removal simulation on the final program: no gouges, no rapids through material."""
+    def g(run: Run):
+        import cam_sim
+        p = run.program
+        if p is None:
+            return [check("simulation", False, "no program")]
+        try:
+            r = cam_sim.simulate(p, ops=ops, part=run.model)
+        except Exception as e:  # noqa: BLE001
+            return [check("simulation ran", False, str(e))]
+        st = r.stats
+        out = [check("no gouges", st["gouge"]["cells"] == 0, r.summary()),
+               check("no rapids through material", not st["rapid_hits"], str(st["rapid_hits"][:3]))]
+        if max_left is not None:
+            out.append(check(f"material left ≤ {max_left} mm", st["left"]["max"] <= max_left, r.summary()))
+        return out
+    return g
+
+
+def makera_gcode(run: Run):
+    p = run.program
+    if p is None:
+        return [check("makera gcode", False, "no program")]
+    g = p.gcode(); lines = g.splitlines()
+    return [check("Makera post", p.setup.machine.post == "makera", p.setup.machine.name),
+            check("lines ≤ 63 chars", all(len(l) <= 63 for l in lines), max(lines, key=len)),
+            check("no line numbers", not any(re.match(r"N\d", l) for l in lines), ""),
+            check("M6 Tn tool changes", bool(re.search(r"^M6 T\d+$", g, re.M)), "")]
+
+
+def two_setups(run: Run):
+    p = run.program
+    if p is None:
+        return [check("two setups", False, "no program")]
+    sts = p.setups
+    return [check("≥2 setups incl. a bottom one", len(sts) >= 2 and any(s.orient == "bottom" for s in sts), str([(s.name, s.orient) for s in sts])),
+            check("operator pause between setups", "M600" in p.gcode(), "")]
+
+
+def rotary_program(run: Run):
+    p = run.program
+    if p is None:
+        return [check("rotary program", False, "no program")]
+    return [check("4th-axis setup", any(s.rotary for s in p.setups), str([s.describe() for s in p.setups])),
+            check("continuous A moves", any(o.uses_a for o in p.ops), str([o.kind for o in p.ops])),
+            check("rough + finish", {"rotary_rough", "rotary_finish"} <= {o.kind for o in p.ops}, str([o.kind for o in p.ops])),
+            check("ball finish", any(o.kind == "rotary_finish" and o.tool.type == "ball" for o in p.ops), "")]
+
 
 async def seed_step_import(run: Run) -> None:
     """Put a STEP file of the Pin into workspace/imports so the agent can import_step() it."""
@@ -562,6 +626,19 @@ CASES: list[Case] = [
          prompt="CAM for the Bracket on the Generic 3018: face the stock and cut the outline through with the 6 mm endmill (2 tabs). Then export the G-code as bracket_run and tell me how many lines it has.",
          graders=[no_agent_error(), expect_program(["face", "contour"], min_ops=2), expect_tools_used("export_gcode"),
                   files_in("exports", "bracket_run*.nc"), expect_answer(r"\b\d{2,5}\s*lines")]),
+    Case("cam_makera_two_sided", tags=["cam", "makera", "setups"], initial_code=TWO_SIDED,
+         prompt=("CAM on my Makera Z1 in aluminium with the 1/8\" flat endmill (feeds from the calculator). Stock: part bbox + 3 mm "
+                 "margin, 1 mm extra on top. Top setup: face the top, clear the 30 × 20 recess and cut the outline down to 6 mm. "
+                 "Then flip it: bottom setup to cut the Ø12 counterbore and finish the outline from below. "
+                 "Simulate it and tell me if anything is wrong."),
+         graders=[no_agent_error(), expect_program(min_ops=4, no_warnings_matching="travel|rpm|collet"), two_setups, makera_gcode,
+                  expect_tools_used("simulate_cam"), simulated_clean()]),
+    Case("cam_makera_4axis_shaft", tags=["cam", "makera", "4axis"], initial_code=SHAFT,
+         prompt=("Machine this shaft on my Makera Z1 with the 4th axis from Ø32 aluminium bar, 62 mm long starting at x = -1. "
+                 "Rough it with the 1/8\" flat endmill, then finish with a continuous spiral using a 1/8\" ball endmill "
+                 "(add it to the tool library as T7 if it isn't there). Simulate the program and report gouges or leftover material."),
+         graders=[no_agent_error(), expect_program(min_ops=2, no_warnings_matching="travel|rpm|collet|4th axis"), rotary_program,
+                  makera_gcode, expect_tools_used("simulate_cam"), simulated_clean()]),
     Case("cad_showcase_gearbox", tags=["cad", "showcase", "gears"],
          prompt=("Model a two-stage spur reduction gearbox, 9:1, as a multi-body assembly. All gears module 1.5, 20° pressure angle, 10 mm face width, 8 mm bores. "
                  "Base: 160 × 90 × 8 mm plate centred on the origin, z 0 to 8, with four Ø6.6 mounting holes 10 mm in from each corner. "

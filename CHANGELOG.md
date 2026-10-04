@@ -5,6 +5,29 @@ features, patch bumps fix things. The version shown in the UI header comes from 
 
 ## [Unreleased]
 
+## [0.18.0] — 2026-10-04
+
+### Added
+- **CAM simulation.** Simulate all visible operations or a single one (the **Simulate** button in the CAM bar, or
+  the agent's `simulate_cam` tool): the stock is cut in step with the slider; on the last frame gouges show red and
+  material left on the part amber. The summary reports removed volume, gouge depth/area and the op that caused it,
+  material left, stock left outside the part and rapids through material. Height-map model for top/bottom setups,
+  radial model for the 4th axis.
+- **Multiple setups.** `Setup(..., orient="bottom")` (and front/back/left/right) for flipped and re-fixtured
+  work, each with its own WCS (G54…); the post pauses for the operator between setups and restarts the spindle.
+  `setup.view(part)` gives the part as the machine sees it.
+- **4th axis**, indexed (3+1) and continuous: rotary setups on `Stock.cylinder`, `rotary_rough`, `rotary_finish`
+  (lines, rings, spiral) and `rotary_wrap` for patterns wrapped onto a cylinder; swing/length/installed checks.
+- **Makera Z1 and Carvera Air** (with and without the 4th axis) as built-in machines, added to existing workspaces
+  once, with a `makera` post that follows the controller firmware: ≤ 63-character lines, no line numbers,
+  `M6 Tn` manual tool change with automatic tool measuring, M600 between setups, G28 park, no arcs while A moves,
+  and A-axis feed rates as the firmware interprets them. Tools larger than the collet are flagged.
+
+### Fixed
+- **File ▸ New** now starts clean: the chat is cleared, the agent starts a fresh conversation, and the CAM
+  program, script and simulation are removed.
+- The feeds & speeds calculator defaults to the CAM program's machine.
+
 ## [0.17.0] — 2026-10-02
 
 ### Added

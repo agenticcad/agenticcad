@@ -163,6 +163,12 @@ async def test_cam_tools(ag):
     assert text(await T["get_cam_code"]({})) == CAM_CODE
     r = await T["export_gcode"]({"name": "prog one"})
     assert ok(r) and (ag.workspace / "exports" / "prog one.nc").exists() and "G1" in text(r)
+    r = await T["simulate_cam"]({"ops": [1]})
+    assert ok(r) and "Simulation (zmap" in text(r) and "1 ops" in text(r)
+    ev = ag.rec.last("cam_sim")
+    assert ev and ev["ops"] == [0] and ev["sim"]["mode"] == "zmap" and ag.sim is not None
+    r = await T["simulate_cam"]({"ops": [7]})
+    assert not ok(r) and "no operations" in text(r)
     r = await T["feeds_speeds"]({"tool": "T1", "material": "aluminium"})
     assert ok(r) and "rpm" in text(r).lower()
     r = await T["feeds_speeds"]({"tool": "T99", "material": "aluminium"})

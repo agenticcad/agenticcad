@@ -164,11 +164,11 @@ Auth: the Claude Agent SDK uses your Claude Code login (or `ANTHROPIC_API_KEY`).
 - **STL is tessellated only at export time**, at the deviation you choose (toolbar dropdown, or the
   agent's `export_model(tolerance, angular_tolerance)`); it never reuses the display mesh.
 
-## CAM (GRBL) — experimental
+## CAM (GRBL, Makera Carvera) — experimental
 
-> **Experimental.** Toolpaths are geometrically correct and machine-checked, but not optimised (long, conservative
-> paths, many retracts, no stock simulation). Inspect every program before running it. Modelling, export and
-> drawings are the stable part today.
+> **Experimental.** Toolpaths are geometrically correct, machine-checked and can be simulated, but not optimised
+> (long, conservative paths, many retracts). Inspect and simulate every program before running it. Modelling,
+> export and drawings are the stable part today.
 
 Agent-native, like the CAD side: a second script per design, `cam.py`, written by the agent against
 [cam_kernel.py](cam_kernel.py) and built with the `build_cam` tool. Saved with the design as `<name>.cam.py`.
@@ -195,7 +195,26 @@ Agent-native, like the CAD side: a second script per design, `cam.py`, written b
   `rest_from=` on `pocket` / `adaptive` (2.5D, morphological opening) and `parallel3d` (3D tip-map difference).
   **Feeds & speeds**: `feeds(tool, material, machine)` / `apply_feeds(...)`, 13 materials, spindle and feed
   clamping, radial chip thinning; CAM-tab calculator with "Apply to tool"; agent tool `feeds_speeds`.
-- Not yet: 4-axis, drilling cycles (GRBL has none), thread milling.
+- **Setups**: a program can have several `Setup`s (`orient="top" | "bottom" | "front" | "back" | "left" |
+  "right"`), each with its own WCS (G54, G55, …). Moves are in the setup frame; `setup.view(part)` gives the part
+  as the machine sees it for `section`/`holes`. Between setups the post stops the spindle, parks and pauses for the
+  operator to flip or re-fixture (Makera M600, GRBL M0), then restarts the spindle.
+- **4th axis** (rotation about X, A in degrees): `Setup(..., rotary=True)` on a machine with `machine.rotary`.
+  Indexed 3+1 (`Setup(..., rotary=True, a=90)`; setups on the same mounting share one WCS and just turn A) and
+  continuous 4-axis: `rotary_rough` (rings or lines, from a radial height map), `rotary_finish` (lines, rings or a
+  continuous spiral, ball or flat), `rotary_wrap` (pocket/contour a 2D pattern wrapped onto a cylinder).
+  `Stock.cylinder(d, length)` for bar stock; checks for swing diameter, length and a missing/uninstalled axis.
+- **Makera Carvera** (Z1 and Carvera Air, with and without the 4th axis, as built-in machines): a `makera` post
+  written against the controller firmware: lines ≤ 63 characters, no N numbers, `M6 Tn` on one line (the machine
+  measures the tool after each manual change), M3 only after a tool is active, G28 park, M600 between setups,
+  9 work offsets, no arcs while A moves, and A-axis feeds computed the way the firmware interprets F on mixed
+  linear + rotary moves. Collet size is checked (1/8" standard).
+- **Simulation**: `simulate_cam` (agent) or **Simulate** in the CAM bar runs a material-removal simulation of all
+  visible ops or one: a two-sided height map for top/bottom setups, a radial map for 4th-axis setups. The viewer
+  shows the stock being cut in step with the slider, with gouges in red and material left in amber on the last
+  frame; the summary reports removed volume, gouges (depth, area, which op), material left on the part, stock
+  left outside it, and rapids through material. Side setups (front/back/left/right) are not simulated yet.
+- Not yet: drilling cycles (GRBL has none), thread milling, holder/shank collision checks.
 
 ## 3D printing (external slicer)
 
@@ -376,9 +395,9 @@ but nothing here has been run on a real machine yet by anyone but the author.
 ### Known gaps
 - **One project, one session.** A single global design and one agent session per server; two browsers
   or two people will interfere. Chat history is not persisted across server restarts.
-- **No stock simulation or collision checking in CAM.** Toolpaths are drawn, but there is no cut
-  simulation showing the finished part, gouges, or a holder hitting a wall; flute-length vs depth is left
-  to the agent's judgement. Time estimates ignore acceleration.
+- **CAM simulation is tool-tip only.** It finds gouges, leftover material and rapids through stock, but not
+  a holder or shank hitting a wall; flute-length vs depth is left to the agent's judgement. Side setups and
+  mixed 4th-axis + flat programs are simulated separately. Time estimates ignore acceleration.
 - **Adaptive corners rely on feed reduction**, not on geometry; ring-shaped regions still retract for
   some links. No trochoidal slotting op, no rest for 3D, no Z-level (waterline) finishing.
 - **Sketches are basic**: rectangles, circles, polygons, slots; no lines/arcs with constraints,
@@ -396,7 +415,7 @@ but nothing here has been run on a real machine yet by anyone but the author.
 ### Roadmap (rough order)
 1. **Projects and sessions** — a project per folder, one agent session per project, persisted chat via
    SDK session resume. Prerequisite for deploying as a shared service.
-2. **CAM stock simulation + collision checks** — voxel/heightmap cut sim, holder/shank checks, realistic
+2. **CAM collision checks** — holder/shank checks against the simulated stock, side-setup simulation, realistic
    time estimates. Then Z-level finishing, trochoidal slotting, thread milling, ramp entries.
 3. **Assembly positioning** — mate-style placement (face-to-face, concentric) for library parts, and a
    seeded standard-parts library (ISO fasteners, nuts, washers, bearings, heat-set inserts).

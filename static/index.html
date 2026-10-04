@@ -377,6 +377,7 @@
       <div id="cam-body">
         <div id="cam-empty" class="cam-sec" style="color:var(--muted)">No CAM program yet. Ask the agent, e.g. <i>"Make a CAM program for the Generic 3018: face the stock, drill the holes, pocket the bore and cut the outline with 4 tabs."</i> The agent writes <code>cam.py</code> (see the Code tab) against the machine and tool libraries below.</div>
         <div class="cam-sec" id="cam-setup" style="display:none"><h4>Setup</h4><div id="cam-setup-body"></div></div>
+        <div class="cam-sec" id="cam-simres" style="display:none"><h4>Simulation <button class="btn small" id="sim-clear">Hide</button></h4><div id="cam-simres-body" style="white-space:pre-wrap"></div></div>
         <div class="cam-sec" id="cam-ops" style="display:none"><h4>Operations</h4><div id="cam-ops-body"></div><div id="cam-warn"></div></div>
         <div class="cam-sec" id="cam-gcode" style="display:none"><h4>G-code <span class="muted" id="cam-gcode-meta"></span></h4>
           <div class="row"><button class="btn primary" id="gcode-dl">⬇ Download .nc</button><button class="btn" id="gcode-preview">Preview</button></div>
@@ -395,6 +396,7 @@
         <div class="cam-sec"><h4>Tools <button class="btn small" id="tool-add">+ New</button></h4><div id="cam-tools"></div></div>
       </div>
       <div id="cam-sim" style="display:none">
+        <button class="btn" id="sim-run" title="Simulate material removal for the visible operations">Simulate</button>
         <button class="btn" id="sim-play" title="Play / pause">▶</button>
         <input type="range" id="sim-range" min="0" max="0" value="0" step="1">
         <span id="sim-info" class="muted">—</span>
@@ -1089,6 +1091,7 @@ let stockObj = null, originObj = null, toolObj = null, showTp = true, showStock 
 const camMatCut = c => new THREE.LineBasicMaterial({ color: c, transparent: true, opacity: 0.95 });
 const rapidMat = new THREE.LineDashedMaterial({ color: 0xff5c5c, dashSize: 1.5, gapSize: 1.0, transparent: true, opacity: 0.55 });
 function clearCam() {
+  if (typeof clearSim === 'function' && simRes) clearSim();
   for (const c of camOps) { camGroup.remove(c.cut, c.rapid); c.cut.geometry.dispose(); c.rapid.geometry.dispose(); }
   camOps = [];
   if (stockObj) { camGroup.remove(stockObj); stockObj = null; }
@@ -1116,13 +1119,21 @@ function loadProgram(p) {
   }
   const st = p.stock, sx = st.xmax - st.xmin, sy = st.ymax - st.ymin, sz = st.zmax - st.zmin;
   stockObj = new THREE.Group();
-  const sm = new THREE.Mesh(new THREE.BoxGeometry(sx, sy, sz), new THREE.MeshBasicMaterial({ color: 0xffd166, transparent: true, opacity: 0.07, depthWrite: false }));
-  const se = new THREE.LineSegments(new THREE.EdgesGeometry(sm.geometry), new THREE.LineBasicMaterial({ color: 0xffd166, transparent: true, opacity: 0.6 }));
+  const stockGeo = st.radius ? new THREE.CylinderGeometry(st.radius, st.radius, sx, 48, 1).rotateZ(-Math.PI / 2) : new THREE.BoxGeometry(sx, sy, sz);
+  const sm = new THREE.Mesh(stockGeo, new THREE.MeshBasicMaterial({ color: 0xffd166, transparent: true, opacity: 0.07, depthWrite: false }));
+  const rs = (p.setups || []).find(x => x.rotary);
+  if (rs) {                                    // the 4th axis centreline
+    const ax = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(st.xmin - 15, rs.axis[0], rs.axis[1]), new THREE.Vector3(st.xmax + 15, rs.axis[0], rs.axis[1])]);
+    const axl = new THREE.Line(ax, new THREE.LineDashedMaterial({ color: 0x7fd1ff, dashSize: 2, gapSize: 1.5 })); axl.computeLineDistances();
+    axl.position.set(-(st.xmin + st.xmax) / 2, -(st.ymin + st.ymax) / 2, -(st.zmin + st.zmax) / 2); stockObj.add(axl);
+  }
+  const se = new THREE.LineSegments(new THREE.EdgesGeometry(sm.geometry, st.radius ? 30 : 1), new THREE.LineBasicMaterial({ color: 0xffd166, transparent: true, opacity: 0.6 }));
   stockObj.add(sm, se); stockObj.position.set((st.xmin + st.xmax) / 2, (st.ymin + st.ymax) / 2, (st.zmin + st.zmax) / 2); camGroup.add(stockObj);
   originObj = new THREE.Group(); originObj.add(new THREE.AxesHelper(Math.max(6, Math.min(sx, sy) * 0.15)));
   const od = new THREE.Mesh(new THREE.SphereGeometry(Math.max(0.6, Math.min(sx, sy) * 0.012), 16, 12), new THREE.MeshBasicMaterial({ color: 0xffffff }));
   originObj.add(od); originObj.position.set(...p.origin); camGroup.add(originObj);
   applyCamVisibility(); renderCamTab(); setupSim();
+  if (library.machines.length) { fsFillLibs(); fsCalc(); }
 }
 function applyCamVisibility() {
   for (const c of camOps) { c.cut.visible = c.rapid.visible = showTp && c.visible; }
@@ -1143,12 +1154,14 @@ function renderCamTab() {
       <div>Stock</div><div>${(st.xmax - st.xmin).toFixed(1)} × ${(st.ymax - st.ymin).toFixed(1)} × ${(st.zmax - st.zmin).toFixed(1)} mm · top z ${st.zmax.toFixed(2)}</div>
       <div>WCS origin</div><div>model (${o.map(v => v.toFixed(2)).join(', ')})</div>
       <div>Safe Z</div><div>${program.safe_z.toFixed(2)} (model) · ${(program.safe_z - o[2]).toFixed(2)} (WCS)</div>
-      <div>Est. time</div><div>${program.time.toFixed(1)} min</div></div>`;
+      <div>Est. time</div><div>${program.time.toFixed(1)} min</div></div>`
+      + ((program.setups || []).length > 1 || (program.setups || []).some(x => x.rotary) ? '<div class="kv" style="margin-top:6px">' + program.setups.map((x, i) =>
+        `<div>${x.name}</div><div>${x.wcs} · ${x.rotary ? `4th axis · A ${x.a}°` : 'orient ' + x.orient} · ${program.ops.filter(o => (o.setup || 0) === i).length} ops</div>`).join('') + '</div>' : '');
     const ops = document.getElementById('cam-ops-body'); ops.innerHTML = '';
     program.ops.forEach((op, i) => {
       const r = document.createElement('div'); r.className = 'oprow';
       r.innerHTML = `<input type="checkbox" ${camOps[i]?.visible ? 'checked' : ''}><span class="sw" style="background:${op.color}"></span><span class="nm">${i + 1}. ${op.name} <span class="muted">${op.kind}</span></span><span class="meta">T${op.tool.number} Ø${op.tool.diameter} · ${op.time.toFixed(1)} min</span>`;
-      r.querySelector('input').onchange = e => { camOps[i].visible = e.target.checked; applyCamVisibility(); setupSim(); };
+      r.querySelector('input').onchange = e => { camOps[i].visible = e.target.checked; applyCamVisibility(); if (simRes) clearSim(); setupSim(); };
       r.title = Object.entries(op.params || {}).map(([k, v]) => `${k}=${Array.isArray(v) ? v.join('×') : (typeof v === 'number' ? +v.toFixed(3) : v)}`).join('  ');
       ops.appendChild(r);
     });
@@ -1208,9 +1221,16 @@ function applySim(k) {
     const [oi, mi] = sim.index[k - 1]; const c = camOps[oi]; const mv = c.op.moves[mi]; const t = c.op.tool;
     const h = Math.max(t.diameter * 4, 12); const g = new THREE.CylinderGeometry(t.diameter / 2, t.type === 'ball' ? t.diameter / 2 : t.diameter / 2, h, 24); g.rotateX(Math.PI / 2); g.translate(0, 0, h / 2);
     toolObj = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color: 0xffffff, transparent: true, opacity: 0.7, metalness: 0.4, roughness: 0.3 }));
-    toolObj.position.set(mv[1], mv[2], mv[3]); camGroup.add(toolObj);
+    toolObj.position.set(mv[1], mv[2], mv[3]); toolObj.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), toolAxisFor(c.op, mv)); camGroup.add(toolObj);
     simInfo.textContent = `${c.op.name} · move ${mi + 1}/${c.op.moves.length} · ${mv[0] === 0 ? 'rapid' : 'F' + mv[4]} · (${mv[1].toFixed(1)}, ${mv[2].toFixed(1)}, ${mv[3].toFixed(2)})`;
   } else simInfo.textContent = k === 0 ? 'start' : `complete · ${program ? program.time.toFixed(1) : 0} min`;
+  if (simRes) showSimAt(k);
+}
+function toolAxisFor(op, mv) {
+  const st = program && program.setups ? program.setups[op.setup || 0] : null;
+  if (!st) return new THREE.Vector3(0, 0, 1);
+  if (st.rotary) { const a = (mv.length > 5 ? mv[5] : st.a) * Math.PI / 180; return new THREE.Vector3(0, Math.sin(a), Math.cos(a)); }
+  return new THREE.Vector3(...st.tool_axis).normalize();
 }
 simRange.oninput = () => applySim(+simRange.value);
 document.getElementById('sim-play').onclick = e => {
@@ -1220,14 +1240,147 @@ document.getElementById('sim-play').onclick = e => {
 };
 let lastGcodeLines = 0;
 
+// material-removal simulation (server computes; frames are fetched on demand and drawn as a height map or radial mesh)
+let simRes = null, simMesh = null, simLow = null, simFrameShown = -1, simFetch = null;
+const simCache = new Map();
+async function inflateB64(b64) {
+  const bin = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+  const buf = await new Response(new Blob([bin]).stream().pipeThrough(new DecompressionStream('deflate'))).arrayBuffer();
+  return buf;
+}
+function ghostPart(on) {                       // see the simulated stock through the finished part
+  material.transparent = on; material.opacity = on ? 0.18 : 1; material.depthWrite = !on; material.needsUpdate = true;
+}
+function clearSim() {
+  ghostPart(false);
+  for (const m of [simMesh, simLow]) if (m) { camGroup.remove(m); m.traverse(o => o.geometry && o.geometry.dispose()); }
+  simMesh = simLow = null; simRes = null; simFrameShown = -1; simCache.clear();
+  document.getElementById('cam-simres').style.display = 'none';
+  if (stockObj) stockObj.visible = showStock;
+}
+document.getElementById('sim-clear').onclick = () => clearSim();
+document.getElementById('sim-run').onclick = async () => {
+  if (!program) return;
+  const btn = document.getElementById('sim-run');
+  const ops = camOps.map((c, i) => c.visible ? i : -1).filter(i => i >= 0);
+  btn.disabled = true; simInfo.textContent = 'simulating…';
+  try {
+    const r = await fetch('/api/cam/simulate', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ops }) }).then(r => r.json());
+    if (r.error) throw new Error(r.error);
+    if (!simRes) startSim(r);                  // normally the cam_sim event has already shown it
+  } catch (err) { addMsg('error', 'Simulation failed: ' + err.message); simInfo.textContent = '—'; }
+  btn.disabled = false;
+};
+function startSim(payload) {
+  clearSim(); simRes = payload;
+  const el = document.getElementById('cam-simres'); el.style.display = '';
+  document.getElementById('cam-simres-body').innerHTML = payload.summary.split('\n').map(l =>
+    `<div style="${/^(GOUGES|RAPIDS)/.test(l) ? 'color:var(--red,#ff6b6b);font-weight:600' : ''}">${l.replace(/&/g, '&amp;').replace(/</g, '&lt;')}</div>`).join('');
+  if (stockObj) stockObj.visible = false;
+  ghostPart(true);
+  showSimAt(+simRange.value);
+}
+async function getSimFrame(i) {
+  if (simCache.has(i)) return simCache.get(i);
+  const f = await fetch('/api/cam/sim/frame/' + i).then(r => r.json());
+  const out = { upto: f.upto, mode: f.mode, grid: f.grid };
+  for (const [k, v] of Object.entries(f.data)) out[k] = (k === 'gouge' || k === 'left') ? new Uint8Array(await inflateB64(v)) : new Uint16Array(await inflateB64(v));
+  simCache.set(i, out); return out;
+}
+function showSimAt(k) {
+  if (!simRes) return;
+  const fr = simRes.frames; let i = 0;
+  for (let j = 0; j < fr.length; j++) if (fr[j] <= k) i = j;
+  if (k >= sim.total) i = fr.length - 1;
+  if (i === simFrameShown) return;
+  const want = i; simFetch = want;
+  getSimFrame(want).then(f => { if (simFetch === want && simRes) { drawSimFrame(f, want === fr.length - 1); simFrameShown = want; } });
+}
+function bitAt(bits, idx) { return (bits[idx >> 3] >> (7 - (idx & 7))) & 1; }
+function drawSimFrame(f, final) {
+  for (const m of [simMesh, simLow]) if (m) { camGroup.remove(m); m.traverse(o => o.geometry && o.geometry.dispose()); }
+  simMesh = simLow = null;
+  const mat = () => new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.75, metalness: 0.05, side: THREE.DoubleSide });
+  const base = new THREE.Color(0xc9b48a), red = new THREE.Color(0xff3b3b), amber = new THREE.Color(0xffb020);
+  const g = f.grid;
+  if (f.mode === 'zmap') {
+    // top (and, for two-sided programs, bottom) height fields plus walls along the open edges so the stock reads solid
+    const { nx, ny, x0, y0, res, zmin, zmax } = g, span = zmax - zmin, N = nx * ny;
+    const zOf = (Q, n) => Q[n] === 65535 ? zmin : zmin + Q[n] / 65534 * span;
+    const col = new Float32Array(N * 3);
+    for (let n = 0; n < N; n++) {
+      let c = base;
+      if (final && f.gouge && bitAt(f.gouge, n)) c = red; else if (final && f.left && bitAt(f.left, n)) c = amber;
+      col[n * 3] = c.r; col[n * 3 + 1] = c.g; col[n * 3 + 2] = c.b;
+    }
+    const surf = (Q, low) => {
+      const pos = new Float32Array(N * 3);
+      for (let n = 0; n < N; n++) { pos[n * 3] = x0 + (n % nx) * res; pos[n * 3 + 1] = y0 + Math.floor(n / nx) * res; pos[n * 3 + 2] = zOf(Q, n); }
+      const idx = [];
+      for (let iy = 0; iy < ny - 1; iy++) for (let ix = 0; ix < nx - 1; ix++) {
+        const a = iy * nx + ix, b = a + 1, c2 = a + nx, d = c2 + 1;
+        if (Q[a] === 65535 || Q[b] === 65535 || Q[c2] === 65535 || Q[d] === 65535) continue;
+        if (low) idx.push(a, c2, b, b, c2, d); else idx.push(a, b, c2, b, d, c2);
+      }
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.BufferAttribute(pos, 3)); geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+      geo.setIndex(idx); geo.computeVertexNormals();
+      return { geo, idx };
+    };
+    const top = surf(f.zhi, false);
+    simMesh = new THREE.Mesh(top.geo, mat()); simMesh.renderOrder = 2; camGroup.add(simMesh);
+    if (f.zlo) { simLow = new THREE.Mesh(surf(f.zlo, true).geo, mat()); simLow.renderOrder = 2; camGroup.add(simLow); }
+    const once = new Map(), t = top.idx;                 // directed edges used by exactly one top triangle
+    for (let i = 0; i < t.length; i += 3) for (let e = 0; e < 3; e++) {
+      const u = t[i + e], v = t[i + (e + 1) % 3], key = u < v ? u * N + v : v * N + u;
+      if (once.has(key)) once.set(key, null); else once.set(key, [u, v]);
+    }
+    const wp = [], wc = [];
+    for (const uv of once.values()) {
+      if (!uv) continue;
+      const [u, v] = uv, P = n => [x0 + (n % nx) * res, y0 + Math.floor(n / nx) * res];
+      const [ux, uy] = P(u), [vx, vy] = P(v), ut = zOf(f.zhi, u), vt = zOf(f.zhi, v);
+      const ub = f.zlo ? zOf(f.zlo, u) : zmin, vb = f.zlo ? zOf(f.zlo, v) : zmin;
+      wp.push(ux, uy, ut, ux, uy, ub, vx, vy, vb, ux, uy, ut, vx, vy, vb, vx, vy, vt);
+      for (const n of [u, u, v, u, v, v]) wc.push(col[n * 3] * 0.85, col[n * 3 + 1] * 0.85, col[n * 3 + 2] * 0.85);
+    }
+    if (wp.length) {
+      const wg = new THREE.BufferGeometry();
+      wg.setAttribute('position', new THREE.Float32BufferAttribute(wp, 3)); wg.setAttribute('color', new THREE.Float32BufferAttribute(wc, 3));
+      wg.computeVertexNormals();
+      simMesh.add(new THREE.Mesh(wg, mat()));
+    }
+  } else {
+    const { nx, na, x0, res, res_a, rmax, axis } = g;
+    const pos = new Float32Array(nx * na * 3), col = new Float32Array(nx * na * 3);
+    for (let ia = 0; ia < na; ia++) {
+      const psi = ia * res_a * Math.PI / 180, sp = Math.sin(psi), cp = Math.cos(psi);
+      for (let ix = 0; ix < nx; ix++) {
+        const n = ia * nx + ix, r = f.r[n] / 65534 * rmax;
+        pos[n * 3] = x0 + ix * res; pos[n * 3 + 1] = axis[0] + r * sp; pos[n * 3 + 2] = axis[1] + r * cp;
+        let c = base;
+        if (final && f.gouge && bitAt(f.gouge, n)) c = red; else if (final && f.left && bitAt(f.left, n)) c = amber;
+        col[n * 3] = c.r; col[n * 3 + 1] = c.g; col[n * 3 + 2] = c.b;
+      }
+    }
+    const idx = [];
+    for (let ia = 0; ia < na; ia++) { const ib = (ia + 1) % na; for (let ix = 0; ix < nx - 1; ix++) { const a = ia * nx + ix, b = a + 1, c2 = ib * nx + ix, d = c2 + 1; idx.push(a, c2, b, b, c2, d); } }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3)); geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+    geo.setIndex(idx); geo.computeVertexNormals();
+    simMesh = new THREE.Mesh(geo, mat()); simMesh.renderOrder = 2; camGroup.add(simMesh);
+  }
+}
+
 // feeds & speeds calculator
 let fsResult = null;
 const fsEls = Object.fromEntries(['tool', 'material', 'machine', 'aggr', 'ae', 'out', 'notes', 'apply'].map(k => [k, document.getElementById('fs-' + k)]));
+fsEls.machine.addEventListener('change', () => { fsEls.machine.dataset.picked = '1'; });   // stop following the program's machine
 async function fsInit() {
   try { const { materials } = await fetch('/api/cam/materials').then(r => r.json()); fsEls.material.innerHTML = materials.map(m => `<option ${m === 'aluminium' ? 'selected' : ''}>${m}</option>`).join(''); } catch {}
 }
 function fsFillLibs() {
-  const tv = fsEls.tool.value, mv = fsEls.machine.value;
+  const tv = fsEls.tool.value, mv = fsEls.machine.dataset.picked ? fsEls.machine.value : (program ? program.machine : fsEls.machine.value);
   fsEls.tool.innerHTML = library.tools.map(t => `<option value="${t.number}" ${String(t.number) === tv ? 'selected' : ''}>T${t.number} ${t.name}</option>`).join('');
   fsEls.machine.innerHTML = library.machines.map(m => `<option ${m.name === mv || (!mv && program && program.machine === m.name) ? 'selected' : ''}>${m.name}</option>`).join('');
 }
@@ -2081,9 +2234,18 @@ function connect() {
         if (m.source === 'agent' && m.program) addMsg('system', `CAM program built: ${m.program.ops.length} ops · ${m.program.time.toFixed(1)} min` + (m.program.warnings.length ? ` · ${m.program.warnings.length} warning(s), see CAM tab` : ''));
         break;
       case 'cam_error': document.getElementById('codeerr').textContent = m.text; addMsg('error', 'CAM build failed — see Code tab'); break;
+      case 'cam_sim':
+        if (program) { camOps.forEach((c, i) => { c.visible = m.ops.includes(i); }); applyCamVisibility(); renderCamTab(); setupSim(); startSim(m.sim); }
+        break;
       case 'build_error': document.getElementById('codeerr').textContent = m.text; break;
       case 'status': busy = m.busy; setBusy(busy); if (m.agent_ready) setStatus('agent ready'); else if (m.auth_required) showAuthBanner(m.auth_required); else if (m.agent_ready === false) setStatus('agent not connected'); break;
       case 'agent_ready': setStatus('agent ready'); break;
+      case 'chat_reset':                         // File ▸ New: a clean conversation
+        messagesEl.innerHTML = ''; toolEls.clear(); currentBubble = null; currentText = '';
+        thinkingEl.style.display = 'none';
+        if (codeWhich === 'cam') { codeEl.value = ''; codeDirty = false; }
+        delete fsEls.machine.dataset.picked;
+        break;
       case 'agent_missing_cli': location.href = '/setup'; break;
       case 'agent_auth_required': showAuthBanner(m.text); break;
       case 'delta': thinkingEl.style.display = 'none'; onDelta(m.text); break;

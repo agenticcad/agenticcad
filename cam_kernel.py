@@ -74,6 +74,11 @@ class Machine:
     arcs: bool = True                       # emit G2/G3 where the path is circular
     arc_tolerance: float = 0.05             # max deviation (mm) between polyline and fitted arc
     notes: str = ""
+    post: str = "grbl"                      # grbl | makera (Makera Z1 / Carvera family, Smoothieware-based firmware)
+    # optional rotary 4th axis: {"axis": "A", "about": "x", "max_diameter": mm, "max_length": mm,
+    #   "max_speed": deg/min, "installed": bool}. The rotary axis is parallel to machine X.
+    rotary: dict | None = None
+    collet: float = 0.0                     # largest tool shank the spindle takes (mm); 0 = unchecked
 
 
 # =============================================================================
@@ -112,6 +117,19 @@ class Stock:
         cx, cy = center_xy
         return cls(cx - size_x / 2, cx + size_x / 2, cy - size_y / 2, cy + size_y / 2, bottom, top)
 
+    @classmethod
+    def cylinder(cls, diameter: float, length: float, x0: float = 0.0, axis: tuple[float, float] = (0.0, 0.0)) -> "Stock":
+        """Round bar for the 4th axis: axis parallel to X through model (y, z) = `axis`, from x0 to x0 + length."""
+        y0, z0 = axis
+        r = diameter / 2
+        st = cls(x0, x0 + length, y0 - r, y0 + r, z0 - r, z0 + r)
+        st.radius = r
+        return st
+
+    @property
+    def is_cylinder(self) -> bool:
+        return getattr(self, "radius", None) is not None
+
     @property
     def size(self) -> tuple[float, float, float]:
         return (self.xmax - self.xmin, self.ymax - self.ymin, self.zmax - self.zmin)
@@ -128,7 +146,10 @@ class Stock:
         return shp_box(self.xmin - expand, self.ymin - expand, self.xmax + expand, self.ymax + expand)
 
     def to_dict(self) -> dict:
-        return asdict(self)
+        d = asdict(self)
+        if self.is_cylinder:
+            d["radius"] = self.radius
+        return d
 
 
 ORIGINS = {
@@ -137,23 +158,124 @@ ORIGINS = {
     "stock-bottom-left": lambda s: (s.xmin, s.ymin, s.zmin),
     "stock-bottom-center": lambda s: ((s.xmin + s.xmax) / 2, (s.ymin + s.ymax) / 2, s.zmin),
     "model-origin": lambda s: (0.0, 0.0, 0.0),
+    # 4th axis: on the rotary centreline, at the stock's left end or middle (setup frame: axis = X, Y = Z = 0)
+    "rotary-axis-left": lambda s: (s.xmin, 0.0, 0.0),
+    "rotary-axis-center": lambda s: ((s.xmin + s.xmax) / 2, 0.0, 0.0),
 }
+
+
+def _rx(deg: float) -> np.ndarray:
+    c, s_ = math.cos(math.radians(deg)), math.sin(math.radians(deg))
+    return np.array([[1, 0, 0], [0, c, -s_], [0, s_, c]], dtype=float)
+
+
+def _ry(deg: float) -> np.ndarray:
+    c, s_ = math.cos(math.radians(deg)), math.sin(math.radians(deg))
+    return np.array([[c, 0, s_], [0, 1, 0], [-s_, 0, c]], dtype=float)
+
+
+def _rz(deg: float) -> np.ndarray:
+    c, s_ = math.cos(math.radians(deg)), math.sin(math.radians(deg))
+    return np.array([[c, -s_, 0], [s_, c, 0], [0, 0, 1]], dtype=float)
+
+
+# which model face points up at the spindle in each orientation, as (rx, ry, rz) rotations applied X then Y then Z
+ORIENTS = {"top": (0, 0, 0), "bottom": (180, 0, 0), "front": (-90, 0, 0), "back": (90, 0, 0),
+           "left": (0, 90, 0), "right": (0, -90, 0)}
 
 
 @dataclass
 class Setup:
+    """One way the part is held on the machine. `stock` is given in MODEL coordinates; the setup has its own
+    frame in which the spindle axis is +Z (the part is turned so the machined side faces up).
+      orient: "top" (as modelled) | "bottom" (flipped about X) | "front" | "back" | "left" | "right" (that model face
+              up) | (rx, ry, rz) degrees, applied X then Y then Z.
+      rotary=True: the part is on the 4th axis. The rotary axis is the model line parallel to X through `axis`
+              (y, z) (default: stock centre); in the setup frame it is the X axis (Y = Z = 0). `a` is the A angle the
+              ops of this setup are cut at (3+1 indexed); continuous ops (rotary_*) drive A themselves.
+    Use setup.view(shape) to get geometry in the setup frame for section(), holes(), stock_minus() etc. Toolpath
+    moves are in the setup frame; the viewer maps them back onto the part, the post subtracts the WCS origin."""
     machine: Machine
     stock: Stock
-    origin: Any = "stock-top-left"          # one of ORIGINS or an (x, y, z) tuple in model coords
-    safe_z: float | None = None             # absolute model Z for rapids; default stock top + machine.safe_z
+    origin: Any = None                      # one of ORIGINS or an (x, y, z) tuple in SETUP coords; default by kind
+    safe_z: float | None = None             # absolute setup-frame Z for rapids; default stock top + machine.safe_z
     clearance_z: float | None = None
     name: str = "Setup 1"
+    orient: Any = "top"
+    rotary: bool = False
+    axis: tuple[float, float] | None = None
+    a: float = 0.0
+    wcs: str | None = None                  # G54..G59; Program assigns one per setup when None
 
     def __post_init__(self):
-        if self.safe_z is None:
-            self.safe_z = self.stock.top + self.machine.safe_z
-        if self.clearance_z is None:
-            self.clearance_z = self.stock.top + self.machine.clearance_z
+        self.model_stock = self.stock
+        if self.rotary:
+            if self.machine.rotary is None:
+                raise CamError(f"{self.machine.name} has no 4th axis defined (machine.rotary); can't make a rotary setup")
+            if self.axis is None:
+                self.axis = ((self.stock.ymin + self.stock.ymax) / 2, (self.stock.zmin + self.stock.zmax) / 2)
+            y0, z0 = self.axis
+            corners = [(y - y0, z - z0) for y in (self.stock.ymin, self.stock.ymax) for z in (self.stock.zmin, self.stock.zmax)]
+            r = self.stock.radius if self.stock.is_cylinder else max(math.hypot(*c) for c in corners)
+            self.max_radius = r
+            st = Stock(self.stock.xmin, self.stock.xmax, -r, r, -r, r)
+            st.radius = r
+            self.stock = st
+            self.origin = self.origin or "rotary-axis-left"
+            if self.safe_z is None:
+                self.safe_z = r + self.machine.safe_z
+            if self.clearance_z is None:
+                self.clearance_z = r + self.machine.clearance_z
+        else:
+            rot = ORIENTS.get(self.orient, self.orient) if isinstance(self.orient, str) else self.orient
+            if isinstance(self.orient, str) and self.orient not in ORIENTS:
+                raise CamError(f"unknown orient '{self.orient}'; use one of {list(ORIENTS)} or (rx, ry, rz)")
+            self._rot = tuple(float(v) for v in rot)
+            pts = np.array([[x, y, z] for x in (self.stock.xmin, self.stock.xmax) for y in (self.stock.ymin, self.stock.ymax)
+                            for z in (self.stock.zmin, self.stock.zmax)])
+            q = np.round(pts @ self._R().T, 9)
+            lo, hi = q.min(axis=0), q.max(axis=0)
+            self.stock = Stock(*(float(v) + 0.0 for v in (lo[0], hi[0], lo[1], hi[1], lo[2], hi[2])))
+            self.origin = self.origin or "stock-top-left"
+            if self.safe_z is None:
+                self.safe_z = self.stock.top + self.machine.safe_z
+            if self.clearance_z is None:
+                self.clearance_z = self.stock.top + self.machine.clearance_z
+
+    # ---- transforms (model -> setup frame)
+    def _R(self) -> np.ndarray:
+        rx, ry, rz = self._rot
+        return _rz(rz) @ _ry(ry) @ _rx(rx)
+
+    def matrix(self, a: float | None = None) -> np.ndarray:
+        """4x4 model -> setup frame (for rotary setups at A = a, default the setup's index angle)."""
+        M = np.eye(4)
+        if self.rotary:
+            y0, z0 = self.axis
+            T = np.eye(4); T[1, 3] = -y0; T[2, 3] = -z0
+            M[:3, :3] = _rx(self.a if a is None else a)
+            return M @ T
+        M[:3, :3] = self._R()
+        return M
+
+    def to_setup(self, pts, a: float | None = None) -> np.ndarray:
+        P = np.atleast_2d(np.asarray(pts, dtype=float))
+        M = self.matrix(a)
+        return P @ M[:3, :3].T + M[:3, 3]
+
+    def to_model(self, pts, a: float | None = None) -> np.ndarray:
+        """Setup-frame points (at A = a for rotary setups) back to model coordinates."""
+        P = np.atleast_2d(np.asarray(pts, dtype=float))
+        M = np.linalg.inv(self.matrix(a))
+        return P @ M[:3, :3].T + M[:3, 3]
+
+    def view(self, shape, a: float | None = None):
+        """The shape as the machine sees it in this setup (setup frame), for section/holes/stock_minus/parallel3d."""
+        if self.rotary:
+            y0, z0 = self.axis
+            return b3d.Rot(self.a if a is None else a, 0, 0) * (b3d.Pos(0, -y0, -z0) * shape)
+        rx, ry, rz = self._rot
+        return b3d.Rot(0, 0, rz) * (b3d.Rot(0, ry, 0) * (b3d.Rot(rx, 0, 0) * shape))
 
     def origin_point(self) -> tuple[float, float, float]:
         if isinstance(self.origin, str):
@@ -162,6 +284,17 @@ class Setup:
             return ORIGINS[self.origin](self.stock)
         x, y, z = self.origin
         return (float(x), float(y), float(z))
+
+    @property
+    def tool_axis_model(self) -> tuple[float, float, float]:
+        """Direction from the part towards the spindle, in model coordinates (setup +Z), at the index angle."""
+        d = self.to_model([[0, 0, 1]]) - self.to_model([[0, 0, 0]])
+        return tuple(float(v) for v in d[0])
+
+    def describe(self) -> str:
+        kind = (f"4th axis, axis through model (y, z) = ({self.axis[0]:.2f}, {self.axis[1]:.2f}), A {self.a:g}°"
+                if self.rotary else f"orient {self.orient}")
+        return f"{self.name}: {kind}, WCS {self.wcs or '?'}, origin {self.origin}"
 
 
 # =============================================================================
@@ -175,17 +308,30 @@ class Op:
     name: str
     kind: str
     tool: Tool
-    moves: list[list[float]] = field(default_factory=list)   # [kind, x, y, z, feed]
+    moves: list[list[float]] = field(default_factory=list)   # [kind, x, y, z, feed] or [kind, x, y, z, feed, a] (setup frame)
     color: str = "#4ea1ff"
     params: dict = field(default_factory=dict)
     warnings: list[str] = field(default_factory=list)
+    setup: Any = None                                         # the Setup the moves are in (set by PathBuilder)
+
+    @property
+    def uses_a(self) -> bool:
+        return any(len(m) > 5 for m in self.moves)
+
+    def _seg(self, prev, m) -> float:
+        """Path length of one move: XYZ distance, plus the arc length swept by A at the tool's radius from the axis."""
+        d = math.dist(prev[1:4], m[1:4])
+        if len(m) > 5 and len(prev) > 5 and m[5] != prev[5]:
+            r = max(math.hypot(m[2], m[3]), math.hypot(prev[2], prev[3]))
+            d = math.hypot(d, math.radians(abs(m[5] - prev[5])) * r)
+        return d
 
     def lengths(self) -> tuple[float, float]:
         cut = rapid = 0.0
         prev = None
         for m in self.moves:
             if prev is not None:
-                d = math.dist(prev[1:4], m[1:4])
+                d = self._seg(prev, m)
                 if m[0] == RAPID:
                     rapid += d
                 else:
@@ -198,7 +344,7 @@ class Op:
         prev = None
         for m in self.moves:
             if prev is not None:
-                d = math.dist(prev[1:4], m[1:4])
+                d = self._seg(prev, m)
                 f = machine.rapid if m[0] == RAPID else max(m[4], 1.0)
                 t += d / f
             prev = m
@@ -214,6 +360,10 @@ class PathBuilder:
 
     def __init__(self, setup: Setup, tool: Tool, op: Op):
         self.setup, self.tool, self.op = setup, tool, op
+        op.setup = setup
+        if setup.machine.collet and tool.diameter > setup.machine.collet + 1e-6 and tool.type in ("flat", "ball", "drill"):
+            op.warnings.append(f"{tool.label()} Ø{tool.diameter} is larger than the {setup.machine.collet:g} mm collet: "
+                               "check the shank fits (reduced-shank tool?)")
         self.pos: tuple[float, float, float] | None = None
         mf = setup.machine.max_feed
         self.feed = min(tool.feed, mf.get("x", tool.feed), mf.get("y", tool.feed))
@@ -221,8 +371,11 @@ class PathBuilder:
         if self.feed < tool.feed or self.plunge < tool.plunge:
             op.warnings.append(f"feed clamped to machine max ({self.feed:.0f}/{self.plunge:.0f} mm/min)")
 
-    def _add(self, kind, x, y, z, f=0.0):
-        self.op.moves.append([kind, round(x, 4), round(y, 4), round(z, 4), round(f, 1)])
+    def _add(self, kind, x, y, z, f=0.0, a=None):
+        mv = [kind, round(x, 4), round(y, 4), round(z, 4), round(f, 1)]
+        if a is not None:
+            mv.append(round(a, 4))
+        self.op.moves.append(mv)
         self.pos = (x, y, z)
 
     def retract(self):
@@ -1138,9 +1291,9 @@ def _raster_triangles(P: np.ndarray, I: np.ndarray, zmap: np.ndarray, minx: floa
         np.maximum(sub, np.where(m, Z, -np.inf), out=sub)
 
 
-PUBLIC_API = ["Stock.from_model", "Stock.block", "Setup", "Program", "face", "contour", "pocket", "adaptive", "drill",
-              "parallel3d", "rest_region", "section", "silhouette", "stock_minus", "holes", "face_polygon", "circle",
-              "rect", "feeds", "apply_feeds"]
+PUBLIC_API = ["Stock.from_model", "Stock.block", "Stock.cylinder", "Setup", "Setup.view", "Program", "face", "contour", "pocket",
+              "adaptive", "drill", "parallel3d", "rest_region", "section", "silhouette", "stock_minus", "holes", "face_polygon",
+              "circle", "rect", "feeds", "apply_feeds", "rotary_rough", "rotary_finish", "rotary_wrap", "radial_map"]
 
 
 def api_reference() -> str:
@@ -1272,45 +1425,102 @@ def apply_feeds(tool: Tool, material: str, machine: Machine | None = None, **kw)
 # Program + GRBL post
 # =============================================================================
 class Program:
+    """Operations in run order. Each op carries the Setup it was made with; consecutive ops that share a setup run
+    together. A change of setup is an operator step (flip or re-clamp the part, re-zero) unless both setups are on
+    the 4th axis with the same mounting, in which case the post just turns A to the next index angle."""
+
     def __init__(self, setup: Setup, ops: Iterable[Op] = (), name: str = "program"):
         self.setup = setup
         self.ops: list[Op] = list(ops)
         self.name = name
 
     def add(self, op: Op) -> Op:
+        if op.setup is None:
+            op.setup = self.setup
         self.ops.append(op)
         return op
 
-    def time_minutes(self) -> float:
-        return sum(op.time_minutes(self.setup.machine) for op in self.ops)
+    def setup_of(self, op: Op) -> Setup:
+        return op.setup or self.setup
 
-    def bounds(self):
-        if not self.ops:
+    @property
+    def setups(self) -> list[Setup]:
+        out: list[Setup] = []
+        for op in self.ops:
+            st = self.setup_of(op)
+            if not any(st is x for x in out):
+                out.append(st)
+        return out or [self.setup]
+
+    @staticmethod
+    def same_mounting(a: Setup, b: Setup) -> bool:
+        """Two setups the operator doesn't touch between: both on the 4th axis with the same stock and axis."""
+        return (a.rotary and b.rotary and a.machine is b.machine and a.axis == b.axis
+                and a.model_stock.to_dict() == b.model_stock.to_dict() and a.origin_point() == b.origin_point())
+
+    def assign_wcs(self) -> None:
+        used = [s.wcs for s in self.setups if s.wcs]
+        free = [f"G{n}" for n in range(54, 60) if f"G{n}" not in used]
+        groups: list[Setup] = []
+        for st in self.setups:
+            twin = next((g for g in groups if self.same_mounting(g, st)), None)
+            if st.wcs is None:
+                st.wcs = twin.wcs if twin is not None and twin.wcs else (free.pop(0) if free else "G54")
+            groups.append(st)
+
+    @property
+    def machine(self) -> Machine:
+        """A program runs on one machine: the program setup's. Setups give frames, orientation and work offsets."""
+        return self.setup.machine
+
+    def time_minutes(self) -> float:
+        return sum(op.time_minutes(self.machine) for op in self.ops)
+
+    def bounds(self, setup: Setup | None = None):
+        ops = [op for op in self.ops if op.moves and (setup is None or self.setup_of(op) is setup)]
+        if not ops:
             return None
         lo = [1e18] * 3; hi = [-1e18] * 3
-        for op in self.ops:
-            if not op.moves:
-                continue
+        for op in ops:
             a, b = op.bounds()
             lo = [min(x, y) for x, y in zip(lo, a)]; hi = [max(x, y) for x, y in zip(hi, b)]
         return tuple(lo), tuple(hi)
 
     def check(self) -> list[str]:
         w: list[str] = []
-        m = self.setup.machine
         if not self.ops:
             return ["program has no operations"]
-        b = self.bounds()
-        if b:
-            (x0, y0, z0), (x1, y1, z1) = b
-            for axis, lo, hi in (("x", x0, x1), ("y", y0, y1), ("z", z0, z1)):
-                if hi - lo > m.travel.get(axis, 1e9) + 1e-6:
-                    w.append(f"{axis.upper()} extent {hi - lo:.1f} mm exceeds machine travel {m.travel[axis]} mm")
-            st = self.setup.stock
-            if z0 < st.bottom - 1e-6:
-                w.append(f"toolpath goes {st.bottom - z0:.2f} mm below the stock bottom (into the spoilboard?)")
+        self.assign_wcs()
+        m = self.machine
+        for st in self.setups:
+            tag = f"{st.name}: " if len(self.setups) > 1 else ""
+            b = self.bounds(st)
+            if b:
+                (x0, y0, z0), (x1, y1, z1) = b
+                axes = (("x", x0, x1),) if st.rotary else (("x", x0, x1), ("y", y0, y1), ("z", z0, z1))
+                for axis, lo, hi in axes:
+                    if hi - lo > m.travel.get(axis, 1e9) + 1e-6:
+                        w.append(f"{tag}{axis.upper()} extent {hi - lo:.1f} mm exceeds machine travel {m.travel[axis]} mm")
+                if not st.rotary and z0 < st.stock.bottom - 1e-6:
+                    w.append(f"{tag}toolpath goes {st.stock.bottom - z0:.2f} mm below the stock bottom (into the spoilboard?)")
+            if st.machine is not m and st.machine.name != m.name:
+                w.append(f"{tag}set up for {st.machine.name} but the program runs on {m.name} (one machine per program)")
+            if st.rotary:
+                rot = m.rotary or {}
+                if not m.rotary:
+                    w.append(f"{tag}a 4th-axis setup, but {m.name} has no 4th axis")
+                elif not rot.get("installed", True):
+                    w.append(f"{tag}{m.name}: the 4th axis module is not marked installed")
+                d = 2 * st.max_radius
+                if rot.get("max_diameter") and d > rot["max_diameter"] + 1e-6:
+                    w.append(f"{tag}stock swing Ø{d:.1f} mm exceeds the 4th axis capacity Ø{rot['max_diameter']} mm")
+                L = st.stock.xmax - st.stock.xmin
+                if rot.get("max_length") and L > rot["max_length"] + 1e-6:
+                    w.append(f"{tag}stock length {L:.1f} mm exceeds the 4th axis capacity {rot['max_length']} mm")
         for op in self.ops:
-            t = op.tool
+            st = self.setup_of(op); t = op.tool
+            if op.uses_a and not st.rotary:
+                w.append(f"{op.name}: moves A but its setup is not on the 4th axis")
             if not (m.spindle["min"] <= t.rpm <= m.spindle["max"]):
                 w.append(f"{op.name}: {t.label()} rpm {t.rpm} outside spindle range {m.spindle}")
             w += [f"{op.name}: {x}" for x in op.warnings]
@@ -1320,37 +1530,78 @@ class Program:
         return w
 
     def summary(self) -> str:
-        st = self.setup.stock
-        ox, oy, oz = self.setup.origin_point()
-        lines = [f"Program '{self.name}' on {self.setup.machine.name} ({self.setup.machine.controller}): "
-                 f"{len(self.ops)} ops, est. {self.time_minutes():.1f} min",
-                 f"stock {st.size[0]:.1f} × {st.size[1]:.1f} × {st.size[2]:.1f} mm, top z={st.top:.2f}; "
-                 f"WCS origin {self.setup.origin} = model ({ox:.2f}, {oy:.2f}, {oz:.2f}); safe z={self.setup.safe_z:.2f}"]
-        for i, op in enumerate(self.ops, 1):
-            cut, rapid = op.lengths()
-            b = op.bounds() if op.moves else None
-            zr = f"z {b[0][2]:.2f}..{b[1][2]:.2f}" if b else "no moves"
-            lines.append(f"  {i}. {op.name} [{op.kind}] {op.tool.label()} Ø{op.tool.diameter} — {len(op.moves)} moves, "
-                         f"cut {cut:.0f} mm, {op.time_minutes(self.setup.machine):.1f} min, {zr} "
-                         + " ".join(f"{k}={v}" for k, v in op.params.items()))
+        self.assign_wcs()
+        m = self.setup.machine
+        lines = [f"Program '{self.name}' on {m.name} ({m.post} post): {len(self.ops)} ops in {len(self.setups)} setup(s), "
+                 f"est. {self.time_minutes():.1f} min"]
+        for st in self.setups:
+            stk = st.stock
+            ox, oy, oz = st.origin_point()
+            kind = (f"4th axis A {st.a:g}°, stock swing Ø{2 * st.max_radius:.1f} × {stk.xmax - stk.xmin:.1f} mm"
+                    if st.rotary else f"orient {st.orient}, stock {stk.size[0]:.1f} × {stk.size[1]:.1f} × {stk.size[2]:.1f} mm, top z={stk.top:.2f}")
+            lines.append(f"{st.name} [{st.wcs}]: {kind}; WCS origin {st.origin} = setup ({ox:.2f}, {oy:.2f}, {oz:.2f}); "
+                         f"safe z={st.safe_z:.2f}")
+            for i, op in enumerate(self.ops, 1):
+                if self.setup_of(op) is not st:
+                    continue
+                cut, rapid = op.lengths()
+                b = op.bounds() if op.moves else None
+                zr = f"z {b[0][2]:.2f}..{b[1][2]:.2f}" if b else "no moves"
+                aa = ""
+                if op.uses_a:
+                    av = [mv[5] for mv in op.moves if len(mv) > 5]
+                    aa = f" A {min(av):.0f}..{max(av):.0f}°"
+                lines.append(f"  {i}. {op.name} [{op.kind}] {op.tool.label()} Ø{op.tool.diameter} — {len(op.moves)} moves, "
+                             f"cut {cut:.0f} mm, {op.time_minutes(self.machine):.1f} min, {zr}{aa} "
+                             + " ".join(f"{k}={v}" for k, v in op.params.items()))
         w = self.check()
         if w:
             lines.append("WARNINGS: " + "; ".join(w))
         return "\n".join(lines)
 
     def to_payload(self) -> dict[str, Any]:
-        ox, oy, oz = self.setup.origin_point()
+        """For the viewer: everything in MODEL coordinates (rotary moves wrapped back onto the part)."""
+        self.assign_wcs()
+        setups = self.setups
+        st0 = self.setup
+        ox, oy, oz = st0.to_model([st0.origin_point()])[0]
+        out_setups = []
+        for st in setups:
+            o = st.to_model([st.origin_point()])[0]
+            out_setups.append({"name": st.name, "wcs": st.wcs, "rotary": st.rotary, "a": st.a, "orient": st.orient if not st.rotary else None,
+                               "axis": list(st.axis) if st.rotary else None, "origin": [float(v) for v in o],
+                               "tool_axis": list(st.tool_axis_model), "stock": st.model_stock.to_dict(),
+                               "max_radius": getattr(st, "max_radius", None)})
+        ops = []
+        for op in self.ops:
+            st = self.setup_of(op)
+            si = next(i for i, x in enumerate(setups) if x is st)
+            moves = op.moves
+            if moves:
+                P = np.array([m[1:4] for m in moves], dtype=float)
+                if st.rotary:
+                    A = np.array([m[5] if len(m) > 5 else st.a for m in moves], dtype=float)
+                    M = np.empty_like(P)
+                    for av in np.unique(A):
+                        sel = A == av
+                        M[sel] = st.to_model(P[sel], a=float(av))
+                else:
+                    M = st.to_model(P)
+                moves = [[m[0], round(float(q[0]), 4), round(float(q[1]), 4), round(float(q[2]), 4), m[4]] + ([m[5]] if len(m) > 5 else [])
+                         for m, q in zip(op.moves, M)]
+            ops.append({"name": op.name, "kind": op.kind, "color": op.color, "tool": asdict(op.tool), "setup": si,
+                        "moves": moves, "time": round(op.time_minutes(self.machine), 2), "params": op.params, "uses_a": op.uses_a})
         return {
-            "name": self.name, "machine": self.setup.machine.name,
-            "stock": self.setup.stock.to_dict(), "origin": [ox, oy, oz], "safe_z": self.setup.safe_z,
-            "time": round(self.time_minutes(), 2), "warnings": self.check(),
-            "ops": [{"name": op.name, "kind": op.kind, "color": op.color, "tool": asdict(op.tool),
-                     "moves": op.moves, "time": round(op.time_minutes(self.setup.machine), 2),
-                     "params": op.params} for op in self.ops],
+            "name": self.name, "machine": st0.machine.name,
+            "stock": st0.model_stock.to_dict(), "origin": [float(ox), float(oy), float(oz)], "safe_z": st0.safe_z,
+            "time": round(self.time_minutes(), 2), "warnings": self.check(), "setups": out_setups, "ops": ops,
         }
 
     # ---------------------------------------------------------------- post
     def gcode(self) -> str:
+        post = self.setup.machine.post
+        if post == "makera":
+            return post_makera(self)
         return post_grbl(self)
 
 
@@ -1483,50 +1734,153 @@ def _fmt(v: float) -> str:
     return s if s not in ("", "-0") else "0"
 
 
-def post_grbl(prog: Program) -> str:
-    m = prog.setup.machine
-    ox, oy, oz = prog.setup.origin_point()
-    st = prog.setup.stock
+# =============================================================================
+# Posts. One emitter, two dialects:
+#   grbl   : GRBL 1.1 (and A as a plain linear-style axis for grblHAL-type 4-axis controllers)
+#   makera : Makera Z1 / Carvera family firmware (Smoothieware-based, read from MakeraZ1Firmware):
+#            lines <= 63 characters (longer lines are truncated by the controller), no N numbers, ';' comments,
+#            M6 Tn runs the whole manual change (move, wait for the button, measure tool length) or the ATC,
+#            no canned cycles / coolant / G93; arcs must not move A; G28 goes to the clearance position;
+#            M600 suspends the file. Feed for moves with A follows the firmware's own rule (_makera_feed).
+# =============================================================================
+MAKERA_MAX_LINE = 63
+
+
+def _makera_perimeter(y: float, z: float) -> float:
+    r = math.hypot(y, z)
+    return 2 * math.pi * (r if r > 1 else 1.0) + 30.0
+
+
+def _makera_feed(dxyz: float, da: float, y: float, z: float, t_min: float, a_max: float) -> float:
+    """F word so the Makera firmware takes `t_min` minutes for this move (Robot.cpp: path length is XYZ only; an
+    A-only move reads F as deg/min, raised by 360/perimeter below a 360 mm perimeter; on mixed moves A's surface
+    speed, A rate x perimeter / 360, is held to F). perimeter = 2*pi*r + 30 with r from WCS Y/Z."""
+    per = _makera_perimeter(y, z)
+    da = abs(da)
+    if da < 1e-9:
+        return dxyz / t_min
+    if dxyz < 1e-9:                                    # A only: deg/min, with the firmware's small-radius boost
+        f = da / t_min / max(1.0, 360.0 / per)
+        return min(f, a_max)
+    s_a = da * per / 360.0
+    return max(dxyz, s_a) / t_min
+
+
+def _emit(prog: Program, dialect: str) -> str:
+    mk = dialect == "makera"
+    prog.assign_wcs()
+    m0 = prog.setup.machine
     out: list[str] = []
-    out.append(f"; AgenticCAD GRBL post — {prog.name} — machine: {m.name}")
-    out.append(f"; stock {st.size[0]:.1f} x {st.size[1]:.1f} x {st.size[2]:.1f} mm, WCS origin: {prog.setup.origin}")
-    out.append(f"; est. time {prog.time_minutes():.1f} min; tools: " + ", ".join(sorted({op.tool.label() for op in prog.ops})))
+
+    def comment(text: str):
+        text = text.replace("(", "[").replace(")", "]")
+        if mk:                                          # the dispatcher hoists G90/G91 even out of comments
+            text = text.replace("G90", "G 90").replace("G91", "G 91")
+            out.append(("; " + text)[:MAKERA_MAX_LINE])
+        else:
+            out.append("; " + text)
+
+    def line(t: str):
+        if mk and len(t) > MAKERA_MAX_LINE:
+            raise CamError(f"G-code line longer than {MAKERA_MAX_LINE} characters for the Makera controller: {t}")
+        out.append(t)
+
+    comment(f"AgenticCAD {dialect} post: {prog.name}")
+    comment(f"machine: {m0.name}")
+    comment(f"est. {prog.time_minutes():.1f} min, {len(prog.setups)} setup(s)")
+    for t in sorted({op.tool.label() + f" D{_fmt(op.tool.diameter)}" for op in prog.ops}):
+        comment("tool " + t)
     for w in prog.check():
-        out.append(f"; WARNING: {w}")
-    out.append("G21 G90 G94 G17")   # mm, absolute, feed/min, XY plane
-    out.append("G54")
-    out += m.program_start
-    safe = prog.setup.safe_z - oz
-    clear = prog.setup.clearance_z - oz
+        comment("WARNING: " + w)
+    line("G21 G90 G17" if mk else "G21 G90 G94 G17")
+    out.extend(m0.program_start)
     cur_tool = None
+    prev_setup: Setup | None = None
     last_f = None
-    last = [None, None, None]
+    cur_a = 0.0
+    last: list = [None, None, None, None]
+    spindle_on = False
     for op in prog.ops:
+        st = prog.setup_of(op)
+        m = m0
+        ox, oy, oz = st.origin_point()
+        safe = st.safe_z - oz
+        clear = st.clearance_z - oz
+        aw = (m.rotary or {}).get("axis", "A")
+        a_max = float((m.rotary or {}).get("max_speed", 3600.0))
+        # ---- setup change
+        if prev_setup is None or st is not prev_setup:
+            if prev_setup is not None and Program.same_mounting(prev_setup, st):
+                line(f"G0 Z{_fmt(clear)}")
+                comment(f"{st.name}: index A to {_fmt(st.a)}")
+            else:
+                if prev_setup is not None:
+                    line("M5")
+                    spindle_on = False
+                    if mk:
+                        line("G28")
+                    else:
+                        line(f"G0 Z{_fmt(prev_setup.clearance_z - prev_setup.origin_point()[2])}")
+                    msg = (f"{st.name}: mount the part on the 4th axis" if st.rotary else
+                           f"{st.name}: {'flip' if st.orient == 'bottom' else 're-clamp'} part, orient {st.orient}")
+                    comment(msg)
+                    comment(f"zero {st.wcs} at {st.origin}, then resume")
+                    if mk:
+                        line("M600")
+                    else:
+                        line(f"(MSG, {msg} - zero {st.wcs} then resume)")
+                        line("M0")
+                else:
+                    comment(f"{st.name}: zero {st.wcs} at {st.origin}" + (" on the rotary centreline" if st.rotary else ""))
+                line(st.wcs)
+                if prev_setup is not None:
+                    line(f"G0 Z{_fmt(clear)}")
+            if st.rotary:
+                line(f"G0 {aw}{_fmt(st.a)}")
+            prev_setup = st
+            cur_a = st.a
+            last = [None, None, None, cur_a]               # positions restart in the new setup's frame
+            last_f = None
         t = op.tool
         rpm = min(max(t.rpm, m.spindle["min"]), m.spindle["max"])
-        out.append(f"; --- {op.name} [{op.kind}] {t.label()} D{_fmt(t.diameter)}")
+        comment(f"{op.name} [{op.kind}] {t.label()} D{_fmt(t.diameter)}")
         if cur_tool != t.number:
-            if cur_tool is not None:
-                out.append("M5")
-                out.append(f"G0 Z{_fmt(clear)}")
-                if m.tool_change == "pause":
-                    out.append(f"(MSG, Change tool to {t.label()} D{_fmt(t.diameter)})")
-                    out.append(f"M6 T{t.number}")
-                    out.append("M0")
-                elif m.tool_change == "split":
-                    out.append(f"; TOOLCHANGE T{t.number} — split file here")
-                    out.append(f"M6 T{t.number}")
-                else:
-                    out.append(f"; tool change to T{t.number} required — machine has tool_change=none")
+            if mk:
+                if cur_tool is not None:
+                    line("M5")
+                line(f"M6 T{t.number}")                          # firmware: clearance, change/measure, return
             else:
-                out.append(f"T{t.number}")
-            out.append(f"M3 S{int(rpm)}")
-            if m.coolant:
-                out.append("M8")
-            out.append(f"G0 Z{_fmt(safe)}")
-            last = [None, None, safe]
+                if cur_tool is not None:
+                    line("M5")
+                    line(f"G0 Z{_fmt(clear)}")
+                    if m.tool_change == "pause":
+                        line(f"(MSG, Change tool to {t.label()} D{_fmt(t.diameter)})")
+                        line(f"M6 T{t.number}")
+                        line("M0")
+                    elif m.tool_change == "split":
+                        comment(f"TOOLCHANGE T{t.number}: split file here")
+                        line(f"M6 T{t.number}")
+                    else:
+                        comment(f"tool change to T{t.number} required: machine has tool_change=none")
+                else:
+                    line(f"T{t.number}")
+            line(f"M3 S{int(rpm)}")
+            spindle_on = True
+            if m.coolant and not mk:
+                line("M8")
+            line(f"G0 Z{_fmt(safe)}")
             cur_tool = t.number
-        for item in _with_arcs(op.moves, m.arc_tolerance if m.arcs else None):
+            last = [None, None, safe, cur_a]
+            last_f = None
+        elif not spindle_on:                              # same tool after an operator pause: restart the spindle
+            line(f"M3 S{int(rpm)}")
+            spindle_on = True
+            line(f"G0 Z{_fmt(safe)}")
+            last = [None, None, safe, cur_a]
+            last_f = None
+        use_arcs = m.arcs and not op.uses_a
+        moves = op.moves
+        for item in _with_arcs(moves, m.arc_tolerance if use_arcs else None):
             if item[0] == "arc":
                 _, x, y, z, f, cx, cy, cw = item
                 x -= ox; y -= oy; z -= oz; cx -= ox; cy -= oy
@@ -1535,29 +1889,66 @@ def post_grbl(prog: Program) -> str:
                 if f and f != last_f:
                     fw = f" F{_fmt(f)}"; last_f = f
                 zw = f" Z{_fmt(z)}" if last[2] is None or abs(z - last[2]) > 1e-6 else ""
-                out.append(f"{'G2' if cw else 'G3'} X{_fmt(x)} Y{_fmt(y)}{zw} I{_fmt(cx - sx)} J{_fmt(cy - sy)}{fw}")
-                last = [x, y, z]
+                line(f"{'G2' if cw else 'G3'} X{_fmt(x)} Y{_fmt(y)}{zw} I{_fmt(cx - sx)} J{_fmt(cy - sy)}{fw}")
+                last = [x, y, z, last[3]]
                 continue
-            k, x, y, z, f = item
+            k, x, y, z, f = item[:5]
+            a = item[5] if len(item) > 5 else None
             x -= ox; y -= oy; z -= oz
             words = []
             if last[0] is None or abs(x - last[0]) > 1e-6: words.append(f"X{_fmt(x)}")
             if last[1] is None or abs(y - last[1]) > 1e-6: words.append(f"Y{_fmt(y)}")
             if last[2] is None or abs(z - last[2]) > 1e-6: words.append(f"Z{_fmt(z)}")
+            da = 0.0
+            if a is not None and (last[3] is None or abs(a - last[3]) > 1e-6):
+                da = a - (last[3] if last[3] is not None else a)
+                words.append(f"{aw}{_fmt(a)}")
             if not words:
                 continue
             if k == RAPID:
-                out.append("G0 " + " ".join(words))
+                line("G0 " + " ".join(words))
             else:
                 fw = ""
-                if f and f != last_f:
+                if a is not None and abs(da) > 1e-9:
+                    # feed so the real tool path (XYZ plus arc swept by A at this radius) runs at f mm/min
+                    px = [last[i] if last[i] is not None else v for i, v in enumerate((x, y, z))]
+                    dxyz = math.dist(px, (x, y, z))
+                    r = max(math.hypot(y, z), math.hypot(px[1], px[2]))
+                    true_len = math.hypot(dxyz, math.radians(abs(da)) * r)
+                    t_min = max(true_len / max(f, 1.0), 1e-6)
+                    if mk:
+                        fv = _makera_feed(dxyz, da, y, z, t_min, a_max)
+                    else:
+                        fv = math.hypot(dxyz, abs(da)) / t_min          # grblHAL/LinuxCNC-style: degrees count as length
+                    fv = round(fv, 1)
+                    if fv != last_f:
+                        fw = f" F{_fmt(fv)}"; last_f = fv
+                elif f and f != last_f:
                     fw = f" F{_fmt(f)}"; last_f = f
-                out.append("G1 " + " ".join(words) + fw)
-            last = [x, y, z]
-    out.append("M5")
-    if m.coolant:
-        out.append("M9")
-    out.append(f"G0 Z{_fmt(clear)}")
-    out += m.program_end
-    out.append("M30")
+                line("G1 " + " ".join(words) + fw)
+            last = [x, y, z, a if a is not None else last[3]]
+        if op.uses_a:
+            cur_a = last[3]
+    line("M5")
+    if mk:
+        line("G28")
+    else:
+        if m0.coolant:
+            line("M9")
+        st = prog.setup_of(prog.ops[-1]) if prog.ops else prog.setup
+        line(f"G0 Z{_fmt(st.clearance_z - st.origin_point()[2])}")
+    out.extend(m0.program_end)
+    line("M30")
     return "\n".join(out) + "\n"
+
+
+def post_grbl(prog: Program) -> str:
+    return _emit(prog, "grbl")
+
+
+def post_makera(prog: Program) -> str:
+    return _emit(prog, "makera")
+
+
+# 4th-axis toolpaths live in cam_rotary (imported last: it builds on everything above)
+from cam_rotary import radial_map, rotary_finish, rotary_rough, rotary_wrap  # noqa: E402,F401

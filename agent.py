@@ -199,16 +199,17 @@ Rot()/Pos() for algebra transforms, ShapeList.group_by(), .filter_by(GeomType.CY
 Sort helpers: sort_by(Axis.Z), sort_by(SortBy.AREA), sort_by_distance(pt), filter_by(Axis.Z) (faces parallel to Z-normal).
 Docs: https://build123d.readthedocs.io (use WebFetch if unsure of an API).
 
-CAM (GRBL G-code)
+CAM (G-code for GRBL routers and the Makera Z1 / Carvera Air)
 There is a second script per design, the CAM script, built with `build_cam`. It runs with these names:
   model (the built design: model.shape = all bodies, model.bodies, model.get_face(id), model.bbox_min/max),
   part (= model.shape), bodies (dict name -> shape), tools (dict: by number, by name, by 'T1'),
   machines (dict name -> Machine), and everything from cam_kernel: Stock, Setup, Program, face, contour, pocket,
-  drill, parallel3d, section, silhouette, stock_minus, holes, face_polygon, circle, rect.
+  drill, parallel3d, adaptive, rotary_rough, rotary_finish, rotary_wrap, section, silhouette, stock_minus, holes,
+  face_polygon, circle, rect, feeds, apply_feeds.
 It must assign `program` (a Program). Call `cam_context` first to see the machines/tools/model facts.
 ```
 stock = Stock.from_model(model, margin=3, top=1.0)          # also accepts a body shape; or Stock.block(80, 50, 12, top=8)
-setup = Setup(machines["Generic 3018"], stock, origin="stock-top-left")   # origins: stock-top-left|stock-top-center|
+setup = Setup(machines["Makera Z1"], stock, origin="stock-top-left")   # origins: stock-top-left|stock-top-center|
                                                             #   stock-bottom-left|stock-bottom-center|model-origin|(x,y,z)
 t_flat, t_drill = tools[1], tools["3 mm drill"]
 hs = holes(part, dmax=8)                                    # Hole(x, y, diameter, z_top, z_bottom, through)
@@ -227,9 +228,46 @@ program.add(parallel3d(setup, ball3, shape=part, z_bottom=4, region=..., rest_fr
 t_alu = apply_feeds(tools[2], "aluminium", setup.machine)    # feeds & speeds calculator -> tool copy with rpm/feed/plunge/stepdown/stepover
 info = feeds(tools[2], "plywood", setup.machine, radial_engagement=0.15)   # dict + notes (chip thinning, spindle limits)
 ```
-Notes: all coordinates are model coordinates (Z up); the post subtracts the WCS origin.
+Multiple setups (flip / re-clamp): each Setup has its own frame where the spindle is +Z; build ops for it from
+setup.view(part) (section(setup.view(part), z), holes(setup.view(part)), stock_minus(setup, setup.view(part), z)).
+```
+top = Setup(m, stock, name="Top")                           # stock is always given in MODEL coordinates
+bot = Setup(m, stock, orient="bottom", name="Bottom")       # flipped about X; also front|back|left|right|(rx,ry,rz)
+pv = bot.view(part)                                          # the part as it sits in the flipped setup
+program = Program(top); program.add(face(top, t, ...)); program.add(pocket(bot, t, section(pv, -2), z_top=0, z_bottom=-3))
+```
+The program runs setups in op order; the post selects G54, G55… per setup and pauses for the operator (GRBL M0,
+Makera M600) to flip and re-zero. A program runs on ONE machine (the first Setup's).
+4th axis (rotary A about X; needs a machine with `rotary`, e.g. "Makera Z1 + 4th axis"): the part is turned so its
+axis is the setup X axis (Y = Z = 0 on the centreline; the WCS origin defaults to "rotary-axis-left" on the axis,
+which is where Makera's 4th-axis probing sets zero). Stock.cylinder(d, length, x0=..., axis=(y, z)) for bar stock.
+```
+st = Setup(machines["Makera Z1 + 4th axis"], Stock.cylinder(30, 80, x0=-2), rotary=True)
+program = Program(st, name="shaft")
+program.add(rotary_rough(st, tools[3], part, stepdown=1.0, mode="rings"))          # 1/8" flat; continuous A, leaves 0.3 mm
+program.add(rotary_finish(st, ball, part, mode="spiral", stepover=0.1))             # helix advancing 0.1×D per turn; or lines|rings
+program.add(rotary_wrap(st, vbit, text_or_polys, depth=0.4, kind="contour", side="on"))   # 2D (u = X, v = around) wrapped on the bar
+for a in (0, 90, 180, 270):                                  # 3+1 indexed: ordinary ops on a rotary setup at an A angle
+    sa = Setup(st.machine, st.model_stock, rotary=True, a=a, name=f"A{a}")          # same mounting -> just G0 A<a>, no pause
+    v = sa.view(part)                                        # the part as the tool sees it at this A
+    program.add(pocket(sa, tools[3], stock_minus(sa, v, 9.01, expand=4), z_top=sa.stock.top, z_bottom=9))  # mill the flat at z 9
+    # (section(...) is the part's MATERIAL at that height: pocketing it would cut the part away; clear stock_minus instead)
+```
+A turns by the right-hand rule about +X (A+ brings model +Y towards +Z). Moves on rotary setups are in the setup
+frame; the viewer wraps them back onto the part.
+Stepover arguments are fractions of the tool diameter (0.1 = 0.1×D), not mm. A ball spiral/lines finish can't
+reach square inside corners (shoulders, ends of flats): expect material left there in the simulation and clean them
+with a flat `rotary_finish(..., mode="rings", stepover=0.1)` limited to the shoulder with x_range=(x0, x1).
+After building a program, check it with `simulate_cam`: it removes material from the stock along every move and
+reports gouges into the part (with the op that caused them), material left on the part, and rapids through
+material. Fix gouges and rapid hits before exporting; the user can scrub the simulation in the CAM tab.
+Makera Z1 / Carvera Air post (machine.post == "makera"): M6 Tn runs the whole manual change (moves to the change
+position, waits for the button, measures the tool length), lines ≤ 63 characters, no canned cycles or coolant,
+feeds on A moves are converted to the firmware's own rule. The Z1 is light (150 W, 1/8" collet): aluminium < 1 mm
+per pass; keep tools ≤ the 3.175 mm collet unless the user has another collet.
+Notes: coordinates are setup-frame (= model coordinates for a plain top setup; Z up); the post subtracts the WCS origin.
 Contours get tangential arc lead-in/out by default (lead=radius; lead=0 disables) and start mid-way along the
-longest straight edge. The post fits G2/G3 arcs (machine.arcs, machine.arc_tolerance) and merges collinear moves.
+longest straight edge. The post fits G2/G3 arcs (machine.arcs, machine.arc_tolerance; never while A moves) and merges collinear moves.
 Materials for feeds(): aluminium, brass, mild-steel, acrylic, hdpe, delrin, plywood, mdf, hardwood, softwood, foam, fr4, carbon-fibre. section(shape, z) returns
 polygons with holes (holes = islands for pocket, inner profiles for contour side="outside"); stock_minus(setup,
 shape, z, expand=tool.diameter) = what to clear at level z (expand lets the tool run off the stock edge); face_polygon(model.get_face(id)) uses a face the user clicked. Depths:
@@ -307,6 +345,8 @@ class CadAgent:
                  screenshot_fn: Callable[[dict[str, Any]], Awaitable[str]]):
         self.workspace = workspace
         self._agent_turn = False              # True while the agent is answering (builds use draft threads)
+        self.sim = None                       # last CAM simulation (cam_sim.SimResult)
+        self.sim_ops: list[int] = []
         self.designs_dir = workspace / "designs"
         self.designs_dir.mkdir(parents=True, exist_ok=True)
         self.emit = emit                     # broadcast an event to browsers
@@ -387,13 +427,33 @@ class CadAgent:
         await self.emit(self.design_state())
 
     async def new_design(self, code: str | None = None) -> None:
+        """File ▸ New: a clean start: empty design, no CAM program or simulation, and a fresh conversation."""
+        await self.reset_conversation()
         await self.build(code or ck.NEW_DESIGN_CODE, source="new", record=True)
         await self.set_cam_code("", rebuild=False)
         self.design_name = None
         self.saved_code = None
         self._write_state()
-        self.notes.append("The user started a new, untitled design; the script was reset.")
         await self.emit(self.design_state())
+
+    async def reset_conversation(self) -> None:
+        """Forget the chat: stop any running turn, drop the Claude session (a new one starts with the next message)
+        and the pending notes, and tell the UI to clear the transcript."""
+        if self.busy:
+            await self.interrupt()
+            for _ in range(50):                            # let the turn wind down before disconnecting
+                if not self.busy:
+                    break
+                await asyncio.sleep(0.1)
+        if self.client is not None:
+            try:
+                await self.stop()
+            except Exception:  # noqa: BLE001
+                pass
+            self.client = None
+        self.session_id = None
+        self.notes.clear()
+        await self.emit({"type": "chat_reset"})
 
     async def import_design(self, name: str, code: str) -> str:
         name = safe_name(name.removesuffix(".py"))
@@ -412,13 +472,26 @@ class CadAgent:
         (self.workspace / "cam.py").write_text(code)
         if not code.strip() or not rebuild:
             self.program = None
+            self.sim = None
             await self.emit({"type": "cam", "program": None, "code": code, "source": source})
             return None
         prog = await asyncio.to_thread(self._run_cam, code)
         self.program = prog
+        self.sim = None                                   # a new program invalidates the old simulation
         await self.emit({"type": "cam", "program": prog.to_payload(), "code": code, "source": source,
                          "summary": prog.summary(), "gcode_lines": prog.gcode().count("\n")})
         return prog
+
+    async def simulate(self, ops: list[int] | None = None, resolution: float | None = None):
+        """Run the material-removal simulation (0-based op indices) and show it in the viewer."""
+        import cam_sim
+        if self.program is None:
+            raise cam.CamError("no CAM program built")
+        res = await asyncio.to_thread(cam_sim.simulate, self.program, ops, self.model, resolution)
+        self.sim = res
+        self.sim_ops = ops if ops is not None else list(range(len(self.program.ops)))
+        await self.emit({"type": "cam_sim", "sim": res.to_payload(), "ops": self.sim_ops})
+        return res
 
     def _run_cam(self, code: str) -> cam.Program:
         if self.model is None:
@@ -1089,7 +1162,7 @@ class CadAgent:
         async def get_cam_code(args: dict[str, Any]) -> dict[str, Any]:
             return {"content": [{"type": "text", "text": agent.cam_code or "(no CAM script yet)"}]}
 
-        @tool("export_gcode", "Write the current program as GRBL G-code to workspace/exports/<name>.nc.",
+        @tool("export_gcode", "Write the current program as G-code (the machine's post: GRBL or Makera) to workspace/exports/<name>.nc.",
               {"type": "object", "properties": {"name": {"type": "string"}}, "required": []})
         async def export_gcode(args: dict[str, Any]) -> dict[str, Any]:
             if agent.program is None:
@@ -1104,6 +1177,22 @@ class CadAgent:
             return {"content": [{"type": "text", "text": f"wrote {path} ({path.stat().st_size} bytes, {len(lines)} lines): "
                                  + ", ".join(f"{k} ×{v}" for k, v in counts.items())
                                  + f"; tool changes: {sum(1 for l in lines if l.startswith('M6'))}; est. {agent.program.time_minutes():.1f} min"}]}
+
+        @tool("simulate_cam", "Simulate material removal for the CAM program (all ops, or `ops` = 1-based op numbers) and "
+              "compare with the part: gouges into the part (depth, area, which op), material left on the part, stock left "
+              "outside it, rapids through material. Shows the result in the CAM tab. Flat setups (top/flipped) and 4th-axis "
+              "setups are simulated separately.",
+              {"type": "object", "properties": {"ops": {"type": "array", "items": {"type": "integer"}},
+                                                "resolution": {"type": "number"}}, "required": []})
+        async def simulate_cam(args: dict[str, Any]) -> dict[str, Any]:
+            if agent.program is None:
+                return {"content": [{"type": "text", "text": "no CAM program built"}], "is_error": True}
+            ops = [int(i) - 1 for i in args["ops"]] if args.get("ops") else None
+            try:
+                res = await agent.simulate(ops, args.get("resolution"))
+            except cam.CamError as e:
+                return {"content": [{"type": "text", "text": f"simulation failed: {e}"}], "is_error": True}
+            return {"content": [{"type": "text", "text": res.summary()}]}
 
         @tool("feeds_speeds", "Feeds & speeds calculator: rpm, feed, plunge, stepdown, stepover for a tool in a material "
               "on a machine (spindle/feed limits applied, radial chip thinning if `radial_engagement` < 0.5). "
@@ -1393,7 +1482,7 @@ class CadAgent:
             slicing_tools = [slicer_info, slice_for_printing]
 
         tools = [build_model, *([] if LEGACY_BUILD else [edit_model]), inspect_model, screenshot, export_model, get_code, save_design,
-                 cam_context, build_cam, get_cam_code, export_gcode, feeds_speeds, save_machine, save_tool,
+                 cam_context, build_cam, get_cam_code, export_gcode, simulate_cam, feeds_speeds, save_machine, save_tool,
                  get_parameters, set_parameters, measure_tool, mass_properties, make_drawings, library_tool, kit_tool, sketch_tool] + slicing_tools
         self.tool_handlers = {t.name: t.handler for t in tools}     # name -> async handler (tests call these directly)
         return create_sdk_mcp_server("cad", "0.4.0", tools=tools)
