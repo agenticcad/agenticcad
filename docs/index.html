@@ -7,7 +7,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M16 3 28 9.5v13L16 29 4 22.5v-13L16 3Z' fill='none' stroke='%234ea1ff' stroke-width='2'/%3E%3Ccircle cx='16' cy='16' r='4' fill='%23ff8c42'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="../assets/site.css?v=0.20.0">
+<link rel="stylesheet" href="../assets/site.css?v=0.21.0">
 <style>
   .docs{display:grid;grid-template-columns:250px 1fr;gap:56px;padding:44px 0 80px}
   .toc{position:sticky;top:76px;align-self:start;max-height:calc(100vh - 100px);overflow:auto;font-size:13px;padding-right:8px}
@@ -39,7 +39,7 @@
 <div class="wrap docs">
   <aside class="toc" id="toc">
     <div class="g">Start</div><a href="#overview">Overview</a><a href="#desktop">Desktop app</a><a href="#install">Install from source</a><a href="#workspace">The workspace</a>
-    <div class="g">Design</div><a href="#script">Design as script</a><a href="#chat">Chat and selection</a><a href="#images">Reference images</a><a href="#bodies">Bodies and the Browser</a><a href="#ribbon">Ribbon tools</a><a href="#sketches">Sketches</a><a href="#units">Units</a><a href="#threads">Threads</a><a href="#gears">Gears</a><a href="#kit">Design Kit</a><a href="#params">Parameters</a><a href="#measure">Measure</a><a href="#drawings">Shop drawings</a><a href="#library">Part library</a><a href="#step">STEP import and export</a><a href="#printing">3D printing</a><a href="#fidelity">Fidelity</a>
+    <div class="g">Design</div><a href="#script">Design as script</a><a href="#chat">Chat and selection</a><a href="#images">Reference images</a><a href="#bodies">Bodies and the Browser</a><a href="#ribbon">Ribbon tools</a><a href="#sketches">Sketches</a><a href="#units">Units</a><a href="#threads">Threads</a><a href="#gears">Gears</a><a href="#kit">Design Kit</a><a href="#params">Parameters</a><a href="#measure">Measure</a><a href="#section">Section and interference</a><a href="#drawings">Shop drawings</a><a href="#library">Part library</a><a href="#step">STEP import and export</a><a href="#printing">3D printing</a><a href="#fidelity">Fidelity</a>
     <div class="g">CAM</div><a href="#cam">CAM overview</a><a href="#cam-sim">Simulation</a><a href="#setups">Setups and 4th axis</a><a href="#makera">Makera Carvera</a><a href="#machines">Machines and tools</a><a href="#ops">Operations</a><a href="#adaptive">Adaptive clearing</a><a href="#post">Post and G-code</a>
     <div class="g">Agent</div><a href="#settings">Settings and MCP</a><a href="#tools">Agent tools reference</a>
     <div class="g">Reference</div><a href="#shortcuts">Keyboard shortcuts</a><a href="#architecture">Architecture</a><a href="#files">Files and API</a><a href="#versioning">Versioning</a><a href="#tests">Tests and evals</a><a href="#gaps">Known gaps and roadmap</a><a href="#licence">Licence</a>
@@ -141,7 +141,14 @@ result = {<span class="hl-s">"Plate"</span>: plate.part}</code></pre>
       <tr><td>Fillet / Chamfer</td><td><kbd>F</kbd> <kbd>X</kbd></td><td>edges, or a face for all its edges</td><td><code>body.fillet(r, [...])</code> / <code>body.chamfer(l, None, [...])</code></td></tr>
       <tr><td>Shell</td><td><kbd>L</kbd></td><td>faces to open</td><td><code>offset(body, amount=-t, openings=[...])</code></td></tr>
       <tr><td>Move</td><td><kbd>V</kbd></td><td>a body</td><td><code>Pos(...) * Rot(...) * (body)</code></td></tr>
-      <tr><td>Measure</td><td><kbd>I</kbd></td><td>vertices, edges, faces</td><td>nothing; see <a href="#measure">Measure</a></td></tr></table>
+      <tr><td>Revolve</td><td><kbd>R</kbd></td><td>a sketch; the axis is the sketch's X/Y, a world axis, or a straight edge you click</td><td><code>revolve(sketch, axis=Axis(...), revolution_arc=360)</code> as a new body, or joined to / cut from one</td></tr>
+      <tr><td>Loft</td><td><kbd>G</kbd></td><td>two to four sketches, in order</td><td><code>loft([sk1, sk2], ruled=…)</code></td></tr>
+      <tr><td>Sweep</td><td><kbd>W</kbd></td><td>connected edges of one body, or one face (its outline)</td><td><code>sweep(sketch, path=path_wire([...]))</code>, or a round <code>pipe(path, diameter, wall)</code></td></tr>
+      <tr><td>Mirror</td><td><kbd>M</kbd></td><td>a body; a base plane (with offset) or a flat face</td><td><code>body + mirror_about(body, origin, normal)</code>, or a separate mirrored body</td></tr>
+      <tr><td>Pattern</td><td><kbd>N</kbd></td><td>a body; optionally an edge for the direction or a circular edge for the axis</td><td><code>pattern_linear(...)</code> / <code>pattern_circular(...)</code>: copies joined, a new body, or cut from another body (hole patterns)</td></tr>
+      <tr><td>Measure</td><td><kbd>I</kbd></td><td>vertices, edges, faces</td><td>nothing; see <a href="#measure">Measure</a></td></tr>
+      <tr><td>Section</td><td><kbd>S</kbd></td><td>a base plane, or a flat face to cut parallel to</td><td>nothing; see <a href="#section">Section and interference</a></td></tr>
+      <tr><td>Interference</td><td><kbd>J</kbd></td><td>all bodies, or those selected in the Browser</td><td>nothing; see <a href="#section">Section and interference</a></td></tr></table>
     <p>Face references use the point you clicked (<code>faces().sort_by_distance((x, y, z))[0]</code>), never face centres, so they survive most later edits. Every operation is undoable and the agent is notified.</p>
 
     <h2 id="sketches">Sketches</h2>
@@ -205,6 +212,10 @@ result = {"Motor": motor, "Stage": kit.place(stage, Pos(0, 0, 13)),
 
     <h2 id="measure">Measure</h2>
     <p>Press <kbd>I</kbd> (or Measure on the ribbon); a measure panel appears over the viewer. The cursor snaps <b>vertex &gt; edge &gt; face point</b> with a live readout: line length, arc radius and sweep, circle Ø. Two picks give the distance with the closest points drawn and labelled, Δxyz, and the angle (line–line, line–plane, plane–plane) with parallel and perpendicular flags; two circles give centre spacing; two planes give the gap. Click bodies in the Browser for volume, mass and centre of mass (material names or g/cm³), two bodies for clearance or interference volume. <kbd>⌫</kbd> or right-click removes the last pick, <kbd>Esc</kbd> clears. Agent tools: <code>measure</code> (faces, edges, points, bodies), <code>mass_properties</code>.</p>
+
+    <h2 id="section">Section and interference</h2>
+    <p><b>Section</b> (<kbd>S</kbd>) cuts the model with a plane: XY, XZ or YZ with an offset slider, or parallel to a flat face you click. The half facing you is removed, and the cut faces are drawn solid and hatched in each body's colour, so the inside of a gearbox or housing reads clearly. The section stays on until you remove it (a chip in the bottom bar). The agent's <code>screenshot</code> tool takes a <code>section</code> too, so it can look inside assemblies.</p>
+    <p><b>Interference</b> (<kbd>J</kbd>) checks every pair of bodies, or the ones selected in the Browser, with exact solid booleans after a bounding-box filter. It reports the overlap volume per pair; click one to see the overlap in red with the rest ghosted. Touching faces don't count. A bolt in a tapped hole is listed separately as thread engagement, and designs with real helical threads are checked on a quick draft-thread rebuild. The 113-body planetary gearhead takes about 20 s. The agent has the same check as <code>check_interference</code> and is told to run it on assemblies.</p>
 
     <h2 id="drawings">Shop drawings</h2>
     <p>Ribbon ▸ <b>Drawings</b> (<kbd>D</kbd>) or File ▸ Shop drawings…, with the material and sheet size from ⚙ Settings ▸ Shop drawings: third-angle front, top and right views plus an isometric, with hidden lines (OCCT HLR projection), overall dimensions, hole callouts (n× Ø, THRU or depth, thread labels), lettered holes with a coordinate table, and a title block with size, mass, scale and date. One SVG per body plus an assembly sheet, and a DXF of the view geometry, written to <code>workspace/drawings/</code>. Agent tool: <code>make_drawings</code>.</p>
@@ -397,7 +408,7 @@ program.<span class="hl-f">add</span>(<span class="hl-f">pocket</span>(bot, tool
       <li>CAM simulation models the tool tip only (no holder or shank collisions) and skips side setups; time estimates ignore acceleration.</li>
       <li>Adaptive corners rely on feed reduction; no trochoidal slotting, no 3D rest, no Z-level finishing.</li>
       <li>Sketches have no constraint solver (dimensions are not kept as relationships), and no sketch fillet or trim.</li>
-      <li>Manual tools are typed, not dragged (except Press/Pull); no mates or joints, patterns, mirror, loft or sweep by hand.</li>
+      <li>Manual tools are typed, not dragged (except Press/Pull); no mates or joints; patterns copy whole bodies (no feature patterns).</li>
       <li>Drawings have overall dimensions and hole tables only; no section views or PDF.</li>
       <li>Face and edge ids change on every rebuild.</li>
     </ul>
@@ -408,7 +419,7 @@ program.<span class="hl-f">add</span>(<span class="hl-f">pocket</span>(bot, tool
   </main>
 </div>
 <footer><div class="wrap"><span>© 2026 AgenticCAD · PolyForm Noncommercial 1.0.0</span><a href="../terms.html">Terms</a><a href="../privacy.html">Privacy</a><a href="#" data-cookie-settings>Cookie settings</a><a href="https://github.com/agenticcad/agenticcad">GitHub</a><a href="../tutorials/">Tutorials</a><a href="../index.html">Home</a></div></footer>
-<script src="../assets/site.js?v=0.20.0"></script>
+<script src="../assets/site.js?v=0.21.0"></script>
 <script>
   const links = [...document.querySelectorAll('.toc a')], heads = links.map(a => document.querySelector(a.getAttribute('href')));
   const io = new IntersectionObserver(() => { let cur = 0; heads.forEach((h, i) => { if (h && h.getBoundingClientRect().top < 120) cur = i; }); links.forEach((a, i) => a.classList.toggle('on', i === cur)); }, { rootMargin: '-100px 0px -70% 0px', threshold: [0, 1] });
