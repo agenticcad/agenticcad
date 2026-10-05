@@ -133,7 +133,10 @@ Rules
   `library search` it and `library insert` it rather than re-creating it; when you build something reusable, offer to
   `library save_body` / `save_design` it.
   Use `measure` / `mass_properties` to check fits, gaps, wall thicknesses and weights instead of guessing;
-  `make_drawings` produces shop drawings.
+  `make_drawings` produces shop drawings. For multi-body assemblies run `check_interference` before you report done
+  (parts that overlap are a modelling error, except threads), and use `screenshot` with `section` to look inside
+  housings and gearboxes. Script helpers: pattern_linear / pattern_circular (counts include the original; fused, or
+  separate=True for a list), mirror_about(shape, origin, normal), path_wire(edges) and pipe(path, diameter, wall).
 - Sketches: the user can draw 2D sketches in the UI; they appear in the script as blocks between
   `# sketch:NAME {...}` and `# /sketch:NAME` that assign a build123d Sketch to variable NAME (never edit or
   remove those blocks; the editor owns them, and the user can re-open them). Use them like any Sketch:
@@ -343,6 +346,17 @@ def _build_hint(e: BaseException) -> str:
     return ""
 
 
+_SCRIPT_NAMES: set[str] | None = None
+
+
+def _script_names() -> set[str]:
+    """Names the design script namespace defines (build123d, helpers): new variables must not shadow them."""
+    global _SCRIPT_NAMES
+    if _SCRIPT_NAMES is None:
+        _SCRIPT_NAMES = set(ck.script_namespace()) | {"result", "kit", "math"}
+    return _SCRIPT_NAMES
+
+
 def _find_overrides(code: str) -> tuple[dict, tuple[int, int] | None]:
     """The table of the top-level `overrides({...})` call in a CAM script and its line span (1-based, inclusive)."""
     import ast
@@ -516,6 +530,34 @@ class CadAgent:
         await self.emit({"type": "cam", "program": prog.to_payload(), "code": code, "source": source,
                          "summary": prog.summary(), "gcode_lines": prog.gcode().count("\n")})
         return prog
+
+    async def interference(self, paths: list[str] | None = None, mesh: bool = True) -> dict[str, Any]:
+        """Interference check of the current design. Real (helical) threads make the booleans very slow and
+        fragile, so a design that has them is checked on a draft-thread rebuild (threads as plain cylinders;
+        same bodies and names), cached per script."""
+        import analysis
+        if self.model is None:
+            raise ck.CadError("no model built")
+        m, note = self.model, None
+        if any(getattr(t, "real", False) for t in m.threads) and not m.draft_threads:
+            key = (m.code, self.quality)
+            if getattr(self, "_draft_check", None) and self._draft_check[0] == key:
+                m = self._draft_check[1]
+            else:
+                try:
+                    m = await asyncio.to_thread(ck.run_script, m.code, "draft", self.workspace, self.parts, "draft")
+                except ck.CadError:              # a script that needs its real threads (e.g. it searches a thread phase)
+                    m = None
+                self._draft_check = (key, m)
+            if m is None:
+                m = self.model
+                note = "checked with the real threads (this script doesn't build with draft threads), so it is slower"
+            else:
+                note = "real threads were checked as plain cylinders (fast); a bolt in a tapped hole shows as thread engagement"
+        res = await asyncio.to_thread(analysis.interference, m, paths, 1e-3, 90.0, mesh)
+        if note:
+            res["notes"].insert(0, note)
+        return res
 
     async def set_op_override(self, key: str, values: dict | None) -> cam.Program | None:
         """CAM tab: set (or with empty/None values, clear) the tool overrides of one operation by rewriting the
@@ -841,6 +883,122 @@ class CadAgent:
         tpl = f"offset({{body}}, amount=-{thickness:g}, openings=[{opens}])" if opens else f"offset({{body}}, amount=-{thickness:g})"
         await self.modify_body(body, tpl, f"shell {thickness:g} mm" + (f" open {len(face_centers)} face(s)" if face_centers else " (hollow)"))
 
+    # ---- feature tools (ribbon): mirror / pattern / revolve / loft / sweep, all written as code
+    def _body_var(self, code: str, path: str) -> tuple[str, str]:
+        """Bind a body's expression to a variable (hoisted before `result`) so other expressions can use it."""
+        code = script_edit.wrap_body_expr(code, path, "{body}")
+        return code, script_edit.body_expr(code, path)
+
+    def _unique_body_name(self, name: str) -> str:
+        existing = {b.name for b in self.model.bodies} | {b.path for b in self.model.bodies}
+        base, k = name, 2
+        while name in existing:
+            name = f"{base} {k}"; k += 1
+        return name
+
+    async def _apply_feature(self, code: str, expr: str, op: str, target: str | None, what: str, name: str) -> None:
+        """op new: add `expr` as a new body; join / cut: fuse into / subtract from `target` (expr may use {body} for
+        the target's own variable)."""
+        if op == "new" or not target:
+            body_name = self._unique_body_name(name)
+            var = re.sub(r"[^a-z0-9_]", "_", body_name.lower()).strip("_") or "feature"
+            var = ("p_" + var) if var[0].isdigit() else var
+            reserved = _script_names()
+            base, k = var, 2
+            while var in reserved or re.search(rf"\b{re.escape(var)}\b", code):   # never shadow pipe(), loft(), a variable...
+                var = f"{base}_{k}" if base not in reserved or k > 2 else f"{base}_body"; k += 1
+            code = script_edit.add_body(code, var, expr.replace("{body}", var), body_name)
+            where = f"new body '{body_name}'"
+        elif op in ("join", "cut"):
+            code = script_edit.wrap_body_expr(code, target, "{body} " + ("+" if op == "join" else "-") + " " + expr)
+            where = f"{'joined to' if op == 'join' else 'cut from'} '{target}'"
+        else:
+            raise ck.CadError(f"{what}: operation must be new | join | cut")
+        await self.build(code, source="edit")
+        self.notes.append(f"The user added a {what} via the ribbon ({where}); the script was edited directly.")
+        await self.emit({"type": "info", "text": f"{what} · {where}"})
+
+    async def op_mirror(self, body: str, origin: list[float], normal: list[float], mode: str = "join") -> None:
+        """Mirror `body` in the plane through `origin` with `normal`: join (one symmetric body) or new (a separate
+        mirrored body)."""
+        code, var = self._body_var(self.model.code, body)
+        expr = f"mirror_about({var}, origin={self._p(origin)}, normal={self._p(normal)})"
+        if mode == "join":
+            await self._apply_feature(code, expr, "join", body, "mirror", body)
+        else:
+            await self._apply_feature(code, expr, "new", None, "mirror", f"{body} mirror")
+
+    async def op_pattern(self, body: str, kind: str, params: dict[str, Any], mode: str = "join", target: str | None = None) -> None:
+        """Pattern `body`. kind linear: direction, count, spacing [, direction2, count2, spacing2]; circular: count,
+        angle, axis_origin, axis_dir. mode: join (copies fused into the body) | new (one new body of the copies) |
+        cut (subtract all copies from `target`; the source body is then only a tool and leaves the result)."""
+        code, var = self._body_var(self.model.code, body)
+        if kind == "linear":
+            args = f"{self._p(params['direction'])}, count={int(params['count'])}, spacing={float(params['spacing']):g}"
+            if params.get("direction2") and int(params.get("count2") or 1) > 1:
+                args += f", direction2={self._p(params['direction2'])}, count2={int(params['count2'])}, spacing2={float(params['spacing2']):g}"
+            call = "pattern_linear"
+        elif kind == "circular":
+            args = f"count={int(params['count'])}, angle={float(params.get('angle', 360)):g}, axis=({self._p(params.get('axis_origin') or [0, 0, 0])}, {self._p(params.get('axis_dir') or [0, 0, 1])})"
+            call = "pattern_circular"
+        else:
+            raise ck.CadError("pattern: kind must be linear | circular")
+        if mode == "join":
+            code = script_edit.wrap_body_expr(code, body, f"{call}({{body}}, {args})")
+            await self.build(code, source="edit")
+            self.notes.append(f"The user patterned body '{body}' ({kind}) via the ribbon; the script was edited directly.")
+            await self.emit({"type": "info", "text": f"{kind} pattern of '{body}'"})
+        elif mode == "new":
+            await self._apply_feature(code, f"{call}({var}, {args}, include_original=False)", "new", None, "pattern", f"{body} pattern")
+        elif mode == "cut":
+            if not target or target == body:
+                raise ck.CadError("pattern cut: choose another body to cut the copies from")
+            code = script_edit.delete(code, body)              # the source is a tool now; its variable stays hoisted
+            await self._apply_feature(code, f"{call}({var}, {args})", "cut", target, f"{kind} pattern of '{body}'", target)
+        else:
+            raise ck.CadError("pattern: mode must be join | new | cut")
+
+    def _sketch_ok(self, name: str) -> None:
+        if self.model is None or not any(sk["name"] == name for sk in self.model.sketches):
+            raise ck.CadError(f"no sketch '{name}'")
+
+    async def op_revolve(self, sketch: str, axis_origin: list[float], axis_dir: list[float], angle: float = 360.0,
+                         mode: str = "new", target: str | None = None) -> None:
+        self._sketch_ok(sketch)
+        expr = f"revolve({sketch}, axis=Axis({self._p(axis_origin)}, {self._p(axis_dir)}), revolution_arc={float(angle):g})"
+        await self._apply_feature(self.model.code, expr, mode, target, f"revolve of {sketch}", f"{sketch} revolve")
+
+    async def op_loft(self, sketches: list[str], ruled: bool = False, mode: str = "new", target: str | None = None) -> None:
+        if len(sketches) < 2:
+            raise ck.CadError("loft needs at least two sketches")
+        for n in sketches:
+            self._sketch_ok(n)
+        expr = f"loft([{', '.join(sketches)}]" + (", ruled=True" if ruled else "") + ")"
+        await self._apply_feature(self.model.code, expr, mode, target, f"loft of {', '.join(sketches)}", "Loft")
+
+    async def op_sweep(self, path_body: str, points: list[list[float]], sketch: str | None = None, diameter: float | None = None,
+                       wall: float | None = None, mode: str = "new", target: str | None = None,
+                       face_point: list[float] | None = None) -> None:
+        """Sweep a sketch (or a round pipe profile of `diameter`) along the connected edges of `path_body` nearest
+        `points`, or around the outline of the face nearest `face_point`."""
+        if not points and not face_point:
+            raise ck.CadError("sweep: pick the path edges (or one face to go around its outline)")
+        code, var = self._body_var(self.model.code, path_body)
+        path = (f"{var}.faces().sort_by_distance({self._p(face_point)})[0].outer_wire()" if not points else
+                f"path_wire([{', '.join(f'{var}.edges().sort_by_distance({self._p(p)})[0]' for p in points)}])")
+        if sketch:
+            self._sketch_ok(sketch)
+            expr = f"sweep({sketch}, path={path}, transition=Transition.RIGHT)"
+            label = f"sweep of {sketch}"
+        elif diameter:
+            expr = f"pipe({path}, diameter={float(diameter):g}" + (f", wall={float(wall):g}" if wall else "") + ")"
+            label = f"Ø{float(diameter):g} pipe"
+        else:
+            raise ck.CadError("sweep: choose a sketch profile or a pipe diameter")
+        if target == path_body and mode in ("join", "cut"):
+            expr = expr.replace(f"{var}.edges()", "{body}.edges()").replace(f"{var}.faces()", "{body}.faces()")
+        await self._apply_feature(code, expr, mode, target, label, "Pipe" if not sketch else f"{sketch} sweep")
+
     async def transform_body(self, path: str, move: list[float], rotate: list[float]) -> None:
         mx, my, mz = (float(v) for v in (move + [0, 0, 0])[:3]); rx, ry, rz = (float(v) for v in (rotate + [0, 0, 0])[:3])
         parts = []
@@ -1133,11 +1291,16 @@ class CadAgent:
         @tool("screenshot",
               "Render the current design in the browser viewer and return a PNG. `view` is one of "
               + ", ".join(SCREENSHOT_VIEWS) + ". `highlight_faces` (list of face ids) colours those faces "
-              "orange so you can confirm which is which. `show_edges` defaults to true.",
+              "orange so you can confirm which is which. `show_edges` defaults to true. `section` cuts the model "
+              "with a plane to show the inside of assemblies and hollow parts: {plane: 'XY'|'XZ'|'YZ', offset: mm "
+              "along the plane normal from the origin (default: through the model centre), flip: bool}; cut faces "
+              "are drawn solid (hatched) in each body's colour.",
               {"type": "object",
                "properties": {"view": {"type": "string", "enum": SCREENSHOT_VIEWS, "default": "iso"},
                               "highlight_faces": {"type": "array", "items": {"type": "integer"}},
-                              "show_edges": {"type": "boolean", "default": True}},
+                              "show_edges": {"type": "boolean", "default": True},
+                              "section": {"type": "object", "properties": {"plane": {"type": "string", "enum": ["XY", "XZ", "YZ"]},
+                                                                           "offset": {"type": "number"}, "flip": {"type": "boolean"}}}},
                "required": []})
         async def screenshot(args: dict[str, Any]) -> dict[str, Any]:
             if agent.model is None:
@@ -1147,13 +1310,15 @@ class CadAgent:
                     "view": args.get("view") or "iso",
                     "highlight": args.get("highlight_faces") or [],
                     "showEdges": args.get("show_edges", True),
+                    "section": args.get("section") or None,
                 })
             except Exception as e:  # noqa: BLE001
                 return {"content": [{"type": "text", "text": f"screenshot unavailable: {e}"}], "is_error": True}
             return {"content": [
                 {"type": "image", "data": png_b64, "mimeType": "image/jpeg"},
                 {"type": "text", "text": f"view={args.get('view') or 'iso'} highlighted={args.get('highlight_faces') or []} "
-                                         f"(X red, Y green, Z blue axis gizmo; grid is the XY plane)"},
+                                         + (f"section={args.get('section')} " if args.get('section') else "")
+                                         + "(X red, Y green, Z blue axis gizmo; grid is the XY plane)"},
             ]}
 
         @tool("export_model",
@@ -1248,6 +1413,22 @@ class CadAgent:
             except cam.CamError as e:
                 return {"content": [{"type": "text", "text": f"simulation failed: {e}"}], "is_error": True}
             return {"content": [{"type": "text", "text": res.summary()}]}
+
+        @tool("check_interference",
+              "Exact interference check between bodies (OCCT booleans): every pair whose solids overlap, with the "
+              "overlap volume, centre and extent. Touching faces don't count; overlaps on registered thread axes "
+              "(a bolt in a tapped hole) are listed separately as expected. Use it after building or editing an "
+              "assembly; fix real interference before reporting done. Optional `bodies` limits the check.",
+              {"type": "object", "properties": {"bodies": {"type": "array", "items": {"type": "string"}}}, "required": []})
+        async def check_interference(args: dict[str, Any]) -> dict[str, Any]:
+            if agent.model is None:
+                return {"content": [{"type": "text", "text": "no model built"}], "is_error": True}
+            import analysis
+            try:
+                res = await agent.interference(args.get("bodies") or None, mesh=False)
+            except ck.CadError as e:
+                return {"content": [{"type": "text", "text": str(e)}], "is_error": True}
+            return {"content": [{"type": "text", "text": analysis.summary(res)}]}
 
         @tool("feeds_speeds", "Feeds & speeds calculator: rpm, feed, plunge, stepdown, stepover for a tool in a material "
               "on a machine (spindle/feed limits applied, radial chip thinning if `radial_engagement` < 0.5). "
@@ -1539,7 +1720,7 @@ class CadAgent:
             slicing_tools = [slicer_info, slice_for_printing]
 
         tools = [build_model, *([] if LEGACY_BUILD else [edit_model]), inspect_model, screenshot, export_model, get_code, save_design,
-                 cam_context, build_cam, get_cam_code, export_gcode, simulate_cam, feeds_speeds, save_machine, save_tool,
+                 cam_context, build_cam, get_cam_code, export_gcode, simulate_cam, check_interference, feeds_speeds, save_machine, save_tool,
                  get_parameters, set_parameters, measure_tool, mass_properties, make_drawings, library_tool, kit_tool, sketch_tool] + slicing_tools
         self.tool_handlers = {t.name: t.handler for t in tools}     # name -> async handler (tests call these directly)
         return create_sdk_mcp_server("cad", "0.4.0", tools=tools)

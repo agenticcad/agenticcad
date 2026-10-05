@@ -426,8 +426,11 @@ def hole(part: Part, diameter: float, at, depth: float | None = None, through: b
         out = out - pl * Cylinder(cd / 2, cdepth + 0.5, align=(Align.CENTER, Align.CENTER, Align.MAX))
     if countersink:
         from build123d import Cone
+        # 90° cone: Ø countersink at the surface narrowing to the hole Ø at depth h, started 0.5 mm outside the
+        # surface so the cut is clean (wide end out, narrow end in)
         h = (countersink - diameter) / 2
-        out = out - pl * (Pos(0, 0, 0.5) * Cone(countersink / 2 + 0.5, diameter / 2, h + 0.5, align=(Align.CENTER, Align.CENTER, Align.MAX)))
+        inward = Plane(origin=Vector(*at) - ax * 0.5, z_dir=ax)
+        out = out - inward * Cone(countersink / 2 + 0.5, diameter / 2, h + 0.5, align=(Align.CENTER, Align.CENTER, Align.MIN))
     return out
 
 

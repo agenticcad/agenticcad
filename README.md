@@ -290,8 +290,9 @@ outlines and can be selected as chat chips. The **agent edits sketches through t
 (list/get/set/delete, same item format), so anything it draws stays editable by you and vice versa.
 
 ### Modelling ribbon (Fusion-style, no agent turn)
-Top of the viewer: **Create** Box `B` / Cylinder `C` / Sphere `O` / Sketch `K`, **Modify** Press/Pull `Q` /
-Hole `H` / Fillet `F` / Chamfer `X` / Shell `L` / Move `V`, **Inspect** Measure `I`. Hover for a tooltip
+Top of the viewer: **Create** Box `B` / Cylinder `C` / Sphere `O` / Sketch `K` / Revolve `R` / Loft `G` / Sweep `W`,
+**Modify** Press/Pull `Q` / Hole `H` / Fillet `F` / Chamfer `X` / Shell `L` / Move `V` / Mirror `M` / Pattern `N`,
+**Inspect** Measure `I` / Section `S` / Interference `J`. Hover for a tooltip
 with the shortcut and what to click. A tool opens a command dialog under the ViewCube that walks you
 through it: step indicator, a live prompt ("Click a face…"), chips for what you picked (× to drop),
 fields with units (↑↓ ±1, ⇧ ±10, ⌥ ±0.1), ↵ OK, ⌫ removes the last pick, Esc cancels. Every operation is written as code on the body's
@@ -300,6 +301,26 @@ expression in `result` — e.g. `_bracket = bp.part` hoisted before `result`, th
 — so the design stays a script, Undo works, and the agent sees a `[Note]` of what you did.
 Primitives are placed with their base on the clicked face along its normal; holes can be plain,
 counterbored, or tapped (M2…M12); fillet/chamfer take edges or whole faces; shell opens the picked faces.
+
+- **Revolve** a sketch about its own X/Y axis, a world axis or a straight edge you click; **Loft** through two to
+  four sketches in order (optionally ruled); **Sweep** a sketch, or a round pipe (with an optional wall), along
+  connected model edges or around the outline of a face you click. Each makes a new body or joins/cuts an existing
+  one.
+- **Mirror** a body about a base plane (with an offset) or a flat face you click: join for one symmetric body, or a
+  separate mirrored body. **Pattern** a body rectangularly (one or two directions, or along a clicked edge) or
+  circularly (about a world axis or a clicked circular edge): join the copies, make a new body of them, or cut them
+  from another body, which is how you make hole patterns (a cylinder body patterned and cut from a plate). The
+  script gets readable calls: `pattern_circular(peg, count=6, angle=360, axis=...)`, `mirror_about(...)`,
+  `revolve(...)`, `loft([...])`, `pipe(path_wire([...]), diameter=6)`, usable by the agent too.
+- **Section** cuts the model with a plane (XY / XZ / YZ with an offset slider, or parallel to a flat face you
+  click). The half facing you is removed, and cut faces are drawn solid and hatched in each body's colour. The
+  section stays on (a chip in the bottom bar) until you remove it. The agent's `screenshot` takes a `section` too.
+- **Interference** finds every pair of bodies whose solids overlap (exact OCCT booleans after a bounding-box
+  filter), with the overlap volume. Click a pair to see the overlap in red with the rest ghosted. Touching
+  faces don't count. A bolt in a tapped hole is listed separately as thread engagement, and designs with real
+  helical threads are checked on a draft-thread rebuild, which is far faster and more robust. The 113-body
+  planetary gearhead takes about 20 s. Agent tool: `check_interference`, which the agent is told to run on
+  assemblies.
 
 ### Other manual modelling
 - Browser ▸ **+ Body**: box / cylinder / sphere with dimensions and centre.
@@ -424,7 +445,7 @@ but nothing here has been run on a real machine yet by anyone but the author.
 - **Sketches have no constraint solver**: dimensions apply when you place or drag a point and are not kept as
   relationships; no sketch fillet, trim or offset.
 - **Manual tools are typed, not dragged** (except Press/Pull): no drag handles for primitives,
-  no mates/joints for positioning library parts; no patterns, mirror, loft or sweep by hand.
+  no mates/joints for positioning library parts. Patterns copy whole bodies (no feature or face patterns).
 - **Drawings** have overall dimensions and hole tables only; no section views, no feature
   dimensions, no PDF.
 - **Library parts land at the origin** and are moved afterwards; there is no standard-parts seed

@@ -274,6 +274,22 @@ async def gcode_preview(lines: int = 400):
     return PlainTextResponse("\n".join(g[:lines]) + (f"\n; ... {len(g) - lines} more lines" if len(g) > lines else ""))
 
 
+class InterferenceBody(BaseModel):
+    bodies: list[str] | None = None       # body paths; None = all
+
+
+@app.post("/api/interference")
+async def interference(body: InterferenceBody):
+    if agent.model is None:
+        return JSONResponse({"error": "no model"}, status_code=400)
+    import analysis
+    try:
+        res = await agent.interference(body.bodies or None)
+    except ck.CadError as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+    return res | {"summary": analysis.summary(res)}
+
+
 class SimBody(BaseModel):
     ops: list[int] | None = None          # 0-based op indices; None = all
     resolution: float | None = None
@@ -690,7 +706,17 @@ async def _dispatch(ws: WebSocket, msg: dict) -> None:
                 await agent.op_edges(msg["body"], msg.get("points") or [], float(msg.get("radius") or 0), k, msg.get("faces"))
             elif k == "shell":
                 await agent.op_shell(msg["body"], msg.get("faces") or [], float(msg.get("thickness") or 1))
-        except (KeyError, ValueError, ck.CadError) as e:
+            elif k == "mirror":
+                await agent.op_mirror(msg["body"], msg["origin"], msg["normal"], msg.get("mode", "join"))
+            elif k == "pattern":
+                await agent.op_pattern(msg["body"], msg.get("pattern", "linear"), msg.get("params") or {}, msg.get("mode", "join"), msg.get("target"))
+            elif k == "revolve":
+                await agent.op_revolve(msg["sketch"], msg["axis_origin"], msg["axis_dir"], float(msg.get("angle") or 360), msg.get("mode", "new"), msg.get("target"))
+            elif k == "loft":
+                await agent.op_loft(msg.get("sketches") or [], bool(msg.get("ruled")), msg.get("mode", "new"), msg.get("target"))
+            elif k == "sweep":
+                await agent.op_sweep(msg["path_body"], msg.get("points") or [], msg.get("sketch"), msg.get("diameter"), msg.get("wall"), msg.get("mode", "new"), msg.get("target"), msg.get("face_point"))
+        except (KeyError, ValueError, ck.CadError, script_edit.Unsupported) as e:
             await ws.send_text(json.dumps({"type": "error", "text": f"{k} failed: {e}"}))
     elif t == "transform_body":
         await agent.transform_body(msg.get("path", ""), msg.get("move") or [0, 0, 0], msg.get("rotate") or [0, 0, 0])

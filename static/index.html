@@ -244,6 +244,12 @@
   .fs-box .fs-row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; font-size:12px; } .fs-box .fs-row label { color:var(--muted); }
   .fs-box select { background:var(--bg); color:var(--text); border:1px solid var(--line); border-radius:6px; padding:4px 6px; font:inherit; }
   .set-err { color:var(--err); font-size:12px; min-height:16px; margin-top:6px; }
+  #cmd .prompt.bad { color:var(--err); } #cmd .prompt.bad i { background:var(--err); }
+  .iflist { max-height:240px; overflow:auto; border:1px solid var(--line); border-radius:6px; margin-top:6px; }
+  .ifrow { display:flex; gap:6px; align-items:baseline; padding:5px 8px; border-bottom:1px solid var(--line); font-size:12px; cursor:pointer; flex-wrap:wrap; }
+  .ifrow:last-child { border-bottom:0; } .ifrow:hover { background:var(--panel2); } .ifrow.on { background:rgba(255,59,59,.12); box-shadow:inset 3px 0 0 #ff3b3b; }
+  .ifrow b { font-weight:600; } .ifrow span { margin-left:auto; color:#ff8080; font-variant-numeric:tabular-nums; } .ifrow.thr span { color:#ffb020; }
+  .ifh { font-size:10px; text-transform:uppercase; letter-spacing:.4px; color:var(--muted); padding:6px 8px 2px; }
   .set-grid { display:grid; grid-template-columns:120px 1fr; gap:8px 10px; align-items:center; font-size:12px; }
   .set-grid label { color:var(--muted); }
   .set-grid textarea { min-height:70px !important; }
@@ -332,6 +338,7 @@
       <span class="btn" style="padding:0 4px 0 9px;display:flex;align-items:center;gap:4px" title="Display mesh only — the model is exact B-rep">Mesh
         <select id="quality"><option value="draft">draft</option><option value="normal" selected>normal</option><option value="fine">fine</option></select></span>
       <button class="btn" id="undo" title="Revert to previous build">↶ Undo</button>
+      <span class="btn active" id="sec-chip" style="display:none;gap:6px;align-items:center" title="Section analysis is on — click to adjust"><span>Section</span><b title="remove the section" style="cursor:pointer">✕</b></span>
       <button class="btn" id="measure-btn" style="display:none">Measure</button>
       <button class="btn" id="sketch-btn" style="display:none">Sketch</button>
       <span class="sep" id="cam-sep" style="display:none"></span>
@@ -466,7 +473,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
 // ------------------------------------------------------------------ viewer
 const viewerEl = document.getElementById('viewer');
-const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true, stencil: true });   // stencil: section caps
 renderer.setPixelRatio(window.devicePixelRatio);
 viewerEl.appendChild(renderer.domElement);
 const scene = new THREE.Scene();
@@ -591,6 +598,7 @@ function applyColors(extraHighlight = []) {
 function applyVisibility() {
   const hideAll = typeof sliceData !== 'undefined' && !!sliceData && showLayers && document.getElementById('print-hide-model').checked;   // sliced-layer preview
   for (const b of model.bodies.values()) { const vis = !hidden.has(b.id) && !hideAll; b.mesh.visible = vis; b.lines.visible = vis && showEdges; }
+  if (typeof sectionSync === 'function') sectionSync();
 }
 
 const VIEW_DIRS = { iso: [1, -1, 0.8], iso_back: [-1, 1, 0.8], front: [0, -1, 0], back: [0, 1, 0], left: [-1, 0, 0], right: [1, 0, 0], top: [0, -0.0001, 1], bottom: [0, -0.0001, -1] };
@@ -854,7 +862,7 @@ function toggleBody(id) {
 
 // screenshot for the agent
 async function renderScreenshot(spec) {
-  const W = 1024, H = 768;
+  const W = 1024, H = 768; let savedSection = null;
   const savedPos = camera.position.clone(), savedTarget = controls.target.clone(), savedEdges = showEdges;
   const savedPR = renderer.getPixelRatio();
   try {
@@ -863,6 +871,7 @@ async function renderScreenshot(spec) {
       const bb = new THREE.Box3(); for (const b of model.bodies.values()) if (b.mesh.visible) bb.expandByObject(b.mesh); const saved = bbox; bbox = bb.isEmpty() ? bbox : bb; setView(spec.view || 'iso'); bbox = saved; }
     else { setView(spec.view || 'iso'); showEdges = spec.showEdges !== false; applyVisibility(); }
     applyColors(spec.highlight || []);
+    if (spec.section) { savedSection = section; const f0 = sectionAt(spec.section.plane || 'XZ', spec.section.offset); section = { ...f0, flip: spec.section.flip ? !f0.flip : f0.flip }; sectionSync(); }
     controls.update(); renderer.render(scene, camera);
     // JPEG keeps the agent's tool result well under the SDK's 1 MB message limit even with dense toolpaths
     let q = 0.85, url = renderer.domElement.toDataURL('image/jpeg', q);
@@ -871,6 +880,7 @@ async function renderScreenshot(spec) {
   } finally {
     renderer.setPixelRatio(savedPR); resize();
     camera.position.copy(savedPos); controls.target.copy(savedTarget); controls.update();
+    if (spec.section) { section = savedSection; }
     showEdges = savedEdges; applyVisibility(); applyColors();
   }
 }
@@ -882,6 +892,7 @@ document.getElementById('fit').onclick = () => fitCamera();
 document.getElementById('edges').onclick = e => { showEdges = !showEdges; applyVisibility(); e.currentTarget.classList.toggle('active', showEdges); };
 document.getElementById('quality').onchange = e => send({ type: 'set_quality', quality: e.target.value });
 document.getElementById('undo').onclick = () => send({ type: 'undo' });
+document.getElementById('sec-chip').onclick = e => { if (e.target.tagName === 'B') { section = null; sectionSync(); if (tool && tool.kind === 'section') endTool(); } else if (!tool || tool.kind !== 'section') activateTool('section'); };
 
 // file menu
 const fileMenu = document.getElementById('filemenu');
@@ -2160,6 +2171,148 @@ async function extrudeDialog(name) {
   if (r) send({ type: 'extrude_sketch', ...r });
 }
 
+// ------------------------------------------------------------------ section analysis (Inspect ▸ Section)
+// A clipping plane through every body, with solid hatched caps in each body's colour (stencil caps: per body,
+// back faces +1 / front faces −1 leave a non-zero stencil inside the cut, where the cap plane is drawn).
+renderer.localClippingEnabled = true;
+let section = null;   // { origin:[x,y,z], normal:[x,y,z], offset (mm along normal), flip, caps, plane: 'XY'|'XZ'|'YZ'|'face', label }
+const secPlane = new THREE.Plane(), secGroup = new THREE.Group(); scene.add(secGroup);
+let secBuiltFor = null;
+const hatchTex = (() => {
+  const c = document.createElement('canvas'); c.width = c.height = 32; const g = c.getContext('2d');
+  g.fillStyle = '#fff'; g.fillRect(0, 0, 32, 32); g.strokeStyle = 'rgba(0,0,0,.32)'; g.lineWidth = 2.2;
+  for (let k = -32; k <= 64; k += 16) { g.beginPath(); g.moveTo(k, 32); g.lineTo(k + 32, 0); g.stroke(); }
+  const t = new THREE.CanvasTexture(c); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.colorSpace = THREE.SRGBColorSpace; return t;
+})();
+const stencilMat = (side, op) => new THREE.MeshBasicMaterial({ side, depthWrite: false, depthTest: false, colorWrite: false, stencilWrite: true,
+  stencilFunc: THREE.AlwaysStencilFunc, stencilFail: op, stencilZFail: op, stencilZPass: op, clippingPlanes: [secPlane] });
+const secBackMat = stencilMat(THREE.BackSide, THREE.IncrementWrapStencilOp), secFrontMat = stencilMat(THREE.FrontSide, THREE.DecrementWrapStencilOp);
+function sectionPoint() { const n = new THREE.Vector3(...section.normal).normalize(); return new THREE.Vector3(...section.origin).addScaledVector(n, section.offset); }
+function sectionBuild() {
+  while (secGroup.children.length) { const c = secGroup.children.pop(); if (c.userData.cap) { c.geometry.dispose(); c.material.dispose(); } }
+  secBuiltFor = model;
+  if (!model) return;
+  const size = (bbox ? bbox.getSize(new THREE.Vector3()).length() : 100) * 2.2, hatch = 2.5;   // hatch spacing (mm)
+  let i = 0;
+  for (const b of model.bodies.values()) {
+    const back = new THREE.Mesh(b.mesh.geometry, secBackMat), front = new THREE.Mesh(b.mesh.geometry, secFrontMat);
+    back.renderOrder = front.renderOrder = 200 + i * 2; back.userData.body = front.userData.body = b.id;
+    const g = new THREE.PlaneGeometry(size, size), uv = g.attributes.uv;
+    for (let k = 0; k < uv.count; k++) uv.setXY(k, uv.getX(k) * size / (hatch * 2), uv.getY(k) * size / (hatch * 2));
+    const capCol = b.base.clone().multiplyScalar(0.9);
+    const cap = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ color: capCol, map: hatchTex, side: THREE.DoubleSide, stencilWrite: true, stencilRef: 0,
+      stencilFunc: THREE.NotEqualStencilFunc, stencilFail: THREE.ReplaceStencilOp, stencilZFail: THREE.ReplaceStencilOp, stencilZPass: THREE.ReplaceStencilOp }));
+    cap.renderOrder = 200 + i * 2 + 1; cap.userData = { cap: true, body: b.id };
+    cap.onAfterRender = r => r.clearStencil();
+    secGroup.add(back, front, cap); i++;
+  }
+}
+function sectionSync() {
+  const planes = section ? [secPlane] : [];
+  if ((material.clippingPlanes || []).length !== planes.length) { material.clippingPlanes = planes; edgeMat.clippingPlanes = planes; material.needsUpdate = true; edgeMat.needsUpdate = true; }
+  const chip = document.getElementById('sec-chip');
+  if (!section || !model) { secGroup.visible = false; if (chip) chip.style.display = 'none'; return; }
+  if (secBuiltFor !== model) sectionBuild();
+  const n = new THREE.Vector3(...section.normal).normalize(), p = sectionPoint(), keep = n.clone().multiplyScalar(section.flip ? 1 : -1);
+  secPlane.setFromNormalAndCoplanarPoint(keep, p);
+  secGroup.visible = true;
+  for (const c of secGroup.children) {
+    const b = model.bodies.get(c.userData.body); c.visible = !!(b && b.mesh.visible) && (section.caps !== false || !c.userData.cap);
+    if (c.userData.cap) { c.position.copy(p); c.lookAt(p.clone().add(n)); }
+  }
+  if (chip) { chip.style.display = ''; chip.querySelector('span').textContent = `Section ${section.plane === 'face' ? 'face' : section.plane} ${section.offset >= 0 ? '+' : ''}${+section.offset.toFixed(2)}`; }
+}
+function sectionRange(normal, origin) {   // offsets along `normal` (from `origin`) that pass through the model
+  if (!bbox) return [-50, 50];
+  const n = new THREE.Vector3(...normal).normalize(), o = new THREE.Vector3(...origin); let lo = Infinity, hi = -Infinity;
+  for (const x of [bbox.min.x, bbox.max.x]) for (const y of [bbox.min.y, bbox.max.y]) for (const z of [bbox.min.z, bbox.max.z]) { const d = new THREE.Vector3(x, y, z).sub(o).dot(n); lo = Math.min(lo, d); hi = Math.max(hi, d); }
+  return [lo, hi];
+}
+const SEC_PLANES = { XY: [0, 0, 1], XZ: [0, 1, 0], YZ: [1, 0, 0] };
+function facingFlip(origin, normal, offset) {   // flip so the half towards the camera is the one cut away
+  const n = new THREE.Vector3(...normal).normalize(), p = new THREE.Vector3(...origin).addScaledVector(n, offset);
+  return camera.position.clone().sub(p).dot(n) < 0;
+}
+function sectionAt(planeName, offset, flip) {   // a base-plane section; offset default = through the model centre
+  const normal = SEC_PLANES[planeName] || SEC_PLANES.XZ;
+  const c = bbox ? bbox.getCenter(new THREE.Vector3()) : new THREE.Vector3();
+  const off = offset ?? new THREE.Vector3(...normal).dot(c);
+  return { origin: [0, 0, 0], normal, offset: off, flip: flip ?? facingFlip([0, 0, 0], normal, off), caps: true, plane: planeName in SEC_PLANES ? planeName : 'XZ' };
+}
+function renderSectionCmd() {
+  if (!section) { section = sectionAt('XZ'); sectionSync(); }
+  const [lo, hi] = sectionRange(section.normal, section.origin), pad = (hi - lo) * 0.02 || 1;
+  cmdEl.innerHTML = `<div class="hd"><span class="ic">${svg('section', 18)}</span><span class="nm">Section analysis</span><span class="kbd">S</span><button class="x" title="Close (Esc) — the section stays">${svg('close', 16)}</button></div>
+    <div class="prompt ok"><i></i>Drag the slider or type an offset. Click a flat face to cut parallel to it.</div>
+    <div class="fields">
+      <div class="row"><label>Plane</label><div class="in sel"><select id="sp">${[['XY', 'XY (horizontal)'], ['XZ', 'XZ (front)'], ['YZ', 'YZ (side)'], ...(section.plane === 'face' ? [['face', 'Picked face']] : [])].map(([v, l]) => `<option value="${v}" ${v === section.plane ? 'selected' : ''}>${l}</option>`).join('')}</select></div></div>
+      <div class="row"><label>Offset</label><div class="in"><input id="so" type="number" step="any" value="${+section.offset.toFixed(3)}"><span class="u">mm</span></div></div>
+      <div class="row"><label></label><div class="in"><input id="sr" type="range" min="${lo - pad}" max="${hi + pad}" step="${Math.max(0.01, (hi - lo) / 400)}" value="${section.offset}" style="flex:1"></div></div>
+      <div class="row"><label for="sf">Flip side</label><div class="in"><label class="sw"><input id="sf" type="checkbox" ${section.flip ? 'checked' : ''}><span></span></label></div></div>
+      <div class="row"><label for="sc">Solid caps</label><div class="in"><label class="sw"><input id="sc" type="checkbox" ${section.caps !== false ? 'checked' : ''}><span></span></label></div></div>
+    </div>
+    <div class="ft"><span class="hint">↵ keep · Esc keep · Remove clears it</span><button class="btn" id="sremove">Remove</button><button class="btn primary" id="tapply">${svg('check', 14)} OK</button></div>`;
+  cmdEl.classList.add('on');
+  const so = cmdEl.querySelector('#so'), sr = cmdEl.querySelector('#sr');
+  const setOff = v => { section.offset = v; so.value = +v.toFixed(3); sr.value = v; sectionSync(); };
+  sr.oninput = () => setOff(+sr.value);
+  so.oninput = () => { const v = parseFloat(so.value); if (isFinite(v)) { section.offset = v; sr.value = v; sectionSync(); } };
+  so.onkeydown = e => { if (e.key === 'ArrowUp' || e.key === 'ArrowDown') { e.preventDefault(); setOff(section.offset + (e.key === 'ArrowUp' ? 1 : -1) * (e.shiftKey ? 10 : e.altKey ? 0.1 : 1)); } };
+  cmdEl.querySelector('#sp').onchange = e => { if (e.target.value !== 'face') { section = { ...sectionAt(e.target.value), caps: section.caps }; sectionSync(); renderSectionCmd(); } };
+  cmdEl.querySelector('#sf').onchange = e => { section.flip = e.target.checked; sectionSync(); };
+  cmdEl.querySelector('#sc').onchange = e => { section.caps = e.target.checked; sectionSync(); };
+  cmdEl.querySelector('#sremove').onclick = () => { section = null; sectionSync(); endTool(); };
+  cmdEl.querySelector('.x').onclick = endTool; cmdEl.querySelector('#tapply').onclick = endTool;
+}
+function sectionFromFace(sn) {
+  const n = faceNormalAt(sn);
+  section = { origin: sn.p.slice(), normal: n, offset: 0, flip: facingFlip(sn.p, n, 0), caps: section ? section.caps : true, plane: 'face' };
+  sectionSync(); renderSectionCmd();
+}
+
+// ------------------------------------------------------------------ interference (Inspect ▸ Interference)
+let interf = null;   // { res, sel: index }
+const interfGroup = new THREE.Group(); scene.add(interfGroup);
+const interfMat = new THREE.MeshBasicMaterial({ color: 0xff3b3b, transparent: true, opacity: 0.9, depthTest: false });
+function interfClear() { while (interfGroup.children.length) { const c = interfGroup.children.pop(); c.geometry.dispose(); } ghostPart(false); }
+function interfShow(i) {
+  interfClear(); if (!interf) return; interf.sel = i;
+  const pairs = i == null ? interf.res.pairs : [interf.res.pairs[i]];
+  for (const p of pairs) {
+    if (!p.mesh) continue;
+    const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(p.mesh.positions, 3)); g.setIndex(p.mesh.indices);
+    const m = new THREE.Mesh(g, p.thread ? new THREE.MeshBasicMaterial({ color: 0xffb020, transparent: true, opacity: 0.8, depthTest: false }) : interfMat); m.renderOrder = 9; interfGroup.add(m);
+  }
+  if (pairs.length) ghostPart(true);
+  if (i != null && pairs[0]) {   // frame the overlap
+    const [a, b] = pairs[0].bbox, c = new THREE.Vector3((a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (a[2] + b[2]) / 2), r = Math.max(4, Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2]) * 3);
+    const dir = camera.position.clone().sub(controls.target).normalize(); controls.target.copy(c); camera.position.copy(c).addScaledVector(dir, r * 2.5); controls.update();
+  }
+  renderInterfCmd();
+}
+function renderInterfCmd() {
+  const r = interf && interf.res, sel = [...selBodies].map(id => model.bodies.get(id)).filter(Boolean);
+  const real = r ? r.pairs.filter(p => !p.thread) : [], thr = r ? r.pairs.filter(p => p.thread) : [];
+  const row = (p, i) => `<div class="ifrow ${interf.sel === i ? 'on' : ''} ${p.thread ? 'thr' : ''}" data-i="${i}"><b>${p.a}</b> × <b>${p.b}</b><span>${p.volume < 0.01 ? p.volume.toExponential(1) : +p.volume.toPrecision(3)} mm³${p.thread ? ' · thread ' + p.thread : ''}</span></div>`;
+  cmdEl.innerHTML = `<div class="hd"><span class="ic">${svg('interference', 18)}</span><span class="nm">Interference</span><span class="kbd">J</span><button class="x" title="Close (Esc)">${svg('close', 16)}</button></div>
+    <div class="prompt ${r ? (real.length ? 'bad' : 'ok') : ''}"><i></i>${!r ? `Check which bodies overlap (exact solids). ${sel.length >= 2 ? `${sel.length} bodies selected.` : 'Select bodies in the Browser to limit the check.'}`
+      : real.length ? `${real.length} overlapping pair${real.length > 1 ? 's' : ''} — click one to show it in red.` : 'No interference.' + (thr.length ? ' Thread engagement is listed separately.' : '')}</div>
+    ${r ? `<div class="iflist">${r.pairs.map((p, i) => p.thread ? '' : row(p, i)).join('')}${thr.length ? `<div class="ifh">Thread engagement (expected)</div>` + r.pairs.map((p, i) => p.thread ? row(p, i) : '').join('') : ''}</div>
+      <div class="muted" style="font-size:11px;margin-top:6px">${r.bodies} bodies · ${r.checked} pairs tested exactly · ${r.skipped_bbox} clear by bounding box · ${r.elapsed} s${r.notes.length ? '<br>' + r.notes.join('<br>') : ''}</div>` : ''}
+    <div class="ft"><span class="hint">touching faces don't count</span>${r ? '<button class="btn" id="ishowall">Show all</button>' : ''}<button class="btn primary" id="irun">${r ? 'Run again' : (sel.length >= 2 ? `Check ${sel.length} bodies` : 'Check all bodies')}</button></div>`;
+  cmdEl.classList.add('on');
+  cmdEl.querySelector('.x').onclick = endTool;
+  cmdEl.querySelectorAll('.ifrow').forEach(e => e.onclick = () => interfShow(+e.dataset.i === interf.sel ? null : +e.dataset.i));
+  const sa = cmdEl.querySelector('#ishowall'); if (sa) sa.onclick = () => interfShow(null);
+  cmdEl.querySelector('#irun').onclick = async e => {
+    const btn = e.currentTarget; btn.disabled = true; btn.textContent = 'Checking…';
+    try {
+      const res = await api('/api/interference', { bodies: sel.length >= 2 ? sel.map(b => b.path) : null });
+      interf = { res, sel: null }; interfShow(res.pairs.some(p => !p.thread) ? null : null);
+    } catch (err) { addMsg('error', 'interference check failed: ' + err.message); renderInterfCmd(); }
+  };
+}
+
 // ------------------------------------------------------------------ modelling toolbar (ribbon + command dialog, code-backed)
 // Every tool: pick things in the viewer (faces/edges via snapPick), fill the command dialog, OK → the server
 // rewrites the script (script_edit) and rebuilds. No agent turn.
@@ -2178,6 +2331,13 @@ const ICO = {
   check: '<path d="M5 12l4 4L19 6"/>', close: '<path d="M6 6l12 12M18 6 6 18"/>',
   drawings: '<path d="M5 3h9l5 5v13H5z"/><path d="M14 3v5h5"/><path d="M8 12h8M8 16h8"/>',
   slice: '<path d="M12 3 3 8l9 5 9-5-9-5Z"/><path d="M3 12l9 5 9-5"/><path d="M3 16l9 5 9-5"/>',
+  revolve: '<path d="M12 2v20" stroke-dasharray="2 2"/><path d="M12 5h5v6h-5"/><path d="M6.5 9.5A7 3 0 1 0 12 6"/><path d="M4.5 13l2-3.5 3 2"/>',
+  loft: '<path d="M4 19h8l-3-3H4Z"/><ellipse cx="15" cy="6" rx="5" ry="2"/><path d="M4 16 10 6M12 19l8-13"/>',
+  sweep: '<circle cx="5" cy="17" r="2.5"/><path d="M5 14.5C5 8 10 5 19 5"/><path d="M7.5 17C10 11 13 8 19 8"/>',
+  mirror: '<path d="M12 3v18" stroke-dasharray="2 2"/><path d="M9 6 4 17h5Z"/><path d="M15 6l5 11h-5Z"/>',
+  pattern: '<rect x="3" y="3" width="5" height="5" rx="1"/><rect x="10" y="3" width="5" height="5" rx="1"/><rect x="17" y="3" width="4" height="5" rx="1"/><rect x="3" y="10" width="5" height="5" rx="1"/><rect x="10" y="10" width="5" height="5" rx="1"/><rect x="3" y="17" width="5" height="4" rx="1"/>',
+  section: '<path d="M4 8l8-4 8 4v8l-8 4-8-4Z"/><path d="M2 13h20" stroke-width="2"/><path d="M4 13l8 4 8-4" stroke-dasharray="2 2"/>',
+  interference: '<circle cx="9" cy="12" r="6"/><circle cx="15" cy="12" r="6"/><path d="M12 7.2a6 6 0 0 1 0 9.6a6 6 0 0 1 0-9.6Z" fill="currentColor" stroke="none" opacity=".55"/>',
 };
 const svg = (k, size = 20) => `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">${ICO[k]}</svg>`;
 const TOOLS = {
@@ -2191,7 +2351,14 @@ const TOOLS = {
   chamfer:  { group: 'modify', label: 'Chamfer',    key: 'X', hint: 'Click edges, or a face to take all of its edges. Then set the distance.', picks: 'edges', steps: ['Edges', 'Distance'] },
   shell:    { group: 'modify', label: 'Shell',      key: 'L', hint: 'Click the faces to open. Leave none selected for a hollow body.', picks: 'faces', steps: ['Open faces', 'Thickness'] },
   move:     { group: 'modify', label: 'Move',       key: 'V', hint: 'Choose a body, then offsets and rotation.', picks: 'body', steps: ['Body', 'Offset'] },
+  revolve:  { group: 'create', label: 'Revolve',    key: 'R', hint: 'Revolve a sketch about an axis: the sketch\'s own X or Y axis, a world axis, or a straight edge you click.', picks: 'edges', steps: ['Sketch & axis', 'Angle'] },
+  loft:     { group: 'create', label: 'Loft',       key: 'G', hint: 'A solid through two or more sketches in order (e.g. a square base to a round top).', picks: 'none', steps: ['Sketches', 'Result'] },
+  sweep:    { group: 'create', label: 'Sweep',      key: 'W', hint: 'Click connected model edges as the path, then sweep a sketch along them or make a round pipe.', picks: 'edges', steps: ['Path', 'Profile'] },
+  mirror:   { group: 'modify', label: 'Mirror',     key: 'M', hint: 'Mirror a body about a base plane or a flat face you click. Join makes it symmetric.', picks: 'face1', steps: ['Plane', 'Body'] },
+  pattern:  { group: 'modify', label: 'Pattern',    key: 'N', hint: 'Rectangular or circular copies of a body: join them, make a new body, or cut them from another body (hole patterns).', picks: 'edges', steps: ['Body', 'Layout'] },
   measure:  { group: 'inspect', label: 'Measure',   key: 'I', hint: 'Hover snaps to vertices and edges. Click two things for distance and angle.', picks: 'none' },
+  section:  { group: 'inspect', label: 'Section',  key: 'S', hint: 'Cut the model with a plane to see inside: base planes or a flat face, with a slider and solid hatched caps.', picks: 'face1' },
+  interference: { group: 'inspect', label: 'Interference', key: 'J', hint: 'Find bodies that overlap (exact solids) and show where, in red.', picks: 'none' },
   drawings: { group: 'output', label: 'Drawings',  key: 'D', hint: 'Shop drawings (SVG + DXF) with the material and sheet from ⚙ Settings.', picks: 'none' },
   slice:    { group: 'output', label: 'Slice',     key: 'P', hint: 'Slice for 3D printing with the printer and options from ⚙ Settings; layers show in the viewer.', picks: 'none' },
 };
@@ -2232,6 +2399,7 @@ function startTool(kind) {
   renderCmd();
 }
 function endTool() {
+  if (tool && tool.kind === 'interference') { interfClear(); interf = null; }
   pullTeardown(); tool = null; clearHover(); while (mGroup.children.length) mGroup.remove(mGroup.children[0]);
   document.body.classList.remove('tooling'); cmdEl.classList.remove('on'); cmdEl.innerHTML = ''; syncRibbon();
 }
@@ -2247,6 +2415,8 @@ function toolHover(ev) {
 }
 function toolPick(sn) {
   if (!sn) return;
+  if (tool.kind === 'section') { const fi = sn.type === 'face' && model.faces.get(sn.id); if (fi && fi.kind === 'PLANE') sectionFromFace(sn); else hoverEl.textContent = 'Click a flat face to cut parallel to it.'; return; }
+  if (tool.kind === 'interference' || tool.kind === 'loft') return;
   const want = TOOLS[tool.kind].picks;
   if (want === 'edges') { if (sn.type !== 'edge' && sn.type !== 'face') return; tool.picks.push(sn); }
   else if (want === 'faces') { if (sn.type !== 'face') return; tool.picks.push(sn); }
@@ -2265,7 +2435,10 @@ const pickLabel = pk => pk.type === 'edge' ? `edge #${pk.id}` : `${pk.body.path}
 // --- command dialog
 function renderCmd() {
   if (!tool) return;
+  if (tool.kind === 'section') return renderSectionCmd();
+  if (tool.kind === 'interference') return renderInterfCmd();
   const k = tool.kind, T = TOOLS[k], p = tool.picks, first = p[0], target = first ? first.body.path : null;
+  const V = (id, d) => { tool.vals ||= {}; return tool.vals[id] ?? d; };
   const num = (id, label, val, unit = 'mm') => `<div class="row"><label for="${id}">${label}</label><div class="in"><input id="${id}" type="number" step="any" value="${val}"><span class="u">${unit}</span></div></div>`;
   const sel = (id, label, opts) => `<div class="row"><label for="${id}">${label}</label><div class="in sel"><select id="${id}">${opts}</select></div></div>`;
   const chk = (id, label) => `<div class="row"><label for="${id}">${label}</label><div class="in"><label class="sw"><input id="${id}" type="checkbox"><span></span></label></div></div>`;
@@ -2282,9 +2455,61 @@ function renderCmd() {
   if (k === 'chamfer') { fields = num('tr', 'Distance', 1); ready = havePick; }
   if (k === 'shell') { fields = num('tt', 'Thickness', 1.5); ready = true; }
   if (k === 'move') { fields = sel('tbody', 'Body', bodyOpts(target)) + num('mx', 'Offset X', 0) + num('my', 'Offset Y', 0) + num('mz', 'Offset Z', 0) + num('rz', 'Rotate Z', 0, '°'); ready = model && model.bodies.size > 0; }
+  // feature tools: values persist across re-renders in tool.vals
+  const opt = (pairs, cur) => pairs.map(([v, l]) => `<option value="${v}" ${String(v) === String(cur) ? 'selected' : ''}>${l}</option>`).join('');
+  const firstSel = [...selBodies].map(id => model.bodies.get(id)).filter(Boolean)[0];
+  const defBody = target || (firstSel && firstSel.path) || (model && model.bodies.size ? [...model.bodies.values()][0].path : '');
+  const sketchNames = modelSketches.map(s_ => s_.name), defSketch = [...selSketches][0] || sketchNames[0] || '';
+  const edges = p.filter(x => x.type === 'edge'), lineEdge = edges.find(e => e.info && e.info.kind === 'LINE'), circEdge = edges.find(e => e.info && e.info.kind === 'CIRCLE' && e.info.center);
+  const opFields = (pre, ops) => { const m = V(pre + 'm', ops[0][0]); return sel(pre + 'm', 'Result', opt(ops, m)) + (m === 'join' || m === 'cut' ? sel(pre + 'tg', m === 'cut' ? 'Cut from' : 'Join to', bodyOpts(V(pre + 'tg', defBody))) : ''); };
+  if (k === 'mirror') {
+    const pl = V('mp', first ? 'face' : 'YZ');
+    fields = sel('mb', 'Body', bodyOpts(V('mb', defBody))) + sel('mp', 'Mirror plane', opt([...(first ? [['face', 'Picked face']] : []), ['YZ', 'YZ (left ↔ right)'], ['XZ', 'XZ (front ↔ back)'], ['XY', 'XY (top ↔ bottom)']], pl))
+      + (pl !== 'face' ? num('mo', 'Plane offset', V('mo', 0)) : '') + sel('mm', 'Result', opt([['join', 'Join: one symmetric body'], ['new', 'New body']], V('mm', 'join')));
+    ready = !!(model && model.bodies.size);
+  }
+  if (k === 'pattern') {
+    const ty = V('pt', 'circular'), d2 = V('pd2', 'none');
+    fields = sel('pb', 'Body', bodyOpts(V('pb', defBody))) + sel('pt', 'Type', opt([['circular', 'Circular'], ['linear', 'Rectangular / linear']], ty));
+    if (ty === 'linear') fields += sel('pd', 'Direction', opt([['X', '+X'], ['Y', '+Y'], ['Z', '+Z'], ['-X', '−X'], ['-Y', '−Y'], ...(lineEdge ? [['edge', 'Along picked edge']] : [])], V('pd', lineEdge ? 'edge' : 'X')))
+      + num('pn', 'Count', V('pn', 4), '') + num('ps', 'Spacing', V('ps', 20)) + sel('pd2', 'Second direction', opt([['none', 'None'], ['Y', '+Y'], ['X', '+X'], ['Z', '+Z'], ['-Y', '−Y'], ['-X', '−X']], d2))
+      + (d2 !== 'none' ? num('pn2', 'Count 2', V('pn2', 2), '') + num('ps2', 'Spacing 2', V('ps2', 20)) : '');
+    else fields += sel('pa', 'Axis', opt([...(circEdge ? [['edge', 'Axis of picked circular edge']] : []), ['Z', 'Z through origin'], ['X', 'X through origin'], ['Y', 'Y through origin']], V('pa', circEdge ? 'edge' : 'Z')))
+      + num('pn', 'Count', V('pn', 6), '') + num('pang', 'Angle', V('pang', 360), '°');
+    fields += opFields('p', [['join', 'Join copies (one body)'], ['new', 'New body of the copies'], ['cut', 'Cut copies from a body (hole pattern)']]);
+    ready = !!(model && model.bodies.size);
+  }
+  if (k === 'revolve') {
+    const def = sketchDefs.find(d => d.name === V('rs', defSketch));
+    fields = sel('rs', 'Sketch', opt(sketchNames.map(n => [n, n]), V('rs', defSketch)))
+      + sel('ra', 'Axis', opt([...(lineEdge ? [['edge', 'Picked edge']] : []), ...(def ? [['sx', 'Sketch X axis'], ['sy', 'Sketch Y axis']] : []), ['Z', 'World Z'], ['X', 'World X'], ['Y', 'World Y']], V('ra', lineEdge ? 'edge' : def ? 'sy' : 'Z')))
+      + num('rang', 'Angle', V('rang', 360), '°') + opFields('r', [['new', 'New body'], ['join', 'Join to a body'], ['cut', 'Cut from a body']]);
+    ready = sketchNames.length > 0;
+  }
+  if (k === 'loft') {
+    const none = [['', '—']], so = cur => opt(sketchNames.map(n => [n, n]), cur);
+    fields = sel('l1', 'Sketch 1', so(V('l1', sketchNames[0] || ''))) + sel('l2', 'Sketch 2', so(V('l2', sketchNames[1] || '')))
+      + sel('l3', 'Sketch 3', opt([...none, ...sketchNames.map(n => [n, n])], V('l3', ''))) + sel('l4', 'Sketch 4', opt([...none, ...sketchNames.map(n => [n, n])], V('l4', '')))
+      + chk('lr', 'Ruled (straight sides)') + opFields('l', [['new', 'New body'], ['join', 'Join to a body'], ['cut', 'Cut from a body']]);
+    ready = sketchNames.length >= 2;
+  }
+  if (k === 'sweep') {
+    const pr = V('wp', 'pipe');
+    fields = sel('wp', 'Profile', opt([['pipe', 'Round pipe'], ...sketchNames.map(n => [n, 'Sketch ' + n])], pr))
+      + (pr === 'pipe' ? num('wd', 'Diameter', V('wd', 6)) + num('ww', 'Wall (0 = solid)', V('ww', 0)) : '') + opFields('w', [['new', 'New body'], ['join', 'Join to a body'], ['cut', 'Cut from a body']]);
+    ready = (edges.length > 0 && edges.every(e => e.body.path === edges[0].body.path)) || (!edges.length && p.length > 0);
+  }
   const step = havePick || T.picks === 'none' || k === 'shell' || k === 'move' ? 1 : 0;
   const steps = (T.steps || []).map((s_, i) => `<span class="st ${i === step ? 'cur' : (i < step ? 'done' : '')}"><i>${i + 1}</i>${s_}</span>`).join('<span class="stl"></span>');
-  const promptTxt = T.picks === 'face1' ? (havePick ? 'Adjust the values, then OK.' : 'Click a face in the viewer.')
+  const nEdges = p.filter(x => x.type === 'edge').length;
+  const FEATURE_PROMPTS = {
+    mirror: havePick ? 'Mirrors about the face you clicked (or pick a base plane below).' : 'Click a flat face to mirror about it, or choose a base plane below.',
+    pattern: 'Choose the body and layout. Optional: click a straight edge for the direction, or a circular edge for the axis.',
+    revolve: havePick ? 'The clicked straight edge can be the axis.' : 'Choose the sketch and axis below, or click a straight edge to revolve about it.',
+    loft: 'Choose the sketches in order (e.g. bottom to top).',
+    sweep: nEdges ? `${nEdges} path edge${nEdges > 1 ? 's' : ''} — keep clicking connected edges of the same body, then OK.` : p.length ? 'Sweeps around the outline of the face you clicked.' : 'Click the model edges to sweep along (connected, one body), or one face to go around its outline.',
+  };
+  const promptTxt = FEATURE_PROMPTS[k] ? FEATURE_PROMPTS[k] : T.picks === 'face1' ? (havePick ? 'Adjust the values, then OK.' : 'Click a face in the viewer.')
     : T.picks === 'edges' ? (havePick ? `${p.length} selected — keep clicking, or OK.` : 'Click edges, or a face for all of its edges.')
     : T.picks === 'faces' ? (havePick ? `${p.length} face(s) will be open.` : 'Click faces to open, or OK for a closed hollow.') : 'Set the values, then OK.';
   const chips = p.length ? `<div class="chips">${p.map((pk, i) => `<span class="pk">${pickLabel(pk)}<b data-i="${i}">×</b></span>`).join('')}</div>` : '';
@@ -2295,6 +2520,11 @@ function renderCmd() {
     <div class="ft"><span class="hint">↵ OK · ⌫ remove pick · Esc cancel</span><button class="btn" id="tcancel">Cancel</button><button class="btn primary" id="tapply" ${ready ? '' : 'disabled'}>${svg('check', 14)} OK</button></div>`;
   cmdEl.classList.add('on');
   cmdEl.querySelectorAll('.pk b').forEach(b => b.onclick = () => { tool.picks.splice(+b.dataset.i, 1); redrawToolPicks(); renderCmd(); });
+  if (['mirror', 'pattern', 'revolve', 'loft', 'sweep'].includes(k)) cmdEl.querySelectorAll('.fields input, .fields select').forEach(e => {
+    if (e.type === 'checkbox' && tool.vals && e.id in tool.vals) e.checked = tool.vals[e.id];
+    const store = () => { tool.vals[e.id] = e.type === 'checkbox' ? e.checked : e.value; };
+    e.addEventListener('input', store); if (e.tagName === 'SELECT') e.addEventListener('change', () => { store(); renderCmd(); });
+  });
   cmdEl.querySelector('.x').onclick = endTool; cmdEl.querySelector('#tcancel').onclick = endTool;
   cmdEl.querySelectorAll('input[type=number]').forEach(inp => inp.onkeydown = e => { if (e.key === 'ArrowUp' || e.key === 'ArrowDown') { e.preventDefault(); const st = e.shiftKey ? 10 : (e.altKey ? 0.1 : 1); inp.value = +((parseFloat(inp.value) || 0) + (e.key === 'ArrowUp' ? st : -st)).toFixed(3); } });
   const v = id => parseFloat(cmdEl.querySelector('#' + id)?.value) || 0;
@@ -2310,9 +2540,58 @@ function renderCmd() {
       for (const [body, s_] of Object.entries(byBody)) send({ type: 'op', kind: k, body, points: s_.points, faces: s_.faces, radius: v('tr') });
     } else if (k === 'shell') { const body = target || [...model.bodies.values()][0].path; send({ type: 'op', kind: 'shell', body, faces: p.filter(x => x.body.path === body).map(x => x.p), thickness: v('tt') }); }
     else if (k === 'move') send({ type: 'transform_body', path: cmdEl.querySelector('#tbody').value, move: [v('mx'), v('my'), v('mz')], rotate: [0, 0, v('rz')] });
+    else if (['mirror', 'pattern', 'revolve', 'loft', 'sweep'].includes(k)) { if (!featureApply(k, p, v)) return; }
     pullTeardown(); tool.picks = []; redrawToolPicks(); renderCmd();
   };
   if (k === 'extrude') { const upd = () => pullUpdate(currentPullAmount()); cmdEl.querySelector('#ta')?.addEventListener('input', upd); cmdEl.querySelector('#tdir')?.addEventListener('change', upd); }
+}
+const AXES = { X: [1, 0, 0], Y: [0, 1, 0], Z: [0, 0, 1], '-X': [-1, 0, 0], '-Y': [0, -1, 0], '-Z': [0, 0, -1] };
+function featureApply(k, p, v) {   // send the feature op; false = invalid input (message shown, dialog stays)
+  const q = id => cmdEl.querySelector('#' + id), val = id => q(id) ? q(id).value : null;
+  const edges = p.filter(x => x.type === 'edge'), lineEdge = edges.find(e => e.info && e.info.kind === 'LINE'), circEdge = edges.find(e => e.info && e.info.kind === 'CIRCLE' && e.info.center);
+  const bad = msg => { const pr = cmdEl.querySelector('.prompt'); if (pr) { pr.className = 'prompt bad'; pr.innerHTML = '<i></i>' + msg; } return false; };
+  const opOf = pre => ({ mode: val(pre + 'm'), target: ['join', 'cut'].includes(val(pre + 'm')) ? val(pre + 'tg') : null });
+  if (k === 'mirror') {
+    const pl = val('mp'); let origin, normal;
+    if (pl === 'face') { origin = p[0].p; normal = faceNormalAt(p[0]); }
+    else { normal = AXES[{ YZ: 'X', XZ: 'Y', XY: 'Z' }[pl]]; origin = normal.map(c => c * v('mo')); }
+    send({ type: 'op', kind: 'mirror', body: val('mb'), origin, normal, mode: val('mm') }); return true;
+  }
+  if (k === 'pattern') {
+    const ty = val('pt'), count = Math.round(v('pn')), o = opOf('p');
+    if (count < 2) return bad('Count must be at least 2 (it includes the original).');
+    if (o.mode === 'cut' && o.target === val('pb')) return bad('Cut the copies from a different body than the one being patterned.');
+    let params;
+    if (ty === 'linear') {
+      const d = val('pd') === 'edge' ? lineEdge.info.dir : AXES[val('pd')];
+      params = { direction: d, count, spacing: v('ps') };
+      if (val('pd2') !== 'none') { params.direction2 = AXES[val('pd2')]; params.count2 = Math.round(v('pn2')); params.spacing2 = v('ps2'); }
+    } else {
+      const ax = val('pa') === 'edge' ? { o: circEdge.info.center, d: circEdge.info.axis || [0, 0, 1] } : { o: [0, 0, 0], d: AXES[val('pa')] };
+      params = { count, angle: v('pang'), axis_origin: ax.o, axis_dir: ax.d };
+    }
+    send({ type: 'op', kind: 'pattern', body: val('pb'), pattern: ty, params, ...o }); return true;
+  }
+  if (k === 'revolve') {
+    const name = val('rs'), def = sketchDefs.find(d => d.name === name), a = val('ra');
+    let origin = [0, 0, 0], dir = AXES[a] || [0, 0, 1];
+    if (a === 'edge') { origin = lineEdge.info.p0; dir = lineEdge.info.dir; }
+    else if ((a === 'sx' || a === 'sy') && def) { const x = new THREE.Vector3(...def.plane.x_dir).normalize(), z = new THREE.Vector3(...def.plane.z_dir).normalize(); origin = def.plane.origin; dir = (a === 'sx' ? x : new THREE.Vector3().crossVectors(z, x)).toArray(); }
+    send({ type: 'op', kind: 'revolve', sketch: name, axis_origin: origin, axis_dir: dir, angle: v('rang'), ...opOf('r') }); return true;
+  }
+  if (k === 'loft') {
+    const list = ['l1', 'l2', 'l3', 'l4'].map(val).filter(Boolean);
+    if (new Set(list).size !== list.length) return bad('Choose different sketches for each section.');
+    send({ type: 'op', kind: 'loft', sketches: list, ruled: q('lr').checked, ...opOf('l') }); return true;
+  }
+  if (k === 'sweep') {
+    const face = !edges.length ? p.find(x => x.type === 'face') : null;
+    if (!edges.length && !face) return bad('Click the path edges (or one face) first.');
+    const pr = val('wp');
+    if (pr === 'pipe' && !(v('wd') > 0)) return bad('Set a pipe diameter.');
+    send({ type: 'op', kind: 'sweep', path_body: (edges[0] || face).body.path, points: edges.map(e => e.p), face_point: face ? face.p : null, sketch: pr === 'pipe' ? null : pr, diameter: pr === 'pipe' ? v('wd') : null, wall: pr === 'pipe' && v('ww') > 0 ? v('ww') : null, ...opOf('w') }); return true;
+  }
+  return false;
 }
 document.addEventListener('keydown', ev => {
   const typing = ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName) || document.querySelector('.CodeMirror-focused');

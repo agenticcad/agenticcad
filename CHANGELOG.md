@@ -5,6 +5,32 @@ features, patch bumps fix things. The version shown in the UI header comes from 
 
 ## [Unreleased]
 
+## [0.21.0] — 2026-10-05
+
+### Added
+- **Section analysis** (Inspect ▸ Section, `S`): cut the model with a base plane and offset slider, or parallel to
+  a flat face. The half facing the camera is removed, and cut faces show as solid hatched caps in each body's
+  colour. It stays on until removed (bottom-bar chip). The agent's `screenshot` accepts `section` to look inside
+  assemblies.
+- **Interference check** (Inspect ▸ Interference, `J`, and the agent's `check_interference`): exact overlap volume
+  for every pair of bodies, the overlap shown in red. Thread engagement is listed separately, and designs with real
+  threads are checked on a draft-thread rebuild. The agent is told to run it on assemblies.
+- **Revolve, Loft, Sweep** (with a round **Pipe** profile, along edges or around a face's outline), **Mirror** and
+  **Pattern** (rectangular or circular; join, new body, or cut from another body for hole patterns) in the ribbon.
+  They're written into the script as readable calls (`pattern_circular`, `pattern_linear`, `mirror_about`,
+  `path_wire`, `pipe`, `revolve`, `loft`, `sweep`) that the agent can use as well.
+
+### Fixed
+- **Countersinks were cut upside down.** `hole(..., countersink=D)` made an undercut (about Ø(D+0.2) at the surface,
+  widening to D+1 inside, then a step to the bore) instead of a 90° cone from Ø D at the surface. Countersunk screw
+  heads therefore interfered with their seats; this affected the Design Kit's countersunk screw seats and hinges
+  too. The interference check found it in the planetary gearhead reference.
+- Planetary gearhead reference: the motor connector pins now stand on the housing's cavity floor instead of
+  0.01 mm inside its back wall. The model is now interference-free apart from thread engagement.
+- New bodies created from the ribbon never take a variable name that shadows a script helper.
+- The interference check falls back to the real threads when a script can't build with draft threads, and tests
+  pairs without threaded fasteners first, so the time budget goes to gears, shafts and housings.
+
 ## [0.20.0] — 2026-10-05
 
 ### Added

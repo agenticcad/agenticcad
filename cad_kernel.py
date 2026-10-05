@@ -25,6 +25,7 @@ from typing import Any
 import build123d as b3d
 from build123d import Compound, Face, Edge, Shape, Vector
 import threads as thr
+import features
 import gears
 
 # OCP (the OCCT bindings bundled with build123d) is used for display meshing so we
@@ -314,6 +315,7 @@ def script_namespace() -> dict[str, Any]:
     ns["from_library"] = from_library
     ns.update(thr.namespace())
     ns.update(gears.namespace())
+    ns.update(features.namespace())
     ns.update({"inch": 25.4, "IN": 25.4, "ft": 304.8, "thou": 0.0254, "mm": 1.0})   # scripts stay in mm; write imperial as 2.5 * inch
     return ns
 

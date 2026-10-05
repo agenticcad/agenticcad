@@ -114,7 +114,7 @@ for x, y in CORNERS:
     rear_cap -= Pos(x, y, 0) * Cylinder(1.7, 100)
 
 housing = Pos(21.15 - 2.9, 0, -37) * Box(5.8, 14.0, 4.8) - Pos(21.15 - 2.25 + 0.01, 0, -37) * Box(4.5, 12.4, 3.2)
-pins = {f"Pin{i + 1}": Pos(21.15 - 4.5 + 1.75, -5 + 2 * i, -37) * Box(3.5, 0.64, 0.64) for i in range(6)}
+pins = {f"Pin{i + 1}": Pos(21.15 - 4.5 + 0.01 + 1.75, -5 + 2 * i, -37) * Box(3.5, 0.64, 0.64) for i in range(6)}   # stand on the cavity floor
 
 motor_screws = {f"Screw{i + 1}": Pos(x, y, -40) * Rot(180, 0, 0) * socket_screw("M3", 35) for i, (x, y) in enumerate(CORNERS)}
 

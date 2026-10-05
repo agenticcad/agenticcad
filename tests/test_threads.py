@@ -128,3 +128,18 @@ def test_real_tapped_holes_stay_one_solid(size, depth):
     from build123d import Align, Box
     x = thr.tap(Box(14, 14, 20, align=(Align.CENTER, Align.CENTER, Align.MIN)), size, at=(0, 0, 20), depth=depth, real=True)
     assert len(x.solids()) == 1 and x.volume > 3000 and any(f.geom_type.name == "BSPLINE" for f in x.faces())
+
+
+def test_countersink_is_a_90_degree_cone_widest_at_the_surface():
+    """Regression: the countersink cone was cut upside down (an undercut, Ø4.2 at the surface widening to Ø5 inside),
+    so correct 90° screw heads interfered with their seats."""
+    import math
+    import build123d as b
+    from threads import hole
+    plate = b.Box(20, 20, 2, align=(b.Align.CENTER, b.Align.CENTER, b.Align.MIN))
+    for axis, at, sign in (((0, 0, -1), (0, 0, 2), -1), ((0, 0, 1), (0, 0, 0), 1)):
+        h = hole(plate, 2.2, at=at, through=True, axis=axis, countersink=4.0)
+        for depth, r_expected in ((0.1, 1.9), (0.45, 1.55), (0.85, 1.15), (1.0, 1.1)):
+            sec = h & b.Pos(0, 0, at[2] + sign * depth) * b.Box(30, 30, 1e-3)
+            r = math.sqrt((400 * 1e-3 - sec.volume) / 1e-3 / math.pi)
+            assert abs(r - r_expected) < 0.01, (axis, depth, r)
