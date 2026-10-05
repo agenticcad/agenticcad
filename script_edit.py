@@ -288,7 +288,7 @@ def sketch_code(name: str, plane: dict, items: list[dict]) -> str:
             _sketch_item(lines, it)
         except KeyError as e:
             raise Unsupported(f"sketch item {it.get('type')!r} is missing field {e}; expected rect(cx,cy,w,h,angle) | "
-                              f"circle(cx,cy,r) | polygon(pts) | slot(x1,y1,x2,y2,w)")
+                              f"circle(cx,cy,r) | polygon(pts) | slot(x1,y1,x2,y2,w) | profile(start, segs=[{{to}} | {{to, via}}])")
     if not items:
         lines.append("    pass")
     lines.append(f"{name} = _{name}.sketch")
@@ -313,8 +313,43 @@ def _sketch_item(lines: list[str], it: dict) -> None:
         elif t == "slot":   # editor gives the two end centres; build123d wants centre + one end
             mx, my = (it["x1"] + it["x2"]) / 2, (it["y1"] + it["y2"]) / 2
             lines.append(f"    SlotCenterPoint(({_f(mx)}, {_f(my)}), ({_f(it['x2'])}, {_f(it['y2'])}), {_f(it['w'])}{mode})")
+        elif t == "profile":   # closed chain of lines and three-point arcs, back to `start`
+            lines.append("    with BuildLine():")
+            for kind, a, via, b in profile_segments(it):
+                if kind == "arc":
+                    lines.append(f"        ThreePointArc(({_f(a[0])}, {_f(a[1])}), ({_f(via[0])}, {_f(via[1])}), ({_f(b[0])}, {_f(b[1])}))")
+                else:
+                    lines.append(f"        Line(({_f(a[0])}, {_f(a[1])}), ({_f(b[0])}, {_f(b[1])}))")
+            lines.append(f"    make_face({mode[2:]})" if mode else "    make_face()")
         else:
             raise Unsupported(f"unknown sketch item type {t!r}")
+
+
+def profile_segments(it: dict) -> list[tuple]:
+    """[(kind, a, via, b)] for a profile item, closed back to its start with a line if needed. Arcs whose three
+    points are (nearly) collinear become lines; zero-length segments are dropped."""
+    start = [float(v) for v in it["start"]]
+    pts, out = start, []
+    segs = list(it["segs"])
+    if not segs:
+        raise Refused("profile needs at least two segments")
+    for sg in segs:
+        b = [float(v) for v in sg["to"]]
+        if abs(b[0] - pts[0]) < 1e-6 and abs(b[1] - pts[1]) < 1e-6:
+            continue
+        via = sg.get("via")
+        if via is not None:
+            via = [float(v) for v in via]
+            cross = (via[0] - pts[0]) * (b[1] - pts[1]) - (via[1] - pts[1]) * (b[0] - pts[0])
+            if abs(cross) < 1e-6 * max(1.0, (b[0] - pts[0]) ** 2 + (b[1] - pts[1]) ** 2):
+                via = None
+        out.append(("arc" if via else "line", pts, via, b))
+        pts = b
+    if abs(pts[0] - start[0]) > 1e-6 or abs(pts[1] - start[1]) > 1e-6:
+        out.append(("line", pts, None, start))
+    if len(out) < 2 or (len(out) == 2 and all(k == "line" for k, *_ in out)):
+        raise Refused("profile must enclose an area (at least three lines, or lines and arcs)")
+    return out
 
 
 def sketches(code: str) -> list[dict]:

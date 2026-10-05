@@ -256,9 +256,23 @@ is told its earlier chat history is gone). API: `GET/POST /api/settings`, `GET /
 ## Sketches
 
 Fusion-style 2D sketches on a face or base plane, drawn in the viewer: select a planar face (or none for
-XY/XZ/YZ + offset) → **✎ Sketch**. The camera snaps square to the plane; draw rectangles, circles,
-polygons and slots by clicking (grid snap, alt = free), toggle subtract, edit numbers in the item list,
-Finish. The sketch is stored in the script as a block
+XY/XZ/YZ + offset) → **✎ Sketch**. The camera snaps square to the plane. Tools (keys in brackets):
+
+- **Line (L) / Arc (A)**: one closed profile of lines and three-point arcs. Click points; switch between line
+  and arc at any time (an arc takes its end point, then a point it passes through); click the first point, or
+  press Enter, to close.
+- **Rectangle (R)**, **Circle (C)**, **Slot (S)** by two clicks; **Select (V)** shows handles to drag corners,
+  centres, radii and profile points, and Delete removes the selected item.
+- **Snapping**: sketch points, the model's corners, circle centres and edge midpoints, edges lying in the sketch
+  plane (drawn dashed), the origin, horizontal/vertical alignment with existing points (dashed guides), then the
+  grid. A marker and label show what it snapped to; hold Alt to place freely, or untick "model".
+- **Typed dimensions**: while a shape is in progress just type a number: length and angle for lines and slots,
+  width and height for rectangles, diameter for circles (Tab to switch, Enter to place).
+- The item list edits numbers directly (profiles list their points), toggles add/subtract per item, and removes
+  items.
+
+There is no constraint solver yet: dimensions are applied when you place or edit a point, not kept as
+relationships. Finish writes the sketch into the script as a block
 
 ```python
 # sketch:sketch1 {"plane": {...}, "items": [...]}

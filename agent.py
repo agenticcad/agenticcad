@@ -1449,7 +1449,9 @@ class CadAgent:
         @tool("sketch", "Read or edit UI-editable sketches (the `# sketch:NAME {...}` blocks). action=list | get (name) | "
               "set (name, plane, items: creates or replaces the block; the user can then edit it graphically) | delete (name). "
               "plane = {origin:[x,y,z], x_dir:[..], z_dir:[..], label}; items = list of {type:'rect',cx,cy,w,h,angle} | "
-              "{type:'circle',cx,cy,r} | {type:'polygon',pts:[[x,y],..]} | {type:'slot',x1,y1,x2,y2,w}, each with mode 'add'|'subtract'; "
+              "{type:'circle',cx,cy,r} | {type:'polygon',pts:[[x,y],..]} | {type:'slot',x1,y1,x2,y2,w} | "
+              "{type:'profile',start:[x,y],segs:[{to:[x,y]} (line) | {to:[x,y],via:[x,y]} (three-point arc through via), ..]} "
+              "(a closed outline of lines and arcs; it closes back to start), each with mode 'add'|'subtract'; "
               "coordinates are plane-local mm. Prefer this over rewriting sketch blocks by hand.",
               {"type": "object", "properties": {"action": {"type": "string", "enum": ["list", "get", "set", "delete"]},
                                                 "name": {"type": "string"}, "plane": {"type": "object"},

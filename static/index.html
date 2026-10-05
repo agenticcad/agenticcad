@@ -198,15 +198,25 @@
   .libcard img, .libcard .noimg { width:56px; height:56px; object-fit:cover; border-radius:6px; border:1px solid var(--line); background:#0f1216; flex:none; }
   .libcard .nm { flex:1; min-width:0; } .libcard .nm b { display:block; } .libcard .meta { color:var(--muted); font-size:11px; white-space:normal; }
   .libcard .acts { display:flex; flex-direction:column; gap:4px; } .libcard .acts .btn { padding:2px 8px; font-size:11px; }
-  #sketch-panel { position:absolute; z-index:4; top:8px; left:50%; transform:translateX(-50%); background:rgba(28,32,39,.95); border:1px solid var(--accent2); border-radius:8px; padding:6px 8px; display:none; gap:6px; align-items:center; flex-wrap:wrap; max-width:70%; }
+  #sketch-panel { position:absolute; z-index:4; top:8px; left:50%; transform:translateX(-50%); background:rgba(28,32,39,.95); border:1px solid var(--accent2); border-radius:8px; padding:6px 8px; display:none; gap:6px 6px; align-items:center; flex-wrap:wrap; max-width:88%; width:max-content; }
+  #sketch-items .sk-hd { display:flex; gap:8px; align-items:center; } #sketch-items .sk-hd input { width:110px; background:var(--bg); color:var(--text); border:1px solid var(--line); border-radius:6px; padding:3px 6px; font:inherit; font-weight:600; }
+  #sketch-items .sk-hd .muted { font-size:11px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  #sketch-panel .skr-tools { display:flex; gap:4px; } #sketch-panel .skr-break { flex-basis:100%; height:0; }
   body.sketching #sketch-panel { display:flex; }
   #sketch-panel .btn.tool.active { color:var(--accent2); border-color:var(--accent2); }
   #sketch-panel input[type=text] { width:80px; background:var(--bg); color:var(--text); border:1px solid var(--line); border-radius:6px; padding:4px 6px; font:inherit; }
-  #sketch-items { position:absolute; z-index:4; right:12px; top:150px; width:250px; max-height:50%; overflow:auto; background:rgba(28,32,39,.95); border:1px solid var(--line); border-radius:8px; padding:6px 8px; display:none; font-size:12px; }
+  #sketch-items { position:absolute; z-index:4; right:12px; top:150px; width:290px; max-height:50%; overflow:auto; background:rgba(28,32,39,.95); border:1px solid var(--line); border-radius:8px; padding:6px 8px; display:none; font-size:12px; }
   body.sketching #sketch-items { display:block; }
   .skrow { display:flex; gap:4px; align-items:center; padding:2px 0; border-bottom:1px solid var(--line); flex-wrap:wrap; }
   .skrow input { width:46px; background:var(--bg); color:var(--text); border:1px solid var(--line); border-radius:4px; padding:2px 3px; font:inherit; font-size:11px; }
   .skrow .k { color:var(--muted); font-size:10px; } .skrow b { cursor:pointer; margin-left:auto; color:var(--err); }
+  .skrow .nm { cursor:pointer; } .skrow.sel { background:rgba(255,140,66,.08); box-shadow:inset 2px 0 0 var(--accent); }
+  .skrow .mini { background:var(--panel2); border:1px solid var(--line); color:var(--text); border-radius:4px; font-size:11px; padding:0 5px; cursor:pointer; margin-left:auto; } .skrow .mini + b { margin-left:4px; }
+  .skpts { width:100%; display:flex; flex-direction:column; gap:2px; padding:2px 0 2px 10px; } .skpts.hide { display:none; } .skpts div { display:flex; gap:4px; align-items:center; } .skpts .k { width:62px; }
+  #sk-dim { position:absolute; z-index:5; display:none; gap:4px; align-items:center; background:rgba(20,23,28,.92); border:1px solid var(--accent); border-radius:6px; padding:3px 6px; font-size:11px; pointer-events:auto; }
+  #sk-dim label { color:var(--accent); font-weight:600; } #sk-dim span { color:var(--muted); margin-right:4px; } #sk-dim i { color:var(--muted); font-style:normal; font-size:10px; }
+  #sk-dim input { width:58px; background:var(--bg); color:var(--text); border:1px solid var(--line); border-radius:4px; padding:2px 4px; font:inherit; } #sk-dim input.lock { border-color:var(--accent); color:var(--accent); }
+  body.sketching.sk-select #viewer > canvas { cursor:default; }
   #sketch-svg { position:absolute; inset:0; z-index:3; pointer-events:none; display:none; }
   body.sketching #sketch-svg { display:block; }
   body.sketching #viewer > canvas { cursor:crosshair; }
@@ -275,7 +285,7 @@
   #cmd .in.sel select { width:100%; background:#0f1216; color:#e6e9ee; border:1px solid #333a45; border-radius:7px; padding:6px 9px; font:inherit; } #cmd .in.sel select:focus { outline:none; border-color:#4ea1ff; }
   #cmd .sw { position:relative; width:36px; height:20px; display:inline-block; cursor:pointer; } #cmd .sw input { opacity:0; width:0; height:0; } #cmd .sw span { position:absolute; inset:0; background:#2c333d; border-radius:20px; transition:.15s; } #cmd .sw span:before { content:""; position:absolute; width:14px; height:14px; left:3px; top:3px; background:#98a3b1; border-radius:50%; transition:.15s; } #cmd .sw input:checked + span { background:#4ea1ff; } #cmd .sw input:checked + span:before { transform:translateX(16px); background:#fff; }
   #cmd .ft { display:flex; align-items:center; gap:6px; padding:8px 12px 10px; border-top:1px solid #2c333d; margin-top:4px; } #cmd .ft .hint { flex:1; color:#6f7a88; font-size:10.5px; } #cmd .ft .btn.primary { display:flex; align-items:center; gap:4px; }
-  body.sketching #ribbon, body.sketching #cmd { display:none; }
+  body.sketching #ribbon, body.sketching #cmd, body.sketching #toolbar { display:none; }
   body.tooling #viewer > canvas { cursor:crosshair; }
   #codeerr { color:var(--err); font-size:11px; white-space:pre-wrap; max-height:120px; overflow:auto; padding:0 12px 8px; }
   /* modal */
@@ -340,18 +350,21 @@
     <div id="cmd"></div>
     <svg id="sketch-svg"></svg>
     <div id="sketch-panel">
-      <span class="muted">Sketch</span><input type="text" id="sk-name" value="sketch1" title="variable name">
-      <span class="muted" id="sk-plane"></span>
-      <button class="btn tool active" data-tool="rect" title="Rectangle: two corners">▭ Rect</button>
-      <button class="btn tool" data-tool="circle" title="Circle: centre then radius">◯ Circle</button>
-      <button class="btn tool" data-tool="polygon" title="Polygon: click points, click the first point to close">⬠ Poly</button>
-      <button class="btn tool" data-tool="slot" title="Slot: two end centres, width below">⬭ Slot</button>
+      <span class="skr-tools"><button class="btn tool" data-tool="select" title="Select (V): drag the points to edit · Delete removes the selected item">↖ Select</button>
+      <button class="btn tool active" data-tool="line" title="Line (L): click points, click the first point (or Enter) to close · type a length · A switches to arcs">╱ Line</button>
+      <button class="btn tool" data-tool="arc" title="Arc (A): click the end point, then a point the arc passes through · continues the current profile">◠ Arc</button>
+      <button class="btn tool" data-tool="rect" title="Rectangle (R): two corners · type width / height">▭ Rect</button>
+      <button class="btn tool" data-tool="circle" title="Circle (C): centre, then a point on it · type a diameter">◯ Circle</button>
+      <button class="btn tool" data-tool="slot" title="Slot (S): two end centres · width below">⬭ Slot</button></span>
+      <span class="skr-break"></span>
       <label class="muted" style="display:flex;gap:4px;align-items:center"><input type="checkbox" id="sk-sub"> subtract</label>
-      <label class="muted" style="display:flex;gap:4px;align-items:center">snap <input type="text" id="sk-snap" value="1" style="width:34px"></label>
+      <label class="muted" style="display:flex;gap:4px;align-items:center" title="snap to model corners, circle centres, edge midpoints and edges in this plane (hold Alt to place freely)"><input type="checkbox" id="sk-snapm" checked> model</label>
+      <label class="muted" style="display:flex;gap:4px;align-items:center">grid <input type="text" id="sk-snap" value="1" style="width:34px"></label>
       <label class="muted" style="display:flex;gap:4px;align-items:center">slot w <input type="text" id="sk-slotw" value="6" style="width:34px"></label>
-      <button class="btn primary" id="sk-finish">Finish</button><button class="btn" id="sk-cancel">Cancel</button>
+      <span style="flex:1"></span><button class="btn primary" id="sk-finish">Finish</button><button class="btn" id="sk-cancel">Cancel</button>
     </div>
-    <div id="sketch-items"><div class="hd muted" style="font-size:11px;text-transform:uppercase">Items · Esc cancels shape · ⌫ deletes last</div><div id="sk-list"></div></div>
+    <div id="sk-dim"></div>
+    <div id="sketch-items"><div class="sk-hd"><input type="text" id="sk-name" value="sketch1" title="sketch name (a Python variable)"><span class="muted" id="sk-plane"></span></div><div class="hd muted" style="font-size:10px;text-transform:uppercase;letter-spacing:.3px;margin:4px 0 2px">Items · Esc cancels · ⌫ undoes · Alt = no snap</div><div id="sk-list"></div></div>
 
     <div id="params-card" style="display:none"><div class="hd">Parameters <span class="muted" id="params-hint" style="text-transform:none;letter-spacing:0"></span></div><div id="params-body"></div></div>
     <div id="measure-panel" style="display:none">
@@ -1706,8 +1719,12 @@ function renderSketchTree() {
 }
 
 // ------------------------------------------------------------------ 2D sketch editor
-const skSvg = document.getElementById('sketch-svg');
-var sk = null;   // (var: the render loop runs before this line) { name, plane:{origin,x,y,z,label}, items:[], tool, pts:[], hover:[u,v] }
+// Tools: select (drag points), line / arc (one closed profile of lines and three-point arcs), rect, circle, slot.
+// Snapping (Alt = off): sketch points, model vertices / circle centres / edge midpoints and edges in the sketch plane,
+// horizontal / vertical alignment with existing points, then the grid. While a shape is in progress, typing a number
+// fills its dimension (length / angle, width / height, diameter; Tab to switch, Enter to place).
+const skSvg = document.getElementById('sketch-svg'), skDimEl = document.getElementById('sk-dim');
+var sk = null;   // (var: the render loop runs before this line)
 function planeFromFace(fid) {
   const f = model.faces.get(fid);
   if (!f || f.kind !== 'PLANE' || !f.normal) return null;
@@ -1733,105 +1750,380 @@ async function startSketch(def) {
     plane = basePlane(r.p); plane.origin = plane.z.clone().multiplyScalar(r.o).toArray(); plane.label = `${r.p} plane` + (r.o ? ` +${r.o}` : '');
   }
   if (measuring) setMeasuring(false); if (tool) endTool();
-  sk = { name, plane, items: def ? JSON.parse(JSON.stringify(def.items)) : [], tool: 'rect', pts: [], hover: null };
+  sk = { name, plane, items: def ? JSON.parse(JSON.stringify(def.items)) : [], tool: 'line', pts: [], hover: null, snap: null, prof: null,
+         sel: -1, drag: null, lock: {}, dimKey: '', refs: null };
+  sk.refs = skModelRefs();
   document.getElementById('sk-name').value = name; document.getElementById('sk-plane').textContent = plane.label;
+  setSkTool('line');
   document.body.classList.add('sketching'); if (typeof syncRibbon === 'function') syncRibbon();
   controls.target.set(...plane.origin); orientCamera(plane.z.clone()); controls.enableRotate = false;
   selFaces.clear(); applyColors(); renderChips(); renderSkItems();
 }
 function nextSketchName() { let i = 1; const names = new Set(modelSketches.map(s_ => s_.name)); while (names.has('sketch' + i)) i++; return 'sketch' + i; }
-function endSketch() { sk = null; document.body.classList.remove('sketching'); controls.enableRotate = true; skSvg.innerHTML = ''; if (typeof syncRibbon === 'function') syncRibbon(); }
+function endSketch() { sk = null; document.body.classList.remove('sketching'); controls.enableRotate = true; controls.enabled = true; skSvg.innerHTML = ''; skDimEl.style.display = 'none'; if (typeof syncRibbon === 'function') syncRibbon(); }
 document.getElementById('sketch-btn').onclick = () => sk ? endSketch() : startSketch(null);
 document.getElementById('sk-cancel').onclick = endSketch;
 document.getElementById('sk-finish').onclick = () => {
   if (!sk) return;
+  if (sk.prof && sk.prof.segs.length >= 2) skCloseProfile();
   const name = document.getElementById('sk-name').value.trim() || sk.name;
   if (!/^[A-Za-z_]\w*$/.test(name)) { addMsg('error', 'sketch name must be a Python identifier'); return; }
   const plane = { origin: sk.plane.origin.map(v => +v.toFixed(4)), x_dir: sk.plane.x.toArray().map(v => +v.toFixed(6)), z_dir: sk.plane.z.toArray().map(v => +v.toFixed(6)), label: sk.plane.label };
   agenticcad.send({ type: 'set_sketch', name, plane, items: sk.items });
   endSketch();
 };
-document.querySelectorAll('#sketch-panel .tool').forEach(b => b.onclick = () => { if (!sk) return; sk.tool = b.dataset.tool; sk.pts = []; document.querySelectorAll('#sketch-panel .tool').forEach(x => x.classList.toggle('active', x === b)); });
-function skLocal(ev) {
+function setSkTool(t) {
+  if (!sk) return;
+  const keepProf = (t === 'line' || t === 'arc') && (sk.tool === 'line' || sk.tool === 'arc');
+  if (!keepProf) sk.prof = null; else if (sk.prof && t === 'line') sk.prof.pending = null;
+  sk.tool = t; sk.pts = []; sk.lock = {}; sk.drag = null;
+  document.querySelectorAll('#sketch-panel .tool').forEach(x => x.classList.toggle('active', x.dataset.tool === t));
+  document.body.classList.toggle('sk-select', t === 'select');
+}
+document.querySelectorAll('#sketch-panel .tool').forEach(b => b.onclick = () => setSkTool(b.dataset.tool));
+const r3 = x => +(+x).toFixed(3);
+function skRaw(ev) {
   const rect = renderer.domElement.getBoundingClientRect();
   const ndc = new THREE.Vector2(((ev.clientX - rect.left) / rect.width) * 2 - 1, -((ev.clientY - rect.top) / rect.height) * 2 + 1);
   const rc = new THREE.Raycaster(); rc.setFromCamera(ndc, camera);
   const pl = new THREE.Plane().setFromNormalAndCoplanarPoint(sk.plane.z, new THREE.Vector3(...sk.plane.origin));
   const hit = new THREE.Vector3(); if (!rc.ray.intersectPlane(pl, hit)) return null;
   const d = hit.sub(new THREE.Vector3(...sk.plane.origin));
-  const snap = parseFloat(document.getElementById('sk-snap').value) || 0;
-  let u = d.dot(sk.plane.x), v = d.dot(sk.plane.y);
-  if (snap > 0 && !ev.altKey) { u = Math.round(u / snap) * snap; v = Math.round(v / snap) * snap; }
-  return [+u.toFixed(3), +v.toFixed(3)];
+  return { u: d.dot(sk.plane.x), v: d.dot(sk.plane.y), mx: ev.clientX - rect.left, my: ev.clientY - rect.top };
 }
 function skWorld(u, v) { return new THREE.Vector3(...sk.plane.origin).addScaledVector(sk.plane.x, u).addScaledVector(sk.plane.y, v); }
 function skScreen(u, v) { const p = skWorld(u, v).project(camera); const r = renderer.domElement.getBoundingClientRect(); return [(p.x + 1) / 2 * r.width, (1 - p.y) / 2 * r.height]; }
-renderer.domElement.addEventListener('pointermove', ev => { if (sk) sk.hover = skLocal(ev); });
+function skPxPerMm() { const a = skScreen(0, 0), b = skScreen(1, 0); return Math.hypot(b[0] - a[0], b[1] - a[1]) || 1; }
+// model geometry projected into the sketch plane, computed once per sketch
+function skModelRefs() {
+  const pts = [], edges = [];
+  if (!model) return { pts, edges };
+  const o = new THREE.Vector3(...sk.plane.origin), X = sk.plane.x, Y = sk.plane.y, Z = sk.plane.z, q = new THREE.Vector3();
+  const uvw = p => { q.set(p[0] - o.x, p[1] - o.y, p[2] - o.z); return [q.dot(X), q.dot(Y), q.dot(Z)]; };
+  const seen = new Set();
+  const add = (p, kind) => { const [u, v, w] = uvw(p), key = kind + u.toFixed(3) + ',' + v.toFixed(3); if (seen.has(key)) return; seen.add(key); pts.push({ u, v, kind, inPlane: Math.abs(w) < 0.05 }); };
+  for (const b of model.bodies.values()) {
+    if (hidden.has(b.id)) continue;
+    for (const e of b.edgeLines || []) {
+      const i = e.info || {};
+      if (i.p0) add(i.p0, 'vertex'); if (i.p1 && !i.closed) add(i.p1, 'vertex');
+      if (i.kind === 'CIRCLE' && i.center) add(i.center, 'centre');
+      const P = (e.pts || []).map(uvw), flat = P.length > 1 && P.every(p => Math.abs(p[2]) < 0.05);
+      if (i.kind === 'LINE' && i.p0 && i.p1) add([(i.p0[0] + i.p1[0]) / 2, (i.p0[1] + i.p1[1]) / 2, (i.p0[2] + i.p1[2]) / 2], 'midpoint');
+      if (flat) for (let k = 0; k + 1 < P.length; k++) edges.push([P[k], P[k + 1]]);
+    }
+  }
+  return { pts, edges };
+}
+// key points of a sketch item: [u, v, kind, setter|null]
+function arcFit(a, m, b) {
+  const [ax, ay] = a, [mx, my] = m, [bx, by] = b, d = 2 * (ax * (my - by) + mx * (by - ay) + bx * (ay - my));
+  if (Math.abs(d) < 1e-9) return null;
+  const s1 = ax * ax + ay * ay, s2 = mx * mx + my * my, s3 = bx * bx + by * by;
+  const ux = (s1 * (my - by) + s2 * (by - ay) + s3 * (ay - my)) / d, uy = (s1 * (bx - mx) + s2 * (ax - bx) + s3 * (mx - ax)) / d;
+  const T = 2 * Math.PI, nrm = t => ((t % T) + T) % T;
+  const t0 = Math.atan2(ay - uy, ax - ux), s_end = nrm(Math.atan2(by - uy, bx - ux) - t0), s_mid = nrm(Math.atan2(my - uy, mx - ux) - t0);
+  return { c: [ux, uy], r: Math.hypot(ax - ux, ay - uy), t0, sweep: s_mid <= s_end ? s_end : s_end - T };
+}
+function arcPts(a, m, b, n = 32) {
+  const f = arcFit(a, m, b); if (!f) return [a, b];
+  const out = []; for (let k = 0; k <= n; k++) { const t = f.t0 + f.sweep * k / n; out.push([f.c[0] + f.r * Math.cos(t), f.c[1] + f.r * Math.sin(t)]); }
+  return out;
+}
+function profilePts(it, extra) {   // outline of a profile (closed unless `extra` = open preview)
+  let cur = it.start; const out = [cur];
+  for (const sg of it.segs) { if (sg.via) out.push(...arcPts(cur, sg.via, sg.to).slice(1)); else out.push(sg.to); cur = sg.to; }
+  return out;
+}
+function skHandles(it) {
+  const H = [], set = (o, kx, ky) => (u, v) => { o[kx] = r3(u); o[ky] = r3(v); };
+  if (it.type === 'rect') {
+    H.push([it.cx, it.cy, 'centre', set(it, 'cx', 'cy')]);
+    const a = (it.angle || 0) * Math.PI / 180, c = Math.cos(a), s_ = Math.sin(a);
+    for (const [sx, sy] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) {
+      const x = sx * it.w / 2, y = sy * it.h / 2;
+      H.push([it.cx + x * c - y * s_, it.cy + x * s_ + y * c, 'vertex', it.angle ? null : (u, v) => {
+        const ox = it.cx - sx * it.w / 2, oy = it.cy - sy * it.h / 2;
+        if (Math.abs(u - ox) < 1e-3 || Math.abs(v - oy) < 1e-3) return;
+        it.w = r3(Math.abs(u - ox)); it.h = r3(Math.abs(v - oy)); it.cx = r3((u + ox) / 2); it.cy = r3((v + oy) / 2);
+      }]);
+    }
+  } else if (it.type === 'circle') {
+    H.push([it.cx, it.cy, 'centre', set(it, 'cx', 'cy')]);
+    for (const [dx, dy] of [[1, 0], [0, 1], [-1, 0], [0, -1]]) H.push([it.cx + dx * it.r, it.cy + dy * it.r, 'quadrant', (u, v) => { const r = Math.hypot(u - it.cx, v - it.cy); if (r > 1e-3) it.r = r3(r); }]);
+  } else if (it.type === 'slot') { H.push([it.x1, it.y1, 'centre', set(it, 'x1', 'y1')], [it.x2, it.y2, 'centre', set(it, 'x2', 'y2')]); }
+  else if (it.type === 'polygon') it.pts.forEach(p => H.push([p[0], p[1], 'vertex', (u, v) => { p[0] = r3(u); p[1] = r3(v); }]));
+  else if (it.type === 'profile') {
+    H.push([it.start[0], it.start[1], 'vertex', (u, v) => { it.start[0] = r3(u); it.start[1] = r3(v); }]);
+    let cur = it.start;
+    for (const sg of it.segs) {
+      if (Math.hypot(sg.to[0] - it.start[0], sg.to[1] - it.start[1]) > 1e-6) H.push([sg.to[0], sg.to[1], 'vertex', (u, v) => { sg.to[0] = r3(u); sg.to[1] = r3(v); }]);
+      if (sg.via) { H.push([sg.via[0], sg.via[1], 'arc', (u, v) => { sg.via[0] = r3(u); sg.via[1] = r3(v); }]); const f = arcFit(cur, sg.via, sg.to); if (f) H.push([f.c[0], f.c[1], 'centre', null]); }
+      else H.push([(cur[0] + sg.to[0]) / 2, (cur[1] + sg.to[1]) / 2, 'midpoint', null]);
+      cur = sg.to;
+    }
+  }
+  return H;
+}
+function skCurrent() {   // the point the next segment / dimension starts from
+  if (sk.prof) { const s_ = sk.prof.segs; return s_.length ? s_[s_.length - 1].to : sk.prof.start; }
+  return sk.pts.length ? sk.pts[0] : null;
+}
+function skSnap(ev, skip) {
+  const raw = skRaw(ev); if (!raw) return null;
+  const base = { p: [raw.u, raw.v], kind: 'free', guides: [] };
+  if (ev.altKey) return { ...base, p: base.p.map(r3) };
+  const tolPx = 10, mx = raw.mx, my = raw.my, useModel = document.getElementById('sk-snapm').checked;
+  let best = null;
+  const consider = (u, v, kind, bias = 0) => { const [x, y] = skScreen(u, v), d = Math.hypot(x - mx, y - my) + bias; if (d < tolPx && (!best || d < best.d)) best = { d, p: [u, v], kind }; };
+  sk.items.forEach((it, i) => skHandles(it).forEach(([u, v, kind, setter], k) => { if (!(skip && skip.i === i && skip.k === k)) consider(u, v, kind); }));
+  if (sk.prof) { consider(sk.prof.start[0], sk.prof.start[1], sk.prof.segs.length >= (sk.tool === 'arc' ? 1 : 2) ? 'close' : 'vertex', -2); for (const sg of sk.prof.segs) consider(sg.to[0], sg.to[1], 'vertex'); }
+  for (const p of sk.pts) consider(p[0], p[1], 'vertex');
+  consider(0, 0, 'origin', 1);
+  if (useModel && sk.refs) for (const q of sk.refs.pts) consider(q.u, q.v, q.kind, q.inPlane ? 0 : 3);
+  if (best) return { ...base, p: best.p.map(r3), kind: best.kind };
+  if (useModel && sk.refs) {
+    const k = skPxPerMm(); let be = null;
+    for (const [a, b] of sk.refs.edges) {
+      const dx = b[0] - a[0], dy = b[1] - a[1], L2 = dx * dx + dy * dy || 1e-12;
+      const t = Math.max(0, Math.min(1, ((raw.u - a[0]) * dx + (raw.v - a[1]) * dy) / L2));
+      const u = a[0] + t * dx, v = a[1] + t * dy, d = Math.hypot(u - raw.u, v - raw.v) * k;
+      if (d < 8 && (!be || d < be.d)) be = { d, p: [u, v] };
+    }
+    if (be) return { ...base, p: be.p.map(r3), kind: 'edge' };
+  }
+  // horizontal / vertical alignment with nearby key points (the current point first)
+  const k = skPxPerMm(), tolMm = 6 / k, refs = [];
+  const cur = skCurrent(); if (cur) refs.push(cur);
+  sk.items.forEach(it => skHandles(it).forEach(([u, v, kind]) => { if (kind !== 'quadrant') refs.push([u, v]); }));
+  if (sk.prof) refs.push(sk.prof.start, ...sk.prof.segs.map(s_ => s_.to));
+  let au = null, av = null;
+  for (const r of refs) {
+    const du = Math.abs(raw.u - r[0]), dv = Math.abs(raw.v - r[1]);
+    if (du < tolMm && (!au || du < au.d)) au = { d: du, r };
+    if (dv < tolMm && (!av || dv < av.d)) av = { d: dv, r };
+  }
+  const g = parseFloat(document.getElementById('sk-snap').value) || 0, grid = x => g > 0 ? Math.round(x / g) * g : x;
+  const u = au ? au.r[0] : grid(raw.u), v = av ? av.r[1] : grid(raw.v);
+  if (au) base.guides.push([au.r, [u, v]]); if (av) base.guides.push([av.r, [u, v]]);
+  return { ...base, p: [r3(u), r3(v)], kind: au && av ? 'align' : au ? 'vertical' : av ? 'horizontal' : (g > 0 ? 'grid' : 'free') };
+}
+// typed dimensions for the shape in progress
+function skDimSpec() {
+  if (!sk || sk.drag) return null;
+  if ((sk.tool === 'line' || sk.tool === 'arc') && sk.prof && !sk.prof.pending) return [['L', 'length', 'mm'], ['A', 'angle', '°']];
+  if (sk.tool === 'rect' && sk.pts.length === 1) return [['W', 'width', 'mm'], ['H', 'height', 'mm']];
+  if (sk.tool === 'circle' && sk.pts.length === 1) return [['D', 'diameter', 'mm']];
+  if (sk.tool === 'slot' && sk.pts.length === 1) return [['L', 'length', 'mm'], ['A', 'angle', '°']];
+  return null;
+}
+function skTarget(hv) {   // the hover point with any typed dimensions applied
+  const a = skCurrent(); if (!a || !hv) return hv;
+  const L = sk.lock, dx = hv[0] - a[0], dy = hv[1] - a[1];
+  if (sk.tool === 'rect') return [r3(a[0] + (L.W != null ? L.W * (dx < 0 ? -1 : 1) : dx)), r3(a[1] + (L.H != null ? L.H * (dy < 0 ? -1 : 1) : dy))];
+  if (sk.tool === 'circle') { const D = L.D != null ? L.D : 2 * Math.hypot(dx, dy), n = Math.hypot(dx, dy) || 1; return [r3(a[0] + (n > 1e-9 ? dx / n : 1) * D / 2), r3(a[1] + (n > 1e-9 ? dy / n : 0) * D / 2)]; }
+  if (L.L == null && L.A == null) return hv;
+  const len = L.L != null ? L.L : Math.hypot(dx, dy), ang = (L.A != null ? L.A : Math.atan2(dy, dx) * 180 / Math.PI) * Math.PI / 180;
+  return [r3(a[0] + len * Math.cos(ang)), r3(a[1] + len * Math.sin(ang))];
+}
+function skDimValues(t) {
+  const a = skCurrent(); if (!a || !t) return {};
+  const dx = t[0] - a[0], dy = t[1] - a[1];
+  return { L: Math.hypot(dx, dy), A: Math.atan2(dy, dx) * 180 / Math.PI, W: Math.abs(dx), H: Math.abs(dy), D: 2 * Math.hypot(dx, dy) };
+}
+function skUpdateDim() {
+  const spec = skDimSpec();
+  if (!spec || !sk.hover) { skDimEl.style.display = 'none'; sk.dimKey = ''; return; }
+  const key = sk.tool + spec.map(s_ => s_[0]).join('');
+  if (key !== sk.dimKey) {
+    sk.dimKey = key;
+    skDimEl.innerHTML = spec.map(([k, l, u]) => `<label title="${l}">${k}</label><input data-d="${k}" inputmode="decimal" autocomplete="off"><span>${u}</span>`).join('') + '<i>type · Tab · Enter</i>';
+    skDimEl.querySelectorAll('input').forEach(inp => {
+      inp.oninput = () => { const v = parseFloat(inp.value); if (isFinite(v) && v > (inp.dataset.d === 'A' ? -1e9 : 0)) sk.lock[inp.dataset.d] = v; else delete sk.lock[inp.dataset.d]; inp.classList.toggle('lock', inp.dataset.d in sk.lock); };
+      inp.onkeydown = e => {
+        if (e.key === 'Enter') { e.preventDefault(); const t = skTarget(sk.hover.p); if (t) skPlace(t, 'typed'); inp.blur(); }
+        else if (e.key === 'Escape') { sk.lock = {}; inp.blur(); }
+        e.stopPropagation();
+      };
+    });
+  }
+  const t = skTarget(sk.hover.p), vals = skDimValues(t), [sx, sy] = skScreen(...t);
+  skDimEl.style.display = 'flex';
+  if (!skDimEl.contains(document.activeElement)) { skDimEl.style.left = (sx + 18) + 'px'; skDimEl.style.top = (sy + 14) + 'px'; }
+  skDimEl.querySelectorAll('input').forEach(inp => { const k_ = inp.dataset.d; if (document.activeElement !== inp && !(k_ in sk.lock)) inp.value = (+vals[k_].toFixed(k_ === 'A' ? 1 : 2)).toString(); });
+}
+// placing points
+function skCloseProfile() {
+  const pr = sk.prof; if (!pr) return;
+  const last = pr.segs.length ? pr.segs[pr.segs.length - 1].to : pr.start;
+  if (Math.hypot(last[0] - pr.start[0], last[1] - pr.start[1]) > 1e-6) pr.segs.push({ to: pr.start.slice() });
+  const nArcs = pr.segs.filter(s_ => s_.via).length;
+  if (pr.segs.length >= 3 || (pr.segs.length >= 2 && nArcs)) sk.items.push({ type: 'profile', start: pr.start, segs: pr.segs, mode: document.getElementById('sk-sub').checked ? 'subtract' : 'add' });
+  else addMsg('error', 'a profile needs at least three lines (or a line and an arc) to enclose an area');
+  sk.prof = null; sk.lock = {}; renderSkItems();
+}
+function skPlace(p, kind) {
+  const mode = document.getElementById('sk-sub').checked ? 'subtract' : 'add';
+  sk.lock = {};
+  if (sk.tool === 'line' || sk.tool === 'arc') {
+    if (!sk.prof) { sk.prof = { start: p.slice(), segs: [], pending: null }; return; }
+    const pr = sk.prof;
+    if (pr.pending) { pr.segs.push({ to: pr.pending, via: p.slice() }); const closed = Math.hypot(pr.pending[0] - pr.start[0], pr.pending[1] - pr.start[1]) < 1e-6; pr.pending = null; if (closed) skCloseProfile(); renderSkItems(); return; }
+    const cur = skCurrent(); if (Math.hypot(p[0] - cur[0], p[1] - cur[1]) < 1e-6) return;
+    const atStart = Math.hypot(p[0] - pr.start[0], p[1] - pr.start[1]) < 1e-6;
+    if (sk.tool === 'arc') { pr.pending = p.slice(); return; }
+    pr.segs.push({ to: p.slice() });
+    if (atStart) skCloseProfile();
+    renderSkItems(); return;
+  }
+  if (sk.tool === 'rect') { sk.pts.push(p); if (sk.pts.length === 2) { const [a, b] = sk.pts; if (a[0] !== b[0] && a[1] !== b[1]) sk.items.push({ type: 'rect', cx: r3((a[0] + b[0]) / 2), cy: r3((a[1] + b[1]) / 2), w: r3(Math.abs(b[0] - a[0])), h: r3(Math.abs(b[1] - a[1])), angle: 0, mode }); sk.pts = []; } }
+  else if (sk.tool === 'circle') { sk.pts.push(p); if (sk.pts.length === 2) { const [c, e] = sk.pts; const r = Math.hypot(e[0] - c[0], e[1] - c[1]); if (r > 0) sk.items.push({ type: 'circle', cx: c[0], cy: c[1], r: r3(r), mode }); sk.pts = []; } }
+  else if (sk.tool === 'slot') { sk.pts.push(p); if (sk.pts.length === 2) { const [a, b] = sk.pts; if (a[0] !== b[0] || a[1] !== b[1]) sk.items.push({ type: 'slot', x1: a[0], y1: a[1], x2: b[0], y2: b[1], w: parseFloat(document.getElementById('sk-slotw').value) || 6, mode }); sk.pts = []; } }
+  renderSkItems();
+}
+function skHandleAt(mx, my) {
+  let best = null;
+  sk.items.forEach((it, i) => skHandles(it).forEach(([u, v, kind, setter], k) => { if (!setter) return; const [x, y] = skScreen(u, v), d = Math.hypot(x - mx, y - my); if (d < 9 && (!best || d < best.d)) best = { d, i, k }; }));
+  return best;
+}
+renderer.domElement.addEventListener('pointerdown', ev => {
+  if (!sk || sk.tool !== 'select' || ev.button !== 0) return;
+  const raw = skRaw(ev); if (!raw) return;
+  const h = skHandleAt(raw.mx, raw.my); if (!h) return;
+  ev.stopImmediatePropagation(); controls.enabled = false; renderer.domElement.setPointerCapture(ev.pointerId);
+  sk.drag = h; sk.sel = h.i; renderSkItems();
+}, true);
+renderer.domElement.addEventListener('pointermove', ev => {
+  if (!sk) return;
+  sk.hover = skSnap(ev, sk.drag);
+  if (sk.drag && sk.hover) { const it = sk.items[sk.drag.i], h = skHandles(it)[sk.drag.k]; if (h && h[3]) { h[3](...sk.hover.p); renderSkItemValues(); } }
+});
 renderer.domElement.addEventListener('pointerup', ev => {
   if (!sk || ev.button !== 0) return;
+  if (sk.drag) { sk.drag = null; controls.enabled = true; ev.stopImmediatePropagation(); renderSkItems(); return; }
   if (!downAt || Math.hypot(ev.clientX - downAt[0], ev.clientY - downAt[1]) > 4) return;
-  const p = skLocal(ev); if (!p) return;
-  const mode = document.getElementById('sk-sub').checked ? 'subtract' : 'add';
-  if (sk.tool === 'rect') { sk.pts.push(p); if (sk.pts.length === 2) { const [a, b] = sk.pts; if (a[0] !== b[0] && a[1] !== b[1]) sk.items.push({ type: 'rect', cx: +((a[0] + b[0]) / 2).toFixed(3), cy: +((a[1] + b[1]) / 2).toFixed(3), w: +Math.abs(b[0] - a[0]).toFixed(3), h: +Math.abs(b[1] - a[1]).toFixed(3), angle: 0, mode }); sk.pts = []; } }
-  else if (sk.tool === 'circle') { sk.pts.push(p); if (sk.pts.length === 2) { const [c, e] = sk.pts; const r = Math.hypot(e[0] - c[0], e[1] - c[1]); if (r > 0) sk.items.push({ type: 'circle', cx: c[0], cy: c[1], r: +r.toFixed(3), mode }); sk.pts = []; } }
-  else if (sk.tool === 'slot') { sk.pts.push(p); if (sk.pts.length === 2) { const [a, b] = sk.pts; if (a[0] !== b[0] || a[1] !== b[1]) sk.items.push({ type: 'slot', x1: a[0], y1: a[1], x2: b[0], y2: b[1], w: parseFloat(document.getElementById('sk-slotw').value) || 6, mode }); sk.pts = []; } }
-  else if (sk.tool === 'polygon') {
-    if (sk.pts.length >= 3) { const [sx, sy] = skScreen(...sk.pts[0]); const [px, py] = skScreen(...p); if (Math.hypot(sx - px, sy - py) < 10) { sk.items.push({ type: 'polygon', pts: sk.pts, mode }); sk.pts = []; renderSkItems(); return; } }
-    sk.pts.push(p);
-  }
-  renderSkItems();
+  const s_ = skSnap(ev); if (!s_) return;
+  if (sk.tool === 'select') { const raw = skRaw(ev), h = raw && skHandleAt(raw.mx, raw.my); sk.sel = h ? h.i : skItemAt(s_.p); renderSkItems(); return; }
+  skPlace(skTarget(s_.p), s_.kind);
 });
+function skItemAt(p) {   // the topmost item whose outline contains p
+  for (let i = sk.items.length - 1; i >= 0; i--) { const poly = skOutline(sk.items[i]); if (poly.length > 2 && pointInPoly(p, poly)) return i; }
+  return -1;
+}
+function pointInPoly([x, y], P) { let c = false; for (let i = 0, j = P.length - 1; i < P.length; j = i++) { const [xi, yi] = P[i], [xj, yj] = P[j]; if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) c = !c; } return c; }
+function skOutline(it) {
+  if (it.type === 'rect') { const a = (it.angle || 0) * Math.PI / 180, c = Math.cos(a), s_ = Math.sin(a), hw = it.w / 2, hh = it.h / 2; return [[-hw, -hh], [hw, -hh], [hw, hh], [-hw, hh]].map(([x, y]) => [it.cx + x * c - y * s_, it.cy + x * s_ + y * c]); }
+  if (it.type === 'circle') { const o = []; for (let k = 0; k < 64; k++) { const a = k / 64 * 2 * Math.PI; o.push([it.cx + it.r * Math.cos(a), it.cy + it.r * Math.sin(a)]); } return o; }
+  if (it.type === 'polygon') return it.pts;
+  if (it.type === 'profile') return profilePts(it);
+  if (it.type === 'slot') { const dx = it.x2 - it.x1, dy = it.y2 - it.y1, Ln = Math.hypot(dx, dy) || 1, a0 = Math.atan2(dx / Ln, -dy / Ln), o = []; for (let k = 0; k <= 24; k++) { const a = a0 + k / 24 * Math.PI; o.push([it.x2 + it.w / 2 * Math.cos(a), it.y2 + it.w / 2 * Math.sin(a)]); } for (let k = 0; k <= 24; k++) { const a = a0 + Math.PI + k / 24 * Math.PI; o.push([it.x1 + it.w / 2 * Math.cos(a), it.y1 + it.w / 2 * Math.sin(a)]); } return o; }
+  return [];
+}
 document.addEventListener('keydown', ev => {
-  if (!sk || document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA') return;
-  if (ev.key === 'Escape') { if (sk.pts.length) sk.pts = []; else endSketch(); }
-  if (ev.key === 'Backspace') { if (sk.pts.length) sk.pts.pop(); else sk.items.pop(); renderSkItems(); }
-  if (ev.key === 'Enter' && sk.tool === 'polygon' && sk.pts.length >= 3) { sk.items.push({ type: 'polygon', pts: sk.pts, mode: document.getElementById('sk-sub').checked ? 'subtract' : 'add' }); sk.pts = []; renderSkItems(); }
+  if (!sk) return;
+  const ae = document.activeElement;
+  if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.tagName === 'SELECT')) return;
+  if (/^[0-9.\-]$/.test(ev.key) && skDimSpec()) {   // start typing a dimension
+    skUpdateDim();
+    const inp = [...skDimEl.querySelectorAll('input')].find(i => !(i.dataset.d in sk.lock)) || skDimEl.querySelector('input');
+    if (inp) { ev.preventDefault(); inp.focus(); inp.value = ev.key; inp.oninput(); }
+    return;
+  }
+  const k = ev.key.toLowerCase();
+  if (!ev.metaKey && !ev.ctrlKey && { v: 'select', l: 'line', a: 'arc', r: 'rect', c: 'circle', s: 'slot' }[k]) { setSkTool({ v: 'select', l: 'line', a: 'arc', r: 'rect', c: 'circle', s: 'slot' }[k]); return; }
+  if (ev.key === 'Escape') {
+    if (sk.prof && sk.prof.pending) sk.prof.pending = null;
+    else if (sk.prof) sk.prof = null; else if (sk.pts.length) sk.pts = []; else if (sk.sel >= 0) sk.sel = -1; else endSketch();
+    if (sk) { sk.lock = {}; renderSkItems(); }
+  }
+  if (ev.key === 'Backspace' || ev.key === 'Delete') {
+    ev.preventDefault();
+    if (sk.prof) { if (sk.prof.pending) sk.prof.pending = null; else if (sk.prof.segs.length) sk.prof.segs.pop(); else sk.prof = null; }
+    else if (sk.pts.length) sk.pts.pop();
+    else if (sk.sel >= 0) { sk.items.splice(sk.sel, 1); sk.sel = -1; }
+    else if (ev.key === 'Backspace') sk.items.pop();
+    renderSkItems();
+  }
+  if (ev.key === 'Enter' && sk.prof && sk.prof.segs.length >= 2) skCloseProfile();
 });
 function renderSkItems() {
   const el = document.getElementById('sk-list'); el.innerHTML = '';
   if (!sk) return;
-  const num = (it, k) => `<span class="k">${k}</span><input type="number" step="any" value="${it[k]}" data-k="${k}">`;
+  const num = (o, k, lbl) => `<span class="k">${lbl || k}</span><input type="number" step="any" value="${o[k]}" data-k="${k}">`;
   sk.items.forEach((it, i) => {
-    const r = document.createElement('div'); r.className = 'skrow';
-    let f = `<span>${i + 1}. ${it.type}${it.mode === 'subtract' ? ' −' : ''}</span>`;
-    if (it.type === 'rect') f += num(it, 'cx') + num(it, 'cy') + num(it, 'w') + num(it, 'h') + num(it, 'angle');
+    const r = document.createElement('div'); r.className = 'skrow' + (i === sk.sel ? ' sel' : ''); r.dataset.i = i;
+    let f = `<span class="nm">${i + 1}. ${it.type}${it.mode === 'subtract' ? ' −' : ''}</span>`;
+    if (it.type === 'rect') f += num(it, 'cx') + num(it, 'cy') + num(it, 'w') + num(it, 'h') + num(it, 'angle', '∠');
     else if (it.type === 'circle') f += num(it, 'cx') + num(it, 'cy') + num(it, 'r');
     else if (it.type === 'slot') f += num(it, 'x1') + num(it, 'y1') + num(it, 'x2') + num(it, 'y2') + num(it, 'w');
-    else f += `<span class="k">${it.pts.length} pts</span>`;
-    r.innerHTML = f + '<b title="remove">×</b>';
-    r.querySelectorAll('input').forEach(inp => inp.onchange = () => { it[inp.dataset.k] = parseFloat(inp.value) || 0; });
-    r.querySelector('b').onclick = () => { sk.items.splice(i, 1); renderSkItems(); };
+    else if (it.type === 'polygon') f += `<span class="k">${it.pts.length} points</span>`;
+    else if (it.type === 'profile') { const na = it.segs.filter(s_ => s_.via).length; f += `<span class="k">${it.segs.length} segments${na ? ` · ${na} arc${na > 1 ? 's' : ''}` : ''}</span>`; }
+    r.innerHTML = f + `<button class="mini" data-a="mode" title="toggle add / subtract">${it.mode === 'subtract' ? '−' : '+'}</button><b title="remove">×</b>`;
+    if (it.type === 'profile' || it.type === 'polygon') {
+      const pts = it.type === 'polygon' ? it.pts.map((p, k) => [`P${k + 1}`, p]) : [['start', it.start], ...it.segs.flatMap((s_, k) => [...(s_.via ? [[`arc ${k + 1} via`, s_.via]] : []), ...(k === it.segs.length - 1 && Math.hypot(s_.to[0] - it.start[0], s_.to[1] - it.start[1]) < 1e-6 ? [] : [[`P${k + 2}`, s_.to]])])];
+      const det = document.createElement('div'); det.className = 'skpts' + (i === sk.sel ? '' : ' hide');
+      det.innerHTML = pts.map(([l, p], k) => `<div><span class="k">${l}</span><input type="number" step="any" value="${p[0]}" data-p="${k}" data-c="0"><input type="number" step="any" value="${p[1]}" data-p="${k}" data-c="1"></div>`).join('');
+      det.querySelectorAll('input').forEach(inp => inp.onchange = () => { pts[+inp.dataset.p][1][+inp.dataset.c] = parseFloat(inp.value) || 0; });
+      r.appendChild(det);
+    }
+    r.querySelectorAll('input[data-k]').forEach(inp => inp.onchange = () => { it[inp.dataset.k] = parseFloat(inp.value) || 0; });
+    r.querySelector('[data-a=mode]').onclick = e => { e.stopPropagation(); it.mode = it.mode === 'subtract' ? 'add' : 'subtract'; renderSkItems(); };
+    r.querySelector('b').onclick = e => { e.stopPropagation(); sk.items.splice(i, 1); sk.sel = -1; renderSkItems(); };
+    r.querySelector('.nm').onclick = () => { sk.sel = sk.sel === i ? -1 : i; renderSkItems(); };
     el.appendChild(r);
   });
+  if (!sk.items.length) el.innerHTML = '<div class="muted" style="padding:4px 0">Nothing yet. Line (L): click points, click the first point to close; A switches to arcs.</div>';
+}
+function renderSkItemValues() {   // refresh the numbers of the item being dragged without rebuilding the list
+  const row = document.querySelector(`#sk-list .skrow[data-i="${sk.drag ? sk.drag.i : -1}"]`); if (!row) return;
+  const it = sk.items[+row.dataset.i];
+  row.querySelectorAll('input[data-k]').forEach(inp => { if (document.activeElement !== inp) inp.value = it[inp.dataset.k]; });
 }
 function drawSketchOverlay() {
   if (!sk) return;
   const r = renderer.domElement.getBoundingClientRect(); skSvg.setAttribute('viewBox', `0 0 ${r.width} ${r.height}`);
   const out = [];
   const P = (u, v) => skScreen(u, v).map(x => x.toFixed(1)).join(',');
-  const L = (u0, v0, u1, v1, col, w) => { const a = skScreen(u0, v0), b = skScreen(u1, v1); return `<line x1="${a[0].toFixed(1)}" y1="${a[1].toFixed(1)}" x2="${b[0].toFixed(1)}" y2="${b[1].toFixed(1)}" stroke="${col}" stroke-width="${w}"/>`; };
+  const L = (u0, v0, u1, v1, col, w, dash) => { const a = skScreen(u0, v0), b = skScreen(u1, v1); return `<line x1="${a[0].toFixed(1)}" y1="${a[1].toFixed(1)}" x2="${b[0].toFixed(1)}" y2="${b[1].toFixed(1)}" stroke="${col}" stroke-width="${w}"${dash ? ' stroke-dasharray="4 3"' : ''}/>`; };
   const ext = bbox ? Math.ceil(bbox.getSize(new THREE.Vector3()).length() / 10) * 10 : 60;
   for (let g = -ext; g <= ext; g += 5) { const maj = g % 10 === 0; out.push(L(g, -ext, g, ext, maj ? '#3a4a5a' : '#28323d', maj ? 0.8 : 0.5)); out.push(L(-ext, g, ext, g, maj ? '#3a4a5a' : '#28323d', maj ? 0.8 : 0.5)); }
   out.push(L(0, 0, 15, 0, '#e55', 1.5)); out.push(L(0, 0, 0, 15, '#5e5', 1.5));
-  const shape = (it, col) => {
-    if (it.type === 'rect') { const a = (it.angle || 0) * Math.PI / 180, c = Math.cos(a), s_ = Math.sin(a), hw = it.w / 2, hh = it.h / 2; const pts = [[-hw, -hh], [hw, -hh], [hw, hh], [-hw, hh]].map(([x, y]) => P(it.cx + x * c - y * s_, it.cy + x * s_ + y * c)); return `<polygon points="${pts.join(' ')}" fill="${col}22" stroke="${col}" stroke-width="1.5"/>`; }
-    if (it.type === 'circle') { const pts = []; for (let k = 0; k < 48; k++) { const a = k / 48 * 2 * Math.PI; pts.push(P(it.cx + it.r * Math.cos(a), it.cy + it.r * Math.sin(a))); } return `<polygon points="${pts.join(' ')}" fill="${col}22" stroke="${col}" stroke-width="1.5"/>`; }
-    if (it.type === 'polygon') return `<polygon points="${it.pts.map(p => P(...p)).join(' ')}" fill="${col}22" stroke="${col}" stroke-width="1.5"/>`;
-    if (it.type === 'slot') { const dx = it.x2 - it.x1, dy = it.y2 - it.y1, Ln = Math.hypot(dx, dy) || 1, nx = -dy / Ln, ny = dx / Ln; const pts = []; const a0 = Math.atan2(ny, nx); for (let k = 0; k <= 24; k++) { const a = a0 + k / 24 * Math.PI; pts.push(P(it.x2 + it.w / 2 * Math.cos(a), it.y2 + it.w / 2 * Math.sin(a))); } for (let k = 0; k <= 24; k++) { const a = a0 + Math.PI + k / 24 * Math.PI; pts.push(P(it.x1 + it.w / 2 * Math.cos(a), it.y1 + it.w / 2 * Math.sin(a))); } return `<polygon points="${pts.join(' ')}" fill="${col}22" stroke="${col}" stroke-width="1.5"/>`; }
-    return '';
-  };
-  for (const it of sk.items) out.push(shape(it, it.mode === 'subtract' ? '#ff6b6b' : '#3ee6c6'));
-  const hv = sk.hover;
-  if (sk.pts.length && hv) {
-    const a = sk.pts[0];
-    if (sk.tool === 'rect') out.push(shape({ type: 'rect', cx: (a[0] + hv[0]) / 2, cy: (a[1] + hv[1]) / 2, w: Math.abs(hv[0] - a[0]), h: Math.abs(hv[1] - a[1]), angle: 0 }, '#ffd166'));
-    if (sk.tool === 'circle') out.push(shape({ type: 'circle', cx: a[0], cy: a[1], r: Math.hypot(hv[0] - a[0], hv[1] - a[1]) }, '#ffd166'));
-    if (sk.tool === 'slot') out.push(shape({ type: 'slot', x1: a[0], y1: a[1], x2: hv[0], y2: hv[1], w: parseFloat(document.getElementById('sk-slotw').value) || 6 }, '#ffd166'));
-    if (sk.tool === 'polygon') out.push(`<polyline points="${[...sk.pts, hv].map(p => P(...p)).join(' ')}" fill="none" stroke="#ffd166" stroke-width="1.5"/>`);
+  if (sk.refs) for (const [a, b] of sk.refs.edges) out.push(L(a[0], a[1], b[0], b[1], '#7fa7c9', 1, true));     // model edges in the plane
+  const poly = (pts, col, closed = true, w = 1.5) => `<${closed ? 'polygon' : 'polyline'} points="${pts.map(p => P(...p)).join(' ')}" fill="${closed ? col + '22' : 'none'}" stroke="${col}" stroke-width="${w}"/>`;
+  sk.items.forEach((it, i) => out.push(poly(skOutline(it), i === sk.sel ? '#ff8c42' : it.mode === 'subtract' ? '#ff6b6b' : '#3ee6c6', true, i === sk.sel ? 2.2 : 1.5)));
+  if (sk.tool === 'select') sk.items.forEach((it, i) => skHandles(it).forEach(([u, v, kind, setter]) => { if (!setter) return; const [x, y] = skScreen(u, v); out.push(`<rect x="${x - 3.5}" y="${y - 3.5}" width="7" height="7" fill="${i === sk.sel ? '#ff8c42' : '#14171c'}" stroke="${i === sk.sel ? '#ff8c42' : '#3ee6c6'}" stroke-width="1.2"/>`); }));
+  const hv = sk.hover, t = hv ? skTarget(hv.p) : null;
+  // shape in progress
+  if (sk.prof) {
+    const pr = sk.prof, open = profilePts({ start: pr.start, segs: pr.segs });
+    out.push(poly(open, '#ffd166', false, 2));
+    const cur = skCurrent();
+    if (pr.pending && hv) out.push(poly(arcPts(cur, hv.p, pr.pending), '#ffd166', false, 1.5), L(cur[0], cur[1], pr.pending[0], pr.pending[1], '#ffd16655', 1, true));
+    else if (t) out.push(sk.tool === 'arc' ? L(cur[0], cur[1], t[0], t[1], '#ffd166aa', 1.2, true) : L(cur[0], cur[1], t[0], t[1], '#ffd166', 1.5));
+    for (const p of [pr.start, ...pr.segs.map(s_ => s_.to), ...(pr.pending ? [pr.pending] : [])]) { const [x, y] = skScreen(...p); out.push(`<circle cx="${x}" cy="${y}" r="3" fill="#ffd166"/>`); }
   }
-  for (const p of sk.pts) { const [x, y] = skScreen(...p); out.push(`<circle cx="${x}" cy="${y}" r="3" fill="#ffd166"/>`); }
-  if (hv) { const [x, y] = skScreen(...hv); out.push(`<circle cx="${x}" cy="${y}" r="4" fill="none" stroke="#fff"/><text x="${x + 8}" y="${y - 8}" fill="#fff" font-size="11">${hv[0]}, ${hv[1]}</text>`); }
+  if (sk.pts.length && t) {
+    const a = sk.pts[0];
+    if (sk.tool === 'rect') out.push(poly(skOutline({ type: 'rect', cx: (a[0] + t[0]) / 2, cy: (a[1] + t[1]) / 2, w: Math.abs(t[0] - a[0]), h: Math.abs(t[1] - a[1]), angle: 0 }), '#ffd166'));
+    if (sk.tool === 'circle') out.push(poly(skOutline({ type: 'circle', cx: a[0], cy: a[1], r: Math.hypot(t[0] - a[0], t[1] - a[1]) }), '#ffd166'));
+    if (sk.tool === 'slot') out.push(poly(skOutline({ type: 'slot', x1: a[0], y1: a[1], x2: t[0], y2: t[1], w: parseFloat(document.getElementById('sk-slotw').value) || 6 }), '#ffd166'));
+    for (const p of sk.pts) { const [x, y] = skScreen(...p); out.push(`<circle cx="${x}" cy="${y}" r="3" fill="#ffd166"/>`); }
+  }
+  // snap cue
+  if (hv && !(sk.tool === 'select' && !sk.drag)) {
+    for (const [a, b] of hv.guides || []) out.push(L(a[0], a[1], b[0], b[1], '#ff8c42', 1, true));
+    const typed = Object.keys(sk.lock).length > 0, p = typed ? t : hv.p, [x, y] = skScreen(...p), c = '#ff8c42';
+    let glyph = { vertex: `<rect x="${x - 5}" y="${y - 5}" width="10" height="10" fill="none" stroke="${c}" stroke-width="1.5"/>`, close: `<rect x="${x - 6}" y="${y - 6}" width="12" height="12" fill="${c}55" stroke="${c}" stroke-width="2"/>`,
+      centre: `<circle cx="${x}" cy="${y}" r="6" fill="none" stroke="${c}" stroke-width="1.5"/><path d="M${x - 3} ${y}h6M${x} ${y - 3}v6" stroke="${c}"/>`, midpoint: `<path d="M${x} ${y - 6}L${x + 6} ${y + 5}H${x - 6}Z" fill="none" stroke="${c}" stroke-width="1.5"/>`,
+      quadrant: `<path d="M${x} ${y - 6}L${x + 6} ${y}L${x} ${y + 6}L${x - 6} ${y}Z" fill="none" stroke="${c}" stroke-width="1.5"/>`, arc: `<circle cx="${x}" cy="${y}" r="5" fill="none" stroke="${c}" stroke-width="1.5"/>`,
+      edge: `<path d="M${x - 5} ${y - 5}l10 10M${x + 5} ${y - 5}l-10 10" stroke="${c}" stroke-width="1.5"/>`, origin: `<circle cx="${x}" cy="${y}" r="6" fill="none" stroke="${c}" stroke-width="1.5"/>` }[hv.kind]
+      || `<circle cx="${x}" cy="${y}" r="4" fill="none" stroke="#fff"/>`;
+    if (typed) glyph = `<circle cx="${x}" cy="${y}" r="4" fill="${c}"/>`;
+    const label = typed ? 'typed' : { close: 'close', centre: 'centre', midpoint: 'midpoint', quadrant: 'quadrant', edge: 'on edge', vertex: 'point', origin: 'origin', horizontal: 'horizontal', vertical: 'vertical', align: 'aligned', arc: 'arc point' }[hv.kind];
+    out.push(glyph, `<text x="${x + 9}" y="${y - 9}" fill="#fff" font-size="11">${p[0]}, ${p[1]}${label ? ` · ${label}` : ''}</text>`);
+  }
   skSvg.innerHTML = out.join('');
+  skUpdateDim();
 }
 
 // ------------------------------------------------------------------ manual modelling dialogs (no agent turn)

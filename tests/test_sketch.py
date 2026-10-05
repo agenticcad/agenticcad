@@ -92,3 +92,25 @@ def test_toolbar_ops_generate_valid_code():
     assert len(ck.run_script(ch).body_by_name("Bracket").shape.faces()) > 17
     sh = se.wrap_body_expr("result = {\"Cup\": Box(30, 30, 20)}", "Cup", "offset({body}, amount=-2, openings=[{body}.faces().sort_by_distance((0, 0, 10))[0]])")
     assert close(ck.run_script(sh).volume, 30 * 30 * 20 - 26 * 26 * 18, 1.0)
+
+
+def test_profile_of_lines_and_arcs():
+    """A profile item: lines and three-point arcs closed back to the start (here a 20 x 10 slot-like D shape with a
+    semicircular end bulging +X, minus a rectangular window drawn as a line profile)."""
+    D = {"type": "profile", "start": [-10, -5], "segs": [{"to": [10, -5]}, {"to": [10, 5], "via": [15, 0]}, {"to": [-10, 5]}], "mode": "add"}
+    win = {"type": "profile", "start": [-5, -2], "segs": [{"to": [5, -2]}, {"to": [5, 2]}, {"to": [-5, 2]}, {"to": [-5, -2]}], "mode": "subtract"}
+    code = se.set_sketch("result = {}\n", "sk", PLANE, [D, win])
+    assert "ThreePointArc((10, -5), (15, 0), (10, 5))" in code and "make_face(mode=Mode.SUBTRACT)" in code
+    assert code.count("Line((-10, 5), (-10, -5))") == 1                          # closed back to the start automatically
+    assert se.sketches(code)[0]["items"] == [D, win]
+    m = ck.run_script(code)
+    assert close(m.sketches[0]["area"], 20 * 10 + 3.14159265 * 25 / 2 - 10 * 4, 1e-3)
+    # an arc with a collinear through-point is a line; zero-length segments are dropped
+    flat = {"type": "profile", "start": [0, 0], "segs": [{"to": [10, 0], "via": [5, 0]}, {"to": [10, 0]}, {"to": [10, 10]}, {"to": [0, 10]}], "mode": "add"}
+    c2 = se.set_sketch("result = {}\n", "s2", PLANE, [flat])
+    assert "ThreePointArc" not in c2 and close(ck.run_script(c2).sketches[0]["area"], 100, 1e-6)
+    # a profile that can't enclose an area is refused before it reaches the kernel
+    with pytest.raises(se.Refused):
+        se.set_sketch("result = {}\n", "s3", PLANE, [{"type": "profile", "start": [0, 0], "segs": [{"to": [10, 0]}], "mode": "add"}])
+    with pytest.raises(se.Unsupported, match="profile"):
+        se.set_sketch("result = {}\n", "s4", PLANE, [{"type": "profile", "segs": []}])

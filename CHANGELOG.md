@@ -5,6 +5,23 @@ features, patch bumps fix things. The version shown in the UI header comes from 
 
 ## [Unreleased]
 
+## [0.20.0] — 2026-10-05
+
+### Added
+- **Sketch lines and arcs.** A Line / Arc tool draws one closed profile of lines and three-point arcs (switch
+  between them mid-profile, click the start or press Enter to close). Stored as a `profile` sketch item
+  (`BuildLine` + `Line` / `ThreePointArc` + `make_face`), and available to the agent's `sketch` tool.
+- **Sketch snapping** to sketch points, the model's corners, circle centres, edge midpoints and in-plane edges,
+  the origin, and horizontal/vertical alignment with existing points, with a marker and label showing what it
+  snapped to (Alt places freely).
+- **Typed dimensions while drawing**: length / angle for lines and slots, width / height for rectangles, diameter
+  for circles.
+- **Select tool in sketches**: drag corners, centres, radii and profile points; Delete removes the selected item;
+  per-item add/subtract toggle and editable profile points in the item list.
+
+### Changed
+- The sketch toolbar is two rows, and the sketch name and plane moved into the item panel.
+
 ## [0.19.0] — 2026-10-05
 
 ### Added
