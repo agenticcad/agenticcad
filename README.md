@@ -421,8 +421,8 @@ but nothing here has been run on a real machine yet by anyone but the author.
   mixed 4th-axis + flat programs are simulated separately. Time estimates ignore acceleration.
 - **Adaptive corners rely on feed reduction**, not on geometry; ring-shaped regions still retract for
   some links. No trochoidal slotting op, no rest for 3D, no Z-level (waterline) finishing.
-- **Sketches are basic**: rectangles, circles, polygons, slots; no lines/arcs with constraints,
-  no dimensions on the sketch, no snapping to model edges.
+- **Sketches have no constraint solver**: dimensions apply when you place or drag a point and are not kept as
+  relationships; no sketch fillet, trim or offset.
 - **Manual tools are typed, not dragged** (except Press/Pull): no drag handles for primitives,
   no mates/joints for positioning library parts; no patterns, mirror, loft or sweep by hand.
 - **Drawings** have overall dimensions and hole tables only; no section views, no feature
@@ -440,7 +440,7 @@ but nothing here has been run on a real machine yet by anyone but the author.
    time estimates. Then Z-level finishing, trochoidal slotting, thread milling, ramp entries.
 3. **Assembly positioning** — mate-style placement (face-to-face, concentric) for library parts, and a
    seeded standard-parts library (ISO fasteners, nuts, washers, bearings, heat-set inserts).
-4. **Sketch upgrades** — lines and arcs, snapping to model edges, driven dimensions, constraints.
+4. **Sketch constraints** — driven dimensions and geometric constraints kept by a solver; sketch fillet and trim.
 5. **Drag handles everywhere** — primitives, holes, fillet radius, sketch items.
 6. **G-code sender** — WebSerial to GRBL: jog, DRO, probing, streaming with a progress marker.
 7. **Drawings** — section views, feature dimensions, PDF; **imports** — DXF/SVG profiles.
