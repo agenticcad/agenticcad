@@ -7,7 +7,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M16 3 28 9.5v13L16 29 4 22.5v-13L16 3Z' fill='none' stroke='%234ea1ff' stroke-width='2'/%3E%3Ccircle cx='16' cy='16' r='4' fill='%23ff8c42'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="../assets/site.css?v=0.19.0">
+<link rel="stylesheet" href="../assets/site.css?v=0.20.0">
 <style>
   .docs{display:grid;grid-template-columns:250px 1fr;gap:56px;padding:44px 0 80px}
   .toc{position:sticky;top:76px;align-self:start;max-height:calc(100vh - 100px);overflow:auto;font-size:13px;padding-right:8px}
@@ -145,7 +145,14 @@ result = {<span class="hl-s">"Plate"</span>: plate.part}</code></pre>
     <p>Face references use the point you clicked (<code>faces().sort_by_distance((x, y, z))[0]</code>), never face centres, so they survive most later edits. Every operation is undoable and the agent is notified.</p>
 
     <h2 id="sketches">Sketches</h2>
-    <p>Select a planar face (or none for XY/XZ/YZ plus an offset) and press <kbd>K</kbd>. The camera squares up to the plane; draw <b>rectangles, circles, polygons and slots</b> by clicking (grid snap; <kbd>⌥</kbd> for free placement), toggle <b>Subtract</b>, edit numbers in the item list, then <b>Finish</b>. The sketch is stored in the script as a block:</p>
+    <p>Select a planar face (or none for XY/XZ/YZ plus an offset) and press <kbd>K</kbd>. The camera squares up to the plane. Tools:</p>
+    <ul>
+      <li><b>Line</b> <kbd>L</kbd> and <b>Arc</b> <kbd>A</kbd> draw one closed profile of lines and three-point arcs: click points, switch between line and arc at any time (an arc takes its end point, then a point it passes through), click the first point or press <kbd>Enter</kbd> to close.</li>
+      <li><b>Rectangle</b> <kbd>R</kbd>, <b>Circle</b> <kbd>C</kbd> and <b>Slot</b> <kbd>S</kbd> by two clicks; <b>Select</b> <kbd>V</kbd> shows handles to drag corners, centres, radii and profile points, and <kbd>Delete</kbd> removes the selected item.</li>
+      <li><b>Snapping</b> to sketch points, the model's corners, circle centres and edge midpoints, edges lying in the sketch plane, the origin, and horizontal / vertical alignment with existing points, then the grid. A marker and label show what it snapped to; hold <kbd>⌥</kbd> to place freely.</li>
+      <li><b>Typed dimensions</b>: while a shape is in progress, type a number: length and angle for lines and slots, width and height for rectangles, diameter for circles (<kbd>Tab</kbd> switches, <kbd>Enter</kbd> places).</li>
+    </ul>
+    <p>Toggle <b>Subtract</b> per item, edit numbers in the item list, then <b>Finish</b>. There is no constraint solver yet: dimensions apply when you place or edit a point. The sketch is stored in the script as a block:</p>
 <pre><code><span class="hl-c"># sketch:sketch1 {"plane": {...}, "items": [...]}</span>
 <span class="hl-k">with</span> <span class="hl-t">BuildSketch</span>(<span class="hl-t">Plane</span>(origin=(<span class="hl-n">0</span>, <span class="hl-n">0</span>, <span class="hl-n">4</span>), x_dir=(<span class="hl-n">1</span>, <span class="hl-n">0</span>, <span class="hl-n">0</span>), z_dir=(<span class="hl-n">0</span>, <span class="hl-n">0</span>, <span class="hl-n">1</span>))) <span class="hl-k">as</span> _sketch1:
     <span class="hl-k">with</span> <span class="hl-t">Locations</span>((-<span class="hl-n">18</span>, <span class="hl-n">0</span>)):
@@ -389,19 +396,19 @@ program.<span class="hl-f">add</span>(<span class="hl-f">pocket</span>(bot, tool
       <li>One project and one session per server; chat history is not persisted across restarts.</li>
       <li>CAM simulation models the tool tip only (no holder or shank collisions) and skips side setups; time estimates ignore acceleration.</li>
       <li>Adaptive corners rely on feed reduction; no trochoidal slotting, no 3D rest, no Z-level finishing.</li>
-      <li>Sketches have no lines or arcs with constraints, no driven dimensions, no snapping to model edges.</li>
+      <li>Sketches have no constraint solver (dimensions are not kept as relationships), and no sketch fillet or trim.</li>
       <li>Manual tools are typed, not dragged (except Press/Pull); no mates or joints, patterns, mirror, loft or sweep by hand.</li>
       <li>Drawings have overall dimensions and hole tables only; no section views or PDF.</li>
       <li>Face and edge ids change on every rebuild.</li>
     </ul>
-    <p>Roadmap, roughly in order: projects and sessions; CAM holder and shank collision checks; assembly positioning and a standard-parts library; sketch upgrades; drag handles everywhere; a WebSerial G-code sender; drawing and import upgrades; deployment (Docker, auth, multi-user); other posts and 3D-printing exports. Issues and contributions: <a href="https://github.com/agenticcad/agenticcad">github.com/agenticcad/agenticcad</a>.</p>
+    <p>Roadmap, roughly in order: projects and sessions; CAM holder and shank collision checks; assembly positioning and a standard-parts library; sketch constraints and dimensions; drag handles everywhere; a WebSerial G-code sender; drawing and import upgrades; deployment (Docker, auth, multi-user); other posts and 3D-printing exports. Issues and contributions: <a href="https://github.com/agenticcad/agenticcad">github.com/agenticcad/agenticcad</a>.</p>
 
     <h2 id="licence">Licence</h2>
     <p>AgenticCAD is free for <b>non-commercial use</b> under the <a href="https://github.com/agenticcad/agenticcad/blob/main/LICENSE">PolyForm Noncommercial License 1.0.0</a>: personal projects, research, education, hobby making, charities, schools and public institutions. <b>Commercial use</b> (in a business, in products or services, or as part of paid work) needs a commercial licence: <b>A$99 per user per year</b>, one licence per person who uses it. Buy online for the number of users you need; the Stripe receipt showing users and period is your licence record, with nothing to enter in the software. Volume or site licences: <a href="mailto:agenticcad@prodevelop.com.au?subject=AgenticCAD%20commercial%20licence">agenticcad@prodevelop.com.au</a>.</p>
   </main>
 </div>
 <footer><div class="wrap"><span>© 2026 AgenticCAD · PolyForm Noncommercial 1.0.0</span><a href="../terms.html">Terms</a><a href="../privacy.html">Privacy</a><a href="#" data-cookie-settings>Cookie settings</a><a href="https://github.com/agenticcad/agenticcad">GitHub</a><a href="../tutorials/">Tutorials</a><a href="../index.html">Home</a></div></footer>
-<script src="../assets/site.js?v=0.19.0"></script>
+<script src="../assets/site.js?v=0.20.0"></script>
 <script>
   const links = [...document.querySelectorAll('.toc a')], heads = links.map(a => document.querySelector(a.getAttribute('href')));
   const io = new IntersectionObserver(() => { let cur = 0; heads.forEach((h, i) => { if (h && h.getBoundingClientRect().top < 120) cur = i; }); links.forEach((a, i) => a.classList.toggle('on', i === cur)); }, { rootMargin: '-100px 0px -70% 0px', threshold: [0, 1] });
