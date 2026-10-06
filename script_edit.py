@@ -277,10 +277,12 @@ def _f(v: float) -> str:
     return f"{float(v):.4g}" if abs(float(v)) >= 1e-9 else "0"
 
 
-def sketch_code(name: str, plane: dict, items: list[dict]) -> str:
-    """build123d BuildSketch block for the editor's plane + items (coordinates are plane-local mm)."""
+def sketch_code(name: str, plane: dict, items: list[dict], constraints: list[dict] | None = None) -> str:
+    """build123d BuildSketch block for the editor's plane + items (coordinates are plane-local mm). Constraints and
+    dimensions ride in the header so the editor and the agent can keep editing them; the code uses the solved numbers."""
     o, x, z = plane["origin"], plane["x_dir"], plane["z_dir"]
-    lines = [f"# sketch:{name} " + _json.dumps({"plane": plane, "items": items}, separators=(",", ":")),
+    head = {"plane": plane, "items": items} | ({"constraints": constraints} if constraints else {})
+    lines = [f"# sketch:{name} " + _json.dumps(head, separators=(",", ":")),
              f"with BuildSketch(Plane(origin=({_f(o[0])}, {_f(o[1])}, {_f(o[2])}), x_dir=({_f(x[0])}, {_f(x[1])}, {_f(x[2])}), "
              f"z_dir=({_f(z[0])}, {_f(z[1])}, {_f(z[2])}))) as _{name}:"]
     for it in items:
@@ -358,7 +360,7 @@ def sketches(code: str) -> list[dict]:
     for m in _SK_HEAD.finditer(code):
         try:
             d = _json.loads(m.group(2))
-            out.append({"name": m.group(1), "plane": d.get("plane"), "items": d.get("items", [])})
+            out.append({"name": m.group(1), "plane": d.get("plane"), "items": d.get("items", []), "constraints": d.get("constraints", [])})
         except Exception:
             continue
     return out
@@ -377,11 +379,18 @@ def _block_span(code: str, name: str):
     return m.start(), e
 
 
-def set_sketch(code: str, name: str, plane: dict, items: list[dict]) -> str:
-    """Replace the named sketch block, or insert a new one before the top-level `result = ...`."""
+def set_sketch(code: str, name: str, plane: dict, items: list[dict], constraints: list[dict] | None = None) -> str:
+    """Replace the named sketch block, or insert a new one before the top-level `result = ...`. Constraints are solved
+    first (the items' numbers are moved to satisfy them); a conflict raises Refused."""
     if not _re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", name):
         raise Refused("sketch name must be a Python identifier")
-    block = sketch_code(name, plane, items)
+    if constraints:
+        import sketch_solver
+        try:
+            sketch_solver.apply(items, constraints)
+        except sketch_solver.SketchConstraintError as e:
+            raise Refused(str(e)) from None
+    block = sketch_code(name, plane, items, constraints)
     span = _block_span(code, name)
     if span:
         return code[:span[0]] + block + code[span[1]:]

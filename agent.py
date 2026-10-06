@@ -756,10 +756,11 @@ class CadAgent:
         return meta
 
     # ------------------------------------------------------------------ sketches (UI 2D editor)
-    async def set_sketch(self, name: str, plane: dict[str, Any], items: list[dict[str, Any]], by_agent: bool = False) -> None:
+    async def set_sketch(self, name: str, plane: dict[str, Any], items: list[dict[str, Any]], by_agent: bool = False,
+                         constraints: list[dict[str, Any]] | None = None) -> None:
         if self.model is None:
             return
-        code = script_edit.set_sketch(self.model.code, name, plane, items)
+        code = script_edit.set_sketch(self.model.code, name, plane, items, constraints)
         await self.build(code, source="sketch")
         desc = ", ".join(f"{it['type']}" + (" (subtract)" if it.get("mode") == "subtract" else "") for it in items) or "empty"
         if by_agent:
@@ -1694,10 +1695,18 @@ class CadAgent:
               "{type:'circle',cx,cy,r} | {type:'polygon',pts:[[x,y],..]} | {type:'slot',x1,y1,x2,y2,w} | "
               "{type:'profile',start:[x,y],segs:[{to:[x,y]} (line) | {to:[x,y],via:[x,y]} (three-point arc through via), ..]} "
               "(a closed outline of lines and arcs; it closes back to start), each with mode 'add'|'subtract'; "
+              "optional constraints = [{type, refs, value?}] solved before the code is written: coincident [pt, pt], "
+              "on [pt, edge|circle], horizontal/vertical [edge] or [pt, pt], parallel/perpendicular [edge, edge], "
+              "tangent, equal, concentric, midpoint [pt, edge], fix [pt] (value [x, y]) and dimensions length [edge], "
+              "distance [pt, pt|edge], hdistance/vdistance [pt, pt], radius/diameter [circle], angle [edge, edge] (deg). "
+              "refs: point {i, p} (rect c/p0..p3, circle c, slot a/b, polygon p0.., profile s / e<k> segment end / v<k> arc "
+              "through point), edge {i, e: k} (rect side 0 bottom..3 left, polygon side, profile segment, slot 0), circle {i} "
+              "(or {i, e: k} for a profile arc), i = item index; "
               "coordinates are plane-local mm. Prefer this over rewriting sketch blocks by hand.",
               {"type": "object", "properties": {"action": {"type": "string", "enum": ["list", "get", "set", "delete"]},
                                                 "name": {"type": "string"}, "plane": {"type": "object"},
-                                                "items": {"type": "array", "items": {"type": "object"}}}, "required": ["action"]})
+                                                "items": {"type": "array", "items": {"type": "object"}},
+                                                "constraints": {"type": "array", "items": {"type": "object"}}}, "required": ["action"]})
         async def sketch_tool(args: dict[str, Any]) -> dict[str, Any]:
             a = args["action"]
             try:
@@ -1726,7 +1735,7 @@ class CadAgent:
                     if k not in plane:
                         return {"content": [{"type": "text", "text": f"plane needs {k}"}], "is_error": True}
                 plane.setdefault("label", "agent")
-                await agent.set_sketch(name, plane, list(args.get("items") or []), by_agent=True)
+                await agent.set_sketch(name, plane, list(args.get("items") or []), by_agent=True, constraints=list(args.get("constraints") or []))
                 sk = next((s for s in agent.model.sketches if s["name"] == name), None)
                 return {"content": [{"type": "text", "text": f"sketch '{name}' set: " + (f"{sk['faces']} face(s), area {sk['area']}" if sk else "built with no faces (check item modes/overlaps)")}]}
             except (ck.CadError, script_edit.Unsupported) as e:

@@ -271,11 +271,22 @@ XY/XZ/YZ + offset) → **✎ Sketch**. The camera snaps square to the plane. Too
 - The item list edits numbers directly (profiles list their points), toggles add/subtract per item, and removes
   items.
 
-There is no constraint solver yet: dimensions are applied when you place or edit a point, not kept as
-relationships. Finish writes the sketch into the script as a block
+- **Constraints**: pick points, lines and circles with Select (shift-click to add more), then use the Constrain row:
+  coincident, point on edge or circle, horizontal, vertical, parallel, perpendicular, tangent, equal, concentric,
+  midpoint and fix. **Dim (D)** dimensions what's picked: a line's length, a circle's diameter, an arc's radius,
+  the distance between two points or from a point to a line, or the angle between two lines. Type the value, and
+  double-click a dimension to change it later.
+- Drawing adds the obvious constraints for you: horizontal and vertical segments, and points snapped onto existing
+  sketch points.
+- The solver keeps everything satisfied while you drag or edit numbers. The status line shows the remaining
+  degrees of freedom, and fully constrained items turn white. A constraint that conflicts with the others, or
+  is already implied by them, is refused with a message. The constraint list removes them (× or Delete), and
+  deleting an item removes its constraints.
+
+Finish writes the sketch into the script as a block
 
 ```python
-# sketch:sketch1 {"plane": {...}, "items": [...]}
+# sketch:sketch1 {"plane": {...}, "items": [...], "constraints": [...]}
 with BuildSketch(Plane(origin=..., x_dir=..., z_dir=...)) as _sketch1:
     with Locations((5, 0)):
         Rectangle(20, 10)
@@ -287,7 +298,8 @@ sketch1 = _sketch1.sketch
 so it is a normal build123d `Sketch` variable the agent can `extrude` / cut / `revolve`, and the JSON
 header lets the editor reopen it (Browser ▸ Sketches ▸ double-click or ⋯). Sketches render as cyan
 outlines and can be selected as chat chips. The **agent edits sketches through the `sketch` tool**
-(list/get/set/delete, same item format), so anything it draws stays editable by you and vice versa.
+(list/get/set/delete, same item and constraint format), so anything it draws stays editable by you and vice
+versa. Constraints are solved on save, and a conflicting set is refused.
 
 ### Modelling ribbon (Fusion-style, no agent turn)
 Top of the viewer: **Create** Box `B` / Cylinder `C` / Sphere `O` / Sketch `K` / Revolve `R` / Loft `G` / Sweep `W`,

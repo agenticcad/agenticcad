@@ -213,6 +213,14 @@
   .skrow .nm { cursor:pointer; } .skrow.sel { background:rgba(255,140,66,.08); box-shadow:inset 2px 0 0 var(--accent); }
   .skrow .mini { background:var(--panel2); border:1px solid var(--line); color:var(--text); border-radius:4px; font-size:11px; padding:0 5px; cursor:pointer; margin-left:auto; } .skrow .mini + b { margin-left:4px; }
   .skpts { width:100%; display:flex; flex-direction:column; gap:2px; padding:2px 0 2px 10px; } .skpts.hide { display:none; } .skpts div { display:flex; gap:4px; align-items:center; } .skpts .k { width:62px; }
+  #sk-dimedit { position:absolute; z-index:6; display:none; gap:4px; align-items:center; background:#1c2633; border:1px solid #9fc6ff; border-radius:6px; padding:2px 6px; font-size:12px; }
+  #sk-dimedit input { width:72px; background:var(--bg); color:var(--text); border:1px solid var(--line); border-radius:4px; padding:2px 4px; font:12px ui-monospace,Menlo,monospace; } #sk-dimedit span { color:var(--muted); }
+  #sk-cons .btn.tool { min-width:26px; padding:3px 6px; font-size:12px; } #sk-cons .btn:disabled { opacity:.35; }
+  #sk-status { font-size:11px; color:var(--muted); margin-top:4px; } #sk-status b { color:var(--text); } #sk-status b.ok { color:var(--ok); }
+  #sk-status .bad { color:var(--err); margin-top:2px; } #sk-status .okm { color:var(--ok); margin-top:2px; }
+  .skcons { margin-top:6px; border-top:1px solid var(--line); padding-top:4px; } .skcons .hd { font-size:10px; text-transform:uppercase; letter-spacing:.3px; }
+  .skc { display:flex; gap:5px; align-items:center; padding:2px 2px; font-size:11px; cursor:pointer; border-radius:4px; } .skc:hover { background:var(--panel2); } .skc.sel { background:rgba(255,140,66,.12); }
+  .skc .g { width:14px; text-align:center; color:#9fc6ff; } .skc b { margin-left:auto; color:var(--err); cursor:pointer; }
   #sk-dim { position:absolute; z-index:5; display:none; gap:4px; align-items:center; background:rgba(20,23,28,.92); border:1px solid var(--accent); border-radius:6px; padding:3px 6px; font-size:11px; pointer-events:auto; }
   #sk-dim label { color:var(--accent); font-weight:600; } #sk-dim span { color:var(--muted); margin-right:4px; } #sk-dim i { color:var(--muted); font-style:normal; font-size:10px; }
   #sk-dim input { width:58px; background:var(--bg); color:var(--text); border:1px solid var(--line); border-radius:4px; padding:2px 4px; font:inherit; } #sk-dim input.lock { border-color:var(--accent); color:var(--accent); }
@@ -376,6 +384,8 @@
       <button class="btn tool" data-tool="circle" title="Circle (C): centre, then a point on it · type a diameter">◯ Circle</button>
       <button class="btn tool" data-tool="slot" title="Slot (S): two end centres · width below">⬭ Slot</button></span>
       <span class="skr-break"></span>
+      <span class="skr-tools" id="sk-cons"><span class="muted" style="align-self:center;margin-right:2px">Constrain</span><button class="btn tool" data-con="coincident" title="Coincident: two points">⦿</button><button class="btn tool" data-con="on" title="Point on an edge or circle">⊙</button><button class="btn tool" data-con="horizontal" title="Horizontal: lines, or two points level">H</button><button class="btn tool" data-con="vertical" title="Vertical: lines, or two points in line">V</button><button class="btn tool" data-con="parallel" title="Parallel: two lines">∥</button><button class="btn tool" data-con="perpendicular" title="Perpendicular: two lines">⊥</button><button class="btn tool" data-con="tangent" title="Tangent: a line or arc and a circle or arc">◡</button><button class="btn tool" data-con="equal" title="Equal: two lines (length) or two circles/arcs (radius)">=</button><button class="btn tool" data-con="concentric" title="Concentric: two circles/arcs">◎</button><button class="btn tool" data-con="midpoint" title="Midpoint: a point and a line">◇</button><button class="btn tool" data-con="fix" title="Fix points where they are">⚓</button><button class="btn tool" data-con="dimension" title="Dimension (D): a line's length, a circle's diameter, an arc's radius, two points' distance, a point to a line, or the angle between two lines">↔ Dim</button></span>
+      <span class="skr-break"></span>
       <label class="muted" style="display:flex;gap:4px;align-items:center"><input type="checkbox" id="sk-sub"> subtract</label>
       <label class="muted" style="display:flex;gap:4px;align-items:center" title="snap to model corners, circle centres, edge midpoints and edges in this plane (hold Alt to place freely)"><input type="checkbox" id="sk-snapm" checked> model</label>
       <label class="muted" style="display:flex;gap:4px;align-items:center">grid <input type="text" id="sk-snap" value="1" style="width:34px"></label>
@@ -383,8 +393,9 @@
       <span style="flex:1"></span><button class="btn primary" id="sk-finish">Finish</button><button class="btn" id="sk-cancel">Cancel</button>
     </div>
     <div id="sk-dim"></div>
+    <div id="sk-dimedit"></div>
     <div id="anim-panel"></div>
-    <div id="sketch-items"><div class="sk-hd"><input type="text" id="sk-name" value="sketch1" title="sketch name (a Python variable)"><span class="muted" id="sk-plane"></span></div><div class="hd muted" style="font-size:10px;text-transform:uppercase;letter-spacing:.3px;margin:4px 0 2px">Items · Esc cancels · ⌫ undoes · Alt = no snap</div><div id="sk-list"></div></div>
+    <div id="sketch-items"><div class="sk-hd"><input type="text" id="sk-name" value="sketch1" title="sketch name (a Python variable)"><span class="muted" id="sk-plane"></span></div><div id="sk-status"></div><div class="hd muted" style="font-size:10px;text-transform:uppercase;letter-spacing:.3px;margin:4px 0 2px">Items · Esc cancels · ⌫ undoes · Alt = no snap</div><div id="sk-list"></div></div>
 
     <div id="params-card" style="display:none"><div class="hd">Parameters <span class="muted" id="params-hint" style="text-transform:none;letter-spacing:0"></span></div><div id="params-body"></div></div>
     <div id="measure-panel" style="display:none">
@@ -908,7 +919,7 @@ async function renderScreenshot(spec) {
   }
 }
 
-window.agenticcad = { renderScreenshot, get model() { return model; }, scene, camera, renderer, send: (o) => send(o) };
+window.agenticcad = { renderScreenshot, get model() { return model; }, get sketch() { return sk; }, scene, camera, renderer, send: (o) => send(o) };
 
 // toolbar
 document.getElementById('fit').onclick = () => fitCamera();
@@ -1786,7 +1797,9 @@ async function startSketch(def) {
   if (measuring) setMeasuring(false); if (tool) endTool();
   if (isPosed()) poseReset();
   sk = { name, plane, items: def ? JSON.parse(JSON.stringify(def.items)) : [], tool: 'line', pts: [], hover: null, snap: null, prof: null,
-         sel: -1, drag: null, lock: {}, dimKey: '', refs: null };
+         sel: -1, drag: null, lock: {}, dimKey: '', refs: null, cons: def && def.constraints ? JSON.parse(JSON.stringify(def.constraints)) : [],
+         picks: [], selCon: null, dof: null, freeItems: null, msg: null };
+  if (sk.cons.length) skSolve();
   sk.refs = skModelRefs();
   document.getElementById('sk-name').value = name; document.getElementById('sk-plane').textContent = plane.label;
   setSkTool('line');
@@ -1804,7 +1817,7 @@ document.getElementById('sk-finish').onclick = () => {
   const name = document.getElementById('sk-name').value.trim() || sk.name;
   if (!/^[A-Za-z_]\w*$/.test(name)) { addMsg('error', 'sketch name must be a Python identifier'); return; }
   const plane = { origin: sk.plane.origin.map(v => +v.toFixed(4)), x_dir: sk.plane.x.toArray().map(v => +v.toFixed(6)), z_dir: sk.plane.z.toArray().map(v => +v.toFixed(6)), label: sk.plane.label };
-  agenticcad.send({ type: 'set_sketch', name, plane, items: sk.items });
+  agenticcad.send({ type: 'set_sketch', name, plane, items: sk.items, constraints: sk.cons });
   endSketch();
 };
 function setSkTool(t) {
@@ -1812,10 +1825,11 @@ function setSkTool(t) {
   const keepProf = (t === 'line' || t === 'arc') && (sk.tool === 'line' || sk.tool === 'arc');
   if (!keepProf) sk.prof = null; else if (sk.prof && t === 'line') sk.prof.pending = null;
   sk.tool = t; sk.pts = []; sk.lock = {}; sk.drag = null;
-  document.querySelectorAll('#sketch-panel .tool').forEach(x => x.classList.toggle('active', x.dataset.tool === t));
+  document.querySelectorAll('#sketch-panel .tool[data-tool]').forEach(x => x.classList.toggle('active', x.dataset.tool === t));
   document.body.classList.toggle('sk-select', t === 'select');
 }
-document.querySelectorAll('#sketch-panel .tool').forEach(b => b.onclick = () => setSkTool(b.dataset.tool));
+document.querySelectorAll('#sketch-panel .tool[data-tool]').forEach(b => b.onclick = () => setSkTool(b.dataset.tool));
+document.querySelectorAll('#sk-cons [data-con]').forEach(b => b.onclick = () => applyConstraintTool(b.dataset.con));
 const r3 = x => +(+x).toFixed(3);
 function skRaw(ev) {
   const rect = renderer.domElement.getBoundingClientRect();
@@ -1873,27 +1887,28 @@ function profilePts(it, extra) {   // outline of a profile (closed unless `extra
 function skHandles(it) {
   const H = [], set = (o, kx, ky) => (u, v) => { o[kx] = r3(u); o[ky] = r3(v); };
   if (it.type === 'rect') {
-    H.push([it.cx, it.cy, 'centre', set(it, 'cx', 'cy')]);
+    H.push([it.cx, it.cy, 'centre', set(it, 'cx', 'cy'), 'c']);
     const a = (it.angle || 0) * Math.PI / 180, c = Math.cos(a), s_ = Math.sin(a);
-    for (const [sx, sy] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) {
+    for (const [ci_, [sx, sy]] of [[-1, -1], [1, -1], [1, 1], [-1, 1]].entries()) {
       const x = sx * it.w / 2, y = sy * it.h / 2;
       H.push([it.cx + x * c - y * s_, it.cy + x * s_ + y * c, 'vertex', it.angle ? null : (u, v) => {
         const ox = it.cx - sx * it.w / 2, oy = it.cy - sy * it.h / 2;
         if (Math.abs(u - ox) < 1e-3 || Math.abs(v - oy) < 1e-3) return;
         it.w = r3(Math.abs(u - ox)); it.h = r3(Math.abs(v - oy)); it.cx = r3((u + ox) / 2); it.cy = r3((v + oy) / 2);
-      }]);
+      }, 'p' + ci_]);
     }
   } else if (it.type === 'circle') {
-    H.push([it.cx, it.cy, 'centre', set(it, 'cx', 'cy')]);
+    H.push([it.cx, it.cy, 'centre', set(it, 'cx', 'cy'), 'c']);
     for (const [dx, dy] of [[1, 0], [0, 1], [-1, 0], [0, -1]]) H.push([it.cx + dx * it.r, it.cy + dy * it.r, 'quadrant', (u, v) => { const r = Math.hypot(u - it.cx, v - it.cy); if (r > 1e-3) it.r = r3(r); }]);
-  } else if (it.type === 'slot') { H.push([it.x1, it.y1, 'centre', set(it, 'x1', 'y1')], [it.x2, it.y2, 'centre', set(it, 'x2', 'y2')]); }
-  else if (it.type === 'polygon') it.pts.forEach(p => H.push([p[0], p[1], 'vertex', (u, v) => { p[0] = r3(u); p[1] = r3(v); }]));
+  } else if (it.type === 'slot') { H.push([it.x1, it.y1, 'centre', set(it, 'x1', 'y1'), 'a'], [it.x2, it.y2, 'centre', set(it, 'x2', 'y2'), 'b']); }
+  else if (it.type === 'polygon') it.pts.forEach((p, j) => H.push([p[0], p[1], 'vertex', (u, v) => { p[0] = r3(u); p[1] = r3(v); }, 'p' + j]));
   else if (it.type === 'profile') {
-    H.push([it.start[0], it.start[1], 'vertex', (u, v) => { it.start[0] = r3(u); it.start[1] = r3(v); }]);
+    const closedP = Math.hypot(it.segs[it.segs.length - 1].to[0] - it.start[0], it.segs[it.segs.length - 1].to[1] - it.start[1]) < 1e-6;
+    H.push([it.start[0], it.start[1], 'vertex', (u, v) => { it.start[0] = r3(u); it.start[1] = r3(v); if (closedP) it.segs[it.segs.length - 1].to = it.start.slice(); }, 's']);
     let cur = it.start;
-    for (const sg of it.segs) {
-      if (Math.hypot(sg.to[0] - it.start[0], sg.to[1] - it.start[1]) > 1e-6) H.push([sg.to[0], sg.to[1], 'vertex', (u, v) => { sg.to[0] = r3(u); sg.to[1] = r3(v); }]);
-      if (sg.via) { H.push([sg.via[0], sg.via[1], 'arc', (u, v) => { sg.via[0] = r3(u); sg.via[1] = r3(v); }]); const f = arcFit(cur, sg.via, sg.to); if (f) H.push([f.c[0], f.c[1], 'centre', null]); }
+    for (const [j, sg] of it.segs.entries()) {
+      if (Math.hypot(sg.to[0] - it.start[0], sg.to[1] - it.start[1]) > 1e-6) H.push([sg.to[0], sg.to[1], 'vertex', (u, v) => { sg.to[0] = r3(u); sg.to[1] = r3(v); }, 'e' + j]);
+      if (sg.via) { H.push([sg.via[0], sg.via[1], 'arc', (u, v) => { sg.via[0] = r3(u); sg.via[1] = r3(v); }, 'v' + j]); const f = arcFit(cur, sg.via, sg.to); if (f) H.push([f.c[0], f.c[1], 'centre', null]); }
       else H.push([(cur[0] + sg.to[0]) / 2, (cur[1] + sg.to[1]) / 2, 'midpoint', null]);
       cur = sg.to;
     }
@@ -1910,13 +1925,13 @@ function skSnap(ev, skip) {
   if (ev.altKey) return { ...base, p: base.p.map(r3) };
   const tolPx = 10, mx = raw.mx, my = raw.my, useModel = document.getElementById('sk-snapm').checked;
   let best = null;
-  const consider = (u, v, kind, bias = 0) => { const [x, y] = skScreen(u, v), d = Math.hypot(x - mx, y - my) + bias; if (d < tolPx && (!best || d < best.d)) best = { d, p: [u, v], kind }; };
-  sk.items.forEach((it, i) => skHandles(it).forEach(([u, v, kind, setter], k) => { if (!(skip && skip.i === i && skip.k === k)) consider(u, v, kind); }));
+  const consider = (u, v, kind, bias = 0, ref = null) => { const [x, y] = skScreen(u, v), d = Math.hypot(x - mx, y - my) + bias; if (d < tolPx && (!best || d < best.d)) best = { d, p: [u, v], kind, ref }; };
+  sk.items.forEach((it, i) => skHandles(it).forEach(([u, v, kind, setter, key], k) => { if (!(skip && skip.i === i && skip.k === k)) consider(u, v, kind, 0, key ? { i, p: key } : null); }));
   if (sk.prof) { consider(sk.prof.start[0], sk.prof.start[1], sk.prof.segs.length >= (sk.tool === 'arc' ? 1 : 2) ? 'close' : 'vertex', -2); for (const sg of sk.prof.segs) consider(sg.to[0], sg.to[1], 'vertex'); }
   for (const p of sk.pts) consider(p[0], p[1], 'vertex');
   consider(0, 0, 'origin', 1);
   if (useModel && sk.refs) for (const q of sk.refs.pts) consider(q.u, q.v, q.kind, q.inPlane ? 0 : 3);
-  if (best) return { ...base, p: best.p.map(r3), kind: best.kind };
+  if (best) return { ...base, p: best.p.map(r3), kind: best.kind, ref: best.ref };
   if (useModel && sk.refs) {
     const k = skPxPerMm(); let be = null;
     for (const [a, b] of sk.refs.edges) {
@@ -1993,26 +2008,38 @@ function skCloseProfile() {
   const last = pr.segs.length ? pr.segs[pr.segs.length - 1].to : pr.start;
   if (Math.hypot(last[0] - pr.start[0], last[1] - pr.start[1]) > 1e-6) pr.segs.push({ to: pr.start.slice() });
   const nArcs = pr.segs.filter(s_ => s_.via).length;
-  if (pr.segs.length >= 3 || (pr.segs.length >= 2 && nArcs)) sk.items.push({ type: 'profile', start: pr.start, segs: pr.segs, mode: document.getElementById('sk-sub').checked ? 'subtract' : 'add' });
+  if (pr.segs.length >= 3 || (pr.segs.length >= 2 && nArcs)) {
+    sk.items.push({ type: 'profile', start: pr.start, segs: pr.segs, mode: document.getElementById('sk-sub').checked ? 'subtract' : 'add' });
+    const ni = sk.items.length - 1, n = pr.segs.length;
+    // the closing segment returns to the start (no separate end point): drop auto constraints on its end, keep the rest
+    autoConstrain((pr.auto || []).filter(c => !c.refs.some(r => r.i === -1 && r.p === 'e' + (n - 1))).map(c => ({ ...c, refs: c.refs.map(r => r.i === -1 ? { ...r, i: ni } : r) })));
+  }
   else addMsg('error', 'a profile needs at least three lines (or a line and an arc) to enclose an area');
   sk.prof = null; sk.lock = {}; renderSkItems();
 }
-function skPlace(p, kind) {
+function skPlace(p, kind, snap) {
   const mode = document.getElementById('sk-sub').checked ? 'subtract' : 'add';
   sk.lock = {};
+  const hit = snap && snap.ref ? snap.ref : null;
   if (sk.tool === 'line' || sk.tool === 'arc') {
-    if (!sk.prof) { sk.prof = { start: p.slice(), segs: [], pending: null }; return; }
+    if (!sk.prof) { sk.prof = { start: p.slice(), segs: [], pending: null, auto: hit ? [{ type: 'coincident', refs: [{ i: -1, p: 's' }, hit] }] : [] }; return; }
     const pr = sk.prof;
     if (pr.pending) { pr.segs.push({ to: pr.pending, via: p.slice() }); const closed = Math.hypot(pr.pending[0] - pr.start[0], pr.pending[1] - pr.start[1]) < 1e-6; pr.pending = null; if (closed) skCloseProfile(); renderSkItems(); return; }
     const cur = skCurrent(); if (Math.hypot(p[0] - cur[0], p[1] - cur[1]) < 1e-6) return;
     const atStart = Math.hypot(p[0] - pr.start[0], p[1] - pr.start[1]) < 1e-6;
     if (sk.tool === 'arc') { pr.pending = p.slice(); return; }
     pr.segs.push({ to: p.slice() });
+    const j = pr.segs.length - 1;
+    if (!atStart && hit) pr.auto.push({ type: 'coincident', refs: [{ i: -1, p: 'e' + j }, hit] });
+    const g = snap && (snap.guides || []).find(([a]) => Math.hypot(a[0] - cur[0], a[1] - cur[1]) < 1e-6);
+    if (g && (snap.kind === 'horizontal' || snap.kind === 'vertical')) pr.auto.push({ type: snap.kind, refs: [{ i: -1, e: j }] });
+    else if (Math.abs(p[1] - cur[1]) < 1e-9 && Math.abs(p[0] - cur[0]) > 1e-6) pr.auto.push({ type: 'horizontal', refs: [{ i: -1, e: j }] });
+    else if (Math.abs(p[0] - cur[0]) < 1e-9 && Math.abs(p[1] - cur[1]) > 1e-6) pr.auto.push({ type: 'vertical', refs: [{ i: -1, e: j }] });
     if (atStart) skCloseProfile();
     renderSkItems(); return;
   }
-  if (sk.tool === 'rect') { sk.pts.push(p); if (sk.pts.length === 2) { const [a, b] = sk.pts; if (a[0] !== b[0] && a[1] !== b[1]) sk.items.push({ type: 'rect', cx: r3((a[0] + b[0]) / 2), cy: r3((a[1] + b[1]) / 2), w: r3(Math.abs(b[0] - a[0])), h: r3(Math.abs(b[1] - a[1])), angle: 0, mode }); sk.pts = []; } }
-  else if (sk.tool === 'circle') { sk.pts.push(p); if (sk.pts.length === 2) { const [c, e] = sk.pts; const r = Math.hypot(e[0] - c[0], e[1] - c[1]); if (r > 0) sk.items.push({ type: 'circle', cx: c[0], cy: c[1], r: r3(r), mode }); sk.pts = []; } }
+  if (sk.tool === 'rect') { sk.pts.push(p); (sk.ptRefs ||= []).push(hit); if (sk.pts.length === 2) { const [a, b] = sk.pts; if (a[0] !== b[0] && a[1] !== b[1]) { sk.items.push({ type: 'rect', cx: r3((a[0] + b[0]) / 2), cy: r3((a[1] + b[1]) / 2), w: r3(Math.abs(b[0] - a[0])), h: r3(Math.abs(b[1] - a[1])), angle: 0, mode }); const ni = sk.items.length - 1; autoConstrain(sk.ptRefs.map((h, w) => h ? { type: 'coincident', refs: [{ i: ni, p: rectCornerKey(a, b, w) }, h] } : null).filter(Boolean)); } sk.pts = []; sk.ptRefs = []; } }
+  else if (sk.tool === 'circle') { sk.pts.push(p); (sk.ptRefs ||= []).push(hit); if (sk.pts.length === 2) { const [c, e] = sk.pts; const r = Math.hypot(e[0] - c[0], e[1] - c[1]); if (r > 0) { sk.items.push({ type: 'circle', cx: c[0], cy: c[1], r: r3(r), mode }); if (sk.ptRefs[0]) autoConstrain([{ type: 'coincident', refs: [{ i: sk.items.length - 1, p: 'c' }, sk.ptRefs[0]] }]); } sk.pts = []; sk.ptRefs = []; } }
   else if (sk.tool === 'slot') { sk.pts.push(p); if (sk.pts.length === 2) { const [a, b] = sk.pts; if (a[0] !== b[0] || a[1] !== b[1]) sk.items.push({ type: 'slot', x1: a[0], y1: a[1], x2: b[0], y2: b[1], w: parseFloat(document.getElementById('sk-slotw').value) || 6, mode }); sk.pts = []; } }
   renderSkItems();
 }
@@ -2026,20 +2053,35 @@ renderer.domElement.addEventListener('pointerdown', ev => {
   const raw = skRaw(ev); if (!raw) return;
   const h = skHandleAt(raw.mx, raw.my); if (!h) return;
   ev.stopImmediatePropagation(); controls.enabled = false; renderer.domElement.setPointerCapture(ev.pointerId);
-  sk.drag = h; sk.sel = h.i; renderSkItems();
+  sk.drag = { ...h, at: [ev.clientX, ev.clientY], moved: false }; sk.sel = h.i; renderSkItems();
 }, true);
 renderer.domElement.addEventListener('pointermove', ev => {
   if (!sk) return;
   sk.hover = skSnap(ev, sk.drag);
-  if (sk.drag && sk.hover) { const it = sk.items[sk.drag.i], h = skHandles(it)[sk.drag.k]; if (h && h[3]) { h[3](...sk.hover.p); renderSkItemValues(); } }
+  if (sk.drag && !sk.drag.moved && Math.hypot(ev.clientX - sk.drag.at[0], ev.clientY - sk.drag.at[1]) > 3) sk.drag.moved = true;
+  if (sk.drag && sk.drag.moved && sk.hover) {
+    const it = sk.items[sk.drag.i], h = skHandles(it)[sk.drag.k];
+    if (h && h[4] && sk.cons.length) { sketchDrag(sk.items, sk.cons, { i: sk.drag.i, p: h[4] }, sk.hover.p); renderSkItemValues(); }
+    else if (h && h[3]) { h[3](...sk.hover.p); if (sk.cons.length) skSolve(false); renderSkItemValues(); }
+  }
 });
 renderer.domElement.addEventListener('pointerup', ev => {
   if (!sk || ev.button !== 0) return;
-  if (sk.drag) { sk.drag = null; controls.enabled = true; ev.stopImmediatePropagation(); renderSkItems(); return; }
-  if (!downAt || Math.hypot(ev.clientX - downAt[0], ev.clientY - downAt[1]) > 4) return;
+  if (sk.drag) {
+    const moved = sk.drag.moved; sk.drag = null; controls.enabled = true; ev.stopImmediatePropagation();
+    if (moved) { skSolve(); renderSkItems(); return; }
+    // a press on a point that didn't move is a click: pick the point
+  } else if (!downAt || Math.hypot(ev.clientX - downAt[0], ev.clientY - downAt[1]) > 4) return;
   const s_ = skSnap(ev); if (!s_) return;
-  if (sk.tool === 'select') { const raw = skRaw(ev), h = raw && skHandleAt(raw.mx, raw.my); sk.sel = h ? h.i : skItemAt(s_.p); renderSkItems(); return; }
-  skPlace(skTarget(s_.p), s_.kind);
+  if (sk.tool === 'select') {
+    const raw = skRaw(ev); if (!raw) return;
+    const ci = skHitConstraint(raw.mx, raw.my);
+    if (ci != null) { sk.selCon = ci; sk.picks = []; if (ev.detail >= 2 && DIM_TYPES.has(sk.cons[ci].type)) skEditDim(ci); renderSkItems(); return; }
+    const pk = skPickAt(raw.mx, raw.my);
+    if (pk) { skTogglePick(pk, ev.shiftKey || ev.metaKey); sk.sel = pk.ref.i; renderSkItems(); return; }
+    sk.picks = []; sk.selCon = null; sk.sel = skItemAt(s_.p); renderSkItems(); return;
+  }
+  skPlace(skTarget(s_.p), s_.kind, s_);
 });
 function skItemAt(p) {   // the topmost item whose outline contains p
   for (let i = sk.items.length - 1; i >= 0; i--) { const poly = skOutline(sk.items[i]); if (poly.length > 2 && pointInPoly(p, poly)) return i; }
@@ -2065,18 +2107,20 @@ document.addEventListener('keydown', ev => {
     return;
   }
   const k = ev.key.toLowerCase();
+  if (k === 'd' && !ev.metaKey && !ev.ctrlKey) { ev.preventDefault(); applyConstraintTool('dimension'); return; }
   if (!ev.metaKey && !ev.ctrlKey && { v: 'select', l: 'line', a: 'arc', r: 'rect', c: 'circle', s: 'slot' }[k]) { setSkTool({ v: 'select', l: 'line', a: 'arc', r: 'rect', c: 'circle', s: 'slot' }[k]); return; }
   if (ev.key === 'Escape') {
     if (sk.prof && sk.prof.pending) sk.prof.pending = null;
-    else if (sk.prof) sk.prof = null; else if (sk.pts.length) sk.pts = []; else if (sk.sel >= 0) sk.sel = -1; else endSketch();
+    else if (sk.prof) sk.prof = null; else if (sk.pts.length) sk.pts = []; else if ((sk.picks || []).length || sk.selCon != null) { sk.picks = []; sk.selCon = null; } else if (sk.sel >= 0) sk.sel = -1; else endSketch();
     if (sk) { sk.lock = {}; renderSkItems(); }
   }
   if (ev.key === 'Backspace' || ev.key === 'Delete') {
     ev.preventDefault();
     if (sk.prof) { if (sk.prof.pending) sk.prof.pending = null; else if (sk.prof.segs.length) sk.prof.segs.pop(); else sk.prof = null; }
     else if (sk.pts.length) sk.pts.pop();
-    else if (sk.sel >= 0) { sk.items.splice(sk.sel, 1); sk.sel = -1; }
-    else if (ev.key === 'Backspace') sk.items.pop();
+    else if (sk.selCon != null) removeConstraint(sk.selCon);
+    else if (sk.sel >= 0) { const i = sk.sel; sk.items.splice(i, 1); removeItemConstraints(i); sk.sel = -1; sk.picks = []; }
+    else if (ev.key === 'Backspace' && sk.items.length) { const i = sk.items.length - 1; sk.items.pop(); removeItemConstraints(i); }
     renderSkItems();
   }
   if (ev.key === 'Enter' && sk.prof && sk.prof.segs.length >= 2) skCloseProfile();
@@ -2084,6 +2128,7 @@ document.addEventListener('keydown', ev => {
 function renderSkItems() {
   const el = document.getElementById('sk-list'); el.innerHTML = '';
   if (!sk) return;
+  renderSkStatus();
   const num = (o, k, lbl) => `<span class="k">${lbl || k}</span><input type="number" step="any" value="${o[k]}" data-k="${k}">`;
   sk.items.forEach((it, i) => {
     const r = document.createElement('div'); r.className = 'skrow' + (i === sk.sel ? ' sel' : ''); r.dataset.i = i;
@@ -2098,16 +2143,31 @@ function renderSkItems() {
       const pts = it.type === 'polygon' ? it.pts.map((p, k) => [`P${k + 1}`, p]) : [['start', it.start], ...it.segs.flatMap((s_, k) => [...(s_.via ? [[`arc ${k + 1} via`, s_.via]] : []), ...(k === it.segs.length - 1 && Math.hypot(s_.to[0] - it.start[0], s_.to[1] - it.start[1]) < 1e-6 ? [] : [[`P${k + 2}`, s_.to]])])];
       const det = document.createElement('div'); det.className = 'skpts' + (i === sk.sel ? '' : ' hide');
       det.innerHTML = pts.map(([l, p], k) => `<div><span class="k">${l}</span><input type="number" step="any" value="${p[0]}" data-p="${k}" data-c="0"><input type="number" step="any" value="${p[1]}" data-p="${k}" data-c="1"></div>`).join('');
-      det.querySelectorAll('input').forEach(inp => inp.onchange = () => { pts[+inp.dataset.p][1][+inp.dataset.c] = parseFloat(inp.value) || 0; });
+      det.querySelectorAll('input').forEach(inp => inp.onchange = () => { pts[+inp.dataset.p][1][+inp.dataset.c] = parseFloat(inp.value) || 0; if (sk.cons.length) { skSolve(); renderSkItems(); } });
       r.appendChild(det);
     }
-    r.querySelectorAll('input[data-k]').forEach(inp => inp.onchange = () => { it[inp.dataset.k] = parseFloat(inp.value) || 0; });
+    r.querySelectorAll('input[data-k]').forEach(inp => inp.onchange = () => { it[inp.dataset.k] = parseFloat(inp.value) || 0; if (sk.cons.length) { skSolve(); renderSkItems(); } });
     r.querySelector('[data-a=mode]').onclick = e => { e.stopPropagation(); it.mode = it.mode === 'subtract' ? 'add' : 'subtract'; renderSkItems(); };
-    r.querySelector('b').onclick = e => { e.stopPropagation(); sk.items.splice(i, 1); sk.sel = -1; renderSkItems(); };
+    r.querySelector('b').onclick = e => { e.stopPropagation(); sk.items.splice(i, 1); removeItemConstraints(i); sk.sel = -1; sk.picks = []; renderSkItems(); };
     r.querySelector('.nm').onclick = () => { sk.sel = sk.sel === i ? -1 : i; renderSkItems(); };
     el.appendChild(r);
   });
   if (!sk.items.length) el.innerHTML = '<div class="muted" style="padding:4px 0">Nothing yet. Line (L): click points, click the first point to close; A switches to arcs.</div>';
+  if (sk.cons.length) {
+    const box = document.createElement('div'); box.className = 'skcons';
+    const nm = r => `${r.i + 1}${r.p ? '.' + r.p : r.e != null ? '/' + r.e : ''}`;
+    box.innerHTML = `<div class="hd muted">Constraints (${sk.cons.length})</div>` + sk.cons.map((c, ci) => `<div class="skc ${ci === sk.selCon ? 'sel' : ''}" data-ci="${ci}"><span class="g">${CON_META[c.type] ? CON_META[c.type][0] : '↔'}</span>${c.type}${DIM_TYPES.has(c.type) ? ` = ${+(+c.value).toFixed(3)}${c.type === 'angle' ? '°' : ''}` : ''}<span class="muted"> ${c.refs.map(nm).join(' · ')}</span><b title="remove">×</b></div>`).join('');
+    box.querySelectorAll('.skc').forEach(row => { const ci = +row.dataset.ci; row.onclick = () => { sk.selCon = ci; sk.picks = []; renderSkItems(); }; row.ondblclick = () => skEditDim(ci); row.querySelector('b').onclick = e => { e.stopPropagation(); removeConstraint(ci); }; });
+    el.appendChild(box);
+  }
+}
+function renderSkStatus() {
+  const st = document.getElementById('sk-status'); if (!st || !sk) return;
+  const picks = (sk.picks || []).map(p => p.kind === 'pt' ? 'point' : p.kind).join(' + ');
+  const dof = sk.cons.length ? (sk.dof === 0 ? '<b class="ok">fully constrained</b>' : `<b>${sk.dof}</b> degree${sk.dof === 1 ? '' : 's'} of freedom`) : 'no constraints';
+  const msg = sk.msg && performance.now() - sk.msg.t < 6000 ? `<div class="${sk.msg.bad ? 'bad' : 'okm'}">${sk.msg.text}</div>` : '';
+  st.innerHTML = `<div>${dof}${picks ? ` · picked: ${picks}` : ''}</div>${msg}`;
+  document.querySelectorAll('#sk-cons [data-con]').forEach(b => { b.disabled = !conFromPicks(b.dataset.con, sk.picks || []); });
 }
 function renderSkItemValues() {   // refresh the numbers of the item being dragged without rebuilding the list
   const row = document.querySelector(`#sk-list .skrow[data-i="${sk.drag ? sk.drag.i : -1}"]`); if (!row) return;
@@ -2125,7 +2185,10 @@ function drawSketchOverlay() {
   out.push(L(0, 0, 15, 0, '#e55', 1.5)); out.push(L(0, 0, 0, 15, '#5e5', 1.5));
   if (sk.refs) for (const [a, b] of sk.refs.edges) out.push(L(a[0], a[1], b[0], b[1], '#7fa7c9', 1, true));     // model edges in the plane
   const poly = (pts, col, closed = true, w = 1.5) => `<${closed ? 'polygon' : 'polyline'} points="${pts.map(p => P(...p)).join(' ')}" fill="${closed ? col + '22' : 'none'}" stroke="${col}" stroke-width="${w}"/>`;
-  sk.items.forEach((it, i) => out.push(poly(skOutline(it), i === sk.sel ? '#ff8c42' : it.mode === 'subtract' ? '#ff6b6b' : '#3ee6c6', true, i === sk.sel ? 2.2 : 1.5)));
+  out.push('<defs><marker id="skarr" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 1L10 5L0 9Z" fill="#9fc6ff"/></marker></defs>');
+  const fixedCol = '#f2f4f7';
+  sk.items.forEach((it, i) => { const done = sk.cons.length && sk.freeItems && !sk.freeItems.has(i); out.push(poly(skOutline(it), i === sk.sel ? '#ff8c42' : done ? fixedCol : it.mode === 'subtract' ? '#ff6b6b' : '#3ee6c6', true, i === sk.sel ? 2.2 : 1.5)); });
+  if (sk.cons.length || (sk.picks || []).length) skConstraintArt(out);
   if (sk.tool === 'select') sk.items.forEach((it, i) => skHandles(it).forEach(([u, v, kind, setter]) => { if (!setter) return; const [x, y] = skScreen(u, v); out.push(`<rect x="${x - 3.5}" y="${y - 3.5}" width="7" height="7" fill="${i === sk.sel ? '#ff8c42' : '#14171c'}" stroke="${i === sk.sel ? '#ff8c42' : '#3ee6c6'}" stroke-width="1.2"/>`); }));
   const hv = sk.hover, t = hv ? skTarget(hv.p) : null;
   // shape in progress
@@ -2160,6 +2223,384 @@ function drawSketchOverlay() {
   skSvg.innerHTML = out.join('');
   skUpdateDim();
 }
+
+// ---- sketch constraint solver (same equations as sketch_solver.py): damped least squares on the items' numbers
+const SKS = (() => {
+  const closes = it => Math.abs(it.start[0] - it.segs[it.segs.length - 1].to[0]) < 1e-9 && Math.abs(it.start[1] - it.segs[it.segs.length - 1].to[1]) < 1e-9;
+  function slots(items) {
+    const out = [];
+    items.forEach((it, i) => {
+      if (it.type === 'rect') for (const k of ['cx', 'cy', 'w', 'h']) out.push([i, 'k', k]);
+      else if (it.type === 'circle') for (const k of ['cx', 'cy', 'r']) out.push([i, 'k', k]);
+      else if (it.type === 'slot') for (const k of ['x1', 'y1', 'x2', 'y2', 'w']) out.push([i, 'k', k]);
+      else if (it.type === 'polygon') it.pts.forEach((_, j) => { out.push([i, 'pts', j, 0], [i, 'pts', j, 1]); });
+      else if (it.type === 'profile') {
+        out.push([i, 'start', 0, 0], [i, 'start', 0, 1]);
+        const n = it.segs.length, cl = it._closed;
+        it.segs.forEach((sg, j) => { if (!(j === n - 1 && cl)) out.push([i, 'to', j, 0], [i, 'to', j, 1]); if (sg.via) out.push([i, 'via', j, 0], [i, 'via', j, 1]); });
+      }
+    });
+    return out;
+  }
+  const get = (items, s) => { const it = items[s[0]]; if (s[1] === 'k') return +it[s[2]]; if (s[1] === 'pts') return it.pts[s[2]][s[3]]; if (s[1] === 'start') return it.start[s[3]]; return it.segs[s[2]][s[1]][s[3]]; };
+  const set = (items, s, v) => {
+    const it = items[s[0]];
+    if (s[1] === 'k') it[s[2]] = v; else if (s[1] === 'pts') it.pts[s[2]][s[3]] = v;
+    else if (s[1] === 'start') { it.start[s[3]] = v; if (it._closed) it.segs[it.segs.length - 1].to[s[3]] = v; }
+    else it.segs[s[2]][s[1]][s[3]] = v;
+  };
+  const V = (x, y) => [x, y], sub = (a, b) => [a[0] - b[0], a[1] - b[1]], dot = (a, b) => a[0] * b[0] + a[1] * b[1], cr = (a, b) => a[0] * b[1] - a[1] * b[0];
+  const len = a => Math.hypot(a[0], a[1]), unit = a => { const n = len(a); return n > 1e-12 ? [a[0] / n, a[1] / n] : a; };
+  function point(items, ref) {
+    const it = items[ref.i], k = ref.p;
+    if (it.type === 'rect') { if (k === 'c') return V(it.cx, it.cy); const [sx, sy] = { p0: [-1, -1], p1: [1, -1], p2: [1, 1], p3: [-1, 1] }[k]; return V(it.cx + sx * it.w / 2, it.cy + sy * it.h / 2); }
+    if (it.type === 'circle') return V(it.cx, it.cy);
+    if (it.type === 'slot') return k === 'a' ? V(it.x1, it.y1) : V(it.x2, it.y2);
+    if (it.type === 'polygon') return it.pts[+k.slice(1)].slice();
+    if (it.type === 'profile') { if (k === 's') return it.start.slice(); const j = +k.slice(1); return it.segs[j][k[0] === 'v' ? 'via' : 'to'].slice(); }
+    throw new Error(`no point ${k} on a ${it.type}`);
+  }
+  function edge(items, ref) {
+    const it = items[ref.i], k = +ref.e;
+    if (it.type === 'rect') { const n = ['p0', 'p1', 'p2', 'p3']; return [point(items, { i: ref.i, p: n[k] }), point(items, { i: ref.i, p: n[(k + 1) % 4] }), null]; }
+    if (it.type === 'polygon') return [it.pts[k].slice(), it.pts[(k + 1) % it.pts.length].slice(), null];
+    if (it.type === 'slot') return [V(it.x1, it.y1), V(it.x2, it.y2), null];
+    if (it.type === 'profile') { const sg = it.segs[k]; return [(k === 0 ? it.start : it.segs[k - 1].to).slice(), sg.to.slice(), sg.via ? sg.via.slice() : null]; }
+    throw new Error(`a ${it.type} has no edges`);
+  }
+  function circum(a, m, b) {
+    const d = 2 * (a[0] * (m[1] - b[1]) + m[0] * (b[1] - a[1]) + b[0] * (a[1] - m[1])); if (Math.abs(d) < 1e-12) return null;
+    const s1 = dot(a, a), s2 = dot(m, m), s3 = dot(b, b);
+    const c = V((s1 * (m[1] - b[1]) + s2 * (b[1] - a[1]) + s3 * (a[1] - m[1])) / d, (s1 * (b[0] - m[0]) + s2 * (a[0] - b[0]) + s3 * (m[0] - a[0])) / d);
+    return [c, len(sub(a, c))];
+  }
+  function circle(items, ref) {
+    const it = items[ref.i];
+    if (ref.e != null) { const [a, b, via] = edge(items, ref); if (!via) throw new Error('that segment is a line'); return circum(a, via, b) || [V((a[0] + b[0]) / 2, (a[1] + b[1]) / 2), 1e9]; }
+    if (it.type === 'circle') return [V(it.cx, it.cy), +it.r];
+    if (it.type === 'slot') return [V(it.x1, it.y1), it.w / 2];
+    throw new Error(`a ${it.type} is not a circle`);
+  }
+  function kind(items, ref) { if (ref.p != null) return 'pt'; const it = items[ref.i]; if (ref.e != null) return it.type === 'profile' && it.segs[+ref.e].via ? 'arc' : 'line'; return 'circle'; }
+  function shared(items, R) {
+    if (R.length !== 2 || R[0].e == null || R[1].e == null || R[0].i !== R[1].i) return null;
+    const it = items[R[0].i]; if (it.type !== 'profile') return null;
+    const n = it.segs.length, lo = Math.min(+R[0].e, +R[1].e), hi = Math.max(+R[0].e, +R[1].e);
+    if (hi - lo === 1) return it.segs[lo].to; if (lo === 0 && hi === n - 1) return it.start; return null;
+  }
+  function residuals(items, c) {
+    const t = c.type, R = c.refs, K = R.map(r => kind(items, r)), v = +(c.value ?? 0);
+    if (t === 'coincident') { const a = point(items, R[0]), b = point(items, R[1]); return [a[0] - b[0], a[1] - b[1]]; }
+    if (t === 'fix') { const a = point(items, R[0]); return [a[0] - c.value[0], a[1] - c.value[1]]; }
+    if (t === 'horizontal' || t === 'vertical') { const [a, b] = K[0] === 'pt' ? [point(items, R[0]), point(items, R[1])] : edge(items, R[0]); return [t === 'horizontal' ? b[1] - a[1] : b[0] - a[0]]; }
+    if (t === 'parallel' || t === 'perpendicular') { const [a1, b1] = edge(items, R[0]), [a2, b2] = edge(items, R[1]), d1 = unit(sub(b1, a1)), d2 = unit(sub(b2, a2)); return [t === 'parallel' ? cr(d1, d2) : dot(d1, d2)]; }
+    if (t === 'on') { const p = point(items, R[0]); if (K[1] === 'line') { const [a, b] = edge(items, R[1]), d = unit(sub(b, a)); return [cr(d, sub(p, a))]; } const [cc, r] = circle(items, R[1]); return [len(sub(p, cc)) - r]; }
+    if (t === 'midpoint') { const [a, b] = edge(items, R[1]), p = point(items, R[0]); return [p[0] - (a[0] + b[0]) / 2, p[1] - (a[1] + b[1]) / 2]; }
+    if (t === 'equal') { if (K[0] === 'line' && K[1] === 'line') { const [a1, b1] = edge(items, R[0]), [a2, b2] = edge(items, R[1]); return [len(sub(b1, a1)) - len(sub(b2, a2))]; } return [circle(items, R[0])[1] - circle(items, R[1])[1]]; }
+    if (t === 'concentric') { const a = circle(items, R[0])[0], b = circle(items, R[1])[0]; return [a[0] - b[0], a[1] - b[1]]; }
+    if (t === 'tangent') {
+      const p = shared(items, R);
+      if (p) { const dir = (ref, k) => { if (k === 'line') { const [a, b] = edge(items, ref); return unit(sub(b, a)); } const [cc] = circle(items, ref), rad = unit(sub(p, cc)); return [-rad[1], rad[0]]; }; return [cr(dir(R[0], K[0]), dir(R[1], K[1]))]; }
+      if (K[0] === 'line' || K[1] === 'line') { const li = K[0] === 'line' ? 0 : 1, [a, b] = edge(items, R[li]), [cc, r] = circle(items, R[1 - li]), d = unit(sub(b, a)); return [Math.abs(cr(d, sub(cc, a))) - r]; }
+      const [c1, r1] = circle(items, R[0]), [c2, r2] = circle(items, R[1]), dd = len(sub(c1, c2));
+      if (c.internal == null) c.internal = Math.abs(dd - Math.abs(r1 - r2)) < Math.abs(dd - (r1 + r2));
+      return [dd - (c.internal ? Math.abs(r1 - r2) : r1 + r2)];
+    }
+    if (t === 'length') { const [a, b] = edge(items, R[0]); return [len(sub(b, a)) - v]; }
+    if (t === 'distance') { const p = point(items, R[0]); if (K[1] === 'pt') return [len(sub(point(items, R[1]), p)) - v]; const [a, b] = edge(items, R[1]), d = unit(sub(b, a)); return [Math.abs(cr(d, sub(p, a))) - v]; }
+    if (t === 'hdistance' || t === 'vdistance') { const a = point(items, R[0]), b = point(items, R[1]), ax = t === 'hdistance' ? 0 : 1; if (c.sign == null) c.sign = b[ax] - a[ax] >= 0 ? 1 : -1; return [(b[ax] - a[ax]) * c.sign - v]; }
+    if (t === 'radius') return [circle(items, R[0])[1] - v];
+    if (t === 'diameter') return [2 * circle(items, R[0])[1] - v];
+    if (t === 'angle') { const [a1, b1] = edge(items, R[0]), [a2, b2] = edge(items, R[1]), d1 = unit(sub(b1, a1)), d2 = unit(sub(b2, a2)); let ang = Math.atan2(cr(d1, d2), dot(d1, d2)) * 180 / Math.PI; if (c.sign == null) c.sign = ang >= 0 ? 1 : -1; return [(ang * c.sign - v) * Math.PI / 180]; }
+    throw new Error('unknown constraint ' + t);
+  }
+  function measure(items, c) {   // the current value a dimension would have
+    const t = c.type, R = c.refs, K = R.map(r => kind(items, r));
+    if (t === 'length') { const [a, b] = edge(items, R[0]); return len(sub(b, a)); }
+    if (t === 'distance') { const p = point(items, R[0]); if (K[1] === 'pt') return len(sub(point(items, R[1]), p)); const [a, b] = edge(items, R[1]); return Math.abs(cr(unit(sub(b, a)), sub(p, a))); }
+    if (t === 'hdistance' || t === 'vdistance') { const ax = t === 'hdistance' ? 0 : 1; return Math.abs(point(items, R[1])[ax] - point(items, R[0])[ax]); }
+    if (t === 'radius') return circle(items, R[0])[1];
+    if (t === 'diameter') return 2 * circle(items, R[0])[1];
+    if (t === 'angle') { const [a1, b1] = edge(items, R[0]), [a2, b2] = edge(items, R[1]), d1 = unit(sub(b1, a1)), d2 = unit(sub(b2, a2)); return Math.abs(Math.atan2(cr(d1, d2), dot(d1, d2)) * 180 / Math.PI); }
+    return null;
+  }
+  function linsolve(A, b) {   // Gaussian elimination with partial pivoting (A is n×n, modified)
+    const n = b.length;
+    for (let k = 0; k < n; k++) {
+      let p = k; for (let r = k + 1; r < n; r++) if (Math.abs(A[r][k]) > Math.abs(A[p][k])) p = r;
+      if (Math.abs(A[p][k]) < 1e-15) return null;
+      [A[k], A[p]] = [A[p], A[k]]; [b[k], b[p]] = [b[p], b[k]];
+      for (let r = k + 1; r < n; r++) { const f = A[r][k] / A[k][k]; if (!f) continue; for (let c2 = k; c2 < n; c2++) A[r][c2] -= f * A[k][c2]; b[r] -= f * b[k]; }
+    }
+    const x = new Array(n).fill(0);
+    for (let k = n - 1; k >= 0; k--) { let s = b[k]; for (let c2 = k + 1; c2 < n; c2++) s -= A[k][c2] * x[c2]; x[k] = s / A[k][k]; }
+    return x;
+  }
+  function jacobiEig(S) {   // symmetric eigen-decomposition (cyclic Jacobi): {vals, vecs (columns)}
+    const n = S.length, A = S.map(r => r.slice()), Vv = A.map((_, i) => A.map((_, j) => (i === j ? 1 : 0)));
+    for (let sweep = 0; sweep < 60; sweep++) {
+      let off = 0; for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) off += A[i][j] * A[i][j];
+      if (off < 1e-22) break;
+      for (let p = 0; p < n; p++) for (let q = p + 1; q < n; q++) {
+        if (Math.abs(A[p][q]) < 1e-14) continue;
+        const th = (A[q][q] - A[p][p]) / (2 * A[p][q]), t = Math.sign(th || 1) / (Math.abs(th) + Math.sqrt(th * th + 1)), c = 1 / Math.sqrt(t * t + 1), s = t * c;
+        for (let k = 0; k < n; k++) { const akp = A[k][p], akq = A[k][q]; A[k][p] = c * akp - s * akq; A[k][q] = s * akp + c * akq; }
+        for (let k = 0; k < n; k++) { const apk = A[p][k], aqk = A[q][k]; A[p][k] = c * apk - s * aqk; A[q][k] = s * apk + c * aqk; }
+        for (let k = 0; k < n; k++) { const vkp = Vv[k][p], vkq = Vv[k][q]; Vv[k][p] = c * vkp - s * vkq; Vv[k][q] = s * vkp + c * vkq; }
+      }
+    }
+    return { vals: A.map((r, i) => r[i]), vecs: Vv };
+  }
+  function prep(items) { for (const it of items) if (it.type === 'profile') it._closed = closes(it); }
+  function clean(items) { for (const it of items) if (it.type === 'profile') { if (it._closed) it.segs[it.segs.length - 1].to = it.start.slice(); delete it._closed; } }
+  function solve(items, cons, drag, opts = {}) {
+    prep(items);
+    const S = slots(items), n = S.length;
+    const all = x => { S.forEach((s, j) => set(items, s, x[j])); const r = []; for (const c of cons) r.push(...residuals(items, c)); if (drag) { const p = point(items, drag.ref); r.push((p[0] - drag.to[0]) * (drag.w || 1), (p[1] - drag.to[1]) * (drag.w || 1)); } return r; };
+    const jac = (x, r0) => { const J = r0.map(() => new Array(n).fill(0)); for (let j = 0; j < n; j++) { const h = 1e-7 * (1 + Math.abs(x[j])), xp = x.slice(); xp[j] += h; const r = all(xp); for (let i = 0; i < r0.length; i++) J[i][j] = (r[i] - r0[i]) / h; } all(x); return J; };
+    let x = S.map(s => get(items, s)), r = all(x), lam = 1e-3, it = 0;
+    const nrm = a => a.reduce((s, v) => s + v * v, 0);
+    for (; it < (opts.iters || 60) && r.length; it++) {
+      if (nrm(r) < 1e-14) break;
+      const J = jac(x, r), A = Array.from({ length: n }, () => new Array(n).fill(0)), g = new Array(n).fill(0);
+      for (let i = 0; i < r.length; i++) { const Ji = J[i]; for (let a = 0; a < n; a++) { if (!Ji[a]) continue; g[a] += Ji[a] * r[i]; for (let b = 0; b < n; b++) A[a][b] += Ji[a] * Ji[b]; } }
+      let ok = false;
+      for (let k = 0; k < 12; k++) {
+        const M = A.map((row, a) => row.map((v2, b) => v2 + (a === b ? lam * Math.max(A[a][a], 1e-9) + 1e-12 : 0)));
+        const step = linsolve(M, g.map(v2 => -v2)); if (!step) { lam *= 10; continue; }
+        const xn = x.map((v2, j) => v2 + step[j]), rn = all(xn);
+        if (nrm(rn) < nrm(r)) { x = xn; r = rn; lam = Math.max(lam / 3, 1e-9); ok = true; break; }
+        lam *= 4;
+      }
+      if (!ok) break;
+    }
+    all(x);
+    const res = Math.sqrt(nrm(r)); let dof = n, free = new Array(n).fill(true);
+    if (opts.dof && cons.length) {
+      const savedDrag = drag; drag = null; const r0 = all(x), J = jac(x, r0); drag = savedDrag;
+      const JtJ = Array.from({ length: n }, (_, a) => Array.from({ length: n }, (_, b) => { let s = 0; for (let i = 0; i < J.length; i++) s += J[i][a] * J[i][b]; return s; }));
+      const { vals, vecs } = jacobiEig(JtJ), vmax = Math.max(...vals.map(Math.abs), 1e-30);
+      const nullIdx = vals.map((v2, k) => [v2, k]).filter(([v2]) => Math.abs(v2) < Math.max(1e-10, 1e-12 * vmax)).map(([, k]) => k);
+      dof = nullIdx.length; free = S.map((_, j) => nullIdx.some(k => Math.abs(vecs[j][k]) > 1e-5));
+      all(x);
+    }
+    clean(items);
+    return { ok: res < 1e-6, residual: res, dof, free, slots: S, iterations: it };
+  }
+  return { solve, residuals, measure, point, edge, circle, kind, slots };
+})();
+// drag a point: hard when the constraints allow it, otherwise the nearest pose that still meets every constraint
+function skRound(o) {   // strip solver noise (5.9999999998 → 6) in place, like the Python side's _cleanup
+  if (Array.isArray(o)) o.forEach((v, i) => { if (typeof v === 'number') o[i] = Math.round(v * 1e6) / 1e6; else if (v && typeof v === 'object') skRound(v); });
+  else if (o && typeof o === 'object') for (const k in o) { const v = o[k]; if (typeof v === 'number') o[k] = Math.round(v * 1e6) / 1e6; else if (v && typeof v === 'object') skRound(v); }
+  return o;
+}
+function sketchDrag(items, cons, ref, to) {
+  const snap = JSON.stringify(items);
+  let r = SKS.solve(items, cons, { ref, to });
+  if (!r.ok) {
+    const back = JSON.parse(snap); items.splice(0, items.length, ...back);
+    SKS.solve(items, cons, { ref, to, w: 0.05 });
+    r = SKS.solve(items, cons);
+  }
+  skRound(items);
+  return r;
+}
+
+// ---- sketch constraints & dimensions (UI). sk.cons is the list (saved in the sketch header); SKS solves it.
+const CON_META = {
+  coincident: ['⦿', 'Coincident: two points'], on: ['⊙', 'Point on an edge or circle'], horizontal: ['H', 'Horizontal: a line, or two points level'],
+  vertical: ['V', 'Vertical: a line, or two points in line'], parallel: ['∥', 'Parallel: two lines'], perpendicular: ['⊥', 'Perpendicular: two lines'],
+  tangent: ['◡', 'Tangent: a line or arc and a circle or arc'], equal: ['=', 'Equal: two lines (length) or two circles/arcs (radius)'],
+  concentric: ['◎', 'Concentric: two circles/arcs'], midpoint: ['◇', 'Midpoint: a point and a line'], fix: ['⚓', 'Fix: lock points where they are'],
+};
+const DIM_TYPES = new Set(['length', 'distance', 'hdistance', 'vdistance', 'radius', 'diameter', 'angle']);
+const isCirc = k => k === 'circle' || k === 'arc';
+function conFromPicks(type, P) {   // P = [{ref, kind}] → a constraint list for `type`, or null when the picks don't fit
+  const K = P.map(p => p.kind), R = P.map(p => p.ref), n = P.length;
+  const two = (a, b) => n === 2 && ((a(K[0]) && b(K[1])) || (a(K[1]) && b(K[0])));
+  const order = (a) => a(K[0]) ? [R[0], R[1]] : [R[1], R[0]];
+  const pt = k => k === 'pt', line = k => k === 'line', any = () => true;
+  switch (type) {
+    case 'coincident': return n === 2 && K.every(pt) ? [{ type, refs: R }] : null;
+    case 'on': return two(pt, k => k !== 'pt') ? [{ type, refs: order(pt) }] : null;
+    case 'horizontal': case 'vertical':
+      if (n === 2 && K.every(pt)) return [{ type, refs: R }];
+      return n >= 1 && K.every(line) ? R.map(r => ({ type, refs: [r] })) : null;
+    case 'parallel': case 'perpendicular': return n === 2 && K.every(line) ? [{ type, refs: R }] : null;
+    case 'tangent': return n === 2 && K.some(isCirc) && K.every(k => k !== 'pt') ? [{ type, refs: R }] : null;
+    case 'equal': return n === 2 && (K.every(line) || K.every(isCirc)) ? [{ type, refs: R }] : null;
+    case 'concentric': return n === 2 && K.every(isCirc) ? [{ type, refs: R }] : null;
+    case 'midpoint': return two(pt, line) ? [{ type, refs: order(pt) }] : null;
+    case 'fix': return n >= 1 && K.every(pt) ? R.map(r => ({ type, refs: [r], value: SKS.point(sk.items, r) })) : null;
+    case 'dimension': {
+      if (n === 1 && K[0] === 'line') return [{ type: 'length', refs: R }];
+      if (n === 1 && K[0] === 'circle') return [{ type: 'diameter', refs: R }];
+      if (n === 1 && K[0] === 'arc') return [{ type: 'radius', refs: R }];
+      if (n === 2 && K.every(pt)) return [{ type: 'distance', refs: R }];
+      if (two(pt, line)) return [{ type: 'distance', refs: order(pt) }];
+      if (n === 2 && K.every(line)) return [{ type: 'angle', refs: R }];
+      return null;
+    }
+  }
+  return null;
+}
+function skSolve(withDof = true) {   // solve the sketch's constraints and refresh the freedom state
+  if (!sk) return;
+  if (!sk.cons.length) { sk.dof = null; sk.freeItems = null; return; }
+  const r = SKS.solve(sk.items, sk.cons, null, { dof: withDof });
+  skRound(sk.items);
+  if (withDof) {
+    sk.dof = r.dof; sk.solveOk = r.ok;
+    const freeItems = new Set(); r.slots.forEach((s_, j) => { if (r.free[j]) freeItems.add(s_[0]); });
+    sk.freeItems = freeItems;
+  }
+  return r;
+}
+function skMsg(text, bad = true) { sk.msg = { text, bad, t: performance.now() }; renderSkItems(); }
+function addConstraints(list, { quiet = false } = {}) {   // add with checks: refuse conflicts and redundancy
+  const snapItems = JSON.stringify(sk.items), snapCons = JSON.stringify(sk.cons);
+  const before = sk.cons.length ? SKS.solve(sk.items, sk.cons, null, { dof: true }).dof : SKS.slots(sk.items).length;
+  sk.cons.push(...list);
+  const r = SKS.solve(sk.items, sk.cons, null, { dof: true });
+  const restore = () => { sk.items.splice(0, sk.items.length, ...JSON.parse(snapItems)); sk.cons = JSON.parse(snapCons); };
+  if (!r.ok) { restore(); if (!quiet) skMsg(`Can't add ${list[0].type}: it conflicts with the existing constraints.`); return false; }
+  if (r.dof >= before && !DIM_TYPES.has(list[0].type)) { restore(); if (!quiet) skMsg(`${list[0].type} is already implied by the other constraints (redundant).`); return false; }
+  if (r.dof >= before && DIM_TYPES.has(list[0].type)) { restore(); if (!quiet) skMsg('That dimension is already determined by the other constraints.'); return false; }
+  skSolve(); if (!quiet) skMsg(`${list.map(c => c.type).join(', ')} added · ${sk.dof ? sk.dof + ' degree' + (sk.dof > 1 ? 's' : '') + ' of freedom left' : 'fully constrained'}`, false);
+  return true;
+}
+function applyConstraintTool(type) {
+  if (!sk) return;
+  const list = conFromPicks(type, sk.picks || []);
+  if (!list) { skMsg(type === 'dimension' ? 'Dimension: pick a line, a circle/arc, two points, a point and a line, or two lines (Select tool, shift-click to add).' : `${type}: ${CON_META[type][1]}. Pick them with the Select tool (shift-click to add).`); return; }
+  if (type === 'dimension') {
+    const c = list[0]; c.value = +(+SKS.measure(sk.items, c)).toFixed(3);
+    if (!addConstraints([c])) return;
+    sk.picks = []; skEditDim(sk.cons.length - 1); return;
+  }
+  if (addConstraints(list)) sk.picks = [];
+  renderSkItems();
+}
+function removeConstraint(ci) { sk.cons.splice(ci, 1); sk.selCon = null; skSolve(); renderSkItems(); }
+function removeItemConstraints(i) {   // an item was deleted: drop its constraints and shift later item indices
+  sk.cons = sk.cons.filter(c => !c.refs.some(r => r.i === i));
+  for (const c of sk.cons) for (const r of c.refs) if (r.i > i) r.i--;
+  skSolve();
+}
+// picking geometry (Select tool): points first, then edges and circles
+function skEdgesOf(it, i) {   // [{ref, kind, pts}]
+  const out = [];
+  if (it.type === 'rect') { const o = skOutline(it); for (let k = 0; k < 4; k++) out.push({ ref: { i, e: k }, kind: 'line', pts: [o[k], o[(k + 1) % 4]] }); }
+  else if (it.type === 'polygon') it.pts.forEach((p, k) => out.push({ ref: { i, e: k }, kind: 'line', pts: [p, it.pts[(k + 1) % it.pts.length]] }));
+  else if (it.type === 'slot') out.push({ ref: { i, e: 0 }, kind: 'line', pts: [[it.x1, it.y1], [it.x2, it.y2]] });
+  else if (it.type === 'circle') out.push({ ref: { i }, kind: 'circle', pts: skOutline(it).concat([skOutline(it)[0]]) });
+  else if (it.type === 'profile') { let cur = it.start; it.segs.forEach((sg, k) => { out.push({ ref: { i, e: k }, kind: sg.via ? 'arc' : 'line', pts: sg.via ? arcPts(cur, sg.via, sg.to) : [cur, sg.to] }); cur = sg.to; }); }
+  return out;
+}
+function skPickAt(mx, my) {
+  let best = null;
+  sk.items.forEach((it, i) => skHandles(it).forEach(h => { if (!h[4]) return; const [x, y] = skScreen(h[0], h[1]), d = Math.hypot(x - mx, y - my); if (d < 8 && (!best || d < best.d)) best = { d, ref: { i, p: h[4] }, kind: 'pt' }; }));
+  if (best) return best;
+  sk.items.forEach((it, i) => skEdgesOf(it, i).forEach(e => {
+    const S_ = e.pts.map(p => skScreen(...p));
+    for (let k = 0; k + 1 < S_.length; k++) { const [ax, ay] = S_[k], [bx, by] = S_[k + 1], dx = bx - ax, dy = by - ay, L2 = dx * dx + dy * dy || 1e-9, t = Math.max(0, Math.min(1, ((mx - ax) * dx + (my - ay) * dy) / L2)), d = Math.hypot(ax + t * dx - mx, ay + t * dy - my); if (d < 6 && (!best || d < best.d)) best = { d, ref: e.ref, kind: e.kind }; }
+  }));
+  return best;
+}
+const refEq = (a, b) => a.i === b.i && a.p === b.p && a.e === b.e;
+function skTogglePick(p, add) {
+  sk.picks ||= [];
+  const k = sk.picks.findIndex(q => refEq(q.ref, p.ref));
+  if (!add) sk.picks = k >= 0 && sk.picks.length === 1 ? [] : [p];
+  else if (k >= 0) sk.picks.splice(k, 1); else sk.picks.push(p);
+  sk.selCon = null; renderSkItems();
+}
+// a dimension's value, edited in place
+const skDimEdit = document.getElementById('sk-dimedit');
+function skEditDim(ci) {
+  const c = sk.cons[ci]; if (!c || !DIM_TYPES.has(c.type)) return;
+  let lab = (sk.dimLabels || []).find(l => l.ci === ci);
+  if (!lab) { drawSketchOverlay(); lab = (sk.dimLabels || []).find(l => l.ci === ci); }   // just added: lay its label out now
+  const [x, y] = lab ? [lab.x, lab.y] : [200, 200];
+  skDimEdit.style.left = (x - 40) + 'px'; skDimEdit.style.top = (y - 13) + 'px'; skDimEdit.style.display = 'flex';
+  const unit = c.type === 'angle' ? '°' : 'mm';
+  skDimEdit.innerHTML = `<input value="${+(+c.value).toFixed(3)}" inputmode="decimal"><span>${unit}</span>`;
+  const inp = skDimEdit.querySelector('input'); inp.focus(); inp.select();
+  const close = () => { skDimEdit.style.display = 'none'; skDimEdit.innerHTML = ''; };
+  inp.onkeydown = e => {
+    e.stopPropagation();
+    if (e.key === 'Escape') { close(); return; }
+    if (e.key !== 'Enter') return;
+    const v = parseFloat(inp.value); if (!(isFinite(v) && v > 0)) { inp.select(); return; }
+    const old = c.value, snap = JSON.stringify(sk.items); c.value = v;
+    const r = SKS.solve(sk.items, sk.cons);
+    if (!r.ok) { c.value = old; sk.items.splice(0, sk.items.length, ...JSON.parse(snap)); skMsg(`${v}${unit} can't be met with the other constraints.`); }
+    else { skSolve(); skMsg(`${c.type} = ${v}${unit}`, false); }
+    close(); renderSkItems();
+  };
+  inp.onblur = () => setTimeout(close, 150);
+}
+// drawing: glyphs for constraints and dimension annotations
+function skConstraintArt(out) {
+  sk.dimLabels = []; sk.glyphs = [];
+  const S_ = (p) => skScreen(p[0], p[1]);
+  const anchorOf = ref => {
+    const k = SKS.kind(sk.items, ref);
+    if (k === 'pt') return S_(SKS.point(sk.items, ref));
+    if (k === 'circle') { const [c, r] = SKS.circle(sk.items, ref); return S_([c[0] + r * 0.71, c[1] + r * 0.71]); }
+    const [a, b, via] = SKS.edge(sk.items, ref); return S_(via || [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2]);
+  };
+  const stack = new Map();
+  sk.cons.forEach((c, ci) => {
+    const sel = sk.selCon === ci, col = sel ? '#ff8c42' : '#9fc6ff';
+    try {
+      if (DIM_TYPES.has(c.type)) {
+        let lx, ly, txt = c.type === 'angle' ? `${+(+c.value).toFixed(2)}°` : c.type === 'radius' ? `R${+(+c.value).toFixed(3)}` : c.type === 'diameter' ? `Ø${+(+c.value).toFixed(3)}` : `${+(+c.value).toFixed(3)}`;
+        if (c.type === 'radius' || c.type === 'diameter') {
+          const [cc, r] = SKS.circle(sk.items, c.refs[0]), a = S_(cc), b = S_([cc[0] + r * 0.71, cc[1] + r * 0.71]);
+          out.push(`<line x1="${a[0]}" y1="${a[1]}" x2="${b[0]}" y2="${b[1]}" stroke="${col}" stroke-width="1"/>`); lx = b[0] + 12; ly = b[1] + 12;
+        } else if (c.type === 'angle') {
+          const [a1, b1] = SKS.edge(sk.items, c.refs[0]), [a2, b2] = SKS.edge(sk.items, c.refs[1]);
+          const m = S_([(a1[0] + b1[0] + a2[0] + b2[0]) / 4, (a1[1] + b1[1] + a2[1] + b2[1]) / 4]); lx = m[0]; ly = m[1];
+        } else {
+          let A, B;
+          if (c.type === 'length') { const [a, b] = SKS.edge(sk.items, c.refs[0]); A = a; B = b; }
+          else if (SKS.kind(sk.items, c.refs[1]) === 'line') { const p = SKS.point(sk.items, c.refs[0]), [a, b] = SKS.edge(sk.items, c.refs[1]), d = [b[0] - a[0], b[1] - a[1]], L2 = d[0] * d[0] + d[1] * d[1] || 1e-9, t = ((p[0] - a[0]) * d[0] + (p[1] - a[1]) * d[1]) / L2; A = p; B = [a[0] + t * d[0], a[1] + t * d[1]]; }
+          else { A = SKS.point(sk.items, c.refs[0]); B = SKS.point(sk.items, c.refs[1]); if (c.type === 'hdistance') B = [B[0], A[1]]; if (c.type === 'vdistance') B = [A[0], B[1]]; }
+          const a = S_(A), b = S_(B), dx = b[0] - a[0], dy = b[1] - a[1], Ln = Math.hypot(dx, dy) || 1, nx = -dy / Ln * 16, ny = dx / Ln * 16;
+          const a2 = [a[0] + nx, a[1] + ny], b2 = [b[0] + nx, b[1] + ny];
+          out.push(`<path d="M${a[0]} ${a[1]}L${a2[0]} ${a2[1]}M${b[0]} ${b[1]}L${b2[0]} ${b2[1]}" stroke="${col}" stroke-width="0.8" opacity=".7"/>`,
+            `<line x1="${a2[0]}" y1="${a2[1]}" x2="${b2[0]}" y2="${b2[1]}" stroke="${col}" stroke-width="1" marker-start="url(#skarr)" marker-end="url(#skarr)"/>`);
+          lx = (a2[0] + b2[0]) / 2; ly = (a2[1] + b2[1]) / 2;
+        }
+        const w = txt.length * 6.6 + 10;
+        out.push(`<rect x="${lx - w / 2}" y="${ly - 9}" width="${w}" height="18" rx="4" fill="${sel ? '#ff8c42' : '#1c2633'}" stroke="${col}" stroke-width="1"/><text x="${lx}" y="${ly + 4}" fill="${sel ? '#14171c' : '#d8e8ff'}" font-size="11" text-anchor="middle" font-family="ui-monospace,Menlo,monospace">${txt}</text>`);
+        sk.dimLabels.push({ ci, x: lx, y: ly, w, h: 18 });
+        return;
+      }
+      const [x0, y0] = anchorOf(c.refs[0]), key = Math.round(x0 / 6) + ',' + Math.round(y0 / 6), n = stack.get(key) || 0; stack.set(key, n + 1);
+      const gx = x0 + 10 + n * 15, gy = y0 - 12;
+      out.push(`<rect x="${gx - 7}" y="${gy - 7}" width="14" height="14" rx="3" fill="${sel ? '#ff8c42' : '#1c2633'}" stroke="${col}" stroke-width="0.8"/><text x="${gx}" y="${gy + 4}" fill="${sel ? '#14171c' : '#9fc6ff'}" font-size="10" text-anchor="middle">${CON_META[c.type] ? CON_META[c.type][0] : '?'}</text>`);
+      sk.glyphs.push({ ci, x: gx, y: gy });
+    } catch (e) { /* a constraint whose geometry was removed */ }
+  });
+  // selected picks
+  for (const p of sk.picks || []) {
+    try {
+      if (p.kind === 'pt') { const [x, y] = S_(SKS.point(sk.items, p.ref)); out.push(`<circle cx="${x}" cy="${y}" r="5" fill="#ff8c42"/>`); }
+      else { const e = skEdgesOf(sk.items[p.ref.i], p.ref.i).find(q => refEq(q.ref, p.ref)); if (e) out.push(`<polyline points="${e.pts.map(q => S_(q).join(',')).join(' ')}" fill="none" stroke="#ff8c42" stroke-width="3"/>`); }
+    } catch (e) { }
+  }
+}
+function skHitConstraint(mx, my) {
+  for (const l of sk.dimLabels || []) if (Math.abs(mx - l.x) <= l.w / 2 && Math.abs(my - l.y) <= l.h / 2) return l.ci;
+  for (const g of sk.glyphs || []) if (Math.abs(mx - g.x) <= 8 && Math.abs(my - g.y) <= 8) return g.ci;
+  return null;
+}
+// which point of a new rectangle a corner click became
+function rectCornerKey(a, b, which) { const p = which === 0 ? a : b, o = which === 0 ? b : a; return { '-1,-1': 'p0', '1,-1': 'p1', '1,1': 'p2', '-1,1': 'p3' }[`${p[0] < o[0] ? -1 : 1},${p[1] < o[1] ? -1 : 1}`]; }
+function autoConstrain(list) { for (const c of list) addConstraints([c], { quiet: true }); }
 
 // ------------------------------------------------------------------ manual modelling dialogs (no agent turn)
 const fld = (id, label, val, extra = '') => `<div class="modal-field"><label>${label}</label><input id="${id}" type="number" step="any" value="${val}" ${extra} style="flex:1;background:var(--bg);color:var(--text);border:1px solid var(--line);border-radius:6px;padding:6px;font:inherit"></div>`;

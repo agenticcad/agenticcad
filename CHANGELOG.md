@@ -5,6 +5,16 @@ features, patch bumps fix things. The version shown in the UI header comes from 
 
 ## [Unreleased]
 
+## [0.23.0] — 2026-10-06
+
+### Added
+- **Sketch constraints and dimensions.** Coincident, point on edge or circle, horizontal, vertical, parallel,
+  perpendicular, tangent, equal, concentric, midpoint and fix. Driving dimensions cover length, distance (also
+  point to line), radius, diameter and angle (`D`; double-click to edit). A solver keeps them satisfied while you
+  drag or edit numbers, shows the remaining degrees of freedom, turns fully constrained items white, and refuses
+  conflicting or redundant constraints. Drawing adds horizontal, vertical and coincident constraints automatically.
+  Constraints are saved in the sketch header, and the agent's `sketch` tool reads and writes them.
+
 ## [0.22.1] — 2026-10-06
 
 ### Added

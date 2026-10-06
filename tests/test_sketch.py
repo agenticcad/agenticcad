@@ -15,7 +15,7 @@ def test_sketch_block_roundtrip_and_build():
     code = se.set_sketch(ck.DEFAULT_CODE, "sk1", PLANE, ITEMS)
     assert "# sketch:sk1 " in code and code.index("# /sketch:sk1") < code.index("result =")
     defs = se.sketches(code)
-    assert defs == [{"name": "sk1", "plane": PLANE, "items": ITEMS}]
+    assert defs == [{"name": "sk1", "plane": PLANE, "items": ITEMS, "constraints": []}]
     m = ck.run_script(code)
     assert [s["name"] for s in m.sketches] == ["sk1"]
     sk = m.sketches[0]
@@ -114,3 +114,67 @@ def test_profile_of_lines_and_arcs():
         se.set_sketch("result = {}\n", "s3", PLANE, [{"type": "profile", "start": [0, 0], "segs": [{"to": [10, 0]}], "mode": "add"}])
     with pytest.raises(se.Unsupported, match="profile"):
         se.set_sketch("result = {}\n", "s4", PLANE, [{"type": "profile", "segs": []}])
+
+
+# ------------------------------------------------------------------ constraints
+import sketch_solver as SS  # noqa: E402
+
+BOX = lambda: [{"type": "profile", "start": [0.3, -0.2], "segs": [{"to": [39, 1]}, {"to": [41, 19]}, {"to": [1, 21.5]}, {"to": [0.3, -0.2]}], "mode": "add"}]
+P = lambda k, i=0: {"i": i, "p": k}
+E = lambda k, i=0: {"i": i, "e": k}
+
+
+def test_solver_squares_up_a_profile_and_counts_freedom():
+    items = BOX()
+    hv = [{"type": "fix", "refs": [P("s")], "value": [0, 0]}, {"type": "horizontal", "refs": [E(0)]}, {"type": "vertical", "refs": [E(1)]},
+          {"type": "horizontal", "refs": [E(2)]}, {"type": "vertical", "refs": [E(3)]}]
+    r = SS.solve(items, hv)
+    assert r["ok"] and r["dof"] == 2                                      # width and height still free
+    r = SS.solve(items, hv + [{"type": "length", "refs": [E(0)], "value": 40}, {"type": "length", "refs": [E(1)], "value": 20}])
+    assert r["ok"] and r["dof"] == 0 and not any(r["free"])
+    assert items[0]["segs"][1]["to"] == [40, 20] and items[0]["segs"][3]["to"] == items[0]["start"] == [0, 0]
+
+
+def test_tangent_concentric_equal_angle_and_distance():
+    items = BOX() + [{"type": "circle", "cx": 7, "cy": 6, "r": 4, "mode": "subtract"}, {"type": "circle", "cx": 30, "cy": 12, "r": 2, "mode": "subtract"}]
+    cons = [{"type": "fix", "refs": [P("s")], "value": [0, 0]}, {"type": "horizontal", "refs": [E(0)]}, {"type": "vertical", "refs": [E(3)]},
+            {"type": "angle", "refs": [E(0), E(1)], "value": 90}, {"type": "parallel", "refs": [E(0), E(2)]},
+            {"type": "length", "refs": [E(0)], "value": 40}, {"type": "length", "refs": [E(3)], "value": 20},
+            {"type": "tangent", "refs": [E(0), {"i": 1}]}, {"type": "tangent", "refs": [E(3), {"i": 1}]}, {"type": "radius", "refs": [{"i": 1}], "value": 5},
+            {"type": "equal", "refs": [{"i": 1}, {"i": 2}]}, {"type": "hdistance", "refs": [P("c", 1), P("c", 2)], "value": 25},
+            {"type": "vdistance", "refs": [P("c", 1), P("c", 2)], "value": 8}]
+    r = SS.solve(items, cons)
+    assert r["ok"] and r["dof"] == 0
+    assert close(items[1]["cx"], 5) and close(items[1]["cy"], 5) and close(items[2]["r"], 5) and close(items[2]["cx"], 30) and close(items[2]["cy"], 13)
+    assert close(items[0]["segs"][1]["to"][0], 40) and close(items[0]["segs"][1]["to"][1], 20)
+
+
+def test_arcs_points_on_edges_and_midpoints():
+    items = [{"type": "profile", "start": [0, 0], "segs": [{"to": [20, 0]}, {"to": [21, 10], "via": [26, 5]}, {"to": [0, 10]}], "mode": "add"},
+             {"type": "circle", "cx": 9, "cy": 2, "r": 1, "mode": "subtract"}]
+    cons = [{"type": "fix", "refs": [P("s")], "value": [0, 0]}, {"type": "horizontal", "refs": [E(0)]}, {"type": "horizontal", "refs": [E(2)]},
+            {"type": "vertical", "refs": [P("e0"), P("e1")]}, {"type": "tangent", "refs": [E(0), E(1)]}, {"type": "radius", "refs": [E(1)], "value": 5},
+            {"type": "length", "refs": [E(0)], "value": 20}, {"type": "midpoint", "refs": [P("c", 1), E(0)]}]
+    r = SS.solve(items, cons)
+    assert r["ok"]
+    c, rad = SS.circle(items, E(1))
+    assert close(rad, 5, 1e-5) and close(c[0], 20, 1e-5) and close(c[1], 5, 1e-5)          # a semicircle end on the bar
+    assert close(items[1]["cx"], 10) and close(items[1]["cy"], 0)                             # the hole sits on the bottom edge's midpoint
+
+
+def test_conflicts_are_refused_and_saved_constraints_build():
+    items = BOX()
+    cons = [{"type": "horizontal", "refs": [E(0)]}, {"type": "length", "refs": [E(0)], "value": 40}, {"type": "length", "refs": [E(0)], "value": 30}]
+    with pytest.raises(SS.SketchConstraintError, match="conflict"):
+        SS.apply(items, cons)
+    with pytest.raises(se.Refused, match="conflict"):
+        se.set_sketch("result = {}\n", "s", PLANE, BOX(), cons)
+    ok = [{"type": "fix", "refs": [P("s")], "value": [0, 0]}, {"type": "horizontal", "refs": [E(0)]}, {"type": "vertical", "refs": [E(1)]},
+          {"type": "horizontal", "refs": [E(2)]}, {"type": "vertical", "refs": [E(3)]},
+          {"type": "length", "refs": [E(0)], "value": 40}, {"type": "length", "refs": [E(1)], "value": 20}]
+    code = se.set_sketch("result = {}\n", "s", PLANE, BOX(), ok)
+    d = se.sketches(code)[0]
+    assert len(d["constraints"]) == 7 and d["items"][0]["segs"][1]["to"] == [40, 20]
+    assert close(ck.run_script(code).sketches[0]["area"], 800, 1e-6)
+    with pytest.raises(se.Refused, match="item 5"):
+        se.set_sketch("result = {}\n", "s", PLANE, BOX(), [{"type": "horizontal", "refs": [E(0, 5)]}])

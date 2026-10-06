@@ -730,7 +730,7 @@ async def _dispatch(ws: WebSocket, msg: dict) -> None:
             await ws.send_text(json.dumps({"type": "cam_error", "text": f"{type(e).__name__}: {e}"}))
     elif t == "set_sketch":
         try:
-            await agent.set_sketch(msg.get("name") or "sketch1", msg.get("plane") or {}, msg.get("items") or [])
+            await agent.set_sketch(msg.get("name") or "sketch1", msg.get("plane") or {}, msg.get("items") or [], constraints=msg.get("constraints") or [])
         except (ck.CadError, Exception) as e:  # noqa: BLE001
             await ws.send_text(json.dumps({"type": "error", "text": f"sketch failed: {e}"}))
     elif t == "extrude_sketch":
