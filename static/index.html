@@ -2473,7 +2473,7 @@ async function setRender(on) {
     if (model) for (const b of model.bodies.values()) { b.mesh.material = material; b.mesh.castShadow = b.mesh.receiveShadow = false; }
     for (const m of renderMats.values()) m.dispose(); renderMats.clear();
   }
-  applyRenderBg(); applyVisibility(); poseApply(); renderAnimPanel();
+  applyRenderBg(); applyVisibility(); poseApply(); renderAnimPanel(); syncRibbon();
 }
 function applyRenderMats() {
   if (!renderOn || !model) return;
@@ -2617,6 +2617,7 @@ const ICO = {
   mirror: '<path d="M12 3v18" stroke-dasharray="2 2"/><path d="M9 6 4 17h5Z"/><path d="M15 6l5 11h-5Z"/>',
   pattern: '<rect x="3" y="3" width="5" height="5" rx="1"/><rect x="10" y="3" width="5" height="5" rx="1"/><rect x="17" y="3" width="4" height="5" rx="1"/><rect x="3" y="10" width="5" height="5" rx="1"/><rect x="10" y="10" width="5" height="5" rx="1"/><rect x="3" y="17" width="5" height="4" rx="1"/>',
   section: '<path d="M4 8l8-4 8 4v8l-8 4-8-4Z"/><path d="M2 13h20" stroke-width="2"/><path d="M4 13l8 4 8-4" stroke-dasharray="2 2"/>',
+  render: '<circle cx="12" cy="12" r="4.5"/><path d="M12 2.5v2.5M12 19v2.5M2.5 12H5M19 12h2.5M5.3 5.3l1.8 1.8M16.9 16.9l1.8 1.8M5.3 18.7l1.8-1.8M16.9 7.1l1.8-1.8"/>',
   joint: '<circle cx="7" cy="17" r="3"/><circle cx="17" cy="7" r="3"/><path d="M9.2 14.8l5.6-5.6"/><path d="M4 21l1-1M19 5l1-1" />',
   interference: '<circle cx="9" cy="12" r="6"/><circle cx="15" cy="12" r="6"/><path d="M12 7.2a6 6 0 0 1 0 9.6a6 6 0 0 1 0-9.6Z" fill="currentColor" stroke="none" opacity=".55"/>',
 };
@@ -2641,6 +2642,7 @@ const TOOLS = {
   joint:    { group: 'assemble', label: 'Joint',    key: 'T', hint: 'Click a circular edge (revolute: turns about it) or a straight edge (slider) on the part that should move.', picks: 'edges', steps: ['Edge', 'Joint'] },
   section:  { group: 'inspect', label: 'Section',  key: 'S', hint: 'Cut the model with a plane to see inside: base planes or a flat face, with a slider and solid hatched caps.', picks: 'face1' },
   interference: { group: 'inspect', label: 'Interference', key: 'J', hint: 'Find bodies that overlap (exact solids) and show where, in red.', picks: 'none' },
+  render:   { group: 'output', label: 'Render',    key: 'E', hint: 'Studio render on / off: materials, studio lighting and soft shadows. Appearances, images and video in ▶ Animate.', picks: 'none' },
   drawings: { group: 'output', label: 'Drawings',  key: 'D', hint: 'Shop drawings (SVG + DXF) with the material and sheet from ⚙ Settings.', picks: 'none' },
   slice:    { group: 'output', label: 'Slice',     key: 'P', hint: 'Slice for 3D printing with the printer and options from ⚙ Settings; layers show in the viewer.', picks: 'none' },
 };
@@ -2660,6 +2662,7 @@ function activateTool(k) {
   if (k === 'sketch') { if (tool) endTool(); if (measuring) setMeasuring(false); sk ? endSketch() : startSketch(null); return; }
   if (k === 'measure') { if (tool) endTool(); setMeasuring(!measuring); return; }
   if (k === 'drawings') { makeDrawings(); return; }
+  if (k === 'render') { setRender(!renderOn); return; }
   if (k === 'slice') { runSlice(); return; }
   tool && tool.kind === k ? endTool() : startTool(k);
 }
@@ -2672,7 +2675,7 @@ function showTip(b, t) {
 }
 function hideTip() { tipEl.classList.remove('on'); }
 function syncRibbon() {
-  document.querySelectorAll('#ribbon .rb').forEach(b => b.classList.toggle('active', (tool && tool.kind === b.dataset.tool) || (b.dataset.tool === 'sketch' && !!sk) || (b.dataset.tool === 'measure' && measuring)));
+  document.querySelectorAll('#ribbon .rb').forEach(b => b.classList.toggle('active', (tool && tool.kind === b.dataset.tool) || (b.dataset.tool === 'sketch' && !!sk) || (b.dataset.tool === 'measure' && measuring) || (b.dataset.tool === 'render' && renderOn)));
 }
 function startTool(kind) {
   if (measuring) setMeasuring(false); if (sk) endSketch();

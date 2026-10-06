@@ -5,6 +5,12 @@ features, patch bumps fix things. The version shown in the UI header comes from 
 
 ## [Unreleased]
 
+## [0.22.1] — 2026-10-06
+
+### Added
+- **Render** toggle in the ribbon (Output group, `E`): studio render on and off in one click; it stays in sync with
+  the Animate panel.
+
 ## [0.22.0] — 2026-10-06
 
 ### Added
