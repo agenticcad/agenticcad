@@ -250,6 +250,16 @@
   .ifrow:last-child { border-bottom:0; } .ifrow:hover { background:var(--panel2); } .ifrow.on { background:rgba(255,59,59,.12); box-shadow:inset 3px 0 0 #ff3b3b; }
   .ifrow b { font-weight:600; } .ifrow span { margin-left:auto; color:#ff8080; font-variant-numeric:tabular-nums; } .ifrow.thr span { color:#ffb020; }
   .ifh { font-size:10px; text-transform:uppercase; letter-spacing:.4px; color:var(--muted); padding:6px 8px 2px; }
+  #anim-panel { position:absolute; z-index:6; left:50%; bottom:52px; transform:translateX(-50%); width:min(560px, 94%); background:rgba(28,32,39,.96); border:1px solid var(--line); border-radius:10px; padding:8px 12px 10px; display:none; font-size:12px; box-shadow:0 8px 30px rgba(0,0,0,.35); }
+  #anim-panel.on { display:block; }
+  #anim-panel .ap-hd { display:flex; gap:8px; align-items:center; margin-bottom:4px; } #anim-panel .ap-hd .x { margin-left:auto; background:none; border:0; color:var(--muted); cursor:pointer; }
+  #anim-panel .ap-sec { border-top:1px solid var(--line); padding:6px 0 4px; } #anim-panel .ap-t { font-size:10px; text-transform:uppercase; letter-spacing:.5px; color:var(--muted); margin-bottom:4px; }
+  #anim-panel .ap-row { display:flex; gap:8px; align-items:center; margin:4px 0; flex-wrap:wrap; } #anim-panel .ap-row.j label { width:110px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--muted); }
+  #anim-panel .ap-row input[type=range] { flex:1; min-width:120px; } #anim-panel .v { width:70px; text-align:right; font-variant-numeric:tabular-nums; color:var(--muted); }
+  #anim-panel select, #anim-panel input[type=number] { background:var(--bg); color:var(--text); border:1px solid var(--line); border-radius:5px; padding:3px 5px; font:inherit; }
+  #anim-panel label.muted, #anim-panel .sw-l { display:flex; gap:4px; align-items:center; } #anim-panel .ap-note { margin:4px 0; font-size:11px; }
+  #anim-panel .ap-ok { color:var(--ok); margin-top:4px; } #anim-panel .ap-bad { color:var(--err); margin-top:4px; }
+  #anim-panel .ap-hit { padding:3px 6px; border-radius:5px; cursor:pointer; } #anim-panel .ap-hit:hover { background:var(--panel2); } #anim-panel .ap-hit span { color:var(--muted); }
   .set-grid { display:grid; grid-template-columns:120px 1fr; gap:8px 10px; align-items:center; font-size:12px; }
   .set-grid label { color:var(--muted); }
   .set-grid textarea { min-height:70px !important; }
@@ -338,6 +348,7 @@
       <span class="btn" style="padding:0 4px 0 9px;display:flex;align-items:center;gap:4px" title="Display mesh only — the model is exact B-rep">Mesh
         <select id="quality"><option value="draft">draft</option><option value="normal" selected>normal</option><option value="fine">fine</option></select></span>
       <button class="btn" id="undo" title="Revert to previous build">↶ Undo</button>
+      <button class="btn" id="anim-btn" title="Motion, exploded view and studio render">▶ Animate</button>
       <span class="btn active" id="sec-chip" style="display:none;gap:6px;align-items:center" title="Section analysis is on — click to adjust"><span>Section</span><b title="remove the section" style="cursor:pointer">✕</b></span>
       <button class="btn" id="measure-btn" style="display:none">Measure</button>
       <button class="btn" id="sketch-btn" style="display:none">Sketch</button>
@@ -350,6 +361,7 @@
     <div id="ribbon">
       <div class="rg"><div class="rgl">Create</div><div class="rgb" id="rg-create"></div></div>
       <div class="rg"><div class="rgl">Modify</div><div class="rgb" id="rg-modify"></div></div>
+      <div class="rg"><div class="rgl">Assemble</div><div class="rgb" id="rg-assemble"></div></div>
       <div class="rg"><div class="rgl">Inspect</div><div class="rgb" id="rg-inspect"></div></div>
       <div class="rg"><div class="rgl">Output</div><div class="rgb" id="rg-output"></div></div>
     </div>
@@ -371,6 +383,7 @@
       <span style="flex:1"></span><button class="btn primary" id="sk-finish">Finish</button><button class="btn" id="sk-cancel">Cancel</button>
     </div>
     <div id="sk-dim"></div>
+    <div id="anim-panel"></div>
     <div id="sketch-items"><div class="sk-hd"><input type="text" id="sk-name" value="sketch1" title="sketch name (a Python variable)"><span class="muted" id="sk-plane"></span></div><div class="hd muted" style="font-size:10px;text-transform:uppercase;letter-spacing:.3px;margin:4px 0 2px">Items · Esc cancels · ⌫ undoes · Alt = no snap</div><div id="sk-list"></div></div>
 
     <div id="params-card" style="display:none"><div class="hd">Parameters <span class="muted" id="params-hint" style="text-transform:none;letter-spacing:0"></span></div><div id="params-body"></div></div>
@@ -567,6 +580,7 @@ function loadMesh(data) {
   applyColors();
   if (firstLoad) { setView('iso'); firstLoad = false; }
   lastStatsData = data; renderStats();
+  if (typeof onModelPose === 'function') { onModelPose(); if (renderOn) applyRenderMats(); }
 }
 let lastStatsData = null;
 function renderStats() {
@@ -597,7 +611,7 @@ function applyColors(extraHighlight = []) {
 }
 function applyVisibility() {
   const hideAll = typeof sliceData !== 'undefined' && !!sliceData && showLayers && document.getElementById('print-hide-model').checked;   // sliced-layer preview
-  for (const b of model.bodies.values()) { const vis = !hidden.has(b.id) && !hideAll; b.mesh.visible = vis; b.lines.visible = vis && showEdges; }
+  for (const b of model.bodies.values()) { const vis = !hidden.has(b.id) && !hideAll; b.mesh.visible = vis; b.lines.visible = vis && showEdges && !renderOn; }
   if (typeof sectionSync === 'function') sectionSync();
 }
 
@@ -622,6 +636,11 @@ function tickTween() {
 }
 function fitCamera(dir) {
   if (!bbox) return;
+  if (!fitCamera.inPose && typeof isPosed === 'function' && model && isPosed()) {   // frame the exploded / posed bodies
+    scene.updateMatrixWorld();
+    const bb = new THREE.Box3(); for (const b of model.bodies.values()) if (b.mesh.visible) bb.expandByObject(b.mesh);
+    if (!bb.isEmpty()) { const saved = bbox; bbox = bb; fitCamera.inPose = true; try { return fitCamera(dir); } finally { bbox = saved; fitCamera.inPose = false; } }
+  }
   const center = bbox.getCenter(new THREE.Vector3());
   const radius = bbox.getSize(new THREE.Vector3()).length() / 2 || 10;
   let dist = radius / Math.sin(THREE.MathUtils.degToRad(camera.fov / 2));
@@ -739,7 +758,7 @@ function tickMeasureLabel() {
 }
 
 // render loop (started after the ViewCube exists)
-(function animate() { requestAnimationFrame(animate); tickTween(); controls.update(); renderer.render(scene, camera); renderCube(); tickMeasureLabel(); drawSketchOverlay(); })();
+(function animate() { requestAnimationFrame(animate); tickTween(); if (typeof tickAnim === 'function') tickAnim(performance.now()); controls.update(); renderer.render(scene, camera); renderCube(); tickMeasureLabel(); drawSketchOverlay(); })();
 
 
 // picking
@@ -862,15 +881,17 @@ function toggleBody(id) {
 
 // screenshot for the agent
 async function renderScreenshot(spec) {
-  const W = 1024, H = 768; let savedSection = null;
+  const W = 1024, H = 768; let savedSection = null, savedPose = null, savedRender = false;
   const savedPos = camera.position.clone(), savedTarget = controls.target.clone(), savedEdges = showEdges;
   const savedPR = renderer.getPixelRatio();
   try {
+    if (spec.pose || spec.explode != null) { savedPose = { vals: { ...poseVals }, ex: explodeAmt }; Object.assign(poseVals, spec.pose || {}); if (spec.explode != null) { explodeAmt = Math.max(0, Math.min(1, +spec.explode)); explodeCache = null; } poseApply(); }
     renderer.setPixelRatio(1); renderer.setSize(W, H, false); renderer.domElement.style.width = ''; renderer.domElement.style.height = ''; camera.aspect = W / H; camera.updateProjectionMatrix();
     if (spec.only && model) { for (const b of model.bodies.values()) { b.mesh.visible = spec.only.includes(b.path); b.lines.visible = b.mesh.visible && spec.showEdges !== false; }
       const bb = new THREE.Box3(); for (const b of model.bodies.values()) if (b.mesh.visible) bb.expandByObject(b.mesh); const saved = bbox; bbox = bb.isEmpty() ? bbox : bb; setView(spec.view || 'iso'); bbox = saved; }
     else { setView(spec.view || 'iso'); showEdges = spec.showEdges !== false; applyVisibility(); }
     applyColors(spec.highlight || []);
+    if (spec.render && !renderOn) { savedRender = true; await setRender(true); }
     if (spec.section) { savedSection = section; const f0 = sectionAt(spec.section.plane || 'XZ', spec.section.offset); section = { ...f0, flip: spec.section.flip ? !f0.flip : f0.flip }; sectionSync(); }
     controls.update(); renderer.render(scene, camera);
     // JPEG keeps the agent's tool result well under the SDK's 1 MB message limit even with dense toolpaths
@@ -881,6 +902,8 @@ async function renderScreenshot(spec) {
     renderer.setPixelRatio(savedPR); resize();
     camera.position.copy(savedPos); controls.target.copy(savedTarget); controls.update();
     if (spec.section) { section = savedSection; }
+    if (savedPose) { poseVals = savedPose.vals; explodeAmt = savedPose.ex; poseApply(); }
+    if (savedRender) await setRender(false);
     showEdges = savedEdges; applyVisibility(); applyColors();
   }
 }
@@ -1761,6 +1784,7 @@ async function startSketch(def) {
     plane = basePlane(r.p); plane.origin = plane.z.clone().multiplyScalar(r.o).toArray(); plane.label = `${r.p} plane` + (r.o ? ` +${r.o}` : '');
   }
   if (measuring) setMeasuring(false); if (tool) endTool();
+  if (isPosed()) poseReset();
   sk = { name, plane, items: def ? JSON.parse(JSON.stringify(def.items)) : [], tool: 'line', pts: [], hover: null, snap: null, prof: null,
          sel: -1, drag: null, lock: {}, dimKey: '', refs: null };
   sk.refs = skModelRefs();
@@ -2209,7 +2233,8 @@ function sectionBuild() {
 }
 function sectionSync() {
   const planes = section ? [secPlane] : [];
-  if ((material.clippingPlanes || []).length !== planes.length) { material.clippingPlanes = planes; edgeMat.clippingPlanes = planes; material.needsUpdate = true; edgeMat.needsUpdate = true; }
+  if ((material.clippingPlanes || []).length !== planes.length) { material.clippingPlanes = planes; edgeMat.clippingPlanes = planes; material.needsUpdate = true; edgeMat.needsUpdate = true;
+    for (const m of renderMats.values()) { m.clippingPlanes = planes; m.needsUpdate = true; } }
   const chip = document.getElementById('sec-chip');
   if (!section || !model) { secGroup.visible = false; if (chip) chip.style.display = 'none'; return; }
   if (secBuiltFor !== model) sectionBuild();
@@ -2313,6 +2338,261 @@ function renderInterfCmd() {
   };
 }
 
+// ------------------------------------------------------------------ motion, exploded views, render (Animate panel)
+// Joints / couplings / explode / appearances come from the script (motion.py) in the model payload. Poses are
+// applied as per-body matrices (geometry is never rebuilt); the maths matches motion.joint_matrices().
+var poseVals = {};          // free joint values {name: deg | mm}
+var explodeAmt = 0, explodeMode = 'auto', showTrails = true;
+var renderOn = false, renderBg = 'studio';
+var animPlaying = false, animT0 = 0, animFrom = 0;
+const trailGroup = new THREE.Group(); scene.add(trailGroup);
+const trailMat = new THREE.LineDashedMaterial({ color: 0x9aa3ad, dashSize: 1.5, gapSize: 1.2, transparent: true, opacity: 0.7 });
+function motionDef() { return (lastStatsData && lastStatsData.motion) || null; }
+function jointValues() {
+  const mo = motionDef(); if (!mo) return {};
+  const vals = {}; for (const j of mo.joints) vals[j.name] = poseVals[j.name] ?? j.value ?? 0;
+  const fol = Object.fromEntries(mo.couplings.map(c => [c.follower, c]));
+  const val = (n, d = 0) => fol[n] && d < 64 ? fol[n].ratio * val(fol[n].leader, d + 1) + fol[n].offset : vals[n];
+  return Object.fromEntries(Object.keys(vals).map(n => [n, val(n)]));
+}
+function jointMatrices(vals) {
+  const mo = motionDef(), out = {}; if (!mo) return out;
+  const by = Object.fromEntries(mo.joints.map(j => [j.name, j]));
+  const world = n => {
+    if (out[n]) return out[n];
+    const j = by[n], L = new THREE.Matrix4();
+    if (j.type === 'revolute') {
+      const o = new THREE.Vector3(...j.origin), d = new THREE.Vector3(...j.axis).normalize();
+      L.makeTranslation(o.x, o.y, o.z).multiply(new THREE.Matrix4().makeRotationAxis(d, vals[n] * Math.PI / 180)).multiply(new THREE.Matrix4().makeTranslation(-o.x, -o.y, -o.z));
+    } else { const d = new THREE.Vector3(...j.axis).normalize().multiplyScalar(vals[n]); L.makeTranslation(d.x, d.y, d.z); }
+    out[n] = j.parent ? world(j.parent).clone().multiply(L) : L; return out[n];
+  };
+  for (const n in by) world(n);
+  return out;
+}
+function bodyCentre(b) { return new THREE.Vector3((b.bboxMin[0] + b.bboxMax[0]) / 2, (b.bboxMin[1] + b.bboxMax[1]) / 2, (b.bboxMin[2] + b.bboxMax[2]) / 2); }
+function explodeOffsets() {   // {path: Vector3} at full explode
+  const ex = (lastStatsData && lastStatsData.explode) || {}, out = {};
+  if (!model) return out;
+  const bodies = [...model.bodies.values()];
+  const axisName = explodeMode === 'auto' ? ((ex.auto && ex.auto.axis) || 'Z') : explodeMode;
+  const scale = (ex.auto && ex.auto.scale) || 1;
+  const A = axisName === 'radial' ? null : new THREE.Vector3(...({ X: [1, 0, 0], Y: [0, 1, 0], Z: [0, 0, 1] }[axisName] || [0, 0, 1]));
+  const box = arr => { const bb = new THREE.Box3(); for (const b of arr) { bb.expandByPoint(new THREE.Vector3(...b.bboxMin)); bb.expandByPoint(new THREE.Vector3(...b.bboxMax)); } return bb; };
+  const all = box(bodies), c = all.getCenter(new THREE.Vector3()), size = all.getSize(new THREE.Vector3()).length() || 1;
+  const groups = {}; for (const b of bodies) { const g = b.path.includes('/') ? b.path.split('/')[0] : ''; (groups[g] ||= []).push(b); }
+  const multi = Object.keys(groups).length > 1;
+  const split = v => { if (!A) return { ax: new THREE.Vector3(), rad: v.clone() }; const ax = A.clone().multiplyScalar(v.dot(A)); return { ax, rad: v.clone().sub(ax) }; };
+  for (const [g, list] of Object.entries(groups)) {
+    const gc = box(list).getCenter(new THREE.Vector3());
+    const gs = split(gc.clone().sub(c)), goff = multi ? gs.ax.multiplyScalar(1.4).add(gs.rad.multiplyScalar(A ? 0.4 : 1.2)) : new THREE.Vector3();
+    for (const b of list) {
+      const s_ = split(bodyCentre(b).sub(gc));
+      let off = s_.ax.multiplyScalar(1.5).add(s_.rad.multiplyScalar(A ? 0.8 : 1.5)).add(goff).multiplyScalar(scale);
+      if (off.length() < size * 0.01 && A && list.length > 1) off = new THREE.Vector3();
+      out[b.path] = off;
+    }
+  }
+  for (const [p, v] of Object.entries(ex.offsets || {})) out[p] = new THREE.Vector3(...v);   // explicit script offsets win
+  return out;
+}
+var explodeCache = null;
+function poseApply() {
+  if (!model) return;
+  const mo = motionDef(), mats = mo ? jointMatrices(jointValues()) : {}, owner = {};
+  if (mo) for (const j of mo.joints) for (const p of j.bodies) owner[p] = j.name;
+  if (explodeAmt > 0 && !explodeCache) explodeCache = explodeOffsets();
+  while (trailGroup.children.length) { const c = trailGroup.children.pop(); c.geometry.dispose(); }
+  const posed = new Map();
+  for (const b of model.bodies.values()) {
+    const M = owner[b.path] ? mats[owner[b.path]].clone() : new THREE.Matrix4();
+    const off = explodeAmt > 0 && explodeCache ? explodeCache[b.path] : null;
+    if (off && off.lengthSq() > 1e-9) {
+      M.premultiply(new THREE.Matrix4().makeTranslation(off.x * explodeAmt, off.y * explodeAmt, off.z * explodeAmt));
+      if (showTrails && b.mesh.visible) {
+        const c0 = bodyCentre(b).applyMatrix4(owner[b.path] ? mats[owner[b.path]] : new THREE.Matrix4()), c1 = c0.clone().addScaledVector(off, explodeAmt);
+        const l = new THREE.Line(new THREE.BufferGeometry().setFromPoints([c0, c1]), trailMat); l.computeLineDistances(); trailGroup.add(l);
+      }
+    }
+    for (const o of [b.mesh, b.lines]) { o.matrixAutoUpdate = false; o.matrix.copy(M); o.matrixWorldNeedsUpdate = true; }
+    posed.set(b.id, M);
+  }
+  for (const c of secGroup.children) if (!c.userData.cap) { const M = posed.get(c.userData.body); if (M) { c.matrixAutoUpdate = false; c.matrix.copy(M); c.matrixWorldNeedsUpdate = true; } }
+  if (renderOn) renderGround();
+}
+function isPosed() { const mo = motionDef(); return explodeAmt > 0 || (mo && mo.joints.some(j => (poseVals[j.name] ?? j.value ?? 0) !== (j.value ?? 0))); }
+function poseReset() { poseVals = {}; explodeAmt = 0; animPlaying = false; poseApply(); renderAnimPanel(); }
+function onModelPose() { explodeCache = null; const mo = motionDef(); if (mo) for (const n of Object.keys(poseVals)) if (!mo.joints.some(j => j.name === n)) delete poseVals[n]; poseApply(); renderAnimPanel(); }
+
+// ---- render mode: studio environment, physical materials, soft shadows
+var envTex = null, renderMats = new Map(), keyShadow = null, ground = null;
+async function ensureEnv() {
+  if (envTex) return envTex;
+  const { RoomEnvironment } = await import('three/addons/environments/RoomEnvironment.js');
+  const pm = new THREE.PMREMGenerator(renderer); envTex = pm.fromScene(new RoomEnvironment(), 0.04).texture; pm.dispose();
+  return envTex;
+}
+function appearanceOf(b) {
+  const a = ((lastStatsData && lastStatsData.appearance) || {})[b.path];
+  if (a) return a;
+  return { color: '#' + b.base.getHexString(), metalness: 0.0, roughness: 0.42, clearcoat: 0.25 };   // plastic in the body's tint
+}
+function renderMatFor(b) {
+  const a = appearanceOf(b);
+  const m = new THREE.MeshPhysicalMaterial({ color: new THREE.Color(a.color || '#cccccc'), metalness: a.metalness ?? 0, roughness: a.roughness ?? 0.5,
+    clearcoat: a.clearcoat ?? 0, clearcoatRoughness: 0.25, transmission: a.transmission ?? 0, thickness: a.transmission ? 2 : 0, side: THREE.DoubleSide,
+    polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1, envMapIntensity: 1.0 });
+  m.clippingPlanes = material.clippingPlanes; return m;
+}
+function renderGround() {
+  if (!ground || !model) return;
+  const bb = new THREE.Box3(); for (const b of model.bodies.values()) if (b.mesh.visible) bb.expandByObject(b.mesh);
+  if (bb.isEmpty()) return;
+  const size = bb.getSize(new THREE.Vector3()), c = bb.getCenter(new THREE.Vector3()), r = Math.max(size.x, size.y, size.z);
+  ground.position.set(c.x, c.y, bb.min.z - 0.02); ground.scale.setScalar(r * 6);
+  keyShadow.position.set(c.x + r * 1.2, c.y - r * 1.6, c.z + r * 2.4); keyShadow.target.position.copy(c);
+  const cam = keyShadow.shadow.camera; cam.left = cam.bottom = -r * 1.6; cam.right = cam.top = r * 1.6; cam.near = 0.1; cam.far = r * 8; cam.updateProjectionMatrix();
+  keyShadow.shadow.bias = -0.0004; keyShadow.shadow.normalBias = r * 0.002;
+}
+async function setRender(on) {
+  renderOn = on;
+  if (on) {
+    scene.environment = await ensureEnv(); scene.environmentIntensity = 0.5;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.0;
+    renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    if (!keyShadow) {
+      keyShadow = new THREE.DirectionalLight(0xffffff, 1.6); keyShadow.castShadow = true; keyShadow.shadow.mapSize.set(2048, 2048); keyShadow.shadow.radius = 6;
+      scene.add(keyShadow, keyShadow.target);
+      ground = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.ShadowMaterial({ opacity: 0.28 })); ground.receiveShadow = true; scene.add(ground);
+    }
+    keyShadow.visible = ground.visible = true;
+    applyRenderMats();
+  } else {
+    scene.environment = null; renderer.toneMapping = THREE.NoToneMapping; renderer.shadowMap.enabled = false;
+    if (keyShadow) keyShadow.visible = ground.visible = false;
+    if (model) for (const b of model.bodies.values()) { b.mesh.material = material; b.mesh.castShadow = b.mesh.receiveShadow = false; }
+    for (const m of renderMats.values()) m.dispose(); renderMats.clear();
+  }
+  applyRenderBg(); applyVisibility(); poseApply(); renderAnimPanel();
+}
+function applyRenderMats() {
+  if (!renderOn || !model) return;
+  for (const m of renderMats.values()) m.dispose(); renderMats.clear();
+  for (const b of model.bodies.values()) { const m = renderMatFor(b); renderMats.set(b.id, m); b.mesh.material = m; b.mesh.castShadow = b.mesh.receiveShadow = true; }
+  renderGround();
+}
+const BGS = { studio: 0x3a3f47, dark: 0x14171c, light: 0xe9ebee };
+function applyRenderBg() {
+  scene.background = renderOn ? new THREE.Color(BGS[renderBg] ?? BGS.studio) : null;
+  if (grid) grid.visible = !renderOn; if (axes) axes.visible = !renderOn;
+  for (const b of model ? model.bodies.values() : []) b.lines.visible = !renderOn && showEdges && b.mesh.visible;
+  sketchGroup.visible = !renderOn;
+}
+
+// ---- export: still image and video (saved through the server so the desktop app can hand them out)
+async function saveBlob(blob, ext) {
+  const buf = new Uint8Array(await blob.arrayBuffer()); let bin = ''; for (let i = 0; i < buf.length; i += 0x8000) bin += String.fromCharCode.apply(null, buf.subarray(i, i + 0x8000));
+  const name = `${(design && design.name) || 'design'}-${new Date().toISOString().replace(/[:T]/g, '-').slice(0, 19)}`;
+  const r = await api('/api/render/save', { name, ext, data: btoa(bin) });
+  addMsg('system', `saved ${r.file} (${(r.bytes / 1024 / 1024).toFixed(1)} MB) to exports/renders`);
+  window.open(r.url);
+}
+async function saveImage() {
+  const pr = renderer.getPixelRatio(); renderer.setPixelRatio(Math.min(3, pr * 2)); resize(); renderer.render(scene, camera);
+  const blob = await new Promise(res => renderer.domElement.toBlob(res, 'image/png'));
+  renderer.setPixelRatio(pr); resize(); await saveBlob(blob, 'png');
+}
+var recording = null;
+async function recordVideo(opts) {
+  if (recording) return;
+  const types = ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm', 'video/mp4;codecs=avc1', 'video/mp4'];
+  const type = types.find(t => window.MediaRecorder && MediaRecorder.isTypeSupported(t));
+  if (!type) { addMsg('error', 'video recording is not supported in this browser'); return; }
+  const stream = renderer.domElement.captureStream(60), rec = new MediaRecorder(stream, { mimeType: type, videoBitsPerSecond: 16e6 }), chunks = [];
+  rec.ondataavailable = e => { if (e.data.size) chunks.push(e.data); };
+  const dur = opts.seconds * 1000, t0 = performance.now(), start = { cam: camera.position.clone(), tgt: controls.target.clone() };
+  const mo = motionDef(), drv = mo && mo.drive, from = drv ? (poseVals[drv.joint] ?? drv.start) : 0, ex0 = explodeAmt;
+  recording = { rec, step: now => {
+    const t = Math.min(1, (now - t0) / dur);
+    if (opts.spin) { const off = start.cam.clone().sub(start.tgt); off.applyAxisAngle(new THREE.Vector3(0, 0, 1), t * 2 * Math.PI); camera.position.copy(start.tgt).add(off); camera.lookAt(start.tgt); }
+    if (opts.explode) { explodeAmt = Math.sin(t * Math.PI) * Math.max(ex0, 1) * 0.9; if (!explodeCache) explodeCache = explodeOffsets(); }
+    if (opts.motion && drv) poseVals[drv.joint] = drv.start + (drv.stop - drv.start) * t;
+    poseApply();
+    if (t >= 1) { rec.stop(); }
+  } };
+  rec.onstop = async () => {
+    const r_ = recording; recording = null; camera.position.copy(start.cam); controls.target.copy(start.tgt); controls.update(); explodeAmt = ex0; if (drv) poseVals[drv.joint] = from; poseApply(); renderAnimPanel();
+    await saveBlob(new Blob(chunks, { type }), type.includes('mp4') ? 'mp4' : 'webm');
+  };
+  rec.start(); renderAnimPanel();
+}
+function tickAnim(now) {
+  if (recording) { recording.step(now); return; }
+  if (!animPlaying) return;
+  const mo = motionDef(), drv = mo && mo.drive; if (!drv) { animPlaying = false; return; }
+  const span = drv.stop - drv.start, t = ((now - animT0) / 1000) / (drv.seconds || 4);
+  poseVals[drv.joint] = drv.start + ((animFrom - drv.start) / (span || 1) + t) % 1 * span;
+  poseApply(); syncAnimSliders();
+}
+
+// ---- Animate panel
+const animEl = document.getElementById('anim-panel');
+function syncAnimSliders() {
+  const vals = jointValues();
+  animEl.querySelectorAll('[data-j]').forEach(i => { if (document.activeElement !== i) i.value = vals[i.dataset.j] ?? 0; });
+  animEl.querySelectorAll('[data-jv]').forEach(s_ => { s_.textContent = (+(vals[s_.dataset.jv] ?? 0)).toFixed(1); });
+}
+var motionRes = null;
+function renderAnimPanel() {
+  if (!animEl.classList.contains('on')) return;
+  const mo = motionDef(), fol = new Set(mo ? mo.couplings.map(c => c.follower) : []), vals = jointValues();
+  const free = mo ? mo.joints.filter(j => !fol.has(j.name)) : [];
+  const rng = j => { const d = mo.drive && mo.drive.joint === j.name ? [mo.drive.start, mo.drive.stop] : j.limits || (j.type === 'revolute' ? [-180, 180] : [-20, 20]); return [Math.min(...d), Math.max(...d)]; };
+  animEl.innerHTML = `<div class="ap-hd"><b>Animate</b><span class="muted">${mo ? `${mo.joints.length} joint${mo.joints.length > 1 ? 's' : ''}` : 'no joints yet'}</span><button class="x" title="Close">${svg('close', 14)}</button></div>
+    <div class="ap-sec"><div class="ap-t">Motion</div>${mo ? `
+      <div class="ap-row"><button class="btn small ${animPlaying ? 'active' : ''}" id="ap-play">${animPlaying ? '❚❚ Pause' : '▶ Play'}</button><span class="muted">${mo.drive ? `drives ${mo.drive.joint}` : ''}</span>
+        <span style="flex:1"></span><button class="btn small" id="ap-check" title="Run the drive through its range and look for parts hitting each other">Check collisions</button><button class="btn small" id="ap-zero">Rest</button></div>
+      ${free.map(j => { const [a, b] = rng(j); return `<div class="ap-row j"><label>${j.name}</label><input type="range" data-j="${j.name}" min="${a}" max="${b}" step="${j.type === 'revolute' ? 0.5 : 0.05}" value="${vals[j.name] ?? 0}"><span class="v"><span data-jv="${j.name}">${(+(vals[j.name] ?? 0)).toFixed(1)}</span>${j.type === 'revolute' ? '°' : ' mm'}</span></div>`; }).join('')}
+      ${mo.couplings.length ? `<div class="muted ap-note">${mo.couplings.length} coupled joint${mo.couplings.length > 1 ? 's' : ''} follow${mo.couplings.length > 1 ? '' : 's'}: ${mo.couplings.map(c => `${c.follower} = ${+c.ratio.toFixed(4)}×${c.leader}`).slice(0, 4).join(', ')}${mo.couplings.length > 4 ? ' …' : ''}</div>` : ''}
+      <div id="ap-res">${motionRes ? motionRes : ''}</div>`
+      : `<div class="muted ap-note">Add joints with the Joint tool (ribbon ▸ Assemble), ask the agent ("make the gears turn"), or write <code>revolute(...)</code> in the script.</div>`}</div>
+    <div class="ap-sec"><div class="ap-t">Explode</div>
+      <div class="ap-row"><input type="range" id="ap-ex" min="0" max="1" step="0.01" value="${explodeAmt}" style="flex:1"><span class="v">${Math.round(explodeAmt * 100)}%</span></div>
+      <div class="ap-row"><select id="ap-exm">${[['auto', 'Auto' + (((lastStatsData || {}).explode || {}).auto ? ' (' + lastStatsData.explode.auto.axis + ')' : ' (Z)')], ['Z', 'Along Z'], ['X', 'Along X'], ['Y', 'Along Y'], ['radial', 'Radial']].map(([v, l]) => `<option value="${v}" ${v === explodeMode ? 'selected' : ''}>${l}</option>`).join('')}</select>
+        <label class="muted"><input type="checkbox" id="ap-tr" ${showTrails ? 'checked' : ''}> trails</label></div></div>
+    <div class="ap-sec"><div class="ap-t">Render</div>
+      <div class="ap-row"><label class="sw-l"><input type="checkbox" id="ap-rd" ${renderOn ? 'checked' : ''}> studio render</label>
+        <select id="ap-bg">${Object.keys(BGS).map(k => `<option ${k === renderBg ? 'selected' : ''}>${k}</option>`).join('')}</select><span style="flex:1"></span><button class="btn small" id="ap-png">Save image</button></div>
+      <div class="ap-row"><button class="btn small ${recording ? 'active' : ''}" id="ap-rec">${recording ? '● Recording…' : '● Record video'}</button>
+        <label class="muted"><input type="checkbox" id="ap-v-spin" checked> spin</label><label class="muted"><input type="checkbox" id="ap-v-ex" ${explodeAmt > 0 ? 'checked' : ''}> explode</label>${mo && mo.drive ? `<label class="muted"><input type="checkbox" id="ap-v-mo" checked> motion</label>` : ''}
+        <input id="ap-v-s" type="number" min="2" max="30" value="8" style="width:44px"><span class="muted">s</span></div></div>`;
+  const $ = id => animEl.querySelector('#' + id);
+  animEl.querySelector('.x').onclick = () => { animEl.classList.remove('on'); document.getElementById('anim-btn').classList.remove('active'); };
+  if (mo) {
+    $('ap-play').onclick = () => { animPlaying = !animPlaying; if (animPlaying) { animT0 = performance.now(); animFrom = poseVals[mo.drive?.joint] ?? mo.drive?.start ?? 0; } renderAnimPanel(); };
+    $('ap-zero').onclick = () => { poseVals = {}; animPlaying = false; motionRes = null; poseApply(); renderAnimPanel(); };
+    animEl.querySelectorAll('[data-j]').forEach(i => i.oninput = () => { animPlaying = false; poseVals[i.dataset.j] = +i.value; poseApply(); syncAnimSliders(); });
+    $('ap-check').onclick = async e => {
+      e.currentTarget.disabled = true; e.currentTarget.textContent = 'Checking…';
+      try {
+        const r = await api('/api/motion/check', { steps: 12 });
+        motionRes = r.collisions.length ? `<div class="ap-bad">${r.collisions.length} collision${r.collisions.length > 1 ? 's' : ''} while moving:</div>` + r.collisions.slice(0, 8).map(h => `<div class="ap-hit" data-at="${h.at}"><b>${h.a}</b> × <b>${h.b}</b> <span>from ${h.first.toFixed(1)}${r.unit}, worst at ${h.at.toFixed(1)}${r.unit}</span></div>`).join('')
+          : `<div class="ap-ok">No collisions through ${r.drive.joint} ${r.drive.start}→${r.drive.stop}${r.unit} (${r.steps} poses, ${r.elapsed} s).</div>`;
+      } catch (err) { motionRes = `<div class="ap-bad">${err.message}</div>`; }
+      renderAnimPanel();
+      animEl.querySelectorAll('.ap-hit').forEach(h => h.onclick = () => { animPlaying = false; poseVals[mo.drive.joint] = +h.dataset.at; poseApply(); syncAnimSliders(); });
+    };
+  }
+  $('ap-ex').oninput = e => { explodeAmt = +e.target.value; e.target.nextElementSibling.textContent = Math.round(explodeAmt * 100) + '%'; poseApply(); };
+  $('ap-exm').onchange = e => { explodeMode = e.target.value; explodeCache = null; poseApply(); };
+  $('ap-tr').onchange = e => { showTrails = e.target.checked; poseApply(); };
+  $('ap-rd').onchange = e => setRender(e.target.checked);
+  $('ap-bg').onchange = e => { renderBg = e.target.value; applyRenderBg(); };
+  $('ap-png').onclick = () => saveImage().catch(err => addMsg('error', 'save failed: ' + err.message));
+  $('ap-rec').onclick = () => recordVideo({ spin: $('ap-v-spin').checked, explode: $('ap-v-ex').checked, motion: !!($('ap-v-mo') && $('ap-v-mo').checked), seconds: Math.max(2, Math.min(30, +$('ap-v-s').value || 8)) });
+}
+document.getElementById('anim-btn').onclick = e => { const on = !animEl.classList.contains('on'); animEl.classList.toggle('on', on); e.currentTarget.classList.toggle('active', on); renderAnimPanel(); };
+
 // ------------------------------------------------------------------ modelling toolbar (ribbon + command dialog, code-backed)
 // Every tool: pick things in the viewer (faces/edges via snapPick), fill the command dialog, OK → the server
 // rewrites the script (script_edit) and rebuilds. No agent turn.
@@ -2337,6 +2617,7 @@ const ICO = {
   mirror: '<path d="M12 3v18" stroke-dasharray="2 2"/><path d="M9 6 4 17h5Z"/><path d="M15 6l5 11h-5Z"/>',
   pattern: '<rect x="3" y="3" width="5" height="5" rx="1"/><rect x="10" y="3" width="5" height="5" rx="1"/><rect x="17" y="3" width="4" height="5" rx="1"/><rect x="3" y="10" width="5" height="5" rx="1"/><rect x="10" y="10" width="5" height="5" rx="1"/><rect x="3" y="17" width="5" height="4" rx="1"/>',
   section: '<path d="M4 8l8-4 8 4v8l-8 4-8-4Z"/><path d="M2 13h20" stroke-width="2"/><path d="M4 13l8 4 8-4" stroke-dasharray="2 2"/>',
+  joint: '<circle cx="7" cy="17" r="3"/><circle cx="17" cy="7" r="3"/><path d="M9.2 14.8l5.6-5.6"/><path d="M4 21l1-1M19 5l1-1" />',
   interference: '<circle cx="9" cy="12" r="6"/><circle cx="15" cy="12" r="6"/><path d="M12 7.2a6 6 0 0 1 0 9.6a6 6 0 0 1 0-9.6Z" fill="currentColor" stroke="none" opacity=".55"/>',
 };
 const svg = (k, size = 20) => `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">${ICO[k]}</svg>`;
@@ -2357,6 +2638,7 @@ const TOOLS = {
   mirror:   { group: 'modify', label: 'Mirror',     key: 'M', hint: 'Mirror a body about a base plane or a flat face you click. Join makes it symmetric.', picks: 'face1', steps: ['Plane', 'Body'] },
   pattern:  { group: 'modify', label: 'Pattern',    key: 'N', hint: 'Rectangular or circular copies of a body: join them, make a new body, or cut them from another body (hole patterns).', picks: 'edges', steps: ['Body', 'Layout'] },
   measure:  { group: 'inspect', label: 'Measure',   key: 'I', hint: 'Hover snaps to vertices and edges. Click two things for distance and angle.', picks: 'none' },
+  joint:    { group: 'assemble', label: 'Joint',    key: 'T', hint: 'Click a circular edge (revolute: turns about it) or a straight edge (slider) on the part that should move.', picks: 'edges', steps: ['Edge', 'Joint'] },
   section:  { group: 'inspect', label: 'Section',  key: 'S', hint: 'Cut the model with a plane to see inside: base planes or a flat face, with a slider and solid hatched caps.', picks: 'face1' },
   interference: { group: 'inspect', label: 'Interference', key: 'J', hint: 'Find bodies that overlap (exact solids) and show where, in red.', picks: 'none' },
   drawings: { group: 'output', label: 'Drawings',  key: 'D', hint: 'Shop drawings (SVG + DXF) with the material and sheet from ⚙ Settings.', picks: 'none' },
@@ -2394,6 +2676,7 @@ function syncRibbon() {
 }
 function startTool(kind) {
   if (measuring) setMeasuring(false); if (sk) endSketch();
+  if (!['section', 'interference'].includes(kind) && isPosed()) { poseReset(); addMsg('system', 'back to the assembled pose for modelling'); }
   tool = { kind, picks: [] };
   document.body.classList.add('tooling'); syncRibbon(); hoverEl.textContent = TOOLS[kind].hint;
   renderCmd();
@@ -2486,6 +2769,18 @@ function renderCmd() {
       + num('rang', 'Angle', V('rang', 360), '°') + opFields('r', [['new', 'New body'], ['join', 'Join to a body'], ['cut', 'Cut from a body']]);
     ready = sketchNames.length > 0;
   }
+  if (k === 'joint') {
+    const e = edges[edges.length - 1], mo = motionDef(), jn = mo ? mo.joints.map(j => j.name) : [];
+    const grp = e && e.body.path.includes('/') ? e.body.path.split('/')[0] : null;
+    const ty = V('jt', e && e.info && e.info.kind === 'LINE' ? 'slider' : 'revolute');
+    fields = `<div class="row"><label for="jn">Name</label><div class="in"><input id="jn" type="text" value="${V('jn', e ? e.body.path.split('/').pop().toLowerCase().replace(/[^a-z0-9]+/g, '_') : 'joint1')}"></div></div>`
+      + sel('jt', 'Type', opt([['revolute', 'Revolute (turns)'], ['slider', 'Slider (moves along)']], ty))
+      + sel('jb', 'Moves', opt([...(e ? [[e.body.path, e.body.path]] : []), ...(grp ? [[grp + '/*', `whole ${grp} sub-assembly`]] : [])], V('jb', e ? e.body.path : '')))
+      + sel('jp', 'Parent', opt([['', '— ground —'], ...jn.map(n => [n, n])], V('jp', '')))
+      + sel('jc', 'Couple to', opt([['', '— free —'], ...jn.map(n => [n, n])], V('jc', ''))) + (V('jc', '') ? num('jr', 'Ratio', V('jr', 1), '×') : '')
+      + num('jl0', 'Limit min', V('jl0', ''), ty === 'revolute' ? '°' : 'mm') + num('jl1', 'Limit max', V('jl1', ''), ty === 'revolute' ? '°' : 'mm');
+    ready = !!(e && e.info && (e.info.kind === 'CIRCLE' || e.info.kind === 'LINE'));
+  }
   if (k === 'loft') {
     const none = [['', '—']], so = cur => opt(sketchNames.map(n => [n, n]), cur);
     fields = sel('l1', 'Sketch 1', so(V('l1', sketchNames[0] || ''))) + sel('l2', 'Sketch 2', so(V('l2', sketchNames[1] || '')))
@@ -2504,6 +2799,7 @@ function renderCmd() {
   const nEdges = p.filter(x => x.type === 'edge').length;
   const FEATURE_PROMPTS = {
     mirror: havePick ? 'Mirrors about the face you clicked (or pick a base plane below).' : 'Click a flat face to mirror about it, or choose a base plane below.',
+    joint: havePick ? 'Set the joint, then OK. Play it in ▶ Animate.' : 'Click a circular edge (revolute) or a straight edge (slider) on the moving part.',
     pattern: 'Choose the body and layout. Optional: click a straight edge for the direction, or a circular edge for the axis.',
     revolve: havePick ? 'The clicked straight edge can be the axis.' : 'Choose the sketch and axis below, or click a straight edge to revolve about it.',
     loft: 'Choose the sketches in order (e.g. bottom to top).',
@@ -2520,7 +2816,7 @@ function renderCmd() {
     <div class="ft"><span class="hint">↵ OK · ⌫ remove pick · Esc cancel</span><button class="btn" id="tcancel">Cancel</button><button class="btn primary" id="tapply" ${ready ? '' : 'disabled'}>${svg('check', 14)} OK</button></div>`;
   cmdEl.classList.add('on');
   cmdEl.querySelectorAll('.pk b').forEach(b => b.onclick = () => { tool.picks.splice(+b.dataset.i, 1); redrawToolPicks(); renderCmd(); });
-  if (['mirror', 'pattern', 'revolve', 'loft', 'sweep'].includes(k)) cmdEl.querySelectorAll('.fields input, .fields select').forEach(e => {
+  if (['mirror', 'pattern', 'revolve', 'loft', 'sweep', 'joint'].includes(k)) cmdEl.querySelectorAll('.fields input, .fields select').forEach(e => {
     if (e.type === 'checkbox' && tool.vals && e.id in tool.vals) e.checked = tool.vals[e.id];
     const store = () => { tool.vals[e.id] = e.type === 'checkbox' ? e.checked : e.value; };
     e.addEventListener('input', store); if (e.tagName === 'SELECT') e.addEventListener('change', () => { store(); renderCmd(); });
@@ -2540,7 +2836,7 @@ function renderCmd() {
       for (const [body, s_] of Object.entries(byBody)) send({ type: 'op', kind: k, body, points: s_.points, faces: s_.faces, radius: v('tr') });
     } else if (k === 'shell') { const body = target || [...model.bodies.values()][0].path; send({ type: 'op', kind: 'shell', body, faces: p.filter(x => x.body.path === body).map(x => x.p), thickness: v('tt') }); }
     else if (k === 'move') send({ type: 'transform_body', path: cmdEl.querySelector('#tbody').value, move: [v('mx'), v('my'), v('mz')], rotate: [0, 0, v('rz')] });
-    else if (['mirror', 'pattern', 'revolve', 'loft', 'sweep'].includes(k)) { if (!featureApply(k, p, v)) return; }
+    else if (['mirror', 'pattern', 'revolve', 'loft', 'sweep', 'joint'].includes(k)) { if (!featureApply(k, p, v)) return; }
     pullTeardown(); tool.picks = []; redrawToolPicks(); renderCmd();
   };
   if (k === 'extrude') { const upd = () => pullUpdate(currentPullAmount()); cmdEl.querySelector('#ta')?.addEventListener('input', upd); cmdEl.querySelector('#tdir')?.addEventListener('change', upd); }
@@ -2578,6 +2874,16 @@ function featureApply(k, p, v) {   // send the feature op; false = invalid input
     if (a === 'edge') { origin = lineEdge.info.p0; dir = lineEdge.info.dir; }
     else if ((a === 'sx' || a === 'sy') && def) { const x = new THREE.Vector3(...def.plane.x_dir).normalize(), z = new THREE.Vector3(...def.plane.z_dir).normalize(); origin = def.plane.origin; dir = (a === 'sx' ? x : new THREE.Vector3().crossVectors(z, x)).toArray(); }
     send({ type: 'op', kind: 'revolve', sketch: name, axis_origin: origin, axis_dir: dir, angle: v('rang'), ...opOf('r') }); return true;
+  }
+  if (k === 'joint') {
+    const e = edges[edges.length - 1], name = (q('jn').value || '').trim(), ty = val('jt'), info = e.info;
+    if (!name) return bad('Give the joint a name.');
+    let origin = [0, 0, 0], dir = [0, 0, 1];
+    if (info.kind === 'CIRCLE') { origin = info.center; dir = info.axis || [0, 0, 1]; }
+    else { origin = info.p0; dir = info.dir || [1, 0, 0]; }
+    const l0 = q('jl0').value, l1 = q('jl1').value, limits = l0 !== '' && l1 !== '' ? [+l0, +l1] : null;
+    send({ type: 'op', kind: 'joint', name, joint_type: ty, bodies: [val('jb')], origin, direction: dir, parent: val('jp') || null, limits, couple_to: val('jc') || null, ratio: q('jr') ? v('jr') : 1 });
+    return true;
   }
   if (k === 'loft') {
     const list = ['l1', 'l2', 'l3', 'l4'].map(val).filter(Boolean);

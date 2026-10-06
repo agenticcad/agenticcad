@@ -5,6 +5,22 @@ features, patch bumps fix things. The version shown in the UI header comes from 
 
 ## [Unreleased]
 
+## [0.22.0] — 2026-10-06
+
+### Added
+- **Joints and motion.** Declared in the script, with `revolute`, `slider`, `couple` (gear ratios, rack and pinion)
+  and `drive`, and child joints that ride on a parent. There's a Joint tool in a new Assemble ribbon group. ▶ Animate
+  plays the drive and has a slider for every free joint.
+  **Check collisions** / the agent's `check_motion` finds parts that hit each other through the motion; overlaps at
+  rest such as threads don't count.
+- **Exploded views**: automatic (sub-assemblies, then parts; along Z/X/Y or radial) or explicit `explode({...})`
+  offsets, with trail lines.
+- **Studio render**: physically based appearances (`appearance({...})`, about 30 materials, defaults from body names),
+  environment lighting and soft shadows. **Save image** (high-resolution PNG) and **Record video** (spin, explode,
+  motion) save to exports/renders. The agent's `screenshot` accepts `pose`, `explode` and `render`.
+- The planetary gearhead reference now turns: the sun drives the carrier at 4:1, planets ride the carrier, and
+  bearing balls run at cage speed. It has a full set of appearances, and no collisions through a full output turn.
+
 ## [0.21.0] — 2026-10-05
 
 ### Added

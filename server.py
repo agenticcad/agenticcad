@@ -290,6 +290,51 @@ async def interference(body: InterferenceBody):
     return res | {"summary": analysis.summary(res)}
 
 
+class RenderSaveBody(BaseModel):
+    name: str
+    ext: str                              # png | webm | mp4
+    data: str                             # base64
+
+
+@app.post("/api/render/save")
+async def render_save(body: RenderSaveBody):
+    import base64
+    import re as _re
+    ext = body.ext.lower().lstrip(".")
+    if ext not in ("png", "webm", "mp4", "jpg"):
+        return JSONResponse({"error": "png, jpg, webm or mp4 only"}, status_code=400)
+    stem = _re.sub(r"[^A-Za-z0-9_.-]+", "-", body.name).strip("-.") or "render"
+    out = WORKSPACE / "exports" / "renders"
+    out.mkdir(parents=True, exist_ok=True)
+    f = out / f"{stem}.{ext}"
+    f.write_bytes(base64.b64decode(body.data))
+    return {"file": f.name, "path": str(f), "url": f"/api/render/file/{f.name}", "bytes": f.stat().st_size}
+
+
+@app.get("/api/render/file/{fname}")
+async def render_file(fname: str):
+    f = (WORKSPACE / "exports" / "renders" / fname).resolve()
+    if f.parent != (WORKSPACE / "exports" / "renders").resolve() or not f.exists():
+        return JSONResponse({"error": "no such render"}, status_code=404)
+    return FileResponse(f, filename=f.name)
+
+
+class MotionCheckBody(BaseModel):
+    steps: int = 24
+
+
+@app.post("/api/motion/check")
+async def motion_check(body: MotionCheckBody):
+    if agent.model is None:
+        return JSONResponse({"error": "no model"}, status_code=400)
+    import analysis
+    try:
+        res = await agent.motion_check(max(2, min(body.steps, 360)))
+    except ck.CadError as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+    return res | {"summary": analysis.motion_summary(res)}
+
+
 class SimBody(BaseModel):
     ops: list[int] | None = None          # 0-based op indices; None = all
     resolution: float | None = None
@@ -714,6 +759,9 @@ async def _dispatch(ws: WebSocket, msg: dict) -> None:
                 await agent.op_revolve(msg["sketch"], msg["axis_origin"], msg["axis_dir"], float(msg.get("angle") or 360), msg.get("mode", "new"), msg.get("target"))
             elif k == "loft":
                 await agent.op_loft(msg.get("sketches") or [], bool(msg.get("ruled")), msg.get("mode", "new"), msg.get("target"))
+            elif k == "joint":
+                await agent.op_joint(msg["name"], msg.get("joint_type", "revolute"), msg.get("bodies") or [], msg.get("origin") or [0, 0, 0],
+                                     msg.get("direction") or [0, 0, 1], msg.get("parent"), msg.get("limits"), msg.get("couple_to"), float(msg.get("ratio") or 1))
             elif k == "sweep":
                 await agent.op_sweep(msg["path_body"], msg.get("points") or [], msg.get("sketch"), msg.get("diameter"), msg.get("wall"), msg.get("mode", "new"), msg.get("target"), msg.get("face_point"))
         except (KeyError, ValueError, ck.CadError, script_edit.Unsupported) as e:

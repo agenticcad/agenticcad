@@ -137,6 +137,15 @@ Rules
   (parts that overlap are a modelling error, except threads), and use `screenshot` with `section` to look inside
   housings and gearboxes. Script helpers: pattern_linear / pattern_circular (counts include the original; fused, or
   separate=True for a list), mirror_about(shape, origin, normal), path_wire(edges) and pipe(path, diameter, wall).
+- Motion, exploded views and appearance are declared in the script after `result` (they never change geometry; the
+  viewer poses / explodes / renders the bodies): `revolute(name, [body paths or globs], axis=((o), (d)) | "Z",
+  parent=None, limits=None)` (degrees), `slider(name, bodies, direction, limits)` (mm), `couple(follower, leader,
+  ratio, offset)` for gear trains / rack and pinion (a child joint's value is relative to its parent; external
+  gears ratio = −z_leader/z_follower), `drive(joint, start, stop, seconds)` for Play, `explode({path: (dx, dy, dz)},
+  axis="Z")`, `appearance({path or glob: "steel" | "aluminium" | "black anodised" | "brass" | "copper" |
+  "black plastic" | ... | {"color": "#rrggbb", "metalness": 0..1, "roughness": 0..1}})`. A body moves with one joint;
+  chain with parent=. After adding joints run `check_motion` (collisions through the motion). `screenshot` takes
+  `pose` {joint: value}, `explode` 0..1 and `render` true for a lit, material render.
 - Sketches: the user can draw 2D sketches in the UI; they appear in the script as blocks between
   `# sketch:NAME {...}` and `# /sketch:NAME` that assign a build123d Sketch to variable NAME (never edit or
   remove those blocks; the editor owns them, and the user can re-open them). Use them like any Sketch:
@@ -531,30 +540,40 @@ class CadAgent:
                          "summary": prog.summary(), "gcode_lines": prog.gcode().count("\n")})
         return prog
 
-    async def interference(self, paths: list[str] | None = None, mesh: bool = True) -> dict[str, Any]:
-        """Interference check of the current design. Real (helical) threads make the booleans very slow and
-        fragile, so a design that has them is checked on a draft-thread rebuild (threads as plain cylinders;
-        same bodies and names), cached per script."""
-        import analysis
+    async def _check_model(self) -> tuple[ck.Model, str | None]:
+        """The model the interference / motion checks run on. Real (helical) threads make booleans very slow and
+        fragile, so a design that has them is checked on a draft-thread rebuild (threads as plain cylinders; same
+        bodies, names and joints), cached per script. Falls back to the real model when the script can't build with
+        draft threads."""
         if self.model is None:
             raise ck.CadError("no model built")
-        m, note = self.model, None
-        if any(getattr(t, "real", False) for t in m.threads) and not m.draft_threads:
-            key = (m.code, self.quality)
-            if getattr(self, "_draft_check", None) and self._draft_check[0] == key:
-                m = self._draft_check[1]
-            else:
-                try:
-                    m = await asyncio.to_thread(ck.run_script, m.code, "draft", self.workspace, self.parts, "draft")
-                except ck.CadError:              # a script that needs its real threads (e.g. it searches a thread phase)
-                    m = None
-                self._draft_check = (key, m)
-            if m is None:
-                m = self.model
-                note = "checked with the real threads (this script doesn't build with draft threads), so it is slower"
-            else:
-                note = "real threads were checked as plain cylinders (fast); a bolt in a tapped hole shows as thread engagement"
+        m = self.model
+        if not (any(getattr(t, "real", False) for t in m.threads) and not m.draft_threads):
+            return m, None
+        key = (m.code, self.quality)
+        if not (getattr(self, "_draft_check", None) and self._draft_check[0] == key):
+            try:
+                dm = await asyncio.to_thread(ck.run_script, m.code, "draft", self.workspace, self.parts, "draft")
+            except ck.CadError:                  # a script that needs its real threads (e.g. it searches a thread phase)
+                dm = None
+            self._draft_check = (key, dm)
+        dm = self._draft_check[1]
+        if dm is None:
+            return m, "checked with the real threads (this script doesn't build with draft threads), so it is slower"
+        return dm, "real threads were checked as plain cylinders (fast); a bolt in a tapped hole shows as thread engagement"
+
+    async def interference(self, paths: list[str] | None = None, mesh: bool = True) -> dict[str, Any]:
+        import analysis
+        m, note = await self._check_model()
         res = await asyncio.to_thread(analysis.interference, m, paths, 1e-3, 90.0, mesh)
+        if note:
+            res["notes"].insert(0, note)
+        return res
+
+    async def motion_check(self, steps: int = 12) -> dict[str, Any]:
+        import analysis
+        m, note = await self._check_model()
+        res = await asyncio.to_thread(analysis.motion_interference, m, steps)
         if note:
             res["notes"].insert(0, note)
         return res
@@ -999,6 +1018,27 @@ class CadAgent:
             expr = expr.replace(f"{var}.edges()", "{body}.edges()").replace(f"{var}.faces()", "{body}.faces()")
         await self._apply_feature(code, expr, mode, target, label, "Pipe" if not sketch else f"{sketch} sweep")
 
+    async def op_joint(self, name: str, kind: str, bodies: list[str], origin: list[float], direction: list[float],
+                       parent: str | None = None, limits: list[float] | None = None, couple_to: str | None = None,
+                       ratio: float = 1.0) -> None:
+        """Joint tool: append a revolute()/slider() line (and an optional couple()) to the script."""
+        if self.model is None:
+            raise ck.CadError("no model")
+        if not name.strip() or not bodies:
+            raise ck.CadError("joint: give a name and at least one body")
+        if self.model.motion and any(j["name"] == name for j in self.model.motion["joints"]):
+            raise ck.CadError(f"joint '{name}' already exists; pick another name or edit it in the Code tab")
+        extra = (f", parent={parent!r}" if parent else "") + (f", limits=({float(limits[0]):g}, {float(limits[1]):g})" if limits else "")
+        if kind == "slider":
+            line = f"slider({name!r}, {list(bodies)!r}, direction={self._p(direction)}{extra})"
+        else:
+            line = f"revolute({name!r}, {list(bodies)!r}, axis=({self._p(origin)}, {self._p(direction)}){extra})"
+        lines = [line] + ([f"couple({name!r}, {couple_to!r}, ratio={float(ratio):g})"] if couple_to else [])
+        code = self.model.code.rstrip("\n") + "\n" + "\n".join(lines) + "\n"
+        await self.build(code, source="edit")
+        self.notes.append(f"The user added joint '{name}' ({kind}) via the ribbon: {'; '.join(lines)}")
+        await self.emit({"type": "info", "text": f"joint '{name}' added"})
+
     async def transform_body(self, path: str, move: list[float], rotate: list[float]) -> None:
         mx, my, mz = (float(v) for v in (move + [0, 0, 0])[:3]); rx, ry, rz = (float(v) for v in (rotate + [0, 0, 0])[:3])
         parts = []
@@ -1300,7 +1340,10 @@ class CadAgent:
                               "highlight_faces": {"type": "array", "items": {"type": "integer"}},
                               "show_edges": {"type": "boolean", "default": True},
                               "section": {"type": "object", "properties": {"plane": {"type": "string", "enum": ["XY", "XZ", "YZ"]},
-                                                                           "offset": {"type": "number"}, "flip": {"type": "boolean"}}}},
+                                                                           "offset": {"type": "number"}, "flip": {"type": "boolean"}}},
+                              "pose": {"type": "object", "description": "joint values {name: degrees or mm}; coupled joints follow"},
+                              "explode": {"type": "number", "description": "exploded view amount 0..1"},
+                              "render": {"type": "boolean", "description": "studio-lit render with the bodies' appearances"}},
                "required": []})
         async def screenshot(args: dict[str, Any]) -> dict[str, Any]:
             if agent.model is None:
@@ -1311,6 +1354,9 @@ class CadAgent:
                     "highlight": args.get("highlight_faces") or [],
                     "showEdges": args.get("show_edges", True),
                     "section": args.get("section") or None,
+                    "pose": args.get("pose") or None,
+                    "explode": args.get("explode"),
+                    "render": bool(args.get("render")),
                 })
             except Exception as e:  # noqa: BLE001
                 return {"content": [{"type": "text", "text": f"screenshot unavailable: {e}"}], "is_error": True}
@@ -1429,6 +1475,21 @@ class CadAgent:
             except ck.CadError as e:
                 return {"content": [{"type": "text", "text": str(e)}], "is_error": True}
             return {"content": [{"type": "text", "text": analysis.summary(res)}]}
+
+        @tool("check_motion",
+              "Collision check through the design's motion: runs the driven joint (drive() in the script) through its "
+              "range in `steps` poses and reports bodies that hit each other because of the motion (overlap beyond what "
+              "they already share at rest). Use it after adding joints with revolute()/slider()/couple().",
+              {"type": "object", "properties": {"steps": {"type": "integer", "default": 12}}, "required": []})
+        async def check_motion(args: dict[str, Any]) -> dict[str, Any]:
+            if agent.model is None:
+                return {"content": [{"type": "text", "text": "no model built"}], "is_error": True}
+            import analysis
+            try:
+                res = await agent.motion_check(int(args.get("steps") or 12))
+            except ck.CadError as e:
+                return {"content": [{"type": "text", "text": str(e)}], "is_error": True}
+            return {"content": [{"type": "text", "text": analysis.motion_summary(res)}]}
 
         @tool("feeds_speeds", "Feeds & speeds calculator: rpm, feed, plunge, stepdown, stepover for a tool in a material "
               "on a machine (spindle/feed limits applied, radial chip thinning if `radial_engagement` < 0.5). "
@@ -1720,7 +1781,7 @@ class CadAgent:
             slicing_tools = [slicer_info, slice_for_printing]
 
         tools = [build_model, *([] if LEGACY_BUILD else [edit_model]), inspect_model, screenshot, export_model, get_code, save_design,
-                 cam_context, build_cam, get_cam_code, export_gcode, simulate_cam, check_interference, feeds_speeds, save_machine, save_tool,
+                 cam_context, build_cam, get_cam_code, export_gcode, simulate_cam, check_interference, check_motion, feeds_speeds, save_machine, save_tool,
                  get_parameters, set_parameters, measure_tool, mass_properties, make_drawings, library_tool, kit_tool, sketch_tool] + slicing_tools
         self.tool_handlers = {t.name: t.handler for t in tools}     # name -> async handler (tests call these directly)
         return create_sdk_mcp_server("cad", "0.4.0", tools=tools)

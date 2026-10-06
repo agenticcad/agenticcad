@@ -205,3 +205,28 @@ gearhead = {"AdapterPlate": adapter, "RingGear": ring, "Sun": sun, "SetScrew": s
             "BearingCirclip": circlip, "ShaftEClip": eclip, "FrontCover": cover, "OutputKey": key, **housing_screws}
 
 result = {"Motor": motor, "Gearhead": gearhead}
+
+# ================================================================= MOTION (sun input → carrier output, 4:1)
+# Ring fixed: carrier = sun × Zs/(Zs + Zr) = sun / 4; a planet turns −(sun − carrier) × Zs/Zp = −0.75 × sun relative to
+# the carrier. Bearing balls and cages run at the cage speed ½(1 − d_ball/d_pitch) of their inner ring.
+rotor = ["Motor/Shaft", "Motor/RotorCupA", "Motor/RotorMagnet", "Motor/RotorCupB", "Gearhead/Sun", "Gearhead/SetScrew",
+         "Motor/FrontBearing/InnerRing", "Motor/RearBearing/InnerRing"]
+revolute("sun", rotor, axis="Z")
+revolute("carrier", ["Gearhead/Carrier", "Gearhead/CarrierRearPlate", "Gearhead/CarrierScrew*", "Gearhead/PlanetPin*",
+                     "Gearhead/Washer*", "Gearhead/OutputKey", "Gearhead/OutputSpacer", "Gearhead/ShaftEClip",
+                     "Gearhead/OutputBearing*/InnerRing"], axis="Z")
+couple("carrier", "sun", ratio=18 / (18 + L["ring_teeth"]))
+for i, p in enumerate(L["planets"], 1):
+    revolute(f"planet{i}", [f"Gearhead/Planet{i}", f"Gearhead/Bushing{i}"], axis=((p["x"], p["y"], 0), (0, 0, 1)), parent="carrier")
+    couple(f"planet{i}", "sun", ratio=-(1 - 18 / (18 + L["ring_teeth"])) * 18 / 18)
+for b, d, D, lead in (("Motor/FrontBearing", 5, 16, "sun"), ("Motor/RearBearing", 5, 16, "sun"),
+                      ("Gearhead/OutputBearing1", 8, 16, "carrier"), ("Gearhead/OutputBearing2", 8, 16, "carrier")):
+    db, dp = 0.3 * (D - d) / 2 * 2.1, (d + D) / 2
+    name = b.split("/")[-1].lower() + "_balls"
+    revolute(name, [f"{b}/Ball*", f"{b}/Cage*"], axis="Z")
+    couple(name, lead, ratio=0.5 * (1 - db / dp))
+drive("sun", 0, 360 * 4, seconds=8)                     # one output turn
+explode(axis="Z")
+appearance({"Gearhead/RingGear": "steel", "Gearhead/Planet*": "brass", "Gearhead/Bushing*": "bronze",
+            "Motor/Connector/Pin*": "gold", "Motor/Connector/Housing": "white plastic", "Motor/Coil*": "copper",
+            "Gearhead/FrontCover": "black anodised", "Gearhead/AdapterPlate": "aluminium"})

@@ -315,6 +315,22 @@ counterbored, or tapped (M2…M12); fillet/chamfer take edges or whole faces; sh
 - **Section** cuts the model with a plane (XY / XZ / YZ with an offset slider, or parallel to a flat face you
   click). The half facing you is removed, and cut faces are drawn solid and hatched in each body's colour. The
   section stays on (a chip in the bottom bar) until you remove it. The agent's `screenshot` takes a `section` too.
+- **Joints and motion** (Assemble ▸ Joint `T`, or in the script): `revolute(name, bodies, axis, parent=, limits=)`,
+  `slider(...)`, `couple(follower, leader, ratio)` for gear trains and rack and pinion, and `drive(joint, start, stop,
+  seconds)`. A joint with `parent=` rides on its parent, like planets on a carrier. The Joint tool takes a circular
+  edge (revolute) or a straight edge (slider) and writes the line for you. **▶ Animate** in the bottom bar plays
+  the drive, gives every free joint a slider, and **Check collisions** runs the drive through its range looking for
+  parts that hit each other because of the motion. Overlaps that already exist at rest, such as thread engagement,
+  don't count. The agent has the same check as `check_motion`.
+- **Exploded views**: the Animate panel's Explode slider spreads sub-assemblies apart and then their parts, along
+  Z, X or Y or radially, with dashed trail lines. `explode({"Lid": (0, 0, 40)}, axis="Z")` in the script sets
+  explicit offsets and the default mode.
+- **Studio render**: physically based materials under a studio environment, with soft shadows. Appearances come
+  from `appearance({"*Screw*": "black oxide", "Housing": "black anodised", ...})` in the script, about 30 named
+  materials or `{color, metalness, roughness}`, with sensible defaults guessed from body names (screws, coils,
+  magnets, housings, PCBs…). **Save image** writes a high-resolution PNG; **Record video** captures a spin,
+  explode-and-return and/or the motion as WebM (MP4 where the browser only records that). Both are saved in
+  exports/renders. The agent's `screenshot` takes `pose`, `explode` and `render`.
 - **Interference** finds every pair of bodies whose solids overlap (exact OCCT booleans after a bounding-box
   filter), with the overlap volume. Click a pair to see the overlap in red with the rest ghosted. Touching
   faces don't count. A bolt in a tapped hole is listed separately as thread engagement, and designs with real

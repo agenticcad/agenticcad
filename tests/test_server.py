@@ -160,6 +160,26 @@ def test_cam_feeds_for_unsaved_tool(client):
     assert client.post("/api/cam/feeds", json={"tool": t, "material": "kryptonite"}).status_code == 400
 
 
+def test_render_save_and_motion_check_api(client):
+    import base64
+    png = base64.b64encode(b"\x89PNG\r\n\x1a\nfake").decode()
+    r = client.post("/api/render/save", json={"name": "my shot/../x", "ext": "png", "data": png}).json()
+    assert r["file"].endswith(".png") and "/" not in r["file"]
+    assert client.get(r["url"]).content.startswith(b"\x89PNG")
+    assert client.post("/api/render/save", json={"name": "x", "ext": "exe", "data": png}).status_code == 400
+    assert client.get("/api/render/file/..%2Fmodel.py").status_code == 404
+    code = ('arm = Box(30, 6, 4)\npost = Pos(0, 12, 0) * Cylinder(3, 10)\nresult = {"Arm": arm, "Post": post}\n'
+            'revolute("arm", ["Arm"], axis="Z", limits=(0, 180))\n')
+    with client.websocket_connect("/ws") as ws:
+        ws.send_json({"type": "run_code", "code": code})
+        m = wait_for(ws, "model")
+        while not (m["mesh"].get("motion")):
+            m = wait_for(ws, "model")
+        assert m["mesh"]["motion"]["drive"]["joint"] == "arm"
+    r = client.post("/api/motion/check", json={"steps": 12}).json()
+    assert [(h["a"], h["b"]) for h in r["collisions"]] == [("Arm", "Post")] and "COLLISIONS" in r["summary"]
+
+
 def test_settings_and_status_api(client):
     s = client.get("/api/settings").json()
     assert "model" in s["settings"] and "claude-opus-5" in s["models"]

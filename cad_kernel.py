@@ -26,6 +26,7 @@ import build123d as b3d
 from build123d import Compound, Face, Edge, Shape, Vector
 import threads as thr
 import features
+import motion as motion_mod
 import gears
 
 # OCP (the OCCT bindings bundled with build123d) is used for display meshing so we
@@ -131,6 +132,9 @@ class Model:
     threads: list[Any] = field(default_factory=list)      # threads.ThreadSpec registered by the script
     sketches: list[dict[str, Any]] = field(default_factory=list)   # top-level build123d Sketch objects
     draft_threads: int = 0        # real=True threads built plain because the script ran in draft thread mode
+    motion: dict[str, Any] | None = None        # joints / couplings / drive declared by the script (motion.py)
+    explode: dict[str, Any] = field(default_factory=dict)
+    appearance: dict[str, Any] = field(default_factory=dict)
 
     @property
     def shape(self) -> Shape:
@@ -316,6 +320,7 @@ def script_namespace() -> dict[str, Any]:
     ns.update(thr.namespace())
     ns.update(gears.namespace())
     ns.update(features.namespace())
+    ns.update(motion_mod.namespace())
     ns.update({"inch": 25.4, "IN": 25.4, "ft": 304.8, "thou": 0.0254, "mm": 1.0})   # scripts stay in mm; write imperial as 2.5 * inch
     return ns
 
@@ -343,7 +348,9 @@ def run_script(code: str, quality: str = "normal", workspace: Path | None = None
     tok_l = _CTX_LIBRARY.set(library or _CTX_LIBRARY.get() or LIBRARY)
     tok_t = thr.begin_registry()
     tok_m = thr.begin_mode(threads)
+    tok_mo = motion_mod.begin()
     registered: list[Any] = []
+    motion_reg: dict = {}
     draft_threads = 0
     try:
         with contextlib.redirect_stdout(buf):
@@ -355,6 +362,7 @@ def run_script(code: str, quality: str = "normal", workspace: Path | None = None
     finally:
         registered = thr.end_registry(tok_t)
         draft_threads = thr.end_mode(tok_m)
+        motion_reg = motion_mod.end(tok_mo)
         _CTX_WORKSPACE.reset(tok_w); _CTX_LIBRARY.reset(tok_l)
 
     if "result" not in ns:
@@ -367,6 +375,12 @@ def run_script(code: str, quality: str = "normal", workspace: Path | None = None
     model.threads = [t for t in registered if not t.external]
     model.sketches = collect_sketches(ns)
     model.mesh["sketches"] = model.sketches
+    try:
+        mres = motion_mod.resolve(motion_reg, [b.path for b in model.bodies])
+    except motion_mod.MotionError as e:
+        raise CadError(f"motion / explode / appearance: {e}")
+    model.motion, model.explode, model.appearance = mres["motion"], mres["explode"], mres["appearance"]
+    model.mesh.update(motion=model.motion, explode=model.explode, appearance=model.appearance)
     model.mesh["threads"] = [{"size": t.size, "pitch": t.pitch, "at": list(t.at), "axis": list(t.axis), "depth": t.depth,
                               "through": t.through, "real": t.real, "label": t.label()} for t in model.threads]
     return model
