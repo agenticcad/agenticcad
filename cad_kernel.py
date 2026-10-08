@@ -343,6 +343,11 @@ def run_script(code: str, quality: str = "normal", workspace: Path | None = None
     threads="draft" builds real=True threads plain (fast iteration); model.draft_threads counts how many."""
     ns = script_namespace()
     ns["kit"] = design_kit(workspace or _CTX_WORKSPACE.get() or WORKSPACE).namespace()
+    try:                                             # @helper functions from this workspace's extensions
+        import extensions as _ext
+        ns.update(_ext.for_workspace(workspace or _CTX_WORKSPACE.get() or WORKSPACE).helpers())
+    except Exception:  # noqa: BLE001 - a broken extension must never stop a design from building
+        pass
     buf = io.StringIO()
     tok_w = _CTX_WORKSPACE.set(workspace or _CTX_WORKSPACE.get() or WORKSPACE)
     tok_l = _CTX_LIBRARY.set(library or _CTX_LIBRARY.get() or LIBRARY)

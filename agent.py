@@ -30,6 +30,7 @@ import drawing
 from cam_data import Library
 from library import PartLibrary, slug as lib_slug
 import script_edit
+import extensions as ext_mod
 import slicer
 import units as un
 
@@ -128,6 +129,12 @@ Rules
   Multi-part components return a dict of parts; move them with `kit.place(obj, Pos(...))` and put them in `result`
   as a component. When you learn something reusable (a fix, a gotcha, a good recipe), `kit note` it on the entry,
   or `kit save_guide` / `kit save_part` it into this workspace's kit.
+- Extensions let you extend the app itself: one Python file (`extension save`) can add script helpers (@helper),
+  tools you can call (@tool), UI panels with live controls, pickers and tables (@panel) and checks that run after
+  every build (@on_build). Read `extension api` first. Use `show_panel` for a one-off table or report in the viewer;
+  save an extension when the user will want it again (a calculator, a report, a custom check or export). Built-in
+  examples (Parameters, Hole report, Bolt pattern) are in the Extensions ribbon group; `extension read <module>`
+  shows their code.
   `from_library("part name", param=value)` instantiates a library part. The part library is a first-class source of
   geometry: before modelling a standard or previously made part (fasteners, bearings, brackets, anything reusable),
   `library search` it and `library insert` it rather than re-creating it; when you build something reusable, offer to
@@ -421,6 +428,7 @@ class CadAgent:
         self.settings = self._load_settings()
         self.library = Library(workspace)
         self.parts = PartLibrary(workspace)
+        self.extensions = ext_mod.for_workspace(workspace)   # Python files that extend the app (ext_builtin + workspace/extensions)
         ck.WORKSPACE = workspace
         ck.LIBRARY = self.parts
         (workspace / "imports").mkdir(exist_ok=True)
@@ -1096,6 +1104,7 @@ class CadAgent:
                              "summary": model.summary(6), "source": source, "history_id": hid,
                              "history_len": len(self._history_files())})
             await self.emit(self.design_state())
+            await self._after_build(model)
             if record:
                 self._kit_used(code)
             if source == "user":
@@ -1118,6 +1127,7 @@ class CadAgent:
             await self.emit({"type": "model", "mesh": model.mesh, "code": code, "summary": model.summary(6), "source": source,
                              "history_id": hid, "history_len": len(self._history_files())})
             await self.emit(self.design_state())
+            await self._after_build(model)
             self._kit_used(code)
             return model, code
 
@@ -1248,6 +1258,95 @@ class CadAgent:
                 self.program = None
         if not self._history_files():
             (self.workspace / "history" / f"{int(time.time() * 1000)}.py").write_text(code)
+
+    # ------------------------------------------------------------------ extensions (ext_builtin + <workspace>/extensions)
+    def ext_ctx(self, state: dict[str, Any] | None = None, event: str | None = None, selection: dict[str, Any] | None = None) -> ext_mod.Ctx:
+        return ext_mod.Ctx(self.model, self.workspace, self.public_settings(), state, event, selection, self.units())
+
+    async def ext_call(self, name: str, args: dict[str, Any] | None = None, state: dict[str, Any] | None = None, event: str | None = None,
+                       selection: dict[str, Any] | None = None, panel: str | None = None) -> str:
+        """Run an extension tool (in a thread) and apply what it returns. Returns a text summary for the caller."""
+        ctx = self.ext_ctx(state, event, selection)
+        res = await asyncio.to_thread(self.extensions.call, name, ctx, {**(state or {}), **(args or {})})
+        return await self.ext_apply(res, panel=panel, state=ctx.state)
+
+    async def ext_apply(self, res: Any, panel: str | None = None, state: dict[str, Any] | None = None) -> str:
+        """Apply a RESULT dict (see extensions.API_DOC): model edits, selection, chat prompts, UI."""
+        if res is None:
+            return "ok"
+        if not isinstance(res, dict):
+            text = str(res)
+            await self.emit({"type": "info", "text": text[:2000]})
+            return text
+        out: list[str] = []
+        if res.get("error"):
+            await self.emit({"type": "error", "text": str(res["error"])})
+            out.append(f"error: {res['error']}")
+        if res.get("notify"):
+            await self.emit({"type": "info", "text": str(res["notify"])})
+            out.append(str(res["notify"]))
+        if self.model is not None:
+            if res.get("set_params"):
+                await self.set_params({k: float(v) for k, v in res["set_params"].items()}, source="extension")
+                out.append("parameters set: " + ", ".join(f"{k}={v:g}" for k, v in res["set_params"].items()))
+            if res.get("code"):
+                await self.build(str(res["code"]), source="extension")
+                out.append("script replaced and rebuilt")
+            if res.get("wrap"):
+                w = res["wrap"]
+                code = script_edit.wrap_body_expr(self.model.code, w["body"], w["template"])
+                await self.build(code, source="extension")
+                out.append(f"body '{w['body']}' rewritten and rebuilt")
+            if res.get("edits") or res.get("append"):
+                await self.edit_and_build(list(res.get("edits") or []), str(res.get("append") or ""), source="extension")
+                out.append("script edited and rebuilt")
+        for key in ("select", "highlight", "fit"):
+            if res.get(key):
+                await self.emit({"type": "ext_view", "op": key, **(res[key] if isinstance(res[key], dict) else {})})
+        if res.get("chat"):
+            await self.emit({"type": "ext_chat", "text": str(res["chat"])})
+            out.append("asked the agent: " + str(res["chat"]))
+        if res.get("ui"):
+            ui = res["ui"]
+            ext_mod.validate_ui(ui)
+            await self.emit({"type": "ext_panel", "id": panel or f"eph:{int(time.time() * 1000)}", "ui": ui,
+                             "state": {**(state or {}), **(res.get("state") or {})}, "ephemeral": not panel})
+            out.append("panel shown")
+        elif res.get("state") is not None and panel:
+            await self.ext_render(panel, {**(state or {}), **res["state"]})
+        elif panel:
+            await self.ext_render(panel, state or {})
+        if res.get("open_panel"):
+            await self.ext_render(str(res["open_panel"]), {})
+        if res.get("table") and not res.get("ui"):
+            out.append(str(res["table"]))
+        if not out:
+            out.append(str({k: v for k, v in res.items() if k not in ("ui", "state")}) if res else "ok")
+        return "\n".join(out)
+
+    async def ext_render(self, pid: str, state: dict[str, Any] | None = None, event: str | None = None,
+                         selection: dict[str, Any] | None = None) -> None:
+        """Render a panel and send it to the browsers (replaces its content if open, opens it otherwise)."""
+        ctx = self.ext_ctx(state, event, selection)
+        try:
+            e = self.extensions.panel(pid)
+            ui = await asyncio.to_thread(self.extensions.render, pid, ctx)
+        except Exception as ex:  # noqa: BLE001
+            await self.emit({"type": "ext_panel", "id": pid, "error": f"{type(ex).__name__}: {ex}", "state": ctx.state})
+            return
+        await self.emit({"type": "ext_panel", "id": e.id, "title": e.title, "ui": ui, "state": ctx.state})
+
+    async def _after_build(self, model: ck.Model) -> None:
+        """Run @on_build hooks; their warnings go to the chat and onto the model."""
+        try:
+            if not self.extensions.hooks():
+                return
+            warns = await asyncio.to_thread(self.extensions.run_hooks, self.ext_ctx())
+        except Exception as ex:  # noqa: BLE001
+            warns = [f"extension hooks failed: {ex}"]
+        for w in warns:
+            model.warnings.append(w)
+            await self.emit({"type": "info", "text": "⚠ " + w})
 
     # ------------------------------------------------------------------ tools
     def _make_server(self):
@@ -1741,6 +1840,74 @@ class CadAgent:
             except (ck.CadError, script_edit.Unsupported) as e:
                 return {"content": [{"type": "text", "text": f"sketch failed: {e}"}], "is_error": True}
 
+        @tool("extension", "Extensions: Python files that extend the app itself (script helpers, agent tools, UI panels, build "
+              "checks). action=list | api (the full API reference: read it before writing one) | read (module) | save (module, code: "
+              "validated; a file that does not load or registers nothing is refused) | delete (module) | call (name, args: run an "
+              "extension tool now, no restart) | open (panel: show a panel in the viewer). Built-in examples: parameter_explorer, "
+              "hole_report, bolt_pattern. New @tool functions also become first-class ext_<name> tools after a session restart.",
+              {"type": "object", "properties": {"action": {"type": "string", "enum": ["list", "api", "read", "save", "delete", "call", "open"]},
+                                                "module": {"type": "string"}, "code": {"type": "string"}, "name": {"type": "string"},
+                                                "args": {"type": "object"}, "panel": {"type": "string"}}, "required": ["action"]})
+        async def extension_tool(args: dict[str, Any]) -> dict[str, Any]:
+            a = args["action"]
+
+            def ok(text: str) -> dict[str, Any]:
+                return {"content": [{"type": "text", "text": text}]}
+            try:
+                if a == "list":
+                    return ok(agent.extensions.describe() + "\n\nPanels: " + (", ".join(e.id for e in agent.extensions.panels()) or "none") +
+                              "\nTools: " + (", ".join(e.id for e in agent.extensions.tools(agent_only=True)) or "none"))
+                if a == "api":
+                    return ok(ext_mod.API_DOC)
+                if a == "read":
+                    return ok(agent.extensions.read(args.get("module") or ""))
+                if a == "save":
+                    r = await asyncio.to_thread(agent.extensions.save, args.get("module") or "", args.get("code") or "")
+                    await agent.emit(agent.extensions.payload())
+                    note = " New tools become first-class ext_<name> tools after a session restart; until then use `extension call`." if r["tools"] else ""
+                    if r["panels"]:
+                        ids = [e.id for e in agent.extensions.panels() if e.module == r["module"]]
+                        note += f" The panel is in the Extensions ribbon group; show it now with `extension open {ids[0] if ids else r['panels'][0]}`."
+                    return ok(f"saved extension {r['module']}: " + "; ".join(f"{k} {', '.join(v)}" for k, v in r.items() if k != "module" and v) + note)
+                if a == "delete":
+                    await asyncio.to_thread(agent.extensions.delete, args.get("module") or "")
+                    await agent.emit(agent.extensions.payload())
+                    return ok("deleted")
+                if a == "call":
+                    return ok(await agent.ext_call(args.get("name") or "", args.get("args") or {}))
+                if a == "open":
+                    await agent.ext_render(args.get("panel") or "", {})
+                    return ok("panel opened")
+                return {"content": [{"type": "text", "text": f"unknown extension action {a!r}"}], "is_error": True}
+            except Exception as e:  # noqa: BLE001
+                return {"content": [{"type": "text", "text": f"failed: {e}"}], "is_error": True}
+
+        @tool("show_panel", "Show a one-off UI panel in the viewer (not saved): a table, key/values, text, images or buttons that "
+              "ask you something (`chat`) or act on the view (`action`: select / highlight faces and bodies). `ui` is a UI schema "
+              "(see `extension api`), e.g. {\"type\":\"panel\",\"children\":[{\"type\":\"table\",\"columns\":[..],\"rows\":[[..]]}]}. "
+              "For something reusable with live controls, save an extension with a @panel instead.",
+              {"type": "object", "properties": {"title": {"type": "string"}, "ui": {"type": "object"}}, "required": ["title", "ui"]})
+        async def show_panel(args: dict[str, Any]) -> dict[str, Any]:
+            try:
+                ui = dict(args["ui"]); ui.setdefault("type", "panel"); ui["title"] = args["title"]
+                ext_mod.validate_ui(ui)
+                await agent.emit({"type": "ext_panel", "id": f"eph:{int(time.time() * 1000)}", "title": args["title"], "ui": ui, "state": {}, "ephemeral": True})
+            except Exception as e:  # noqa: BLE001
+                return {"content": [{"type": "text", "text": f"invalid panel: {e}"}], "is_error": True}
+            return {"content": [{"type": "text", "text": "panel shown"}]}
+
+        # extension @tool functions as first-class tools (ext_<name>): the set is fixed at connect, so new ones need a restart
+        ext_tools = []
+        for e in agent.extensions.tools(agent_only=True):
+            def _mk(entry):
+                async def h(args: dict[str, Any]) -> dict[str, Any]:
+                    try:
+                        return {"content": [{"type": "text", "text": await agent.ext_call(entry.id, args)}]}
+                    except Exception as ex:  # noqa: BLE001
+                        return {"content": [{"type": "text", "text": f"failed: {ex}"}], "is_error": True}
+                return h
+            ext_tools.append(tool(f"ext_{e.name}", f"[extension {e.module}] {e.description or e.name}", e.schema or {"type": "object", "properties": {}})(_mk(e)))
+
         # 3D printing: only offered when a slicer is installed on this machine (nothing is bundled)
         slicing_tools = []
         if slicer.find_slicer() is not None:
@@ -1791,7 +1958,8 @@ class CadAgent:
 
         tools = [build_model, *([] if LEGACY_BUILD else [edit_model]), inspect_model, screenshot, export_model, get_code, save_design,
                  cam_context, build_cam, get_cam_code, export_gcode, simulate_cam, check_interference, check_motion, feeds_speeds, save_machine, save_tool,
-                 get_parameters, set_parameters, measure_tool, mass_properties, make_drawings, library_tool, kit_tool, sketch_tool] + slicing_tools
+                 get_parameters, set_parameters, measure_tool, mass_properties, make_drawings, library_tool, kit_tool, sketch_tool,
+                 extension_tool, show_panel] + ext_tools + slicing_tools
         self.tool_handlers = {t.name: t.handler for t in tools}     # name -> async handler (tests call these directly)
         return create_sdk_mcp_server("cad", "0.4.0", tools=tools)
 

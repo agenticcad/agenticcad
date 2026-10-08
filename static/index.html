@@ -7,7 +7,7 @@
 <style>
   :root { --bg:#14171c; --panel:#1c2027; --panel2:#232830; --line:#2e343d; --text:#e6e9ee; --muted:#8b94a1; --accent:#ff8c42; --accent2:#4ea1ff; --err:#ff5c5c; --ok:#4cd37a; }
   * { box-sizing:border-box; }
-  html,body { margin:0; height:100%; background:var(--bg); color:var(--text); font:13px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Inter,sans-serif; }
+  html,body { margin:0; height:100%; overflow:hidden; background:var(--bg); color:var(--text); font:13px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Inter,sans-serif; }
   #app { display:flex; height:100%; }
   #viewer { flex:1; position:relative; min-width:0; overflow:hidden; }
   #viewer > canvas { display:block; position:absolute; inset:0; }
@@ -258,6 +258,23 @@
   .ifrow:last-child { border-bottom:0; } .ifrow:hover { background:var(--panel2); } .ifrow.on { background:rgba(255,59,59,.12); box-shadow:inset 3px 0 0 #ff3b3b; }
   .ifrow b { font-weight:600; } .ifrow span { margin-left:auto; color:#ff8080; font-variant-numeric:tabular-nums; } .ifrow.thr span { color:#ffb020; }
   .ifh { font-size:10px; text-transform:uppercase; letter-spacing:.4px; color:var(--muted); padding:6px 8px 2px; }
+  #ext-panels { position:absolute; z-index:5; right:10px; top:120px; bottom:60px; width:min(380px, 46%); display:flex; flex-direction:column; gap:8px; pointer-events:none; overflow:hidden; }
+  .xp { pointer-events:auto; flex:0 1 auto; min-height:64px; background:rgba(28,32,39,.96); border:1px solid var(--line); border-radius:10px; box-shadow:0 8px 30px rgba(0,0,0,.35); font-size:12px; display:flex; flex-direction:column; max-height:60vh; }
+  .xp .xp-hd { display:flex; align-items:center; gap:8px; padding:7px 10px 5px; border-bottom:1px solid var(--line); } .xp .xp-hd b { flex:1; } .xp .xp-hd .x { background:none; border:0; color:var(--muted); cursor:pointer; font-size:14px; }
+  .xp.busy .xp-hd b::after { content:' …'; color:var(--muted); }
+  .xp .xp-bd { padding:6px 10px 8px; overflow:auto; display:flex; flex-direction:column; gap:6px; }
+  .xp .xrow { display:flex; gap:8px; align-items:flex-end; flex-wrap:wrap; } .xp .xrow > * { flex:1; min-width:90px; }
+  .xp .xctl { display:flex; flex-direction:column; gap:2px; } .xp .xctl label { color:var(--muted); font-size:11px; } .xp .xctl .xin { display:flex; gap:4px; align-items:center; }
+  .xp input[type=number], .xp input[type=text], .xp select { background:var(--bg); color:var(--text); border:1px solid var(--line); border-radius:5px; padding:3px 5px; font:inherit; width:100%; min-width:0; }
+  .xp input[type=range] { flex:1; min-width:80px; } .xp .xv { min-width:56px; text-align:right; font-variant-numeric:tabular-nums; color:var(--text); } .xp .xu { color:var(--muted); }
+  .xp .xsec { border-top:1px solid var(--line); padding-top:4px; } .xp .xsec .xt { font-size:10px; text-transform:uppercase; letter-spacing:.5px; color:var(--muted); margin-bottom:4px; }
+  .xp table { border-collapse:collapse; width:100%; font-size:11.5px; } .xp th { text-align:left; color:var(--muted); font-weight:500; padding:2px 6px; border-bottom:1px solid var(--line); } .xp td { padding:3px 6px; border-bottom:1px solid rgba(255,255,255,.04); white-space:nowrap; }
+  .xp tr.sel td { background:rgba(255,140,66,.12); } .xp tr.pick { cursor:pointer; } .xp tr.pick:hover td { background:var(--panel2); }
+  .xp .xbadge { display:inline-block; padding:1px 7px; border-radius:10px; font-size:11px; } .xp .xbadge.ok { background:rgba(62,230,198,.15); color:var(--ok); } .xp .xbadge.warn { background:rgba(255,209,102,.15); color:#ffd166; } .xp .xbadge.err { background:rgba(255,107,107,.15); color:var(--err); } .xp .xbadge.info { background:var(--panel2); color:var(--text); }
+  .xp .xpick { display:flex; gap:6px; align-items:center; } .xp .xpick .val { flex:1; color:var(--text); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; } .xp .xpick .val.none { color:var(--muted); } .xp .xpick .btn.on { border-color:var(--accent); color:var(--accent); }
+  .xp .xerr { color:var(--err); } .xp .xmd p { margin:2px 0; } .xp img { max-width:100%; border-radius:6px; } .xp .xbtn { align-items:flex-end; }
+  #ribbon .rb .ic.emoji { font-size:18px; line-height:20px; } #ribbon .rb.ext { width:auto; min-width:50px; padding:0 7px; } #ribbon .rb.ext .lb { max-width:84px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .ext-row .sum { color:var(--muted); font-size:11px; } .ext-row .err { color:var(--err); font-size:11px; } #modal .ext-row input[type=checkbox] { width:auto; } .ext-row .nm { line-height:1.4; }
   #anim-panel { position:absolute; z-index:6; left:50%; bottom:52px; transform:translateX(-50%); width:min(560px, 94%); background:rgba(28,32,39,.96); border:1px solid var(--line); border-radius:10px; padding:8px 12px 10px; display:none; font-size:12px; box-shadow:0 8px 30px rgba(0,0,0,.35); }
   #anim-panel.on { display:block; }
   #anim-panel .ap-hd { display:flex; gap:8px; align-items:center; margin-bottom:4px; } #anim-panel .ap-hd .x { margin-left:auto; background:none; border:0; color:var(--muted); cursor:pointer; }
@@ -395,6 +412,7 @@
     <div id="sk-dim"></div>
     <div id="sk-dimedit"></div>
     <div id="anim-panel"></div>
+    <div id="ext-panels"></div>
     <div id="sketch-items"><div class="sk-hd"><input type="text" id="sk-name" value="sketch1" title="sketch name (a Python variable)"><span class="muted" id="sk-plane"></span></div><div id="sk-status"></div><div class="hd muted" style="font-size:10px;text-transform:uppercase;letter-spacing:.3px;margin:4px 0 2px">Items · Esc cancels · ⌫ undoes · Alt = no snap</div><div id="sk-list"></div></div>
 
     <div id="params-card" style="display:none"><div class="hd">Parameters <span class="muted" id="params-hint" style="text-transform:none;letter-spacing:0"></span></div><div id="params-body"></div></div>
@@ -800,6 +818,7 @@ renderer.domElement.addEventListener('contextmenu', ev => { if (measuring) { ev.
 renderer.domElement.addEventListener('pointerup', ev => {
   if (!downAt || Math.hypot(ev.clientX - downAt[0], ev.clientY - downAt[1]) > 4) return; // it was a drag
   if (sk) return;
+  if (extPick) { if (ev.button === 2) { extPickEnd(); return; } extPickResolve(pick(ev)); return; }   // an extension panel's picker is waiting
   if (tool) { if (ev.button === 2) return; toolPick(snapPick(ev)); return; }
   if (measuring) { if (ev.button === 2) return; measurePick(snapPick(ev)); return; }
   const h = pick(ev);
@@ -919,7 +938,7 @@ async function renderScreenshot(spec) {
   }
 }
 
-window.agenticcad = { renderScreenshot, get model() { return model; }, get sketch() { return sk; }, scene, camera, renderer, send: (o) => send(o) };
+window.agenticcad = { renderScreenshot, get model() { return model; }, get sketch() { return sk; }, get extDefs() { return extDefs; }, get extPanels() { return extPanels; }, scene, camera, renderer, send: (o) => send(o) };
 
 // toolbar
 document.getElementById('fit').onclick = () => fitCamera();
@@ -2602,6 +2621,142 @@ function skHitConstraint(mx, my) {
 function rectCornerKey(a, b, which) { const p = which === 0 ? a : b, o = which === 0 ? b : a; return { '-1,-1': 'p0', '1,-1': 'p1', '1,1': 'p2', '-1,1': 'p3' }[`${p[0] < o[0] ? -1 : 1},${p[1] < o[1] ? -1 : 1}`]; }
 function autoConstrain(list) { for (const c of list) addConstraints([c], { quiet: true }); }
 
+// ------------------------------------------------------------------ extensions: panels rendered from a JSON UI schema (extensions.py API_DOC)
+var extDefs = { panels: [], modules: [] }, extPanels = {}, extPick = null;
+const extPanelsEl = document.getElementById('ext-panels');
+function extSelection() { return { faces: [...selFaces], bodies: [...selBodies].map(id => model && model.bodies.get(id) ? model.bodies.get(id).path : null).filter(Boolean) }; }
+function extSend(msg) { send({ type: 'ext', selection: extSelection(), ...msg }); }
+function renderExtRibbon() {
+  let g = document.getElementById('rg-ext-wrap');
+  if (!extDefs.panels.length) { if (g) g.remove(); return; }
+  if (!g) { g = document.createElement('div'); g.className = 'rg'; g.id = 'rg-ext-wrap'; g.innerHTML = '<div class="rgl">Extensions</div><div class="rgb" id="rg-ext"></div>'; document.getElementById('ribbon').appendChild(g); }
+  const box = g.querySelector('#rg-ext'); box.innerHTML = '';
+  for (const p of extDefs.panels) {
+    const b = document.createElement('button'); b.className = 'rb ext'; b.dataset.ext = p.id;
+    b.innerHTML = (p.icon ? `<span class="ic emoji">${esc(p.icon)}</span>` : `<span class="ic">${svg('pattern')}</span>`) + `<span class="lb">${esc(p.title)}</span>`;
+    b.onmouseenter = () => showTip(b, { label: p.title, key: '', hint: p.description || `extension ${p.module}` }); b.onmouseleave = hideTip;
+    b.onclick = () => extPanels[p.id] ? extClose(p.id) : extOpen(p.id);
+    box.appendChild(b);
+  }
+  for (const id of Object.keys(extPanels)) if (!id.startsWith('eph:') && !extDefs.panels.some(p => p.id === id)) extClose(id);   // its file went away
+  syncExtRibbon();
+}
+function placeExtPanels() { const r = document.getElementById('ribbon'); if (r && r.offsetParent) extPanelsEl.style.top = (r.getBoundingClientRect().bottom - document.getElementById('viewer').getBoundingClientRect().top + 8) + 'px'; }
+window.addEventListener('resize', placeExtPanels);
+function syncExtRibbon() { document.querySelectorAll('#rg-ext .rb').forEach(b => b.classList.toggle('active', !!extPanels[b.dataset.ext])); }
+function extOpen(pid) { const st = extPanels[pid] ? extPanels[pid].state : {}; const p = extEnsure(pid, (extDefs.panels.find(x => x.id === pid) || {}).title || pid); extQueue(p, { op: 'open', panel: pid, state: st }); }
+function extClose(pid) { const p = extPanels[pid]; if (!p) return; p.el.remove(); delete extPanels[pid]; if (extPick && extPick.panel === pid) extPickEnd(); syncExtRibbon(); }
+function extEnsure(pid, title) {
+  if (extPanels[pid]) return extPanels[pid];
+  const el = document.createElement('div'); el.className = 'xp'; el.dataset.id = pid;
+  el.innerHTML = `<div class="xp-hd"><b>${esc(title || '')}</b><button class="x" title="close">✕</button></div><div class="xp-bd"><div class="muted">loading…</div></div>`;
+  el.querySelector('.x').onclick = () => extClose(pid);
+  extPanelsEl.appendChild(el); placeExtPanels();
+  extPanels[pid] = { el, state: {}, ui: null, inflight: false, pending: null, dragging: null, deferred: null, timer: 0 };
+  syncExtRibbon(); return extPanels[pid];
+}
+function extPanelMsg(m) {
+  const p = extEnsure(m.id, m.title);
+  p.el.classList.remove('busy'); p.inflight = false;
+  if (m.title) p.el.querySelector('.xp-hd b').textContent = m.title;
+  if (m.state) p.state = m.state;
+  if (m.error) { p.el.querySelector('.xp-bd').innerHTML = `<div class="xerr">${esc(m.error)}</div>`; }
+  else { p.ui = m.ui; if (p.dragging) p.deferred = m; else extRender(p); }
+  if (p.pending) { const msg = p.pending; p.pending = null; extQueue(p, msg); }
+}
+function extQueue(p, msg) { if (p.inflight) { p.pending = msg; return; } p.inflight = true; p.el.classList.add('busy'); extSend(msg); }
+function extRefreshAll() { for (const [pid, p] of Object.entries(extPanels)) if (!pid.startsWith('eph:') && !p.dragging && !p.inflight) extQueue(p, { op: 'change', panel: pid, state: p.state, event: null }); }
+function extRender(p) {
+  const bd = p.el.querySelector('.xp-bd'); bd.innerHTML = '';
+  if (p.ui && p.ui.title) p.el.querySelector('.xp-hd b').textContent = p.ui.title;
+  for (const c of (p.ui && p.ui.children) || []) bd.appendChild(extNode(c, p));
+}
+const esc = s => String(s ?? '').replace(/[&<>"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]));
+const fmtv = v => typeof v === 'number' ? +v.toFixed(3) : v;
+function extChanged(p, node, value, final = true) {
+  p.state[node.id] = value;
+  const pid = p.el.dataset.id;
+  if (pid.startsWith('eph:') && !node.call) return;   // one-off panels have no Python behind them to re-render
+  const msg = node.call ? { op: 'call', panel: pid, call: node.call, args: {}, state: p.state, event: node.id } : { op: 'change', panel: pid, state: p.state, event: node.id };
+  clearTimeout(p.timer); p.timer = setTimeout(() => extQueue(p, msg), final ? 0 : 150);
+}
+function extNode(n, p) {
+  const d = document.createElement('div'); const pid = p.el.dataset.id;
+  const ctl = (label, inner) => { d.className = 'xctl'; d.innerHTML = `<label>${esc(label)}</label><div class="xin"></div>`; d.querySelector('.xin').append(...inner); return d; };
+  switch (n.type) {
+    case 'section': d.className = 'xsec'; d.innerHTML = `<div class="xt">${esc(n.title)}</div>`; for (const c of n.children || []) d.appendChild(extNode(c, p)); return d;
+    case 'row': d.className = 'xrow'; for (const c of n.children || []) d.appendChild(extNode(c, p)); return d;
+    case 'text': d.className = n.muted ? 'muted' : ''; if (n.md) { d.classList.add('xmd'); d.innerHTML = marked.parse(String(n.text)); } else d.textContent = n.text; return d;
+    case 'kv': d.className = 'kv'; for (const [k, v] of n.rows || []) { const a = document.createElement('div'); a.textContent = k; const b = document.createElement('div'); b.textContent = v ?? ''; d.append(a, b); } return d;
+    case 'badge': d.innerHTML = `<span class="xbadge ${esc(n.kind || 'info')}">${esc(n.text)}</span>`; return d;
+    case 'image': d.innerHTML = `<img src="${esc(n.src)}" ${n.height ? `style="height:${+n.height}px"` : ''}>`; return d;
+    case 'number': {
+      const v = p.state[n.id] ?? n.value; const i = document.createElement('input'); i.type = 'number'; i.step = n.step ?? 'any'; if (n.min != null) i.min = n.min; if (n.max != null) i.max = n.max; i.value = v ?? ''; i.dataset.id = n.id;
+      i.onchange = () => { const x = parseFloat(i.value); if (isFinite(x)) extChanged(p, n, x); };
+      i.onkeydown = e => { if (e.key === 'ArrowUp' || e.key === 'ArrowDown') { e.preventDefault(); const st = n.step || (e.shiftKey ? 10 : e.altKey ? 0.1 : 1); i.value = +(parseFloat(i.value || 0) + (e.key === 'ArrowUp' ? st : -st)).toFixed(4); i.onchange(); } };
+      const u = document.createElement('span'); u.className = 'xu'; u.textContent = n.unit || ''; return ctl(n.label, n.unit ? [i, u] : [i]); }
+    case 'slider': {
+      const v = p.state[n.id] ?? n.value; const i = document.createElement('input'); i.type = 'range'; i.min = n.min; i.max = n.max; i.step = n.step ?? 'any'; i.value = v; i.dataset.id = n.id;
+      const out = document.createElement('span'); out.className = 'xv'; const show = () => { out.textContent = fmtv(+i.value) + (n.unit ? ' ' + n.unit : ''); }; show();
+      i.oninput = () => { show(); extChanged(p, n, +i.value, false); };
+      i.onpointerdown = () => { p.dragging = n.id; };
+      i.onpointerup = i.onpointercancel = () => { p.dragging = null; extChanged(p, n, +i.value, true); if (p.deferred) { const m = p.deferred; p.deferred = null; extPanelMsg(m); } };
+      return ctl(n.label, [i, out]); }
+    case 'text_input': { const i = document.createElement('input'); i.type = 'text'; i.value = p.state[n.id] ?? n.value ?? ''; i.placeholder = n.placeholder || ''; i.dataset.id = n.id; i.onchange = () => extChanged(p, n, i.value); return ctl(n.label, [i]); }
+    case 'select': { const sel = document.createElement('select'); sel.dataset.id = n.id; const cur = p.state[n.id] ?? n.value; for (const [v, l] of n.options || []) { const o = document.createElement('option'); o.value = v; o.textContent = l; if (String(v) === String(cur)) o.selected = true; sel.appendChild(o); } sel.onchange = () => extChanged(p, n, sel.value); return ctl(n.label, [sel]); }
+    case 'checkbox': { d.className = 'xctl'; const l = document.createElement('label'); l.style.cssText = 'display:flex;gap:6px;align-items:center;color:var(--text);padding:5px 0 3px'; const i = document.createElement('input'); i.type = 'checkbox'; i.checked = !!(p.state[n.id] ?? n.value); i.dataset.id = n.id; i.onchange = () => extChanged(p, n, i.checked); l.append(i, document.createTextNode(n.label)); d.appendChild(l); return d; }
+    case 'picker': {
+      const v = p.state[n.id], picking = extPick && extPick.panel === pid && extPick.id === n.id;
+      d.className = 'xctl'; d.innerHTML = `<label>${esc(n.label)}${n.hint ? ` <span class="muted">· ${esc(n.hint)}</span>` : ''}</label><div class="xpick"><span class="val ${v ? '' : 'none'}">${v ? esc(n.what === 'body' ? v : `${v.body} · ${v.label}`) : `no ${esc(n.what)} yet`}</span><button class="btn small pk ${picking ? 'on' : ''}">${picking ? 'click in the viewer…' : 'Pick'}</button><button class="btn small us" title="use the current selection">Use selection</button></div>`;
+      d.querySelector('.pk').onclick = () => { if (extPick && extPick.panel === pid && extPick.id === n.id) { extPickEnd(); extRender(p); } else extPickStart(pid, n); };
+      d.querySelector('.us').onclick = () => { const val = extPickFromSelection(n.what); if (!val) { addMsg('system', `select a ${n.what} in the viewer first`); return; } extChanged(p, n, val); };
+      return d; }
+    case 'table': {
+      const t = document.createElement('table'); t.innerHTML = `<thead><tr>${(n.columns || []).map(c => `<th>${esc(c)}</th>`).join('')}</tr></thead>`; const tb = document.createElement('tbody');
+      for (const r of n.rows || []) {
+        const tr = document.createElement('tr'); tr.innerHTML = (r.cells || []).map(c => `<td>${esc(c)}</td>`).join('');
+        if (r.face != null || r.body || n.on_row) tr.className = 'pick';
+        if (r.face != null && selFaces.has(r.face)) tr.classList.add('sel');
+        tr.onclick = () => {
+          if (r.face != null && model && model.faces.has(r.face)) { selBodies.clear(); selFaces = new Set([r.face]); ghostFaces.clear(); applyColors(); renderChips(); renderTree(); const fi = model.faces.get(r.face); showMarker(fi.center, fi.normal || [0, 0, 1]); tb.querySelectorAll('tr').forEach(x => x.classList.remove('sel')); tr.classList.add('sel'); }
+          else if (r.body && model) { const b = [...model.bodies.values()].find(x => x.path === r.body); if (b) { selFaces.clear(); selBodies = new Set([b.id]); applyColors(); renderChips(); renderTree(); } }
+          if (n.on_row) extQueue(p, { op: 'call', panel: pid, call: n.on_row, args: r.data || {}, state: p.state, event: null });
+        };
+        tb.appendChild(tr);
+      }
+      t.appendChild(tb); d.style.overflow = 'auto'; d.appendChild(t); return d; }
+    case 'button': {
+      const b = document.createElement('button'); b.className = 'btn' + (n.primary ? ' primary' : ''); b.textContent = n.label;
+      b.onclick = () => {
+        if (n.chat) { if (busy) { addMsg('system', 'the agent is busy — try again when it finishes'); return; } inputEl.value = n.chat; submit(); return; }
+        if (n.action) { extSend({ op: 'action', action: n.action, state: p.state }); return; }
+        if (n.call) extQueue(p, { op: 'call', panel: pid, call: n.call, args: n.args || {}, state: p.state, event: null });
+      };
+      d.className = 'xctl xbtn'; d.appendChild(b); return d; }
+    default: d.className = 'xerr'; d.textContent = `unknown ui node ${n.type}`; return d;
+  }
+}
+function extPickStart(pid, n) { extPick = { panel: pid, id: n.id, what: n.what }; if (tool) endTool(); if (measuring) setMeasuring(false); hoverEl.textContent = `click a ${n.what} in the viewer for "${n.label}" · right-click cancels`; extRender(extPanels[pid]); }
+function extPickEnd() { extPick = null; document.querySelectorAll('#ext-panels .pk.on').forEach(b => { b.classList.remove('on'); b.textContent = 'Pick'; }); }
+function extFaceVal(id) { if (!model || !model.faces.has(id)) return null; const fi = model.faces.get(id); const b = [...model.bodies.values()].find(x => x.ranges.has(id)); return { id, body: b ? b.path : '', label: fi.label, center: fi.center, normal: fi.normal, radius: fi.radius, kind: fi.kind }; }
+function extPickFromSelection(what) {
+  if (!model) return null;
+  if (what === 'face') { const id = [...selFaces][0]; return id != null ? extFaceVal(id) : null; }
+  const bid = [...selBodies][0]; if (bid != null) return (model.bodies.get(bid) || {}).path || null;
+  const id = [...selFaces][0]; if (id != null) { const b = [...model.bodies.values()].find(x => x.ranges.has(id)); return b ? b.path : null; }
+  return null;
+}
+function extPickResolve(h) { const pk = extPick; const p = extPanels[pk.panel]; extPickEnd(); if (!p) return; if (!h) { extRender(p); return; } const node = extFindNode(p.ui, pk.id); if (!node) return; const val = pk.what === 'face' ? extFaceVal(h.face) : h.body.path; if (val) extChanged(p, node, val); else extRender(p); }
+function extFindNode(n, id) { if (!n) return null; if (n.id === id) return n; for (const c of n.children || []) { const r = extFindNode(c, id); if (r) return r; } return null; }
+function extView(m) {
+  if (!model) return;
+  if (m.op === 'fit') { fitCamera(); return; }
+  const faces = (m.faces || []).filter(f => model.faces.has(f)), bodies = (m.bodies || []).map(pth => [...model.bodies.values()].find(b => b.path === pth)).filter(Boolean).map(b => b.id);
+  if (m.op === 'select') { selFaces = new Set(faces); selBodies = new Set(bodies); ghostFaces.clear(); ghostBodies.clear(); renderChips(); renderTree(); }
+  else { ghostFaces = new Set(faces); ghostBodies = new Set(bodies); }
+  applyColors();
+}
+
 // ------------------------------------------------------------------ manual modelling dialogs (no agent turn)
 const fld = (id, label, val, extra = '') => `<div class="modal-field"><label>${label}</label><input id="${id}" type="number" step="any" value="${val}" ${extra} style="flex:1;background:var(--bg);color:var(--text);border:1px solid var(--line);border-radius:6px;padding:6px;font:inherit"></div>`;
 const numv = (d, id) => parseFloat(d.querySelector('#' + id).value) || 0;
@@ -3436,7 +3591,7 @@ renderer.domElement.addEventListener('pointerup', ev => {
 
 // ------------------------------------------------------------------ settings (model, effort, MCP servers)
 document.getElementById('settings-btn').onclick = () => openSettings();
-const SET_TABS = [['general', 'General'], ['mcp', 'MCP servers'], ['output', 'Drawings & printing'], ['machines', 'Machines'], ['tools', 'Tools']];
+const SET_TABS = [['general', 'General'], ['mcp', 'MCP servers'], ['ext', 'Extensions'], ['output', 'Drawings & printing'], ['machines', 'Machines'], ['tools', 'Tools']];
 let lastSetTab = 'general';
 async function openSettings(tab) {
   const [{ settings, models }, status] = await Promise.all([fetch('/api/settings').then(r => r.json()), fetch('/api/agent/status').then(r => r.json())]);
@@ -3480,6 +3635,7 @@ async function openSettings(tab) {
   <div class="set-pane" data-pane="mcp">
   <div class="set-h">MCP servers<span class="muted">their tools become mcp__&lt;name&gt;__* for the agent</span><button class="btn small" id="s-mcp-add" style="margin-left:auto">+ Add</button></div>
   <div id="s-mcp"></div></div>
+  <div class="set-pane" data-pane="ext"></div>
   <div class="set-pane" data-pane="machines"></div>
   <div class="set-pane" data-pane="tools"></div>
   <div class="set-err" id="s-err"></div>`;
@@ -3487,6 +3643,22 @@ async function openSettings(tab) {
   d.querySelectorAll('[data-tab]').forEach(b => b.onclick = () => showTab(b.dataset.tab));
   showTab(tab || lastSetTab);
   const libEd = libraryEditor(d.querySelector('[data-pane=machines]'), d.querySelector('[data-pane=tools]'));
+  const extPane = d.querySelector('[data-pane=ext]');
+  const renderExt = () => {
+    extPane.innerHTML = `<div class="set-h">Extensions<span class="muted">Python files that extend the app: ribbon panels, agent tools, script helpers, build checks</span></div>`;
+    if (!extDefs.modules.length) extPane.insertAdjacentHTML('beforeend', '<div class="muted" style="padding:6px 0">none</div>');
+    for (const m of extDefs.modules) {
+      const row = document.createElement('div'); row.className = 'mcp-row ext-row';
+      const sum = [m.panels.length ? `panels ${m.panels.map(p => p.title).join(', ')}` : '', m.tools.length ? `tools ${m.tools.join(', ')}` : '', m.helpers.length ? `helpers ${m.helpers.join(', ')}` : '', m.hooks.length ? `on_build ${m.hooks.join(', ')}` : ''].filter(Boolean).join(' · ');
+      row.innerHTML = `<input type="checkbox" ${m.enabled ? 'checked' : ''} title="enabled"><span class="nm"><b>${esc(m.id)}</b> <span class="st">${m.layer}</span><br>${m.error ? `<span class="err">FAILED TO LOAD: ${esc(m.error)}</span>` : `<span class="sum">${esc(sum)}</span>`}</span><button class="btn small" data-a="code">Code</button>${m.layer === 'workspace' ? '<button class="btn small" data-a="del">Delete</button>' : ''}`;
+      row.querySelector('input').onchange = e => api(`/api/extensions/${m.id}`, { enabled: e.target.checked }).catch(err => addMsg('error', err.message));
+      row.querySelector('[data-a=code]').onclick = async () => { const code = await fetch(`/api/extensions/${m.id}/code`).then(r => r.text()); const pre = document.createElement('pre'); pre.style.cssText = 'max-height:60vh;overflow:auto;font-size:11.5px;white-space:pre-wrap'; pre.textContent = code; openModal(`${m.id}.py`, pre, [['Close', null]]); };
+      const del = row.querySelector('[data-a=del]'); if (del) del.onclick = async () => { if (!confirm(`Delete extension ${m.id}?`)) return; const r = await fetch(`/api/extensions/${m.id}`, { method: 'DELETE' }); if (!r.ok) addMsg('error', (await r.json()).error || 'delete failed'); };
+      extPane.appendChild(row);
+    }
+    extPane.insertAdjacentHTML('beforeend', `<div class="muted" style="margin-top:10px">Ask the agent for one, e.g. <i>"Write an extension with a panel that estimates mass and cost per body"</i> or <i>"Add a build check that warns when a wall is under 1.2 mm"</i>. Workspace files live in <code>extensions/</code>; the built-in examples are read-only (<i>extension read &lt;module&gt;</i> shows their code). New agent tools appear as first-class tools after a session restart.</div>`);
+  };
+  renderExt(); window.extSettingsRefresh = () => { if (document.body.contains(extPane)) renderExt(); };
   d.querySelector('#s-extra').value = st.extra_prompt || '';
   const sel = d.querySelector('#s-model'), custom = d.querySelector('#s-model-custom');
   sel.onchange = () => { custom.style.display = sel.value === '__custom' ? '' : 'none'; };
@@ -3708,6 +3880,7 @@ function connect() {
         if (m.source === 'sketch') addMsg('system', 'sketch saved · rebuilt');
         if (m.source === 'edit') addMsg('system', 'script edited · rebuilt');
         if (m.source === 'edit') { /* rename/delete: message comes via 'info' */ }
+        extRefreshAll();
         break;
       case 'design': setDesign(m); break;
       case 'slicer': setupPrinting(m); break;
@@ -3750,6 +3923,10 @@ function connect() {
         if (m.cost != null) addMsg('system', `turn done · ${m.turns} steps · ${(m.duration_ms/1000).toFixed(1)}s · $${m.cost.toFixed(3)}`); break;
       case 'error': finishBubble(); addMsg('error', m.text); break;
       case 'info': addMsg('system', m.text); break;
+      case 'extensions': extDefs = m; renderExtRibbon(); if (window.extSettingsRefresh) window.extSettingsRefresh(); break;
+      case 'ext_panel': extPanelMsg(m); break;
+      case 'ext_view': extView(m); break;
+      case 'ext_chat': if (busy) addMsg('system', 'the agent is busy — try again when it finishes'); else { inputEl.value = m.text; submit(); } break;
       case 'exported': addMsg('system', 'exported ' + m.files.join(', ') + ' to workspace/exports'); break;
       case 'screenshot_request': {
         let png = '';

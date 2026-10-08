@@ -5,6 +5,23 @@ features, patch bumps fix things. The version shown in the UI header comes from 
 
 ## [Unreleased]
 
+## [0.24.0] — 2026-10-09
+
+### Added
+- **Extensions: the agent can extend the app itself.** One Python file (`extension save`) adds script helpers
+  (`@helper`), agent tools (`@tool`, callable at once through `extension call` and first-class `ext_<name>` tools after a
+  restart), UI panels (`@panel`) and checks that run after every build (`@on_build`). Panels are declared, not coded:
+  a JSON UI schema of sliders, numbers, selects, checkboxes, face/body pickers, tables (rows select the face they
+  describe), key/values, badges and buttons that call a tool, ask the agent (`chat`) or act on the view. The browser
+  renders them in a new **Extensions** ribbon group and keeps them live: a control change re-renders the panel, model
+  edits go back through a result dict (`set_params`, `wrap`, `append`, `edits`, `code`, `select`, `highlight`…), and
+  open panels follow every rebuild. `show_panel` puts a one-off table or report in the viewer without saving anything.
+  Files hot-reload; a broken one shows as FAILED TO LOAD in Settings ▸ **Extensions** (enable, disable, view code,
+  delete) and never breaks a design. Built-in examples: **Parameters** (every numeric parameter as a slider with live
+  rebuild), **Hole report** (every round hole with Ø, depth, thread and position; click a row to select it; ask the
+  agent for matching screws) and **Bolt pattern** (pick a face, set PCD / count / Ø / angle, Apply writes a
+  `pattern_circular` cut into the script).
+
 ## [0.23.0] — 2026-10-06
 
 ### Added

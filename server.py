@@ -17,6 +17,7 @@ from pydantic import BaseModel
 
 import cad_kernel as ck
 import cam_kernel as cam
+import extensions as ext_mod
 import script_edit
 import slicer
 from agent import CadAgent, claude_cli_candidates, find_claude_cli
@@ -99,10 +100,26 @@ async def lifespan(app: FastAPI):
     task = None
     if os.environ.get("AGENTICCAD_NO_AGENT") != "1":      # tests run the API without a Claude session
         task = asyncio.create_task(_connect_agent())
+    watcher = asyncio.create_task(_watch_extensions())
     yield
     if task:
         task.cancel()
+    watcher.cancel()
     await agent.stop()
+
+
+async def _watch_extensions() -> None:
+    """Hot reload: when an extension file changes (the agent saved one, or you edited it), browsers get the new list."""
+    last = None
+    while True:
+        try:
+            st = agent.extensions.stamp()
+            if last is not None and st != last:
+                await bus.emit(agent.extensions.payload())
+            last = st
+        except Exception:  # noqa: BLE001
+            pass
+        await asyncio.sleep(1.5)
 
 
 async def _connect_agent() -> None:
@@ -405,6 +422,40 @@ async def sketches_get():
     return {"sketches": agent.sketch_defs()}
 
 
+class ExtEnableBody(BaseModel):
+    enabled: bool
+
+
+@app.get("/api/extensions")
+async def extensions_list():
+    return agent.extensions.payload() | {"api": ext_mod.API_DOC}
+
+
+@app.get("/api/extensions/{module}/code")
+async def extensions_code(module: str):
+    try:
+        return PlainTextResponse(agent.extensions.read(module))
+    except ext_mod.ExtError as e:
+        return JSONResponse({"error": str(e)}, status_code=404)
+
+
+@app.post("/api/extensions/{module}")
+async def extensions_enable(module: str, body: ExtEnableBody):
+    agent.extensions.set_enabled(module, body.enabled)
+    await bus.emit(agent.extensions.payload())
+    return agent.extensions.payload()
+
+
+@app.delete("/api/extensions/{module}")
+async def extensions_delete(module: str):
+    try:
+        agent.extensions.delete(module)
+    except ext_mod.ExtError as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+    await bus.emit(agent.extensions.payload())
+    return agent.extensions.payload()
+
+
 @app.get("/api/params")
 async def params_get():
     return {"params": agent.get_params(), "units": agent.units()}
@@ -683,6 +734,7 @@ async def ws_endpoint(ws: WebSocket) -> None:
                                        "summary": agent.program.summary() if agent.program else "",
                                        "gcode_lines": agent.program.gcode().count("\n") if agent.program else 0}))
         await ws.send_text(json.dumps(agent.slicer_payload()))
+        await ws.send_text(json.dumps(agent.extensions.payload()))
         if agent.slice_layers is not None:
             await ws.send_text(json.dumps({"type": "sliced", "result": agent.slice_result.to_dict() | {"summary": agent.slice_result.summary()},
                                            "layers": agent.slice_layers, "restore": True}))
@@ -785,6 +837,21 @@ async def _dispatch(ws: WebSocket, msg: dict) -> None:
             await agent.build(msg.get("code", ""), source="user")
         except ck.CadError as e:
             await ws.send_text(json.dumps({"type": "build_error", "text": str(e)}))
+    elif t == "ext":
+        # panels: open / change (a control changed → re-render) / call (a button or control's `call`) / action (a static RESULT dict)
+        op, pid, state, sel = msg.get("op"), msg.get("panel"), msg.get("state") or {}, msg.get("selection")
+        try:
+            if op in ("open", "change"):
+                await agent.ext_render(pid, state, msg.get("event"), sel)
+            elif op == "call":
+                await agent.ext_call(msg["call"], msg.get("args") or {}, state, msg.get("event"), sel, panel=pid if pid and not pid.startswith("eph:") else None)
+            elif op == "action":
+                await agent.ext_apply(msg.get("action") or {}, panel=None, state=state)
+            elif op == "chat":
+                bus.primary = ws
+                asyncio.create_task(agent.chat(msg.get("text", ""), msg.get("selection_chips"), []))
+        except (ext_mod.ExtError, ck.CadError, script_edit.Unsupported, KeyError, ValueError, TypeError) as e:
+            await ws.send_text(json.dumps({"type": "error", "text": f"extension {op} failed: {e}"}))
 
 
 if __name__ == "__main__":

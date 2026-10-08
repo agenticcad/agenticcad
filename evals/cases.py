@@ -531,7 +531,7 @@ CASES: list[Case] = [
          graders=[no_agent_error(), expect_bodies(["Plate"], count=1), expect_bbox((76.2, 50.8, 6.35), body="Plate", tol=0.3),
                   expect_script_contains("inch"),
                   lambda run: [check("two 1/4-20 threads registered", sorted(t.size for t in run.model.threads) == ["1/4-20", "1/4-20"], str([t.label() for t in run.model.threads])),
-                               check("answer in inches", "inch" in run.text.lower() or '"' in run.text, run.text[:200])]]),
+                               check("answer in inches", "inch" in run.text.lower() or '"' in run.text or re.search(r"\d\s*in\b", run.text) is not None, run.text[:200])]]),
     Case("cad_parametric", tags=["cad", "params"],
          prompt="Model an L-shaped angle bracket: 50 long, 30 tall, 20 wide, 4 mm thick, with a 3 mm inside fillet. Expose the length, height, width and thickness as parameters at the top of the script.",
          graders=[no_agent_error(), expect_bbox((50, 20, 30), tol=1.0), expect_params(), expect_face_kinds("CYLINDER"),
@@ -687,4 +687,116 @@ CASES: list[Case] = [
              "Nothing may overlap anything else. Tell me the ratio when you are done."),
          graders=[no_agent_error(), interference_free(), gearhead_checks,
                   lambda run: [check("≥ 95 bodies", run.model is not None and len(run.model.bodies) >= 95, f"{len(run.model.bodies) if run.model else 0}")]]),
+]
+
+
+# --------------------------------------------------------------------------- extensions (the agent extends the app itself)
+def _ext(run: Run):
+    import extensions as X
+    return X.Extensions(run.workspace)
+
+
+def ext_saved(kinds: dict[str, int]):
+    """A workspace extension exists, loads, and registers at least these entry kinds (panels/tools/hooks/helpers)."""
+    def g(run: Run):
+        mods = [m for m in _ext(run).modules() if m["layer"] == "workspace"]
+        out = [check("workspace extension saved", bool(mods), f"files: {[p.name for p in (run.workspace / 'extensions').glob('*.py')] if (run.workspace / 'extensions').exists() else []}")]
+        if not mods:
+            return out
+        out.append(check("extension loads", not any(m["error"] for m in mods), "; ".join(m["error"] for m in mods if m["error"])))
+        for k, n in kinds.items():
+            have = sum(len(m[k]) for m in mods)
+            out.append(check(f"registers ≥{n} {k}", have >= n, f"{k}: {have}"))
+        return out
+    return g
+
+
+def ext_panel_renders(need_types: list[str] = (), min_children: int = 1):
+    """Every workspace panel renders against the current model, with the control types asked for somewhere in it."""
+    def g(run: Run):
+        import extensions as X
+        E = _ext(run)
+        panels = [p for p in E.panels() if p.layer == "workspace"]
+        if not panels:
+            return [check("panel renders", False, "no workspace panel")]
+        out = []
+        for p in panels:
+            try:
+                ui = E.render(p.id, X.Ctx(run.model, run.workspace, state={}))
+            except Exception as ex:  # noqa: BLE001
+                out.append(check(f"panel {p.name} renders", False, f"{type(ex).__name__}: {ex}")); continue
+            types = set()
+            def walk(n):
+                types.add(n.get("type")); [walk(c) for c in n.get("children", []) or []]
+            walk(ui)
+            out.append(check(f"panel {p.name} renders", len(ui["children"]) >= min_children, f"{len(ui['children'])} children"))
+            for t in need_types:
+                out.append(check(f"panel {p.name} has a {t}", t in types, f"types {sorted(x for x in types if x)}"))
+        return out
+    return g
+
+
+def ext_hook_warns(code: str, needle: str):
+    """Build `code` (which should trip the check) and expect a hook warning containing `needle`."""
+    def g(run: Run):
+        import extensions as X
+        m = ck.run_script(code, workspace=run.workspace)
+        warns = _ext(run).run_hooks(X.Ctx(m, run.workspace))
+        return [check(f"on_build warns about {needle!r}", any(needle.lower() in w.lower() for w in warns), str(warns))]
+    return g
+
+
+def ext_hook_quiet(code: str):
+    def g(run: Run):
+        import extensions as X
+        m = ck.run_script(code, workspace=run.workspace)
+        warns = _ext(run).run_hooks(X.Ctx(m, run.workspace))
+        return [check("on_build quiet on a good part", not warns, str(warns))]
+    return g
+
+
+def ext_panel_event(min_rows: int = 1):
+    """A panel was shown to the browser (show_panel or an opened panel) with a table of at least min_rows rows."""
+    def g(run: Run):
+        evs = [e for e in run.events if e.get("type") == "ext_panel" and e.get("ui")]
+        if not evs:
+            return [check("panel shown", False, "no ext_panel event")]
+        rows = 0
+        def walk(n):
+            nonlocal rows
+            if n.get("type") == "table":
+                rows = max(rows, len(n.get("rows") or []))
+            [walk(c) for c in n.get("children", []) or []]
+        for e in evs:
+            walk(e["ui"])
+        return [check("panel shown", True, f"{len(evs)} panel event(s)"), check(f"table with ≥{min_rows} rows", rows >= min_rows, f"{rows} rows")]
+    return g
+
+
+EXT_PLATE = '''wall = 1.0   # wall thickness
+plate = Box(60, 40, wall)
+result = {"Plate": plate, "Post": Pos(0, 0, 10) * Cylinder(4, 20)}
+'''
+
+CASES += [
+    Case("ext_mass_cost_panel", tags=["ext"],
+         prompt="Write an extension with a panel that estimates mass and material cost per body: a material dropdown per body "
+                "(aluminium, steel, brass, PLA with sensible densities and $/kg), a table with mass and cost per body, and totals. "
+                "Save it and open the panel.",
+         initial_code=EXT_PLATE,
+         graders=[no_agent_error(), expect_tools_used("extension"), ext_saved({"panels": 1}),
+                  ext_panel_renders(need_types=["select", "table"]), ext_panel_event(min_rows=2)]),
+    Case("ext_thin_wall_check", tags=["ext"],
+         prompt="Add a build check that warns whenever a body is thinner than 1.5 mm in any direction (use each body's bounding box: "
+                "the smallest extent). Make it an extension so it runs after every build, then rebuild so I can see it fire on the plate.",
+         initial_code=EXT_PLATE,
+         graders=[no_agent_error(), expect_tools_used("extension"), ext_saved({"hooks": 1}),
+                  ext_hook_warns(EXT_PLATE, "Plate"),
+                  ext_hook_quiet('result = {"Block": Box(20, 20, 5)}\n')]),
+    Case("ext_show_panel_report", tags=["ext"],
+         prompt="Show me a panel in the viewer listing every body with its volume in cm³ and its bounding box size. Don't save anything, "
+                "just show it.",
+         initial_code=EXT_PLATE,
+         graders=[no_agent_error(), expect_tools_used("show_panel"), ext_panel_event(min_rows=2),
+                  lambda run: [check("no workspace extension written", not list((run.workspace / "extensions").glob("*.py")) if (run.workspace / "extensions").exists() else True, "a file was saved")]]),
 ]

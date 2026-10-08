@@ -301,6 +301,44 @@ outlines and can be selected as chat chips. The **agent edits sketches through t
 (list/get/set/delete, same item and constraint format), so anything it draws stays editable by you and vice
 versa. Constraints are solved on save, and a conflicting set is refused.
 
+## Extensions
+
+The agent can extend the app itself. An extension is one Python file in `<workspace>/extensions/` (the agent writes it
+with `extension save`, which refuses a file that doesn't load or registers nothing); build123d, the script helpers
+and `kit` are pre-imported, plus four decorators:
+
+```python
+@helper                                   # callable from any design script
+def wall_thickness(shape, point): ...
+
+@tool("hole_report", "Every hole with diameter, depth and thread")   # agent-callable; ext_hole_report after a restart
+def hole_report(ctx, body: str = None): ...                          # (ctx, **args); the JSON schema comes from the signature
+
+@panel("Bolt pattern", icon="✣", description="Holes on a pitch circle")
+def bolt_pattern(ctx):                    # re-rendered whenever one of its controls changes
+    s = ctx.state
+    return ui.panel(ui.picker("face", "Face", what="face"),
+                    ui.number("pcd", "PCD", s.get("pcd", 40), min=1, unit="mm"),
+                    ui.button("Apply", call="apply", primary=True))
+
+@on_build                                 # after every successful build; return warnings
+def check(ctx): ...
+```
+
+Panels are declared, not coded: a JSON schema of sliders, numbers, selects, checkboxes, face/body pickers (click →
+next click in the viewer fills it), tables whose rows select the face they describe, key/values, badges, images and
+buttons. The browser renders them in an **Extensions** ribbon group with the app's own styling, so they keep working
+across releases. Everything a panel or tool does to the model goes back through a result dict (`set_params`, `wrap`
+a body's expression, `append` / `edits`, `code`, `select`, `highlight`, `chat` to ask the agent, `ui` to show more),
+so extension code stays plain synchronous Python with read access to the model (`ctx.model`, `ctx.bodies`,
+`ctx.faces`, `ctx.params()`, `ctx.holes()`, `ctx.selection`). `show_panel` shows a one-off table or report without
+saving anything. Files hot-reload; Settings ▸ **Extensions** lists them (enable, disable, view code, delete) and a
+broken file shows as FAILED TO LOAD instead of breaking a design. The full API reference is `extension api`.
+
+Built-in examples, also the reference the agent reads: **Parameters** (every numeric parameter as a slider with live
+rebuild), **Hole report** (Ø, depth, thread and position of every round hole; click a row to select it) and **Bolt
+pattern** (pick a face, set PCD / count / Ø / angle, Apply writes a `pattern_circular` cut into the script).
+
 ### Modelling ribbon (Fusion-style, no agent turn)
 Top of the viewer: **Create** Box `B` / Cylinder `C` / Sphere `O` / Sketch `K` / Revolve `R` / Loft `G` / Sweep `W`,
 **Modify** Press/Pull `Q` / Hole `H` / Fillet `F` / Chamfer `X` / Shell `L` / Move `V` / Mirror `M` / Pattern `N`,
