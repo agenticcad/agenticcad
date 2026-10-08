@@ -7,7 +7,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M16 3 28 9.5v13L16 29 4 22.5v-13L16 3Z' fill='none' stroke='%234ea1ff' stroke-width='2'/%3E%3Ccircle cx='16' cy='16' r='4' fill='%23ff8c42'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="../assets/site.css?v=0.23.0">
+<link rel="stylesheet" href="../assets/site.css?v=0.24.0">
 <style>
   .docs{display:grid;grid-template-columns:250px 1fr;gap:56px;padding:44px 0 80px}
   .toc{position:sticky;top:76px;align-self:start;max-height:calc(100vh - 100px);overflow:auto;font-size:13px;padding-right:8px}
@@ -39,7 +39,7 @@
 <div class="wrap docs">
   <aside class="toc" id="toc">
     <div class="g">Start</div><a href="#overview">Overview</a><a href="#desktop">Desktop app</a><a href="#install">Install from source</a><a href="#workspace">The workspace</a>
-    <div class="g">Design</div><a href="#script">Design as script</a><a href="#chat">Chat and selection</a><a href="#images">Reference images</a><a href="#bodies">Bodies and the Browser</a><a href="#ribbon">Ribbon tools</a><a href="#sketches">Sketches</a><a href="#units">Units</a><a href="#threads">Threads</a><a href="#gears">Gears</a><a href="#kit">Design Kit</a><a href="#params">Parameters</a><a href="#measure">Measure</a><a href="#section">Section and interference</a><a href="#motion">Motion, explode, render</a><a href="#drawings">Shop drawings</a><a href="#library">Part library</a><a href="#step">STEP import and export</a><a href="#printing">3D printing</a><a href="#fidelity">Fidelity</a>
+    <div class="g">Design</div><a href="#script">Design as script</a><a href="#chat">Chat and selection</a><a href="#images">Reference images</a><a href="#bodies">Bodies and the Browser</a><a href="#ribbon">Ribbon tools</a><a href="#sketches">Sketches</a><a href="#units">Units</a><a href="#threads">Threads</a><a href="#gears">Gears</a><a href="#kit">Design Kit</a><a href="#ext">Extensions</a><a href="#params">Parameters</a><a href="#measure">Measure</a><a href="#section">Section and interference</a><a href="#motion">Motion, explode, render</a><a href="#drawings">Shop drawings</a><a href="#library">Part library</a><a href="#step">STEP import and export</a><a href="#printing">3D printing</a><a href="#fidelity">Fidelity</a>
     <div class="g">CAM</div><a href="#cam">CAM overview</a><a href="#cam-sim">Simulation</a><a href="#setups">Setups and 4th axis</a><a href="#makera">Makera Carvera</a><a href="#machines">Machines and tools</a><a href="#ops">Operations</a><a href="#adaptive">Adaptive clearing</a><a href="#post">Post and G-code</a>
     <div class="g">Agent</div><a href="#settings">Settings and MCP</a><a href="#tools">Agent tools reference</a>
     <div class="g">Reference</div><a href="#shortcuts">Keyboard shortcuts</a><a href="#architecture">Architecture</a><a href="#files">Files and API</a><a href="#versioning">Versioning</a><a href="#tests">Tests and evals</a><a href="#gaps">Known gaps and roadmap</a><a href="#licence">Licence</a>
@@ -210,6 +210,31 @@ result = {"Motor": motor, "Stage": kit.place(stage, Pos(0, 0, 13)),
       <tr><td>Mechanisms, fluid</td><td>hinges, compression and extension springs on their real helix, knobs, pull handles, cams, links; O-rings with groove cutters, tube, push-fit fittings, hose barbs</td></tr></table>
     <p>27 guides cover gears, bearings, shafts, springs, linkages, O-rings, fasteners, motors, boards, frames, enclosures, fits, materials, metric threads and stock sizes, FDM and resin printing, CNC, sheet metal, laser cutting, moulding and build123d pitfalls. Each workspace has its own kit layer in <code>workspace/kit/</code>: the agent adds notes to entries, saves guides and components there, and its <code>TOC.md</code> is regenerated with what the workspace uses most. Agent tool: <code>kit(action, ...)</code> with toc, search, read, note, save_guide, save_part.</p>
     <p><b>Draft threads.</b> While the agent works, <code>real=True</code> threads build as plain cylinders so rebuilds stay fast; when its turn ends the app builds the design once with the real helices (⚙ Settings key <code>draft_threads</code>).</p>
+
+    <h2 id="ext">Extensions</h2>
+    <p>The agent can extend the app itself. An extension is one Python file in <code>workspace/extensions/</code>, written by the agent with its <code>extension</code> tool (a file that doesn't load, or registers nothing, is refused). build123d, the script helpers and <code>kit</code> are pre-imported, plus four decorators:</p>
+<pre><code><span class="hl-k">@helper</span>                                   <span class="hl-c"># callable from any design script</span>
+<span class="hl-k">def</span> wall_thickness(shape, point): ...
+
+<span class="hl-k">@tool</span>(<span class="hl-s">"hole_report"</span>, <span class="hl-s">"Every hole with diameter, depth and thread"</span>)   <span class="hl-c"># agent-callable</span>
+<span class="hl-k">def</span> hole_report(ctx, body: <span class="hl-t">str</span> = <span class="hl-k">None</span>): ...                          <span class="hl-c"># schema from the signature</span>
+
+<span class="hl-k">@panel</span>(<span class="hl-s">"Bolt pattern"</span>, icon=<span class="hl-s">"✣"</span>, description=<span class="hl-s">"Holes on a pitch circle"</span>)
+<span class="hl-k">def</span> bolt_pattern(ctx):                    <span class="hl-c"># re-rendered whenever one of its controls changes</span>
+    s = ctx.state
+    <span class="hl-k">return</span> ui.panel(ui.picker(<span class="hl-s">"face"</span>, <span class="hl-s">"Face"</span>, what=<span class="hl-s">"face"</span>),
+                    ui.number(<span class="hl-s">"pcd"</span>, <span class="hl-s">"PCD"</span>, s.get(<span class="hl-s">"pcd"</span>, <span class="hl-n">40</span>), min=<span class="hl-n">1</span>, unit=<span class="hl-s">"mm"</span>),
+                    ui.button(<span class="hl-s">"Apply"</span>, call=<span class="hl-s">"apply"</span>, primary=<span class="hl-k">True</span>))
+
+<span class="hl-k">@on_build</span>                                 <span class="hl-c"># after every successful build; return warnings</span>
+<span class="hl-k">def</span> check(ctx): ...</code></pre>
+    <ul>
+      <li><b>Panels are declared, not coded.</b> A panel function returns a JSON schema of sliders, numbers, selects, checkboxes, face and body pickers (click, then click in the viewer), tables whose rows select the face they describe, key/values, badges, images and buttons. The browser renders it in an <b>Extensions</b> ribbon group with the app's own styling, so agent-written UI keeps working across releases. A control change re-renders the panel; open panels follow every rebuild.</li>
+      <li><b>Changes go back through a result dict</b>: <code>set_params</code>, <code>wrap</code> (rewrite a body's expression), <code>append</code> / <code>edits</code>, <code>code</code>, <code>select</code>, <code>highlight</code>, <code>chat</code> (ask the agent) and <code>ui</code> (show more). Extension code stays plain synchronous Python with read access to the model: <code>ctx.bodies</code>, <code>ctx.faces</code>, <code>ctx.params()</code>, <code>ctx.holes()</code>, <code>ctx.selection</code>.</li>
+      <li><b>Tools</b> are callable at once through <code>extension call</code>, and become first-class <code>ext_&lt;name&gt;</code> tools after a session restart. <code>show_panel</code> shows a one-off table or report without saving anything.</li>
+      <li><b>Hot reload.</b> Edit or drop a file in <code>extensions/</code> and the ribbon updates within two seconds. ⚙ Settings ▸ <b>Extensions</b> lists them (enable, disable, view code, delete); a broken file shows as FAILED TO LOAD and never breaks a design.</li>
+    </ul>
+    <p>Built-in examples, also what the agent reads for reference: <b>Parameters</b> (every numeric parameter as a slider with live rebuild), <b>Hole report</b> (Ø, depth, thread and position of every round hole; click a row to select it) and <b>Bolt pattern</b> (pick a face, set PCD / count / Ø / angle, Apply writes a <code>pattern_circular</code> cut into the script). Ask for your own: <i>"Write an extension with a panel that estimates mass and cost per body"</i>, <i>"Add a build check that warns when a wall is under 1.2 mm"</i>.</p>
 
     <h2 id="params">Parameters</h2>
     <p>Every top-level <code>name = number</code> in the script is a field in the <b>Parameters</b> card under the Browser (<kbd>↑</kbd><kbd>↓</kbd> ±1, <kbd>⇧</kbd> ±10, <kbd>⌥</kbd> ±0.1). Changing one rewrites that literal and rebuilds. Library parts saved as designs keep their parameters, so <code>from_library("bracket", width=30)</code> works. Agent tools: <code>get_parameters</code>, <code>set_parameters</code>. API: <code>GET/POST /api/params</code>.</p>
@@ -427,7 +452,7 @@ program.<span class="hl-f">add</span>(<span class="hl-f">pocket</span>(bot, tool
   </main>
 </div>
 <footer><div class="wrap"><span>© 2026 AgenticCAD · PolyForm Noncommercial 1.0.0</span><a href="../terms.html">Terms</a><a href="../privacy.html">Privacy</a><a href="#" data-cookie-settings>Cookie settings</a><a href="https://github.com/agenticcad/agenticcad">GitHub</a><a href="../tutorials/">Tutorials</a><a href="../index.html">Home</a></div></footer>
-<script src="../assets/site.js?v=0.23.0"></script>
+<script src="../assets/site.js?v=0.24.0"></script>
 <script>
   const links = [...document.querySelectorAll('.toc a')], heads = links.map(a => document.querySelector(a.getAttribute('href')));
   const io = new IntersectionObserver(() => { let cur = 0; heads.forEach((h, i) => { if (h && h.getBoundingClientRect().top < 120) cur = i; }); links.forEach((a, i) => a.classList.toggle('on', i === cur)); }, { rootMargin: '-100px 0px -70% 0px', threshold: [0, 1] });
