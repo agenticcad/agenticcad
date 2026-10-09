@@ -129,6 +129,9 @@ Rules
   Multi-part components return a dict of parts; move them with `kit.place(obj, Pos(...))` and put them in `result`
   as a component. When you learn something reusable (a fix, a gotcha, a good recipe), `kit note` it on the entry,
   or `kit save_guide` / `kit save_part` it into this workspace's kit.
+- Configurations: a top-level `configurations = {"Small": {"plate_l": 40}, "Large": {"plate_l": 120}}` dict declares
+  named variants as parameter overrides. The user picks one in the Parameters card; `configurations activate` builds
+  it, `configurations export` writes STEP/STL for every variant. Expose the dimensions that vary as parameters first.
 - Extensions let you extend the app itself: one Python file (`extension save`) can add script helpers (@helper),
   tools you can call (@tool), UI panels with live controls, pickers and tables (@panel) and checks that run after
   every build (@on_build). Read `extension api` first. Use `show_panel` for a one-off table or report in the viewer;
@@ -291,7 +294,7 @@ Materials for feeds(): aluminium, brass, mild-steel, acrylic, hdpe, delrin, plyw
 polygons with holes (holes = islands for pocket, inner profiles for contour side="outside"); stock_minus(setup,
 shape, z, expand=tool.diameter) = what to clear at level z (expand lets the tool run off the stock edge); face_polygon(model.get_face(id)) uses a face the user clicked. Depths:
 z_bottom below the stock bottom means cutting into the spoilboard (fine for through-cuts with a sacrificial
-board, warn otherwise). Tool numbers matter for tool changes (GRBL: machine.tool_change='pause' emits M6/M0).
+board, warn otherwise). Tool numbers matter for tool changes (GRBL: machine.tool_change='pause' emits M6/M0; Haas and LinuxCNC posts emit Tn M06 + G43 Hn, so tool offsets must exist on the control). Built-in machines include the Makera Z1 and Carvera Air, Haas VF-2 / VF-2SS / VF-4 / Mini Mill / TM-1, and generic LinuxCNC mills.
 Prefer the tool library's feeds/stepdown; override per op only with a reason. The user's own per-op tweaks from
 the CAM tab live in one line at the top of cam.py, `overrides({"Pocket": {"feed": 500, "stepover": 0.3}, "Face#2": {...}})`
 (keys = op names, "#2" for the second op with the same name; fields rpm, feed, plunge, stepdown, stepover as a
@@ -429,6 +432,7 @@ class CadAgent:
         self.library = Library(workspace)
         self.parts = PartLibrary(workspace)
         self.extensions = ext_mod.for_workspace(workspace)   # Python files that extend the app (ext_builtin + workspace/extensions)
+        self.config: str | None = None        # active configuration (named parameter overrides declared in the script)
         ck.WORKSPACE = workspace
         ck.LIBRARY = self.parts
         (workspace / "imports").mkdir(exist_ok=True)
@@ -454,7 +458,8 @@ class CadAgent:
         return self.cam_code.strip() != saved_cam.strip()
 
     def design_state(self) -> dict[str, Any]:
-        return {"type": "design", "name": self.design_name, "dirty": self.dirty}
+        return {"type": "design", "name": self.design_name, "dirty": self.dirty, "config": self.config,
+                "configurations": list(self.model.configurations) if self.model else []}
 
     def list_designs(self) -> list[dict[str, Any]]:
         out = []
@@ -483,6 +488,7 @@ class CadAgent:
         if not path.exists():
             raise ck.CadError(f"no design named '{name}'")
         code = path.read_text()
+        self.config = None
         await self.build(code, source="open", record=True)
         cam_file = self.designs_dir / f"{path.stem}.cam.py"
         await self.set_cam_code(cam_file.read_text() if cam_file.exists() else "", rebuild=cam_file.exists())
@@ -495,6 +501,7 @@ class CadAgent:
     async def new_design(self, code: str | None = None) -> None:
         """File ▸ New: a clean start: empty design, no CAM program or simulation, and a fresh conversation."""
         await self.reset_conversation()
+        self.config = None
         await self.build(code or ck.NEW_DESIGN_CODE, source="new", record=True)
         await self.set_cam_code("", rebuild=False)
         self.design_name = None
@@ -668,15 +675,88 @@ class CadAgent:
 
     # ------------------------------------------------------------------ parameters
     def get_params(self) -> list[dict[str, Any]]:
+        """Parameters with their EFFECTIVE values (the active configuration's overrides applied); `base` is the literal."""
         if self.model is None:
             return []
         try:
-            return script_edit.params(self.model.code)
+            ps = script_edit.params(self.model.code)
         except SyntaxError:
             return []
+        over = self.configurations().get(self.config, {}) if self.config else {}
+        for p in ps:
+            p["base"] = p["value"]
+            if p["name"] in over:
+                p["value"] = over[p["name"]]; p["override"] = True
+        return ps
+
+    def configurations(self) -> dict[str, dict[str, float]]:
+        if self.model is None:
+            return {}
+        try:
+            return script_edit.configurations(self.model.code)
+        except (script_edit.Unsupported, SyntaxError):
+            return {}
+
+    def config_state(self) -> dict[str, Any]:
+        return {"active": self.config, "configurations": self.configurations(), "params": self.get_params()}
+
+    async def set_configurations(self, cfgs: dict[str, dict[str, float]], source: str = "configs") -> None:
+        """Replace the script's configurations dict (validated) and rebuild; the active one stays if it still exists."""
+        if self.model is None:
+            raise ck.CadError("no design yet")
+        code = script_edit.set_configurations(self.model.code, {n: {k: float(v) for k, v in vals.items()} for n, vals in cfgs.items()})
+        if self.config and self.config not in cfgs:
+            self.config = None
+        if code != self.model.code:
+            await self.build(code, source=source)
+        self._write_state()
+        await self.emit(self.design_state())
+
+    async def activate_configuration(self, name: str | None, source: str = "configs") -> None:
+        """Switch the active configuration (None = the base values) and rebuild; nothing in the script changes."""
+        if self.model is None:
+            raise ck.CadError("no design yet")
+        if name and name not in self.configurations():
+            raise ck.CadError(f"no configuration named {name!r}; configurations: {', '.join(self.configurations()) or 'none'}")
+        if name == self.config:
+            return
+        self.config = name or None
+        self._write_state()
+        await self.build(self.model.code, source="config", record=False)
+        if source == "configs":
+            self.notes.append(f"The user switched the active configuration to {name or 'the base values'}.")
+
+    async def export_configurations(self, formats: list[str], names: list[str] | None = None, tolerance: float = 0.01,
+                                    angular: float = 0.05) -> list[Path]:
+        """Build every configuration (or the named ones; "" = the base) with real threads and export each as
+        exports/<design>-<configuration>.<fmt>."""
+        if self.model is None:
+            raise ck.CadError("no design yet")
+        cfgs = self.configurations()
+        wanted = names if names is not None else ["", *cfgs]
+        base = safe_name(self.design_name or "untitled")
+        out: list[Path] = []
+        for n in wanted:
+            if n and n not in cfgs:
+                raise ck.CadError(f"no configuration named {n!r}")
+            model = await asyncio.to_thread(ck.run_script, self.model.code, self.quality, self.workspace, self.parts, "real", n or None)
+            stem = f"{base}-{safe_name(n)}" if n else f"{base}-base"
+            out += await asyncio.to_thread(ck.export, model, self.workspace / "exports", stem, formats, tolerance, angular, None)
+        await self.emit({"type": "info", "text": f"exported {len(out)} file(s) for {len(wanted)} configuration(s): " + ", ".join(p.name for p in out)})
+        return out
 
     async def set_params(self, values: dict[str, float], source: str = "params") -> None:
         if self.model is None:
+            return
+        if self.config:                                   # editing while a configuration is active edits ITS overrides
+            cfgs = self.configurations()
+            cur = dict(cfgs.get(self.config, {}))
+            cur.update({k: float(v) for k, v in values.items()})
+            cfgs[self.config] = cur
+            await self.set_configurations(cfgs, source=source)
+            if source == "params":
+                self.notes.append(f"The user changed parameter(s) of configuration '{self.config}' in the Parameters panel: "
+                                  + ", ".join(f"{k}={v:g}" for k, v in values.items()))
             return
         code = script_edit.set_params(self.model.code, {k: float(v) for k, v in values.items()})
         if code == self.model.code:
@@ -1088,12 +1168,18 @@ class CadAgent:
                 "tools": [asdict(t) for t in self.library.tools()]}
 
     def _write_state(self) -> None:
-        (self.workspace / "state.json").write_text(json.dumps({"design": self.design_name}))
+        (self.workspace / "state.json").write_text(json.dumps({"design": self.design_name, "config": self.config}))
 
     # ------------------------------------------------------------------ model
     async def build(self, code: str, source: str = "agent", record: bool = True) -> ck.Model:
         async with self.model_lock:
-            model = await asyncio.to_thread(ck.run_script, code, self.quality, self.workspace, self.parts, self._thread_mode())
+            if self.config:
+                try:
+                    if self.config not in script_edit.configurations(code):
+                        self.config = None
+                except (script_edit.Unsupported, SyntaxError):
+                    self.config = None
+            model = await asyncio.to_thread(ck.run_script, code, self.quality, self.workspace, self.parts, self._thread_mode(), self.config)
             self.model = model
             (self.workspace / "model.py").write_text(code)
             hid = None
@@ -1119,7 +1205,7 @@ class CadAgent:
             if self.model is None:
                 raise ck.CadError("no design yet")
             code = script_edit.apply_edits(self.model.code, edits, append)
-            model = await asyncio.to_thread(ck.run_script, code, self.quality, self.workspace, self.parts, self._thread_mode())
+            model = await asyncio.to_thread(ck.run_script, code, self.quality, self.workspace, self.parts, self._thread_mode(), self.config)
             self.model = model
             (self.workspace / "model.py").write_text(code)
             hid = str(int(time.time() * 1000))
@@ -1228,7 +1314,8 @@ class CadAgent:
         name = None
         if state_path.exists():
             try:
-                name = json.loads(state_path.read_text()).get("design")
+                st = json.loads(state_path.read_text())
+                name, self.config = st.get("design"), st.get("config") or None
             except Exception:
                 name = None
         # model.py is the working copy (may hold unsaved edits); the design file is what was last saved
@@ -1243,11 +1330,15 @@ class CadAgent:
         fresh = code is None
         code = code or ck.NEW_DESIGN_CODE          # first run: an empty design, not a demo
         try:
-            self.model = ck.run_script(code, self.quality, self.workspace, self.parts)
+            self.model = ck.run_script(code, self.quality, self.workspace, self.parts, config=self.config)
         except ck.CadError:
-            code = ck.NEW_DESIGN_CODE
-            self.model = ck.run_script(code, self.quality, self.workspace, self.parts)
-            self.design_name, self.saved_code = None, None
+            self.config = None
+            try:
+                self.model = ck.run_script(code, self.quality, self.workspace, self.parts)
+            except ck.CadError:
+                code = ck.NEW_DESIGN_CODE
+                self.model = ck.run_script(code, self.quality, self.workspace, self.parts)
+                self.design_name, self.saved_code = None, None
         if fresh and self.design_name is None:
             self.saved_code = code                 # an untouched empty design is not unsaved work
         (self.workspace / "model.py").write_text(code)
@@ -1623,7 +1714,7 @@ class CadAgent:
             return {"content": [{"type": "text", "text": txt}]}
 
         @tool("save_machine", "Create or update a machine definition. `machine` is a JSON object with fields: name, "
-              "controller, units, travel{x,y,z}, max_feed{x,y,z}, rapid, spindle{min,max}, tool_change (pause|none|split), "
+              "controller, units, travel{x,y,z}, max_feed{x,y,z}, rapid, spindle{min,max}, tool_change (pause|atc|manual|none|split), post (grbl|makera|haas|linuxcnc), "
               "coolant, safe_z, clearance_z, program_start[], program_end[], notes.",
               {"type": "object", "properties": {"machine": {"type": "object"}}, "required": ["machine"]})
         async def save_machine(args: dict[str, Any]) -> dict[str, Any]:
@@ -1659,6 +1750,50 @@ class CadAgent:
             except Exception as e:  # noqa: BLE001
                 return {"content": [{"type": "text", "text": f"failed: {e}"}], "is_error": True}
             return {"content": [{"type": "text", "text": agent.model.summary(6) if agent.model else "no model"}]}
+
+        @tool("configurations", "Named variants of the design: the script's `configurations = {name: {parameter: value}}` dict "
+              "overrides top-level numeric parameters. action=list | set (name, values: create or replace one variant) | "
+              "delete (name) | activate (name, or omit it for the base values: rebuilds the viewer with that variant, the script "
+              "is unchanged) | export (formats e.g. [\"step\",\"stl\"], names?: every variant and the base when omitted; files are "
+              "exports/<design>-<name>.<fmt>). You can also write the dict in the script directly.",
+              {"type": "object", "properties": {"action": {"type": "string", "enum": ["list", "set", "delete", "activate", "export"]},
+                                                "name": {"type": "string"}, "values": {"type": "object"},
+                                                "formats": {"type": "array", "items": {"type": "string"}},
+                                                "names": {"type": "array", "items": {"type": "string"}},
+                                                "tolerance": {"type": "number"}}, "required": ["action"]})
+        async def configurations_tool(args: dict[str, Any]) -> dict[str, Any]:
+            a = args["action"]
+
+            def ok(text: str) -> dict[str, Any]:
+                return {"content": [{"type": "text", "text": text}]}
+            try:
+                if agent.model is None:
+                    return {"content": [{"type": "text", "text": "no design yet"}], "is_error": True}
+                if a == "list":
+                    st = agent.config_state()
+                    lines = [f"active: {st['active'] or '(base values)'}"]
+                    for n, vals in st["configurations"].items():
+                        lines.append(f"- {n}: " + ", ".join(f"{k}={v:g}" for k, v in vals.items()))
+                    return ok("\n".join(lines) if st["configurations"] else "no configurations; base parameters: "
+                              + ", ".join(f"{p['name']}={p['base']:g}" for p in st["params"]))
+                if a == "set":
+                    cfgs = agent.configurations(); cfgs[args["name"]] = {k: float(v) for k, v in (args.get("values") or {}).items()}
+                    await agent.set_configurations(cfgs, source="agent")
+                    return ok(f"configuration {args['name']!r} set; configurations: {', '.join(agent.configurations())}")
+                if a == "delete":
+                    cfgs = agent.configurations(); cfgs.pop(args["name"], None)
+                    await agent.set_configurations(cfgs, source="agent")
+                    return ok(f"deleted; configurations: {', '.join(agent.configurations()) or 'none'}")
+                if a == "activate":
+                    await agent.activate_configuration(args.get("name") or None, source="agent")
+                    return ok(f"active configuration: {agent.config or '(base values)'}\n" + agent.model.summary(6))
+                if a == "export":
+                    paths = await agent.export_configurations([f.lower() for f in (args.get("formats") or ["step"])], args.get("names"),
+                                                              float(args.get("tolerance") or 0.01))
+                    return ok("exported:\n" + "\n".join(str(p) for p in paths))
+                return {"content": [{"type": "text", "text": f"unknown action {a!r}"}], "is_error": True}
+            except Exception as e:  # noqa: BLE001
+                return {"content": [{"type": "text", "text": f"failed: {e}"}], "is_error": True}
 
         @tool("measure", "Measure between up to two entities: face ids, edge ids (from the viewer's measure tool or inspect), "
               "[x,y,z] points, and/or two body names. Returns entity properties (edge length/radius/centre, face area...), minimum "
@@ -1959,7 +2094,7 @@ class CadAgent:
         tools = [build_model, *([] if LEGACY_BUILD else [edit_model]), inspect_model, screenshot, export_model, get_code, save_design,
                  cam_context, build_cam, get_cam_code, export_gcode, simulate_cam, check_interference, check_motion, feeds_speeds, save_machine, save_tool,
                  get_parameters, set_parameters, measure_tool, mass_properties, make_drawings, library_tool, kit_tool, sketch_tool,
-                 extension_tool, show_panel] + ext_tools + slicing_tools
+                 extension_tool, show_panel, configurations_tool] + ext_tools + slicing_tools
         self.tool_handlers = {t.name: t.handler for t in tools}     # name -> async handler (tests call these directly)
         return create_sdk_mcp_server("cad", "0.4.0", tools=tools)
 

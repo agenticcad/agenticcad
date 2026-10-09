@@ -45,6 +45,52 @@ DEFAULT_MACHINES = [
             rotary={"axis": "A", "about": "x", "max_diameter": 92, "max_length": 200, "max_speed": 2400, "installed": True},
             notes="Carvera Air with the harmonic-drive 4th axis module (Ø92 x 200 mm, ~10 Nm, 2400 deg/min). Work "
                   "origin Y/Z on the rotary centreline."),
+    # Haas vertical machining centres (standard configurations; options such as spindle speed and tool changer size
+    # vary by order). Travels, spindle and rapids from haascnc.com spec sheets as listed by dealers (2026): VF-2 30x16x20 in,
+    # 8100 rpm, 1000 ipm, 20-pocket carousel; VF-2SS 12000 rpm, 1400 ipm, 24+1 side-mount; VF-4 50x20x25 in; Mini Mill
+    # 16x12x10 in, 6000 rpm, 600 ipm, 10 tools; TM-1 30x12x16 in, 4000 rpm, 200 ipm feeds and rapids. CAT 40 taper.
+    Machine(name="Haas VF-2", controller="haas", post="haas", travel={"x": 762, "y": 406, "z": 508},
+            max_feed={"x": 12700, "y": 12700, "z": 12700}, rapid=25400, spindle={"min": 1, "max": 8100},
+            tool_change="atc", coolant=True, safe_z=5, clearance_z=25, collet=20,
+            notes="Haas VF-2 (standard): 30 x 16 x 20 in travels, CAT 40, 30 hp vector drive, 8,100 rpm, 1,000 ipm rapids, "
+                  "20-pocket carousel changer, flood coolant. Program: % / O-number / ( ) comments; every number carries a "
+                  "decimal point; Tn M06 then G43 Hn; G53 G0 Z0. retracts; M00 between setups. collet=20 assumes ER-32 "
+                  "holders; side-lock holders take larger shanks. Verify G54 and tool offsets on the control before running."),
+    Machine(name="Haas VF-2SS", controller="haas", post="haas", travel={"x": 762, "y": 406, "z": 508},
+            max_feed={"x": 21000, "y": 21000, "z": 21000}, rapid=35560, spindle={"min": 1, "max": 12000},
+            tool_change="atc", coolant=True, safe_z=5, clearance_z=25, collet=20,
+            notes="Haas VF-2SS Super Speed: 30 x 16 x 20 in, CAT 40, 12,000 rpm inline direct-drive, 1,400 ipm rapids, "
+                  "833 ipm cutting feed, 24+1 side-mount tool changer, flood coolant. Same program format as the VF-2."),
+    Machine(name="Haas VF-4", controller="haas", post="haas", travel={"x": 1270, "y": 508, "z": 635},
+            max_feed={"x": 12700, "y": 12700, "z": 12700}, rapid=25400, spindle={"min": 1, "max": 8100},
+            tool_change="atc", coolant=True, safe_z=5, clearance_z=25, collet=20,
+            notes="Haas VF-4 (standard): 50 x 20 x 25 in travels, CAT 40, 8,100 rpm, 1,000 ipm rapids, 20-pocket carousel, "
+                  "flood coolant. Same program format as the VF-2."),
+    Machine(name="Haas Mini Mill", controller="haas", post="haas", travel={"x": 406, "y": 305, "z": 254},
+            max_feed={"x": 15240, "y": 15240, "z": 15240}, rapid=15240, spindle={"min": 1, "max": 6000},
+            tool_change="atc", coolant=True, safe_z=5, clearance_z=25, collet=20,
+            notes="Haas Mini Mill: 16 x 12 x 10 in travels, CAT 40, 7.5 hp, 6,000 rpm (10,000 rpm option), 600 ipm rapids, "
+                  "10-pocket tool changer, flood coolant. Same program format as the VF-2."),
+    Machine(name="Haas TM-1", controller="haas", post="haas", travel={"x": 762, "y": 305, "z": 406},
+            max_feed={"x": 5080, "y": 5080, "z": 5080}, rapid=5080, spindle={"min": 1, "max": 4000},
+            tool_change="pause", coolant=True, safe_z=5, clearance_z=25, collet=20,
+            notes="Haas TM-1 Toolroom Mill: 30 x 12 x 16 in travels, CAT 40, 7.5 hp, 4,000 rpm (6,000 option), 200 ipm feeds "
+                  "and rapids. No tool changer as standard (10-pocket option): the post stops with M00 before each Tn M06 so "
+                  "you can swap the holder; set tool_change to atc if yours has the changer."),
+    # LinuxCNC (rs274ngc). Generic envelopes: edit travel, feeds and spindle to match your machine.
+    Machine(name="LinuxCNC mill", controller="linuxcnc", post="linuxcnc", travel={"x": 600, "y": 400, "z": 200},
+            max_feed={"x": 5000, "y": 5000, "z": 2500}, rapid=6000, spindle={"min": 100, "max": 24000},
+            tool_change="atc", coolant=False, safe_z=5, clearance_z=20,
+            notes="Generic LinuxCNC 3-axis mill or router (rs274ngc dialect): % wrapper, ( ) comments, (MSG, ...) operator "
+                  "messages, G64 P0.01 path blending, Tn M6 then G43 Hn (with hal_manualtoolchange LinuxCNC prompts at "
+                  "M6; with an ATC it changes), G53 G0 Z0 retracts, G93 inverse-time feed for rotary moves, M2. Edit the "
+                  "travels, feeds and spindle range to match your machine; set coolant if you have M8."),
+    Machine(name="LinuxCNC mill + 4th axis", controller="linuxcnc", post="linuxcnc", travel={"x": 600, "y": 400, "z": 200},
+            max_feed={"x": 5000, "y": 5000, "z": 2500}, rapid=6000, spindle={"min": 100, "max": 24000},
+            tool_change="atc", coolant=False, safe_z=5, clearance_z=20,
+            rotary={"axis": "A", "about": "x", "max_diameter": 150, "max_length": 300, "max_speed": 7200, "installed": True},
+            notes="LinuxCNC mill with an A-axis rotary table along X (edit the sizes). Rotary moves use G93 inverse-time "
+                  "feed so the true tool path runs at the programmed feed; indexed setups use plain G0 A moves."),
 ]
 
 DEFAULT_TOOLS = [

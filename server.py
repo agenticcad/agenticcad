@@ -458,7 +458,38 @@ async def extensions_delete(module: str):
 
 @app.get("/api/params")
 async def params_get():
-    return {"params": agent.get_params(), "units": agent.units()}
+    return {"params": agent.get_params(), "units": agent.units(), "config": agent.config, "configurations": list(agent.configurations())}
+
+
+class ConfigBody(BaseModel):
+    action: str                                   # activate | set_all | export
+    name: str | None = None
+    configurations: dict | None = None
+    formats: list[str] | None = None
+    names: list[str] | None = None
+    tolerance: float = 0.01
+
+
+@app.get("/api/configs")
+async def configs_get():
+    return agent.config_state()
+
+
+@app.post("/api/configs")
+async def configs_post(body: ConfigBody):
+    try:
+        if body.action == "activate":
+            await agent.activate_configuration(body.name or None)
+        elif body.action == "set_all":
+            await agent.set_configurations(body.configurations or {})
+        elif body.action == "export":
+            paths = await agent.export_configurations([f.lower() for f in (body.formats or ["step"])], body.names, body.tolerance)
+            return agent.config_state() | {"files": [p.name for p in paths]}
+        else:
+            return JSONResponse({"error": f"unknown action {body.action!r}"}, status_code=400)
+    except (ck.CadError, script_edit.Unsupported, ValueError) as e:
+        return JSONResponse({"error": str(e), **agent.config_state()}, status_code=400)
+    return agent.config_state()
 
 
 @app.post("/api/params")

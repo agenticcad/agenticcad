@@ -489,3 +489,74 @@ def apply_edits(code: str, edits: list[dict], append: str = "") -> str:
     if out == code:
         raise Refused("no change: the edits leave the script identical")
     return out
+
+
+# ---------------------------------------------------------------------------
+# Configurations: named sets of parameter overrides, kept in the script as a top-level dict literal
+#   configurations = {"Small": {"plate_l": 40, "plate_w": 30}, "Large": {"plate_l": 120}}
+# The base values are the literals; a configuration overrides some of them when it is active.
+# ---------------------------------------------------------------------------
+CONFIG_VAR = "configurations"
+
+
+def _config_node(tree: ast.Module):
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name) \
+                and node.targets[0].id == CONFIG_VAR:
+            return node
+    return None
+
+
+def configurations(code: str) -> dict[str, dict[str, float]]:
+    """{name: {param: value}} from the script's `configurations` dict, in source order ({} when there is none)."""
+    tree = ast.parse(code)
+    node = _config_node(tree)
+    if node is None:
+        return {}
+    try:
+        raw = ast.literal_eval(node.value)
+    except Exception as e:  # noqa: BLE001
+        raise Unsupported(f"the configurations dict must be a literal: {e}")
+    if not isinstance(raw, dict):
+        raise Unsupported("configurations must be a dict of {name: {parameter: number}}")
+    out: dict[str, dict[str, float]] = {}
+    for k, v in raw.items():
+        if not isinstance(k, str) or not isinstance(v, dict):
+            raise Unsupported("configurations must be a dict of {name: {parameter: number}}")
+        out[k] = {str(pk): (int(pv) if isinstance(pv, bool) is False and isinstance(pv, int) else float(pv)) for pk, pv in v.items()
+                  if isinstance(pv, (int, float)) and not isinstance(pv, bool)}
+    return out
+
+
+def set_configurations(code: str, cfgs: dict[str, dict[str, float]]) -> str:
+    """Write the configurations dict (replacing an existing one, or inserting it after the last parameter line).
+    Refuses names that are not numeric top-level parameters. An empty dict removes the block."""
+    ps = {p["name"]: p for p in params(code)}
+    for name, vals in cfgs.items():
+        if not name or not isinstance(name, str) or name.strip() != name:
+            raise Refused(f"configuration name {name!r}: use a short name such as Small or 20-tooth")
+        bad = [k for k in vals if k not in ps]
+        if bad:
+            raise Refused(f"configuration {name!r} sets {', '.join(bad)}, which are not numeric top-level parameters; parameters: "
+                          + ", ".join(ps) if ps else "the script has no numeric top-level parameters")
+    tree = ast.parse(code)
+    node = _config_node(tree)
+    lines = code.splitlines(keepends=True)
+    if cfgs:
+        body = []
+        for name, vals in cfgs.items():
+            items = ", ".join(f'"{k}": {_fmt_num(v, isinstance(ps[k]["value"], int) and float(v).is_integer())}' for k, v in vals.items())
+            body.append(f'    "{name}": {{{items}}},')
+        block = f"{CONFIG_VAR} = {{\n" + "\n".join(body) + "\n}   # named variants: parameter overrides (Parameters card, or the configurations tool)\n"
+    else:
+        block = ""
+    if node is not None:
+        start, end = node.lineno - 1, node.end_lineno            # replace the whole statement
+        new = lines[:start] + ([block] if block else []) + lines[end:]
+    else:
+        if not block:
+            return code
+        last = max((p["line"] for p in ps.values()), default=0)
+        # keep a parameter line's trailing comment intact: insert after the line
+        new = lines[:last] + [("\n" if last and not lines[last - 1].endswith("\n") else "") + block] + lines[last:]
+    return "".join(new)

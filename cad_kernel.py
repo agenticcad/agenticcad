@@ -132,6 +132,8 @@ class Model:
     threads: list[Any] = field(default_factory=list)      # threads.ThreadSpec registered by the script
     sketches: list[dict[str, Any]] = field(default_factory=list)   # top-level build123d Sketch objects
     draft_threads: int = 0        # real=True threads built plain because the script ran in draft thread mode
+    config: str | None = None     # the configuration (named parameter overrides) this model was built with
+    configurations: list[str] = field(default_factory=list)   # configuration names the script declares
     motion: dict[str, Any] | None = None        # joints / couplings / drive declared by the script (motion.py)
     explode: dict[str, Any] = field(default_factory=dict)
     appearance: dict[str, Any] = field(default_factory=dict)
@@ -337,10 +339,32 @@ def design_kit(workspace: Path | None):
     return _KITS[key]
 
 
-def run_script(code: str, quality: str = "normal", workspace: Path | None = None, library=None, threads: str = "real") -> Model:
+def run_script(code: str, quality: str = "normal", workspace: Path | None = None, library=None, threads: str = "real",
+               config: str | None = None) -> Model:
     """Execute a build123d script. The script must assign `result`.
     `workspace` / `library` bind import_step() and from_library() for this run.
-    threads="draft" builds real=True threads plain (fast iteration); model.draft_threads counts how many."""
+    threads="draft" builds real=True threads plain (fast iteration); model.draft_threads counts how many.
+    config= builds the named configuration: its parameter overrides replace the literals before the script runs
+    (the model keeps the original code; overrides naming parameters the script no longer has are ignored with a warning)."""
+    import script_edit as _se
+    exec_code, cfg_names, cfg_warnings = code, [], []
+    try:
+        cfgs = _se.configurations(code)
+    except (_se.Unsupported, SyntaxError) as e:
+        cfgs = {}
+        if config:
+            raise CadError(f"configuration {config!r}: {e}")
+    cfg_names = list(cfgs)
+    if config:
+        if config not in cfgs:
+            raise CadError(f"no configuration named {config!r}; the script declares: {', '.join(cfg_names) or 'none'}")
+        known = {p["name"] for p in _se.params(code)}
+        use = {k: v for k, v in cfgs[config].items() if k in known}
+        for k in cfgs[config]:
+            if k not in known:
+                cfg_warnings.append(f"configuration {config!r} sets {k}, which is not a parameter of this script (ignored)")
+        if use:
+            exec_code = _se.set_params(code, use)
     ns = script_namespace()
     ns["kit"] = design_kit(workspace or _CTX_WORKSPACE.get() or WORKSPACE).namespace()
     try:                                             # @helper functions from this workspace's extensions
@@ -359,7 +383,7 @@ def run_script(code: str, quality: str = "normal", workspace: Path | None = None
     draft_threads = 0
     try:
         with contextlib.redirect_stdout(buf):
-            exec(compile(code, "model.py", "exec"), ns)
+            exec(compile(exec_code, "model.py", "exec"), ns)
     except Exception:
         tb = traceback.format_exc()
         lines = [ln for ln in tb.splitlines() if "cad_kernel.py" not in ln]
@@ -377,6 +401,8 @@ def run_script(code: str, quality: str = "normal", workspace: Path | None = None
     model = build_model(pairs, code, quality)
     model.stdout = buf.getvalue()
     model.draft_threads = draft_threads
+    model.config, model.configurations = config, cfg_names
+    model.warnings.extend(cfg_warnings)
     model.threads = [t for t in registered if not t.external]
     model.sketches = collect_sketches(ns)
     model.mesh["sketches"] = model.sketches

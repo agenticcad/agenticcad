@@ -55,6 +55,11 @@
   #params-card { position:absolute; z-index:2; left:10px; top:300px; width:230px; overflow:auto; background:rgba(28,32,39,.92); border:1px solid var(--line); border-radius:8px; padding:6px 8px; font-size:12px; }
   #params-card .hd { color:var(--muted); font-size:11px; padding:2px 0 6px; letter-spacing:.3px; text-transform:uppercase; display:flex; gap:6px; align-items:baseline; }
   #params-card .prow input { width:74px; } #params-card .prow .c { display:none; }
+  #params-card .hd select { margin-left:auto; max-width:110px; background:var(--bg); color:var(--text); border:1px solid var(--line); border-radius:5px; padding:1px 4px; font:11px/1.3 inherit; text-transform:none; letter-spacing:0; }
+  #params-card .prow.over input { border-color:var(--accent); } #params-card .prow.over label::after { content:' ·'; color:var(--accent); }
+  .cfgtab { border-collapse:collapse; font-size:12px; width:100%; } .cfgtab th, .cfgtab td { padding:3px 6px; border-bottom:1px solid var(--line); text-align:left; white-space:nowrap; }
+  .cfgtab th { color:var(--muted); font-weight:500; } .cfgtab th b { color:var(--text); } .cfgtab th .x { margin-left:6px; color:var(--err); cursor:pointer; }
+  .cfgtab td input { width:70px !important; padding:3px 5px !important; } .cfgtab td input:placeholder-shown { opacity:.55; } .cfgtab td.base { color:var(--muted); font-variant-numeric:tabular-nums; }
   #measure-panel { position:absolute; z-index:3; left:50%; transform:translateX(-50%); bottom:58px; width:min(720px, calc(100% - 40px)); background:rgba(20,23,28,.94); border:1px solid var(--line); border-radius:10px; padding:8px 12px; font-size:12px; box-shadow:0 8px 30px rgba(0,0,0,.45); }
   #measure-panel .sp-hd { display:flex; align-items:center; gap:10px; } #measure-panel #measure-hint { flex:1; min-width:0; font-size:11px; } #measure-panel .kv { margin-top:6px; grid-template-columns:110px 1fr 110px 1fr; } #measure-panel .kv:empty { display:none; }
   #slice-panel { position:absolute; z-index:3; left:50%; transform:translateX(-50%); bottom:58px; width:min(760px, calc(100% - 40px)); background:rgba(20,23,28,.94); border:1px solid var(--line); border-radius:10px; padding:8px 12px; font-size:12px; box-shadow:0 8px 30px rgba(0,0,0,.45); }
@@ -230,6 +235,7 @@
   body.sketching #viewer > canvas { cursor:crosshair; }
   #settings-btn { margin-right:4px; }
   #modal .box.wide { width:min(980px, 94vw); max-height:88vh; height:88vh; }
+  #modal .box.mid { width:min(780px, 92vw); max-height:80vh; }
   .set-tabs { display:flex; gap:2px; border-bottom:1px solid var(--line); margin:-10px -14px 12px; padding:0 10px; position:sticky; top:-10px; background:var(--panel); z-index:2; }
   .set-tabs button { background:none; border:0; border-bottom:2px solid transparent; color:var(--muted); padding:9px 12px 7px; cursor:pointer; font:inherit; font-size:12px; }
   .set-tabs button:hover { color:var(--text); } .set-tabs button.on { color:var(--text); border-bottom-color:var(--accent2); }
@@ -415,7 +421,7 @@
     <div id="ext-panels"></div>
     <div id="sketch-items"><div class="sk-hd"><input type="text" id="sk-name" value="sketch1" title="sketch name (a Python variable)"><span class="muted" id="sk-plane"></span></div><div id="sk-status"></div><div class="hd muted" style="font-size:10px;text-transform:uppercase;letter-spacing:.3px;margin:4px 0 2px">Items · Esc cancels · ⌫ undoes · Alt = no snap</div><div id="sk-list"></div></div>
 
-    <div id="params-card" style="display:none"><div class="hd">Parameters <span class="muted" id="params-hint" style="text-transform:none;letter-spacing:0"></span></div><div id="params-body"></div></div>
+    <div id="params-card" style="display:none"><div class="hd">Parameters <span class="muted" id="params-hint" style="text-transform:none;letter-spacing:0"></span><select id="cfg-sel" title="Configuration: named sets of parameter values"></select></div><div id="params-body"></div></div>
     <div id="measure-panel" style="display:none">
       <div class="sp-hd"><b>Measure</b><span class="muted" id="measure-hint">hover snaps to vertices and edges · click two things for distance and angle · body rows for mass, two for clearance · ⌫ undo · Esc stop</span>
         <label class="muted" style="display:flex;align-items:center;gap:6px;white-space:nowrap">Density <select id="measure-density"></select></label><button class="btn small" id="measure-toggle">Stop</button></div>
@@ -994,7 +1000,8 @@ document.getElementById('filepick').onchange = async ev => {
 };
 function setDesign(d) {
   design = d; const el = document.getElementById('designname');
-  el.textContent = (d.name || 'untitled') + (d.dirty ? ' •' : ''); document.title = `AgenticCAD · ${d.name || 'untitled'}${d.dirty ? ' •' : ''}`;
+  el.textContent = (d.name || 'untitled') + (d.config ? ' · ' + d.config : '') + (d.dirty ? ' •' : ''); document.title = `AgenticCAD · ${d.name || 'untitled'}${d.config ? ' · ' + d.config : ''}${d.dirty ? ' •' : ''}`;
+  if (d.configurations && (d.config !== cfgActive || d.configurations.join() !== cfgNames.join())) { cfgActive = d.config || null; cfgNames = d.configurations; renderCfgSelect(); }
 }
 // modal helpers
 const modal = document.getElementById('modal'), mTitle = document.getElementById('modal-title'), mBody = document.getElementById('modal-body'), mRow = document.getElementById('modal-row');
@@ -1505,23 +1512,61 @@ let units = 'mm';                       // display units (Settings ▸ Units; au
 const L = mm => units === 'in' ? (+(mm / 25.4).toFixed(3)).toString() + ' in' : (+mm.toFixed(3)).toString() + ' mm';       // length
 const L1 = mm => units === 'in' ? (mm / 25.4).toFixed(2) : mm.toFixed(1);                                                     // compact, no unit
 const A = mm2 => units === 'in' ? (+(mm2 / 645.16).toFixed(3)).toString() + ' in²' : (+mm2.toFixed(3)).toString() + ' mm²';   // area
+var cfgActive = null, cfgNames = [];
 async function loadParams() {
-  try { const { params, units: u } = await fetch('/api/params').then(r => r.json()); paramsList = params; if (u && u !== units) { units = u; renderStats(); } renderParams(); } catch {}
+  try { const { params, units: u, config, configurations } = await fetch('/api/params').then(r => r.json()); paramsList = params; cfgActive = config || null; cfgNames = configurations || []; if (u && u !== units) { units = u; renderStats(); } renderParams(); } catch {}
+}
+function renderCfgSelect() {
+  const sel = document.getElementById('cfg-sel'); if (!sel) return;
+  sel.innerHTML = `<option value="">Default</option>` + cfgNames.map(n => `<option value="${esc(n)}" ${n === cfgActive ? 'selected' : ''}>${esc(n)}</option>`).join('') + `<option value="__manage">Manage…</option>`;
+  sel.value = cfgActive || '';
+  sel.onchange = async () => { if (sel.value === '__manage') { sel.value = cfgActive || ''; openConfigurations(); return; } try { await api('/api/configs', { action: 'activate', name: sel.value || null }); } catch (e) { addMsg('error', e.message); sel.value = cfgActive || ''; } };
+}
+async function openConfigurations() {
+  const st = await fetch('/api/configs').then(r => r.json());
+  const cfgs = JSON.parse(JSON.stringify(st.configurations || {})), params = st.params || [];
+  const d = document.createElement('div'); d.style.minWidth = '520px';
+  const render = () => {
+    const names = Object.keys(cfgs);
+    d.innerHTML = `<div class="muted" style="margin-bottom:8px">A configuration overrides some parameters; the script's literals are the Default. Blank cells keep the Default value. Stored in the script as <code>configurations = {…}</code>.</div>
+      <div style="max-height:46vh;overflow:auto"><table class="cfgtab"><thead><tr><th>Parameter</th><th>Default</th>${names.map(n => `<th><b>${esc(n)}</b><span class="x" data-del="${esc(n)}" title="delete">×</span></th>`).join('')}</tr></thead>
+      <tbody>${params.map(p => `<tr><td>${esc(p.name)}${p.comment ? ` <span class="muted">${esc(p.comment)}</span>` : ''}</td><td class="base">${p.base ?? p.value}</td>${names.map(n => `<td><input type="number" step="any" data-c="${esc(n)}" data-p="${esc(p.name)}" value="${cfgs[n][p.name] ?? ''}" placeholder="${p.base ?? p.value}"></td>`).join('')}</tr>`).join('')}</tbody></table></div>
+      <div style="display:flex;gap:8px;align-items:center;margin-top:10px;flex-wrap:wrap"><input id="cfg-new" placeholder="new configuration name" style="flex:1;min-width:160px"><button class="btn small" id="cfg-add">+ Add</button><span style="flex:1"></span>
+        <label class="muted" style="display:inline-flex;gap:4px;align-items:center"><input type="checkbox" id="cfg-step" checked style="width:auto"> STEP</label><label class="muted" style="display:inline-flex;gap:4px;align-items:center"><input type="checkbox" id="cfg-stl" style="width:auto"> STL</label><button class="btn small" id="cfg-export" title="Build every configuration (and the Default) with real threads and export each">Export all</button></div>
+      <div class="muted" id="cfg-msg" style="margin-top:6px;font-size:11px"></div>`;
+    d.querySelectorAll('input[data-c]').forEach(i => i.onchange = () => { const v = parseFloat(i.value); if (isFinite(v)) cfgs[i.dataset.c][i.dataset.p] = v; else delete cfgs[i.dataset.c][i.dataset.p]; });
+    d.querySelectorAll('[data-del]').forEach(x => x.onclick = () => { delete cfgs[x.dataset.del]; render(); });
+    const add = () => { const n = d.querySelector('#cfg-new').value.trim(); if (!n || cfgs[n]) return; cfgs[n] = {}; render(); d.querySelector('#cfg-new').focus(); };
+    d.querySelector('#cfg-add').onclick = add; d.querySelector('#cfg-new').onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); add(); } };
+    d.querySelector('#cfg-export').onclick = async () => {
+      const formats = [...(d.querySelector('#cfg-step').checked ? ['step'] : []), ...(d.querySelector('#cfg-stl').checked ? ['stl'] : [])];
+      if (!formats.length) { d.querySelector('#cfg-msg').textContent = 'pick STEP and/or STL'; return; }
+      d.querySelector('#cfg-msg').textContent = 'saving and exporting… (every configuration is built with real threads)';
+      try { await api('/api/configs', { action: 'set_all', configurations: cfgs }); const r = await api('/api/configs', { action: 'export', formats }); d.querySelector('#cfg-msg').textContent = `exported ${r.files.length} file(s) to workspace/exports: ${r.files.join(', ')}`; }
+      catch (e) { d.querySelector('#cfg-msg').textContent = e.message; }
+    };
+  };
+  render();
+  const box = document.querySelector('#modal .box'); box.classList.add('mid');
+  const r = await openModal('Configurations', d, [['Cancel', null], ['Save', () => cfgs, true]]);
+  box.classList.remove('mid');
+  if (r) { try { await api('/api/configs', { action: 'set_all', configurations: r }); } catch (e) { addMsg('error', e.message); } }
 }
 function renderParams() {
   const el = document.getElementById('params-body'), card = document.getElementById('params-card');
   card.style.display = paramsList.length ? '' : 'none'; setTimeout(placeParams, 0);
+  renderCfgSelect();
   if (!paramsList.length) { el.innerHTML = ''; return; }
   el.innerHTML = '';
   for (const p of paramsList) {
-    const r = document.createElement('div'); r.className = 'prow';
+    const r = document.createElement('div'); r.className = 'prow' + (p.override ? ' over' : '');
     r.innerHTML = `<label>${p.name}</label><span class="c">${p.comment || ''}</span><input type="number" step="any" value="${p.value}">${p.unit === 'in' ? '<span class="u">in</span>' : ''}`;
     const inp = r.querySelector('input');
     inp.onchange = () => { const v = parseFloat(inp.value); if (!isFinite(v)) return; clearTimeout(paramTimer); paramTimer = setTimeout(() => api('/api/params', { values: { [p.name]: v } }).catch(e => addMsg('error', e.message)), 250); };
     inp.onkeydown = e => { if (e.key === 'ArrowUp' || e.key === 'ArrowDown') { e.preventDefault(); const step = e.shiftKey ? 10 : (e.altKey ? 0.1 : 1); inp.value = +(parseFloat(inp.value) + (e.key === 'ArrowUp' ? step : -step)).toFixed(4); inp.onchange(); } };
     el.appendChild(r);
   }
-  document.getElementById('params-hint').textContent = `↑↓ ±1 · ⇧ ±10 · ⌥ ±0.1`;
+  const hint = '↑↓ ±1 · ⇧ ±10 · ⌥ ±0.1'; document.getElementById('params-hint').textContent = cfgNames.length ? '' : hint; card.title = 'Parameters: ' + hint + (cfgNames.length ? ' · configurations: pick one to rebuild with its values; Manage… to edit variants' : '');
 }
 
 // measure mode: snap to vertex > edge > face point; two picks -> distance + angle, drawn in the viewer
@@ -3720,12 +3765,12 @@ async function openSettings(tab) {
 
 // Settings ▸ Machines / Tools: edit working copies, write them to the library on Save
 const MACHINE_FIELDS = [
-  ['Name', 'name', 'text'], ['Post', 'post', 'select', [['grbl', 'GRBL'], ['makera', 'Makera (Z1 / Carvera Air firmware)']]],
+  ['Name', 'name', 'text'], ['Post', 'post', 'select', [['grbl', 'GRBL'], ['makera', 'Makera (Z1 / Carvera Air firmware)'], ['haas', 'Haas (NGC / Classic, Fanuc-style)'], ['linuxcnc', 'LinuxCNC (rs274ngc)']]],
   ['Controller', 'controller', 'text'], ['Travel', 'travel', 'xyz', 'mm'], ['Max feed', 'max_feed', 'xyz', 'mm/min'], ['Rapid', 'rapid', 'num', 'mm/min'],
   ['Spindle', 'spindle', 'minmax', 'rpm'], ['Collet', 'collet', 'num', 'mm, largest shank (0 = not checked)'],
   ['Max stepdown', 'max_stepdown', 'kv', 'mm per pass by material for the feeds calculator, e.g. aluminium=0.8, *=1.5 (* = any other material; blank = no cap)'],
   ['Safe Z', 'safe_z', 'num', 'mm above the stock for rapids'], ['Clearance Z', 'clearance_z', 'num', 'mm for start, end and tool changes'],
-  ['Tool change', 'tool_change', 'select', [['pause', 'pause (M0 + message)'], ['manual', 'manual (M6 Tn, machine measures the tool)'], ['none', 'none (single tool)'], ['split', 'split (one file per tool)']]],
+  ['Tool change', 'tool_change', 'select', [['pause', 'pause (M0 + message)'], ['atc', 'automatic changer (Tn M06)'], ['manual', 'manual (M6 Tn, machine measures the tool)'], ['none', 'none (single tool)'], ['split', 'split (one file per tool)']]],
   ['Arcs', 'arcs', 'bool', 'emit G2/G3 where the path is circular'], ['Arc tolerance', 'arc_tolerance', 'num', 'mm'],
   ['4th axis', 'rotary', 'rotary'], ['Start G-code', 'program_start', 'lines'], ['End G-code', 'program_end', 'lines'], ['Notes', 'notes', 'area']];
 const TOOL_TYPES = ['flat', 'ball', 'vbit', 'drill', 'chamfer'];
@@ -3876,6 +3921,8 @@ function connect() {
         if (m.source === 'open') addMsg('system', 'design opened');
         if (m.source === 'new') addMsg('system', 'new design');
         if (m.source === 'params') addMsg('system', 'rebuilt with new parameters');
+        if (m.source === 'config') addMsg('system', 'rebuilt with the selected configuration');
+        if (m.source === 'configs') addMsg('system', 'configurations saved · rebuilt');
         if (m.source === 'insert') addMsg('system', 'body inserted');
         if (m.source === 'sketch') addMsg('system', 'sketch saved · rebuilt');
         if (m.source === 'edit') addMsg('system', 'script edited · rebuilt');

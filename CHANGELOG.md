@@ -5,6 +5,22 @@ features, patch bumps fix things. The version shown in the UI header comes from 
 
 ## [Unreleased]
 
+## [0.25.0] — 2026-10-10
+
+### Added
+- **Parametric configurations.** A top-level `configurations = {"Small": {"plate_l": 40}, "Large": {"plate_l": 120}}` dict
+  in the script declares named variants as overrides of the numeric parameters. The Parameters card gets a selector
+  (Default and every variant; switching rebuilds, the script's literals stay) and a **Manage…** table to add, edit and
+  delete variants and **Export all**: every variant and the Default built with real threads and written as
+  `exports/<design>-<name>.step` / `.stl`. Editing a parameter while a variant is active edits that variant. The agent's
+  `configurations` tool lists, sets, deletes, activates and exports them; the active variant is remembered per workspace.
+- **Haas and LinuxCNC posts.** New `haas` dialect (Fanuc-style: `%` and O-number, `( )` comments, every number with a
+  decimal point, `Tn M06` + `G43 Hn`, `G53 G0 Z0.` retracts, `M00` operator stops, `G93` inverse-time feed for 4th-axis
+  moves, `M30`) and `linuxcnc` dialect (rs274ngc: `G64 P0.01` blending, `Tn M6 G43 Hn`, `(MSG, …)`, `G93`, `M2`).
+  Built-in machines: **Haas VF-2, VF-2SS, VF-4, Mini Mill, TM-1** (standard-configuration travels, spindles, rapids and
+  tool changers) and **LinuxCNC mill** (3-axis and + 4th axis, generic envelopes to edit). Machines gain the
+  `atc` tool-change mode (automatic changer, `Tn M06` without a stop). CAM remains experimental.
+
 ## [0.24.0] — 2026-10-09
 
 ### Added

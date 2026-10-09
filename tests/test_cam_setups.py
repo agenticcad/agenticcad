@@ -301,3 +301,49 @@ def test_machine_stepdown_cap_in_feeds(machines):
     m = replace(z1, max_stepdown={"aluminum": 0.5, "*": 2.0})                # aliases and a catch-all
     assert cam.feeds(t, "alu", m)["stepdown"] == 0.5 and cam.feeds(t, "plywood", m)["stepdown"] == 2.0
     assert cam.feeds(t, "aluminium", replace(z1, max_stepdown={}))["stepdown"] > 0.8
+
+
+# --------------------------------------------------------------------------- Haas and LinuxCNC posts (v0.25)
+def test_haas_machines_seeded(machines):
+    for name in ("Haas VF-2", "Haas VF-2SS", "Haas VF-4", "Haas Mini Mill", "Haas TM-1", "LinuxCNC mill", "LinuxCNC mill + 4th axis"):
+        assert name in machines, name
+    assert machines["Haas VF-2"].post == "haas" and machines["Haas VF-2"].tool_change == "atc" and machines["Haas VF-2"].spindle["max"] == 8100
+    assert machines["LinuxCNC mill"].post == "linuxcnc" and machines["LinuxCNC mill + 4th axis"].rotary["installed"]
+
+
+def test_haas_post_dialect(machines, plate):
+    g = two_sided(machines["Haas VF-2"], plate).gcode()
+    L = g.splitlines()
+    assert L[0] == "%" and L[1].startswith("O01000 (") and L[-1] == "%" and L[-2] == "M30"
+    assert not any(l.startswith(";") for l in L)                                  # Fanuc comments are ( ) only
+    assert "G21 G17 G40 G49 G80 G90 G94" in g and "G64" not in g
+    assert re.search(r"^T1 M06$", g, re.M) and re.search(r"^S\d+ M3$", g, re.M) and re.search(r"^G43 H1 Z5\.$", g, re.M)
+    assert "G53 G0 Z0." in g and "M00" in g and "M8" in g and "M9" in g            # retract to home, operator stop, coolant
+    # every coordinate word carries a decimal point (Haas reads X10 as least-increments)
+    for l in L:
+        for w in re.findall(r"\b[XYZIJF]-?\d+(?:\.\d*)?", l):
+            assert "." in w, (w, l)
+    assert "M30" in g and "(MSG" not in g
+
+
+def test_linuxcnc_post_dialect(machines, plate):
+    g = two_sided(machines["LinuxCNC mill"], plate).gcode()
+    L = g.splitlines()
+    assert L[0] == "%" and L[-1] == "%" and L[-2] == "M2" and not L[1].startswith("O")
+    assert "G64 P0.01" in g and re.search(r"^T1 M6$", g, re.M) and re.search(r"^G43 H1 Z", g, re.M)
+    assert "(MSG," in g and re.search(r"^M0$", g, re.M) and "G53 G0 Z0" in g
+    assert "M8" not in g                                                            # no coolant on the generic machine
+
+
+def test_fanuc_rotary_uses_inverse_time(machines, shaft):
+    m = machines["LinuxCNC mill + 4th axis"]
+    st = cam.Setup(m, cam.Stock.cylinder(32, 62, x0=-1), rotary=True)
+    p = cam.Program(st)
+    p.add(cam.rotary_rough(st, flat(), shaft.shape, stepdown=2.0, mode="rings"))
+    g = p.gcode()
+    assert "G93" in g and re.search(r"^G1 .*A-?\d.* F\d", g, re.M)                # inverse-time feed with an F on every A block
+    i93, i94 = g.index("G93"), g.rindex("G94")
+    assert i93 < i94 and g.rstrip().endswith("%")                                   # back to G94 before the end
+    # a Haas TM-1 without a changer stops the operator before each tool change
+    g2 = two_sided(machines["Haas TM-1"], ck.run_script(PLATE)).gcode()
+    assert g2.count("M00") >= 2 and re.search(r"^T1 M06$", g2, re.M)

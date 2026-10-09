@@ -164,7 +164,7 @@ Auth: the Claude Agent SDK uses your Claude Code login (or `ANTHROPIC_API_KEY`).
 - **STL is tessellated only at export time**, at the deviation you choose (toolbar dropdown, or the
   agent's `export_model(tolerance, angular_tolerance)`); it never reuses the display mesh.
 
-## CAM (GRBL, Makera Carvera) — experimental
+## CAM (GRBL, Makera Carvera, Haas, LinuxCNC) — experimental
 
 > **Experimental.** Toolpaths are geometrically correct, machine-checked and can be simulated, but not optimised
 > (long, conservative paths, many retracts). Inspect and simulate every program before running it. Modelling,
@@ -338,6 +338,22 @@ broken file shows as FAILED TO LOAD instead of breaking a design. The full API r
 Built-in examples, also the reference the agent reads: **Parameters** (every numeric parameter as a slider with live
 rebuild), **Hole report** (Ø, depth, thread and position of every round hole; click a row to select it) and **Bolt
 pattern** (pick a face, set PCD / count / Ø / angle, Apply writes a `pattern_circular` cut into the script).
+
+### Parametric configurations
+
+Named variants of a design are parameter overrides declared in the script:
+
+```python
+plate_l, plate_w, wall = 60, 40, 8
+configurations = {"Small": {"plate_l": 40, "plate_w": 30}, "Large": {"plate_l": 120, "wall": 10}}
+```
+
+The Parameters card shows a selector (Default plus every variant); choosing one rebuilds the viewer with those values
+while the script's literals stay as they are, and editing a number while a variant is active edits that variant.
+**Manage…** opens a table to add, edit and delete variants and to **Export all**: every variant and the Default, built
+with real threads, as `exports/<design>-<name>.step` / `.stl`. The agent has the same through its `configurations`
+tool (list / set / delete / activate / export), and can write the dict directly. The active variant is remembered per
+workspace.
 
 ### Modelling ribbon (Fusion-style, no agent turn)
 Top of the viewer: **Create** Box `B` / Cylinder `C` / Sphere `O` / Sketch `K` / Revolve `R` / Loft `G` / Sweep `W`,

@@ -65,7 +65,7 @@ class Machine:
     max_feed: dict = field(default_factory=lambda: {"x": 2000.0, "y": 2000.0, "z": 500.0})
     rapid: float = 2000.0                   # mm/min, used for time estimates (GRBL G0 uses its own max rate)
     spindle: dict = field(default_factory=lambda: {"min": 1000.0, "max": 10000.0})
-    tool_change: str = "pause"              # pause (M0 + message) | none (single tool assumed) | split (one file per tool)
+    tool_change: str = "pause"              # pause (M0 + message) | none (single tool assumed) | split (one file per tool) | manual (Makera M6 Tn) | atc (automatic changer: Tn M06)
     coolant: bool = False
     safe_z: float = 5.0                     # clearance above stock top for rapids
     clearance_z: float = 15.0               # height for tool changes / start / end
@@ -74,7 +74,7 @@ class Machine:
     arcs: bool = True                       # emit G2/G3 where the path is circular
     arc_tolerance: float = 0.05             # max deviation (mm) between polyline and fitted arc
     notes: str = ""
-    post: str = "grbl"                      # grbl | makera (Makera Z1 / Carvera family, Smoothieware-based firmware)
+    post: str = "grbl"                      # grbl | makera (Makera Z1 / Carvera family) | haas (Haas NGC/Classic) | linuxcnc (rs274ngc)
     # optional rotary 4th axis: {"axis": "A", "about": "x", "max_diameter": mm, "max_length": mm,
     #   "max_speed": deg/min, "installed": bool}. The rotary axis is parallel to machine X.
     rotary: dict | None = None
@@ -1621,6 +1621,8 @@ class Program:
         post = self.setup.machine.post
         if post == "makera":
             return post_makera(self)
+        if post in ("haas", "linuxcnc"):
+            return _emit(self, post)
         return post_grbl(self)
 
 
@@ -1754,8 +1756,13 @@ def _fmt(v: float) -> str:
 
 
 # =============================================================================
-# Posts. One emitter, two dialects:
+# Posts. One emitter, four dialects:
 #   grbl   : GRBL 1.1 (and A as a plain linear-style axis for grblHAL-type 4-axis controllers)
+#   haas   : Haas NGC / Classic (Fanuc-style): % wrapper, O-number, ( ) comments, every number with a decimal point,
+#            Tn M06 + G43 Hn tool length comp, G53 G0 Z0. retracts, M00 operator stops, G93 inverse-time feed for
+#            moves with the rotary axis, M30.
+#   linuxcnc: LinuxCNC rs274ngc: % wrapper, ( ) comments and (MSG, ...) operator messages, G64 P path blending,
+#            Tn M6 G43 Hn (hal_manualtoolchange prompts on M6 when there is no ATC), G53 G0 Z0, G93 for rotary, M2.
 #   makera : Makera Z1 / Carvera family firmware (Smoothieware-based, read from MakeraZ1Firmware):
 #            lines <= 63 characters (longer lines are truncated by the controller), no N numbers, ';' comments,
 #            M6 Tn runs the whole manual change (move, wait for the button, measure tool length) or the ATC,
@@ -1785,17 +1792,29 @@ def _makera_feed(dxyz: float, da: float, y: float, z: float, t_min: float, a_max
     return max(dxyz, s_a) / t_min
 
 
+def _fmt_dec(v: float) -> str:
+    """Fanuc-style number: always carries a decimal point (Haas reads "X10" as ten least-increments, not 10 mm)."""
+    t = _fmt(v)
+    return t if "." in t else t + "."
+
+
 def _emit(prog: Program, dialect: str) -> str:
     mk = dialect == "makera"
+    fan = dialect in ("haas", "linuxcnc")              # Fanuc-style family
+    hs = dialect == "haas"
+    _fmt = _fmt_dec if fan else globals()["_fmt"]      # noqa: F841 - local shadow: numbers in this post carry a decimal point
     prog.assign_wcs()
     m0 = prog.setup.machine
     out: list[str] = []
+    g93 = False                                        # inverse-time feed mode is active (fan dialects, rotary moves)
 
     def comment(text: str):
         text = text.replace("(", "[").replace(")", "]")
         if mk:                                          # the dispatcher hoists G90/G91 even out of comments
             text = text.replace("G90", "G 90").replace("G91", "G 91")
             out.append(("; " + text)[:MAKERA_MAX_LINE])
+        elif fan:
+            out.append("(" + text.replace(";", ",") + ")")
         else:
             out.append("; " + text)
 
@@ -1804,6 +1823,15 @@ def _emit(prog: Program, dialect: str) -> str:
             raise CamError(f"G-code line longer than {MAKERA_MAX_LINE} characters for the Makera controller: {t}")
         out.append(t)
 
+    def home_z():
+        """Retract to the machine's Z home (Fanuc family) or the setup's clearance height."""
+        return "G53 G0 Z0." if hs else "G53 G0 Z0"
+
+    if fan:
+        line("%")
+        if hs:
+            pname = "".join(ch for ch in prog.name.upper() if ch.isalnum() or ch in " -_")[:30].strip() or "AGENTICCAD"
+            line(f"O01000 ({pname})")
     comment(f"AgenticCAD {dialect} post: {prog.name}")
     comment(f"machine: {m0.name}")
     comment(f"est. {prog.time_minutes():.1f} min, {len(prog.setups)} setup(s)")
@@ -1811,7 +1839,14 @@ def _emit(prog: Program, dialect: str) -> str:
         comment("tool " + t)
     for w in prog.check():
         comment("WARNING: " + w)
-    line("G21 G90 G17" if mk else "G21 G90 G94 G17")
+    if mk:
+        line("G21 G90 G17")
+    elif fan:
+        line("G21 G17 G40 G49 G80 G90 G94")             # metric, XY plane, no comp, no length offset, no canned cycle
+        if dialect == "linuxcnc":
+            line("G64 P0.01")                           # path blending with a 0.01 mm tolerance
+    else:
+        line("G21 G90 G94 G17")
     out.extend(m0.program_start)
     cur_tool = None
     prev_setup: Setup | None = None
@@ -1838,6 +1873,10 @@ def _emit(prog: Program, dialect: str) -> str:
                     spindle_on = False
                     if mk:
                         line("G28")
+                    elif fan:
+                        if m.coolant:
+                            line("M9")
+                        line(home_z())
                     else:
                         line(f"G0 Z{_fmt(prev_setup.clearance_z - prev_setup.origin_point()[2])}")
                     msg = (f"{st.name}: mount the part on the 4th axis" if st.rotary else
@@ -1846,6 +1885,11 @@ def _emit(prog: Program, dialect: str) -> str:
                     comment(f"zero {st.wcs} at {st.origin}, then resume")
                     if mk:
                         line("M600")
+                    elif hs:
+                        line("M00")
+                    elif dialect == "linuxcnc":
+                        line(f"(MSG, {msg} - zero {st.wcs} then resume)")
+                        line("M0")
                     else:
                         line(f"(MSG, {msg} - zero {st.wcs} then resume)")
                         line("M0")
@@ -1868,6 +1912,30 @@ def _emit(prog: Program, dialect: str) -> str:
                 if cur_tool is not None:
                     line("M5")
                 line(f"M6 T{t.number}")                          # firmware: clearance, change/measure, return
+            elif fan:
+                if g93:
+                    line("G94"); g93 = False
+                if cur_tool is not None:
+                    line("M5")
+                    if m.coolant:
+                        line("M9")
+                    line(home_z())
+                if m.tool_change == "pause":                     # no changer: stop so the operator can swap the tool
+                    comment(f"change tool to {t.label()} D{_fmt(t.diameter)}")
+                    if dialect == "linuxcnc":
+                        line(f"(MSG, Change tool to {t.label()} D{_fmt(t.diameter)})")
+                    line("M00" if hs else "M0")
+                elif m.tool_change == "none" and cur_tool is not None:
+                    comment(f"tool change to T{t.number} required: machine has tool_change=none")
+                line(f"T{t.number} M6" if dialect == "linuxcnc" else f"T{t.number} M06")
+                line(f"S{int(rpm)} M3")
+                spindle_on = True
+                line(f"G43 H{t.number} Z{_fmt(safe)}")          # length offset of this tool, applied on the first Z move
+                if m.coolant:
+                    line("M8")
+                cur_tool = t.number
+                last = [None, None, safe, cur_a]
+                last_f = None
             else:
                 if cur_tool is not None:
                     line("M5")
@@ -1883,14 +1951,15 @@ def _emit(prog: Program, dialect: str) -> str:
                         comment(f"tool change to T{t.number} required: machine has tool_change=none")
                 else:
                     line(f"T{t.number}")
-            line(f"M3 S{int(rpm)}")
-            spindle_on = True
-            if m.coolant and not mk:
-                line("M8")
-            line(f"G0 Z{_fmt(safe)}")
-            cur_tool = t.number
-            last = [None, None, safe, cur_a]
-            last_f = None
+            if not fan:
+                line(f"M3 S{int(rpm)}")
+                spindle_on = True
+                if m.coolant and not mk:
+                    line("M8")
+                line(f"G0 Z{_fmt(safe)}")
+                cur_tool = t.number
+                last = [None, None, safe, cur_a]
+                last_f = None
         elif not spindle_on:                              # same tool after an operator pause: restart the spindle
             line(f"M3 S{int(rpm)}")
             spindle_on = True
@@ -1937,27 +2006,45 @@ def _emit(prog: Program, dialect: str) -> str:
                     t_min = max(true_len / max(f, 1.0), 1e-6)
                     if mk:
                         fv = _makera_feed(dxyz, da, y, z, t_min, a_max)
+                    elif fan:
+                        if not g93:
+                            line("G93"); g93 = True                       # inverse time: F = 1 / minutes for this move
+                        fv = 1.0 / t_min
                     else:
-                        fv = math.hypot(dxyz, abs(da)) / t_min          # grblHAL/LinuxCNC-style: degrees count as length
-                    fv = round(fv, 1)
-                    if fv != last_f:
+                        fv = math.hypot(dxyz, abs(da)) / t_min          # grblHAL-style: degrees count as length
+                    fv = round(fv, 3 if fan else 1)
+                    if fan or fv != last_f:                              # G93 needs an F word on every block
                         fw = f" F{_fmt(fv)}"; last_f = fv
-                elif f and f != last_f:
-                    fw = f" F{_fmt(f)}"; last_f = f
+                else:
+                    if g93:
+                        line("G94"); g93 = False; last_f = None
+                    if f and f != last_f:
+                        fw = f" F{_fmt(f)}"; last_f = f
                 line("G1 " + " ".join(words) + fw)
             last = [x, y, z, a if a is not None else last[3]]
         if op.uses_a:
             cur_a = last[3]
+    if g93:
+        line("G94")
     line("M5")
     if mk:
         line("G28")
+    elif fan:
+        if m0.coolant:
+            line("M9")
+        line(home_z())
     else:
         if m0.coolant:
             line("M9")
         st = prog.setup_of(prog.ops[-1]) if prog.ops else prog.setup
         line(f"G0 Z{_fmt(st.clearance_z - st.origin_point()[2])}")
     out.extend(m0.program_end)
-    line("M30")
+    if dialect == "linuxcnc":
+        line("M2")
+    else:
+        line("M30")
+    if fan:
+        line("%")
     return "\n".join(out) + "\n"
 
 
