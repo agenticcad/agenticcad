@@ -236,5 +236,128 @@ def main():
         print(f"{t['id']}: {len(t['steps'])} steps, {(out / (t['id'] + '.json')).stat().st_size // 1024} KB, {time.time() - t0:.1f}s")
     (out / "index.json").write_text(json.dumps(index, indent=1))
 
+
+
+# --------------------------------------------------------------------------- v0.24 additions
+import motion as _motion  # noqa: E402
+import numpy as _np  # noqa: E402
+import sketch_solver as _sks  # noqa: E402
+
+PROFILE = {"type": "profile", "start": [-27, -4], "segs": [{"to": [-17, -4]}, {"to": [-17, 4]}, {"to": [-27, 4]}, {"to": [-27, -4]}], "mode": "add"}
+CONS_AUTO = [{"type": "horizontal", "refs": [{"i": 0, "e": 0}]}, {"type": "vertical", "refs": [{"i": 0, "e": 1}]},
+             {"type": "horizontal", "refs": [{"i": 0, "e": 2}]}, {"type": "vertical", "refs": [{"i": 0, "e": 3}]}]
+CONS_DIM = CONS_AUTO + [{"type": "length", "refs": [{"i": 0, "e": 0}], "value": 12}, {"type": "length", "refs": [{"i": 0, "e": 1}], "value": 8}]
+
+
+def json_copy(x):
+    return json.loads(json.dumps(x))
+
+
+def tutorial_constraints():
+    plane = {"origin": [0, 0, 4], "x_dir": [1, 0, 0], "z_dir": [0, 0, 1], "label": "Plate top"}
+    m1 = build(PLATE)
+    drawn = [json_copy(PROFILE)]
+    solved = _sks.apply(json_copy(drawn), CONS_DIM)                      # the dimensions drive the geometry, like the editor
+    dragged = json_copy(solved); _sks.solve(dragged, CONS_DIM, drag={"ref": {"i": 0, "p": "e1"}, "to": [-13, 7]})
+    with_sketch = script_edit.set_sketch(PLATE, "pocket", plane, dragged, CONS_DIM)
+    m2 = build(with_sketch)
+    cut = script_edit.wrap_body_expr(with_sketch, "Plate", "({expr}) - extrude(pocket, amount=-3)")
+    m3 = build(cut)
+    return {"id": "constraints", "title": "Constrain a sketch", "minutes": 3,
+            "intro": "Lines snap and constraints appear as you draw; dimensions drive the geometry; drag a point and the solver keeps every rule. Then the agent cuts the sketch into the part.",
+            "meshes": {"m1": mesh_of(m1), "m2": mesh_of(m2), "m3": mesh_of(m3)},
+            "steps": [
+                {"kind": "model", "mesh": "m1", "narr": "The mounting plate. We will draw a small rectangular pocket outline by hand and pin it down with constraints before the agent cuts it."},
+                {"kind": "sketchmode", "plane": plane, "items": drawn, "constraints": [], "face": top_face(m1, 4), "dof": 8,
+                 "narr": "Click the plate's top face and press K. With the Line tool, click four corners and click the first point again to close. Eight degrees of freedom: four free points."},
+                {"kind": "sketchmode", "plane": plane, "items": drawn, "constraints": CONS_AUTO, "dof": 4,
+                 "narr": "Drawing added constraints for you: each segment that came out level or plumb got a Horizontal or Vertical rule (the H and V glyphs). Four degrees of freedom left: position and size."},
+                {"kind": "sketchmode", "plane": plane, "items": solved, "constraints": CONS_DIM, "dof": 2, "tool": "select",
+                 "narr": "Switch to Select (V), click the top edge, press D and type 12; click the left edge, D, 8. The geometry moves to match the numbers, not the other way round. Two degrees of freedom left: where the rectangle sits."},
+                {"kind": "sketchmode", "plane": plane, "items": dragged, "constraints": CONS_DIM, "dof": 2, "tool": "select",
+                 "narr": "Drag a corner: the whole rectangle follows, still 12 × 8, still square. A constraint that conflicts with the others, or one already implied by them, is refused with a message."},
+                {"kind": "model", "mesh": "m2", "narr": "Finish writes the sketch and its constraints into the script as a block. It shows as a cyan outline and is listed under Sketches in the Browser; reopen it any time."},
+                {"kind": "code", "text": with_sketch[with_sketch.index("# sketch:"):with_sketch.index("# /sketch:pocket") + len("# /sketch:pocket")],
+                 "narr": "The block: ordinary build123d lines, and the JSON header carries the constraints so the editor (and the agent's sketch tool) can pick them up again."},
+                {"kind": "user", "text": "Cut the pocket sketch 3 mm into the plate.", "chips": ["sketch: pocket"],
+                 "narr": "Ask the agent to use it. The sketch travels as a chip."},
+                {"kind": "tool", "name": "edit_model", "detail": "extrude(pocket, amount=-3)", "code": cut[cut.index("result ="):], "result": m3.summary(0).splitlines()[0],
+                 "narr": "pocket is a normal build123d Sketch variable, so the agent subtracts a 3 mm extrusion of it from the plate."},
+                {"kind": "model", "mesh": "m3", "narr": "A 12 × 8 pocket, 3 mm deep, exactly where you dragged it. Change a dimension in the sketch and the pocket follows."},
+            ]}
+
+
+TRAIN = """# Two-gear train on a plate: the agent declares the joints, the viewer turns them
+plate_l, plate_w, plate_t = 80, 50, 4
+m, z1, z2, face_w = 2, 20, 12, 8
+cd = m * (z1 + z2) / 2                                   # centre distance 32
+plate = Box(plate_l, plate_w, plate_t, align=(Align.CENTER, Align.CENTER, Align.MIN))
+g20 = Pos(-cd / 2, 0, plate_t) * spur_gear(m, z1, face_w, bore=6)
+g12 = Pos(cd / 2, 0, plate_t) * spur_gear(m, z2, face_w, bore=6).rotate(Axis.Z, 180 / z2)
+result = {"Plate": plate, "Gear20": g20, "Gear12": g12}
+revolute("gear20", ["Gear20"], axis=((-cd / 2, 0, 0), (0, 0, 1)))
+revolute("gear12", ["Gear12"], axis=((cd / 2, 0, 0), (0, 0, 1)))
+couple("gear12", "gear20", -z1 / z2)
+drive("gear20", 0, 360, seconds=6)
+explode({"Gear20": (0, 0, 22), "Gear12": (0, 0, 22)})
+appearance({"Plate": "aluminium", "Gear20": "steel", "Gear12": "brass"})
+"""
+
+
+def tutorial_assembly():
+    m1 = build(TRAIN)
+    assert m1.motion and len(m1.bodies) == 3, (m1.motion, len(m1.bodies))
+    overlap = m1.shape.volume - sum(b.shape.volume for b in m1.bodies)
+
+    def mats_at(deg):
+        vals = _motion.joint_values(m1.motion, {"gear20": deg})
+        J = _motion.joint_matrices(m1.motion, vals)
+        out = {}
+        for j in m1.motion["joints"]:
+            for path in j["bodies"]:
+                out[path] = [round(float(v), 5) for v in _np.asarray(J[j["name"]]).T.flatten()]   # column-major for three.js
+        return out
+    seq = [mats_at(a) for a in (60, 90, 120, 150, 180)]
+    explode = {k: list(v) for k, v in (m1.explode.get("offsets") or {}).items()} if isinstance(m1.explode, dict) and m1.explode.get("offsets") else {"Gear20": [0, 0, 22], "Gear12": [0, 0, 22]}
+    return {"id": "assembly", "title": "Assemble, check, animate", "minutes": 3,
+            "intro": "Two gears on a plate, meshing. The agent checks every pair of bodies for interference, declares the joints and the gear ratio in the script, and the viewer turns them and explodes them.",
+            "meshes": {"m1": mesh_of(m1)},
+            "steps": [
+                {"kind": "user", "text": "Build a two-gear train on an 80 × 50 × 4 plate: a 20-tooth and a 12-tooth spur gear, module 2, 8 mm wide, 6 mm bores, meshing. Make the 20-tooth gear turn one revolution and the small one follow.",
+                 "narr": "One message for geometry and motion. Gear teeth, centre distance and phasing are the agent's problem."},
+                {"kind": "tool", "name": "build_model", "detail": f"{len(TRAIN.splitlines())} lines", "code": TRAIN, "result": m1.summary(0).splitlines()[0],
+                 "narr": "spur_gear is a script helper (true involutes). Centre distance is m(z1+z2)/2 = 32; the small gear is rotated half a tooth so the teeth interleave. Below result, the motion block: two revolute joints, a couple with ratio −20/12, a drive."},
+                {"kind": "model", "mesh": "m1", "narr": "Three bodies. Joints never change geometry: the model is built in its rest pose; the viewer applies the motion."},
+                {"kind": "tool", "name": "check_interference", "detail": "all bodies", "result": f"3 bodies · 3 pairs tested exactly · overlap {max(overlap, 0):.3f} mm³ · No interference",
+                 "narr": f"Before calling it done, the agent checks every pair of bodies for exact overlap (volume of the intersection). Teeth that mesh correctly share no volume: {max(overlap, 0):.3f} mm³ here."},
+                {"kind": "pose", "mats": mats_at(30), "sequence": seq, "ms": 500, "panel": "drive gear20 · 0 → 360°", "sliders": [["gear20", "30° → 180°"], ["gear12", "coupled −20/12"]],
+                 "narr": "▶ Animate plays the drive: the big gear turns and the small one follows at −20/12, from the couple declared in the script. Every free joint gets a slider."},
+                {"kind": "pose", "mats": mats_at(180), "explode": explode, "amount": 1, "ms": 1100, "panel": "explode 100%", "sliders": [["explode", "100%"], ["axis", "Z"]],
+                 "narr": "The Explode slider lifts the parts along the offsets the agent declared (or automatically, by sub-assembly then part), with the pose kept."},
+                {"kind": "pose", "mats": mats_at(180), "explode": explode, "amount": 0, "ms": 1100, "panel": "explode 0%", "sliders": [["explode", "0%"]],
+                 "narr": "And back. The Render toggle (E) switches to studio lighting with the appearances from the script: aluminium plate, steel and brass gears. Save a high-resolution image or record a video from the same panel."},
+                {"kind": "agent", "text": "Two meshing gears on the plate, no interference (exact check), **gear20** drives one revolution in 6 s and **gear12** follows at −20/12. Explode offsets and appearances are set; press ▶ Animate.",
+                 "narr": "Everything the viewer shows is in the script: joints, couple, drive, explode offsets, appearances. Edit them by hand or ask."},
+            ]}
+
+
+def main():
+    ap = argparse.ArgumentParser(); ap.add_argument("--out", required=True); ap.add_argument("--only", default=""); a = ap.parse_args()
+    out = Path(a.out); out.mkdir(parents=True, exist_ok=True)
+    fns = [tutorial_first_part, tutorial_select_face, tutorial_sketch, tutorial_constraints, tutorial_ribbon, tutorial_assembly, tutorial_cam]
+    ids = {tutorial_sketch: "sketch-to-boss", tutorial_first_part: "first-part", tutorial_select_face: "select-face"}
+    prev = {p["id"]: p for p in json.loads((out / "index.json").read_text())} if (out / "index.json").exists() else {}
+    index = []
+    for fn in fns:
+        tid = ids.get(fn, fn.__name__.replace("tutorial_", ""))
+        if a.only and tid not in a.only.split(",") and tid in prev:
+            index.append(prev[tid]); continue
+        t0 = time.time(); t = fn()
+        (out / f"{t['id']}.json").write_text(json.dumps(t, separators=(",", ":")))
+        index.append({"id": t["id"], "title": t["title"], "minutes": t["minutes"], "intro": t["intro"], "steps": len(t["steps"])})
+        print(f"{t['id']}: {len(t['steps'])} steps, {(out / (t['id'] + '.json')).stat().st_size // 1024} KB, {time.time() - t0:.1f}s")
+    (out / "index.json").write_text(json.dumps(index, indent=1))
+
+
 if __name__ == "__main__":
     main()
