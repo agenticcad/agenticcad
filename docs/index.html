@@ -7,7 +7,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M16 3 28 9.5v13L16 29 4 22.5v-13L16 3Z' fill='none' stroke='%234ea1ff' stroke-width='2'/%3E%3Ccircle cx='16' cy='16' r='4' fill='%23ff8c42'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="../assets/site.css?v=0.24.0">
+<link rel="stylesheet" href="../assets/site.css?v=0.24.1">
 <style>
   .docs{display:grid;grid-template-columns:250px 1fr;gap:56px;padding:44px 0 80px}
   .toc{position:sticky;top:76px;align-self:start;max-height:calc(100vh - 100px);overflow:auto;font-size:13px;padding-right:8px}
@@ -45,13 +45,13 @@
     <div class="g">Reference</div><a href="#shortcuts">Keyboard shortcuts</a><a href="#architecture">Architecture</a><a href="#files">Files and API</a><a href="#versioning">Versioning</a><a href="#tests">Tests and evals</a><a href="#gaps">Known gaps and roadmap</a><a href="#licence">Licence</a>
   </aside>
   <main class="doc">
-    <div class="eyebrow">Documentation · v0.16.x</div>
+    <div class="eyebrow">Documentation · v0.24.x</div>
     <h1>AgenticCAD documentation</h1>
     <p class="lead">Everything the app does, how it stores it, and how to drive it by chat, by hand, or from the agent's tools. For a guided walk-through, start with the <a href="../tutorials/">tutorials</a>.</p>
 
     <h2 id="overview">Overview</h2>
-    <p>AgenticCAD is a desktop CAD app with a Claude agent built in. You describe the part you want, the agent models it, and you watch it appear in a 3D viewer. From there you steer it however is quickest: keep talking, point at faces and bodies in the viewer, tweak dimensions in a parameters panel, or use a Fusion-style ribbon to press, pull, hole, fillet and sketch by hand.</p>
-    <p>Every design is exact solid geometry, so what you export is production-ready: STEP for other CAD tools and suppliers, STL at the resolution you choose for 3D printing, shop drawings with hole tables, and, if you have OrcaSlicer installed, a sliced print preview with time and filament estimates. An experimental CAM mode generates GRBL toolpaths for small mills and routers.</p>
+    <p>AgenticCAD is a desktop CAD app with a Claude agent built in. You describe the part you want, the agent models it, and you watch it appear in a 3D viewer. From there you steer it however is quickest: keep talking, point at faces and bodies in the viewer, tweak dimensions in a parameters panel, or use a Fusion-style ribbon to press, pull, hole, fillet, revolve, loft, sweep, mirror, pattern and sketch (with constraints) by hand. Multi-body designs are assemblies: section them, check them for interference, give them joints and watch them move, explode them, render them.</p>
+    <p>Every design is exact solid geometry, so what you export is production-ready: STEP for other CAD tools and suppliers, STL at the resolution you choose for 3D printing, shop drawings with hole tables, and, if you have OrcaSlicer installed, a sliced print preview with time and filament estimates. An experimental CAM mode generates toolpaths for small mills and routers (GRBL, or the Makera Z1 and Carvera Air), with multiple setups, a 4th axis and a material-removal simulation. And when the app lacks a tool, the agent can write one: <a href="#ext">extensions</a> add helpers, agent tools, build checks and ribbon panels from a single Python file.</p>
     <ul>
       <li><b>Say it</b>: “a 60×40×8 plate with a 24 mm boss and four M4 holes”.</li>
       <li><b>Point at it</b>: click a face or body, then “make this 2 mm thicker”.</li>
@@ -431,8 +431,8 @@ program.<span class="hl-f">add</span>(<span class="hl-f">pocket</span>(bot, tool
 .venv/bin/python evals/run.py            <span class="hl-c"># agent evals: real agent, headless, graded; ~$5 per run</span>
 .venv/bin/python evals/run.py --filter cam --model claude-sonnet-5 --repeat 3</code></pre>
     <ul>
-      <li><b>Unit tests</b> (136) cover the kernel (bodies, ids, exact normals, exports, measurement), script editing, CAM (holes, sections, every op, arc post, machine checks, feeds, and an independent engagement audit of the adaptive op), drawings, the library, threads, sketches, and the FastAPI/WebSocket API with the Claude session disabled.</li>
-      <li><b>Evals</b> (26 cases) run the real agent in a throwaway workspace, one fresh session per case, graded by deterministic geometry, program and answer checks (bbox, bodies, holes, volume, parameters, script contents, op parameters, G-code validity, tools used, answer regex). Results land in <code>evals/results/&lt;stamp&gt;.json|md</code> with pass rate, cost, steps and time per case. Add a case by appending to <code>evals/cases.py</code>.</li>
+      <li><b>Unit tests</b> (295) cover the kernel (bodies, ids, exact normals, exports, measurement), script editing, CAM (holes, sections, every op, arc post, machine checks, feeds, simulation, setups, the 4th axis and an independent engagement audit of the adaptive op), drawings, the library, the Design Kit, threads, sketches and the constraint solver, features, interference and motion, extensions, and the FastAPI/WebSocket API with the Claude session disabled.</li>
+      <li><b>Evals</b> (39 cases) run the real agent in a throwaway workspace, one fresh session per case, graded by deterministic geometry, program, UI and answer checks (bbox, bodies, holes, volume, interference, parameters, script contents, op parameters, G-code validity, simulation results, extension files and panels, tools used, answer regex). Results land in <code>evals/results/&lt;stamp&gt;.json|md</code> with pass rate, cost, steps and time per case. Add a case by appending to <code>evals/cases.py</code>.</li>
     </ul>
 
     <h2 id="gaps">Known gaps and roadmap</h2>
@@ -441,18 +441,18 @@ program.<span class="hl-f">add</span>(<span class="hl-f">pocket</span>(bot, tool
       <li>CAM simulation models the tool tip only (no holder or shank collisions) and skips side setups; time estimates ignore acceleration.</li>
       <li>Adaptive corners rely on feed reduction; no trochoidal slotting, no 3D rest, no Z-level finishing.</li>
       <li>Sketches have no fillet, trim or construction geometry yet.</li>
-      <li>Manual tools are typed, not dragged (except Press/Pull); no mates or joints; patterns copy whole bodies (no feature patterns).</li>
+      <li>Manual tools are typed, not dragged (except Press/Pull and sketch points); joints are declared in the script rather than placed by mating faces; patterns copy whole bodies (no feature patterns).</li>
       <li>Drawings have overall dimensions and hole tables only; no section views or PDF.</li>
       <li>Face and edge ids change on every rebuild.</li>
     </ul>
-    <p>Roadmap, roughly in order: projects and sessions; CAM holder and shank collision checks; assembly positioning and a standard-parts library; drag handles everywhere; a WebSerial G-code sender; drawing and import upgrades; deployment (Docker, auth, multi-user); other posts and 3D-printing exports. Issues and contributions: <a href="https://github.com/agenticcad/agenticcad">github.com/agenticcad/agenticcad</a>.</p>
+    <p>Roadmap, roughly in order: projects and sessions; CAM holder and shank collision checks; mate-based assembly positioning; drag handles everywhere; a WebSerial G-code sender; drawing and import upgrades; deployment (Docker, auth, multi-user); other posts and 3D-printing exports. Issues and contributions: <a href="https://github.com/agenticcad/agenticcad">github.com/agenticcad/agenticcad</a>.</p>
 
     <h2 id="licence">Licence</h2>
     <p>AgenticCAD is free for <b>non-commercial use</b> under the <a href="https://github.com/agenticcad/agenticcad/blob/main/LICENSE">PolyForm Noncommercial License 1.0.0</a>: personal projects, research, education, hobby making, charities, schools and public institutions. <b>Commercial use</b> (in a business, in products or services, or as part of paid work) needs a commercial licence: <b>A$99 per user per year</b>, one licence per person who uses it. Buy online for the number of users you need; the Stripe receipt showing users and period is your licence record, with nothing to enter in the software. Volume or site licences: <a href="mailto:agenticcad@prodevelop.com.au?subject=AgenticCAD%20commercial%20licence">agenticcad@prodevelop.com.au</a>.</p>
   </main>
 </div>
 <footer><div class="wrap"><span>© 2026 AgenticCAD · PolyForm Noncommercial 1.0.0</span><a href="../terms.html">Terms</a><a href="../privacy.html">Privacy</a><a href="#" data-cookie-settings>Cookie settings</a><a href="https://github.com/agenticcad/agenticcad">GitHub</a><a href="../tutorials/">Tutorials</a><a href="../index.html">Home</a></div></footer>
-<script src="../assets/site.js?v=0.24.0"></script>
+<script src="../assets/site.js?v=0.24.1"></script>
 <script>
   const links = [...document.querySelectorAll('.toc a')], heads = links.map(a => document.querySelector(a.getAttribute('href')));
   const io = new IntersectionObserver(() => { let cur = 0; heads.forEach((h, i) => { if (h && h.getBoundingClientRect().top < 120) cur = i; }); links.forEach((a, i) => a.classList.toggle('on', i === cur)); }, { rootMargin: '-100px 0px -70% 0px', threshold: [0, 1] });

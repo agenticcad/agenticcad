@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M16 3 28 9.5v13L16 29 4 22.5v-13L16 3Z' fill='none' stroke='%234ea1ff' stroke-width='2'/%3E%3Ccircle cx='16' cy='16' r='4' fill='%23ff8c42'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="assets/site.css?v=0.24.0">
+<link rel="stylesheet" href="assets/site.css?v=0.24.1">
 <style>
   .hero{position:relative;padding:90px 0 40px;overflow:hidden}
   .hero .bgrid{position:absolute;inset:0;background-image:linear-gradient(rgba(255,255,255,.035) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.035) 1px,transparent 1px);background-size:56px 56px;mask-image:radial-gradient(ellipse 70% 60% at 50% 20%,#000 30%,transparent 75%);-webkit-mask-image:radial-gradient(ellipse 70% 60% at 50% 20%,#000 30%,transparent 75%)}
@@ -86,26 +86,26 @@
 <section class="hero">
   <div class="bgrid"></div><div class="glow a"></div><div class="glow b"></div>
   <div class="wrap">
-    <div class="eyebrow" style="justify-content:center">Agent-native CAD / CAM · free for non-commercial use · exact B-rep</div>
+    <div class="eyebrow" style="justify-content:center">Agent-native CAD / CAM · exact B-rep · extends itself · free for non-commercial use</div>
     <h1>CAD that <span>talks back.</span></h1>
-    <p class="lead">Say what you want and it gets built. Point at what you mean and it gets changed. Tweak by hand when that is quicker. No feature tree to fight, no menus to memorise, and every edit stays reproducible. From first idea to exact STEP, print-ready STL and shop drawings, on your own machine.</p>
+    <p class="lead">Say what you want and it gets built. Point at what you mean and it gets changed. Sketch, constrain and tweak by hand when that is quicker. Assemble it, section it, make it move, render it. Then STEP, STL, shop drawings, or G-code for your Makera. One reproducible script, on your own machine — and when the app lacks a tool, the agent writes it.</p>
     <div class="cta">
       <a class="btn primary" href="#download" data-dl><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12M6 9l6 6 6-6M4 20h16"/></svg>Download <span data-dl-ver>latest</span> · <span data-dl-label>desktop app</span></a>
       <a class="btn" href="tutorials/">▶&nbsp; Try the simulated tutorials</a>
       <a class="btn" href="docs/">Read the docs</a>
       <a class="btn" href="https://github.com/agenticcad/agenticcad">Source on GitHub</a>
     </div>
-    <div class="frame video"><div class="bar"><i></i><i></i><i></i><span>60-second tour — a real session, real agent, only the thinking time sped up</span></div>
-      <video id="promo" controls playsinline preload="metadata" poster="assets/img/promo-poster.jpg" width="1920" height="1080"><source src="assets/video/agenticcad-promo-1080p.mp4?v=2" type="video/mp4">Your browser can't play this video. <a href="assets/video/agenticcad-promo-1080p.mp4">Download it</a> instead.</video>
-      <button class="play" id="promo-play" aria-label="Play the tour"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg><span>Watch the 60-second tour</span></button>
+    <div class="frame video"><div class="bar"><i></i><i></i><i></i><span>The tour — one real session with the real agent, only the thinking time sped up</span></div>
+      <video id="promo" controls playsinline preload="metadata" poster="assets/img/promo-poster.jpg?v=4" width="1920" height="1080"><source src="assets/video/agenticcad-promo-1080p.mp4?v=4" type="video/mp4">Your browser can't play this video. <a href="assets/video/agenticcad-promo-1080p.mp4">Download it</a> instead.</video>
+      <button class="play" id="promo-play" aria-label="Play the tour"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg><span>Watch the tour</span></button>
     </div>
     <p class="muted" style="font-size:13px;margin:14px 0 0">Sound on. A real session with the real agent; only the thinking time is sped up.</p>
   </div>
 </section>
 
 <div class="ticker"><div class="track">
-  <span>Describe a part in plain words</span><span>Point at faces, edges and bodies in chat</span><span>Fusion-style ribbon for hand tweaks</span><span>Sketches on any face</span><span>ISO and inch (UNC/UNF) threads</span><span>Inches or millimetres</span><span>Exact STEP, tolerance-controlled STL</span><span>Shop drawings with hole tables</span><span>Slice for 3D printing with your installed OrcaSlicer, layers in the viewer</span><span>Experimental GRBL CAM</span><span>Parametric part library</span><span>Pick your Claude model, plug in MCP servers</span><span>Unit tests and graded agent evals</span>
-  <span>Describe a part in plain words</span><span>Point at faces, edges and bodies in chat</span><span>Fusion-style ribbon for hand tweaks</span><span>Sketches on any face</span><span>ISO and inch (UNC/UNF) threads</span><span>Inches or millimetres</span><span>Exact STEP, tolerance-controlled STL</span><span>Shop drawings with hole tables</span><span>Slice for 3D printing with your installed OrcaSlicer, layers in the viewer</span><span>Experimental GRBL CAM</span><span>Parametric part library</span><span>Pick your Claude model, plug in MCP servers</span><span>Unit tests and graded agent evals</span>
+  <span>Describe a part in plain words</span><span>Point at faces, edges and bodies in chat</span><span>Sketches with constraints and driving dimensions</span><span>Fusion-style ribbon: press/pull, holes, fillets, revolve, loft, sweep, mirror, pattern</span><span>Design Kit: screws, bearings, gears, motors by name</span><span>Joints, gear ratios, exploded views, studio render</span><span>Section analysis and interference check</span><span>ISO and inch threads · mm or inches</span><span>Exact STEP, STL, shop drawings</span><span>Slice with your OrcaSlicer</span><span>Experimental CAM with simulation, setups and 4th axis · Makera Z1 and Carvera Air</span><span>Extensions: the agent adds tools and panels to the app</span><span>Unit tests and graded agent evals</span>
+  <span>Describe a part in plain words</span><span>Point at faces, edges and bodies in chat</span><span>Sketches with constraints and driving dimensions</span><span>Fusion-style ribbon: press/pull, holes, fillets, revolve, loft, sweep, mirror, pattern</span><span>Design Kit: screws, bearings, gears, motors by name</span><span>Joints, gear ratios, exploded views, studio render</span><span>Section analysis and interference check</span><span>ISO and inch threads · mm or inches</span><span>Exact STEP, STL, shop drawings</span><span>Slice with your OrcaSlicer</span><span>Experimental CAM with simulation, setups and 4th axis · Makera Z1 and Carvera Air</span><span>Extensions: the agent adds tools and panels to the app</span><span>Unit tests and graded agent evals</span>
 </div></div>
 
 <section id="start" class="install">
@@ -156,7 +156,7 @@ python3 -m venv .venv &amp;&amp; .venv/bin/pip install -r requirements.txt
     <div class="grid g3" style="margin-top:36px" id="features">
       <div class="card reveal"><div class="num">01</div><h3>Describe</h3><p>“60 × 40 × 8 plate, four Ø5 holes 8 mm from the corners, a Ø20 boss with a Ø8 bore.” Attach a photo or a napkin sketch if you have one. The agent writes the model with named dimensions.</p></div>
       <div class="card reveal" style="transition-delay:.1s"><div class="num">02</div><h3>Point</h3><p>Click a face, an edge or a body and it becomes a chip on your message, with its exact type, centre, normal and size. The agent works on that face, not a guess.</p></div>
-      <div class="card reveal" style="transition-delay:.2s"><div class="num">03</div><h3>Tweak</h3><p>Press/pull, holes, fillets, chamfers, shells and sketches from a Fusion-style ribbon, or change a number in the Parameters card. Written into the same script, undoable, visible to the agent.</p></div>
+      <div class="card reveal" style="transition-delay:.2s"><div class="num">03</div><h3>Tweak</h3><p>Press/pull, holes, fillets, chamfers, shells, revolve, loft, sweep, mirror and pattern from a Fusion-style ribbon; sketches with constraints; or change a number in the Parameters card. Written into the same script, undoable, visible to the agent.</p></div>
     </div>
 
     <div class="split" style="margin:64px 0 26px">
@@ -194,8 +194,12 @@ result = {<span class="hl-s">"Plate"</span>: _plate3.<span class="hl-f">fillet</
       </div>
     </div>
 
+    <div class="split" style="margin-top:56px;align-items:center">
+      <div class="reveal"><div class="clip"><video autoplay muted loop playsinline preload="none" poster="assets/img/clips/sketch.jpg" data-src="assets/video/clips/sketch.mp4?v=4"></video><span>Sketch with constraints: H/V appear as you draw, dimensions drive, a dragged corner keeps the rules</span></div></div>
+      <div><div class="eyebrow">Sketching</div><h2 style="font-size:28px">Constrain it. Dimension it. Drag it.</h2><p class="muted">Lines and arcs snap to the model; horizontal, vertical and coincident constraints appear as you draw. Pick an edge, press <kbd>D</kbd>, type a number and the geometry moves to match. The status line counts the degrees of freedom left; fully constrained items turn white, and anything that conflicts is refused with a reason. Finish writes the sketch and its constraints into the script, where the agent can extrude, cut, revolve or loft it.</p><a class="btn small" href="tutorials/?t=constraints">Play the constraints tutorial →</a></div>
+    </div>
     <div class="mini">
-      <div class="card reveal cyan"><div class="ico"><svg viewBox="0 0 24 24"><path d="M4 4h16v16H4z"/><circle cx="14" cy="14" r="3"/><path d="M8 8h4"/></svg></div><h3>Sketches on any face</h3><p>Select a face, press <kbd>K</kbd>: rectangles, circles, polygons and slots with grid snap. Stored as an editable block that is also a real <code>Sketch</code> the agent can extrude, cut or revolve.</p></div>
+      <div class="card reveal cyan"><div class="ico"><svg viewBox="0 0 24 24"><path d="M4 4h16v16H4z"/><circle cx="14" cy="14" r="3"/><path d="M8 8h4"/></svg></div><h3>Sketches with constraints</h3><p>Select a face, press <kbd>K</kbd>: lines, arcs, rectangles, circles and slots with snapping. Coincident, horizontal, vertical, tangent, equal, concentric… and dimensions that drive the geometry. Drag a point and the solver keeps every rule. It is also a real <code>Sketch</code> the agent can extrude, cut or revolve.</p></div>
       <div class="card reveal yellow"><div class="ico"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/><path d="M12 4v2M12 18v2M4 12h2M18 12h2"/></svg></div><h3>Metric and inch threads</h3><p>ISO metric (M4) and Unified inch (1/4-20, #10-32): tap drill, clearance, hex and socket heads, nuts and washers from the tables. <code>tap(part, "M4", …)</code> cuts the hole and drawings call it out as M4×0.7.</p></div>
       <div class="card reveal"><div class="ico"><svg viewBox="0 0 24 24"><path d="M3 17 17 3l4 4L7 21H3z"/><path d="m13 7 4 4M9 11l4 4"/></svg></div><h3>Parameters and measure</h3><p>Every top-level number is a field. Measure snaps to vertices, edges and faces: lengths, radii, angles, hole spacing, mass, clearance between bodies.</p></div>
       <div class="card reveal accent"><div class="ico"><svg viewBox="0 0 24 24"><path d="M12 3 20 7.5v9L12 21l-8-4.5v-9L12 3Z"/><path d="M12 12 20 7.5M12 12v9M12 12 4 7.5"/></svg></div><h3>Exact B-rep, not triangles</h3><p>Planes, cylinders, cones, spheres, tori and B-splines from OCCT. The display mesh has exact normals; the geometry underneath is analytic.</p></div>
@@ -224,6 +228,22 @@ result = {<span class="hl-s">"Plate"</span>: _plate3.<span class="hl-f">fillet</
   </div>
 </section>
 
+<section id="assemble" style="background:var(--bg2);border-top:1px solid var(--line);border-bottom:1px solid var(--line)">
+  <div class="wrap">
+    <div class="eyebrow">Step 3 · Assemble, check, animate</div>
+    <h2>Build the whole machine, then look inside it.</h2>
+    <p class="muted" style="max-width:760px">The planetary gearhead below is 113 parts the agent built from one prompt: ISO screws with real threads, ball bearings with balls and cages, phased planets, all from the Design Kit. Then it checked every pair of parts for interference and declared the joints so it turns.</p>
+    <div class="grid g3" style="margin-top:36px">
+      <div class="reveal"><div class="clip"><video autoplay muted loop playsinline preload="none" poster="assets/img/clips/section.jpg" data-src="assets/video/clips/section.mp4?v=4"></video><span>Section analysis: cut with any plane, hatched caps, slide through</span></div><h3 style="margin:14px 0 6px">See inside</h3><p class="muted">Press <kbd>S</kbd>: cut the model with a base plane or parallel to any flat face and slide through it; cut faces are hatched caps in each body's colour. Press <kbd>J</kbd>: exact overlap volumes for every pair of bodies, with thread engagement listed separately, and the overlap shown in red. The agent runs the same check before it calls an assembly done.</p></div>
+      <div class="reveal" style="transition-delay:.1s"><div class="clip"><video autoplay muted loop playsinline preload="none" poster="assets/img/clips/explode.jpg" data-src="assets/video/clips/explode.mp4?v=4"></video><span>Exploded view: automatic, by sub-assembly then part, with trail lines</span></div><h3 style="margin:14px 0 6px">Make it move</h3><p class="muted">Joints live in the script: <code>revolute</code>, <code>slider</code>, <code>couple</code> for gear ratios and racks, <code>drive</code> to play. ▶ Animate has a slider for every free joint, plays the drive, and explodes the assembly automatically or by your offsets. <b>Check collisions</b> sweeps the motion for parts that hit each other.</p></div>
+      <div class="reveal" style="transition-delay:.2s"><div class="clip"><video autoplay muted loop playsinline preload="none" poster="assets/img/clips/render.jpg" data-src="assets/video/clips/render.mp4?v=4"></video><span>Studio render: physically based materials, environment light, soft shadows</span></div><h3 style="margin:14px 0 6px">Render it</h3><p class="muted">One click for a studio render: about thirty materials (<code>appearance</code> in the script, sensible defaults from body names), environment lighting and soft shadows. Save a high-resolution image or record a video of the spin, the explode or the motion.</p></div>
+    </div>
+    <div class="grid g2" style="margin-top:28px;align-items:center">
+      <div class="reveal"><div class="clip"><video autoplay muted loop playsinline preload="none" poster="assets/img/clips/motion.jpg" data-src="assets/video/clips/motion.mp4?v=4"></video><span>The sun drives the carrier at 4:1; planets ride the carrier; bearing balls run at cage speed</span></div></div>
+      <div><h3 style="margin:0 0 8px">113 parts, one prompt</h3><p class="muted">“Design a NEMA 17 planetary gearhead, 4:1, module 0.6…” The agent reached for the kit — <code>kit.planetary_stage</code>, <code>kit.ball_bearing("688ZZ")</code>, <code>kit.socket_screw("M3", 40, real=True)</code> — built it body by body, measured clearances, ran the interference check and fixed what it found. That design is an eval case in the repository: what the video shows is what the test grades.</p><a class="btn small" href="docs/#motion">Motion, explode and render in the docs →</a> <a class="btn small" href="docs/#kit">The Design Kit →</a></div>
+    </div>
+  </div>
+</section>
 
 <section id="advanced">
   <div class="wrap">
@@ -232,25 +252,50 @@ result = {<span class="hl-s">"Plate"</span>: _plate3.<span class="hl-f">fillet</
     <p class="muted" style="max-width:720px">The things you reach for once the first parts are done.</p>
     <div class="grid g3" style="margin-top:36px">
       <div class="card reveal accent"><div class="ico"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"/></svg></div><h3>Design Kit</h3><p>63 ready-made standard parts the agent calls by name: ISO screws with real threads, ball bearings by designation with balls and cages, gears and planetary stages, NEMA steppers down to the coils, servos, boards, extrusions, springs, O-rings. Plus 27 design guides it reads before designing, and a per-workspace kit it adds its own notes and parts to.</p></div>
-      <div class="card reveal accent"><div class="ico"><svg viewBox="0 0 24 24"><path d="M4 7h5V5a2 2 0 1 1 4 0v2h5v5h-2a2 2 0 1 0 0 4h2v5h-5v-2a2 2 0 1 0-4 0v2H4v-5h2a2 2 0 1 0 0-4H4z"/></svg></div><h3>Extensions</h3><p>The agent extends the app itself. One Python file adds script helpers, tools it can call, build checks, and panels with sliders, pickers and tables that render in the ribbon with the app's own look — ask for a mass-and-cost estimator or a bolt-pattern tool and it appears within the minute, hot-reloaded, listed in Settings.</p></div>
+      <div class="card reveal accent"><div class="ico"><svg viewBox="0 0 24 24"><path d="M4 7h5V5a2 2 0 1 1 4 0v2h5v5h-2a2 2 0 1 0 0 4h2v5h-5v-2a2 2 0 1 0-4 0v2H4v-5h2a2 2 0 1 0 0-4H4z"/></svg></div><h3>Extensions</h3><p>One Python file adds helpers, agent tools, build checks and ribbon panels. Hot-reloaded, listed in Settings, and the agent writes them on request — <a href="#extend">see it happen</a>.</p></div>
       <div class="card reveal yellow"><div class="ico"><svg viewBox="0 0 24 24"><path d="M4 7h16v13H4zM8 7V4h8v3"/><path d="M4 12h16"/></svg></div><h3>Part library</h3><p>Parametric script parts and exact STEP parts with thumbnails and tags. Insert from the Browser with <b>+ Part</b>, save any body to it, and the agent searches it before modelling a standard part.</p></div>
       <div class="card reveal"><div class="ico"><svg viewBox="0 0 24 24"><path d="M12 3v12M6 9l6 6 6-6"/><path d="M4 20h16"/></svg></div><h3>STEP import</h3><p>Drop a .step on the viewer: as a new body in the current design, as a new design, or straight into the library. Exact, and referenced from the script so the design stays reproducible.</p></div>
       <div class="card reveal cyan"><div class="ico"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="m8 10 2 2 4-4"/><path d="M8 21h8"/></svg></div><h3>Reference images</h3><p>Attach photos, sketches or old drawings to a message. The agent reads them directly; the dimensions you type override what it estimates.</p></div>
       <div class="card reveal accent"><div class="ico"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M7 15l3-3-3-3M12 15h5"/></svg></div><h3>Choose the model, plug in MCP</h3><p>Claude Opus 5.5 by default. Settings for the model, effort, max steps, thinking summaries, web tools, standing instructions and MCP servers (stdio, http, sse) with live connection status. Restart the session in place.</p></div>
       <div class="card reveal"><div class="ico"><svg viewBox="0 0 24 24"><path d="m8 9-4 3 4 3M16 9l4 3-4 3M14 5l-4 14"/></svg></div><h3>Design as script</h3><p>Rename, delete and add bodies, set parameters, sketch blocks and ribbon operations are AST rewrites of the same file. Every build is kept in history; Undo steps back through it.</p></div>
-      <div class="card reveal cyan"><div class="ico"><svg viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/><path d="M3 20h18"/></svg></div><h3>Tested, and evaluated</h3><p>241 unit and API tests run in about two minutes with no Claude calls. 34 agent evals run the real agent headless and grade geometry, programs and answers deterministically, with cost and steps per case.</p></div>
+      <div class="card reveal cyan"><div class="ico"><svg viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/><path d="M3 20h18"/></svg></div><h3>Tested, and evaluated</h3><p>295 unit and API tests run in about three minutes with no Claude calls. 39 agent evals run the real agent headless and grade geometry, programs, panels and answers deterministically, with cost and steps per case.</p></div>
     </div>
     <div class="frame reveal" style="margin-top:28px"><div class="bar"><i></i><i></i><i></i><span>Library tab — parametric and STEP parts</span></div><img src="assets/img/library-tab.jpg?v=2" alt="Part library tab with parametric parts and thumbnails" loading="lazy"></div>
   </div>
 </section>
 
+<section id="extend">
+  <div class="wrap">
+    <div class="split" style="align-items:center">
+      <div>
+        <div class="eyebrow">Step 4 · When the app lacks a tool</div>
+        <h2>The agent extends the app itself.</h2>
+        <p class="muted">Ask for a mass-and-cost estimator, a bolt-pattern tool, a thin-wall check or a hole report, and the agent writes one Python file. It can add helpers every design script can call, tools the agent itself can call, checks that run after every build, and <b>panels</b>: sliders, numbers, pickers that take a face or a body from the viewer, tables whose rows select the geometry they describe, buttons. Panels are declared, not coded, so they render in the ribbon with the app's own look and keep working across releases. Files hot-reload; Settings lists them, and a broken one shows as broken instead of breaking a design.</p>
+<pre><code><span class="hl-k">@panel</span>(<span class="hl-s">"Round corners"</span>, icon=<span class="hl-s">"◜"</span>, description=<span class="hl-s">"Fillet the vertical edges of a body"</span>)
+<span class="hl-k">def</span> <span class="hl-f">round_corners</span>(ctx):
+    s = ctx.state
+    body, radius = s.get(<span class="hl-s">"body"</span>), s.get(<span class="hl-s">"radius"</span>, <span class="hl-n">2.0</span>)
+    info = ui.text(<span class="hl-s">"Pick a body in the viewer."</span>, muted=<span class="hl-k">True</span>)
+    <span class="hl-k">if</span> body:
+        b = ctx.body(body)
+        info = ui.kv([[<span class="hl-s">"Body"</span>, body], [<span class="hl-s">"Vertical edges"</span>, <span class="hl-f">len</span>(_vertical_edges(b.shape))]])
+    <span class="hl-k">return</span> ui.panel(ui.picker(<span class="hl-s">"body"</span>, <span class="hl-s">"Body"</span>, what=<span class="hl-s">"body"</span>),
+                    ui.slider(<span class="hl-s">"radius"</span>, <span class="hl-s">"Radius"</span>, radius, <span class="hl-n">0.5</span>, <span class="hl-n">6</span>, step=<span class="hl-n">0.5</span>, unit=<span class="hl-s">"mm"</span>),
+                    info, ui.button(<span class="hl-s">"Apply"</span>, call=<span class="hl-s">"round_corners_apply"</span>, primary=<span class="hl-k">True</span>))</code></pre>
+        <p class="muted" style="font-size:13px">That is the panel in the clip, as the agent wrote it during the recording (lightly abridged); its Apply wraps the body in a <code>round_vertical_edges(plate, 3)</code> helper it also defined. Built-in examples ship with the app: <b>Parameters</b> (every number as a live slider), <b>Hole report</b>, <b>Bolt pattern</b>.</p>
+        <a class="btn small" href="docs/#ext">Extensions in the docs →</a>
+      </div>
+      <div class="reveal"><div class="clip"><video autoplay muted loop playsinline preload="none" poster="assets/img/clips/ext.jpg" data-src="assets/video/clips/ext.mp4?v=4"></video><span>Asked for a “Round corners” panel: picker, slider, Apply — written, saved and opened by the agent, then used</span></div></div>
+    </div>
+  </div>
+</section>
 
 <section id="cam" style="background:var(--bg2);border-top:1px solid var(--line);border-bottom:1px solid var(--line)">
   <div class="wrap">
     <div class="split rev">
       <div>
         <div class="eyebrow" style="color:var(--yellow)">Experimental · CAM preview</div>
-        <h2>CAM is in, and it is early.</h2>
+        <h2>CAM is in, simulated, and still early.</h2>
         <div class="callout warn" style="margin:0 0 16px"><b>Treat CAM as a preview.</b> The toolpaths are geometrically correct and the post checks your machine's limits, but they are not yet optimised: expect long, conservative paths with many retracts, and simulate before you cut. Good for learning and for simple parts you inspect first; not yet a replacement for your CAM package. The modelling side is where AgenticCAD is solid today.</div>
         <p class="muted">Have a CNC router? Describe the job the way you would brief a machinist and the agent writes a second script, cam.py, against a small API: <code>section</code>, <code>holes</code> and <code>stock_minus</code> taken from the exact model; <code>face</code>, <code>contour</code>, <code>pocket</code>, <code>adaptive</code>, <code>drill</code> and <code>parallel3d</code> for the cuts, multiple setups for two-sided parts, and 4th-axis work, indexed or continuous. Simulate the program to see the stock cut and catch gouges. The post (GRBL, or Makera for the Makera Z1 and Carvera Air) checks travel, spindle range, feeds and depth against the machine you picked and tells you before you press run.</p>
         <div class="caml" id="cam-ops"></div>
@@ -258,6 +303,7 @@ result = {<span class="hl-s">"Plate"</span>: _plate3.<span class="hl-f">fillet</
       </div>
       <div class="reveal">
         <div class="frame"><div class="bar"><i></i><i></i><i></i><span>plate.cam.py — Generic 3018 · aluminium · toolpaths drawn from the real program</span></div><div class="viewer" id="cam-viewer" style="height:400px"><div class="tag">Toolpaths</div><div class="hud" id="cam-hud"></div></div></div>
+        <div style="margin-top:14px"><div class="clip"><video autoplay muted loop playsinline preload="none" poster="assets/img/clips/cam.jpg" data-src="assets/video/clips/cam.mp4?v=4"></video><span>Material-removal simulation on the Makera Z1 program: the stock cut in step, gouges would show red</span></div></div>
         <p class="muted" style="font-size:12px;margin:10px 0 6px">The first lines of the exported G-code:</p>
         <div class="gc" id="cam-gcode"></div>
       </div>
@@ -276,6 +322,22 @@ result = {<span class="hl-s">"Plate"</span>: _plate3.<span class="hl-f">fillet</
   </div>
 </section>
 
+
+<section id="gallery">
+  <div class="wrap">
+    <div class="eyebrow">From the recording</div>
+    <h2>Frames from the tour, untouched.</h2>
+    <div class="shots">
+      <figure class="reveal"><img src="assets/img/shots/gearhead.jpg?v=4" alt="The planetary gearhead, 113 bodies in the Browser" loading="lazy"><figcaption>The gearhead opened: 113 bodies, every screw and bearing real</figcaption></figure>
+      <figure class="reveal"><img src="assets/img/shots/section.jpg?v=4" alt="Section analysis through the gearhead" loading="lazy"><figcaption>Section analysis, hatched caps, the slider mid-way</figcaption></figure>
+      <figure class="reveal"><img src="assets/img/shots/interf.jpg?v=4" alt="Interference check results" loading="lazy"><figcaption>Interference: thread engagement listed separately from real overlaps</figcaption></figure>
+      <figure class="reveal"><img src="assets/img/shots/render.jpg?v=4" alt="Studio render of the exploded gearhead" loading="lazy"><figcaption>Exploded and rendered: steel, brass, bronze, black anodised</figcaption></figure>
+      <figure class="reveal"><img src="assets/img/shots/sketch.jpg?v=4" alt="Sketch with constraints and dimensions" loading="lazy"><figcaption>A constrained sketch on the plate: four auto constraints, two driving dimensions</figcaption></figure>
+      <figure class="reveal"><img src="assets/img/shots/ext.jpg?v=4" alt="An extension panel the agent wrote" loading="lazy"><figcaption>The “Round corners” panel, half a minute after asking for it</figcaption></figure>
+    </div>
+  </div>
+</section>
+
 <section id="tutorials" style="background:var(--bg2);border-top:1px solid var(--line);border-bottom:1px solid var(--line)">
   <div class="wrap">
     <div class="split" style="margin-bottom:28px"><div><div class="eyebrow">Tutorials</div><h2>Watch a session, step by step.</h2></div><p class="muted">Simulated replays of real sessions: the chat, the tool calls, the code and the exact meshes at every step were generated by the kernel, not drawn. Play them, pause them, scrub them.</p></div>
@@ -290,7 +352,13 @@ result = {<span class="hl-s">"Plate"</span>: _plate3.<span class="hl-f">fillet</
 </div></footer>
 
 <script type="importmap">{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/" } }</script>
-<script src="assets/site.js?v=0.24.0"></script>
+<script src="assets/site.js?v=0.24.1"></script>
+<script>
+// feature clips: load when near the viewport, play while visible
+(() => { const vids = [...document.querySelectorAll('.clip video[data-src]')]; if (!('IntersectionObserver' in window)) { vids.forEach(v => { v.src = v.dataset.src; }); return; }
+  const io = new IntersectionObserver(es => es.forEach(e => { const v = e.target; if (e.isIntersecting) { if (!v.src) { v.src = v.dataset.src; v.addEventListener('canplay', () => v.play().catch(() => {}), { once: true }); } v.play().catch(() => {}); } else v.pause(); }), { rootMargin: '200px' });
+  vids.forEach(v => io.observe(v)); })();
+</script>
 <script type="module">
 import { createViewer, hlPython, hlGcode } from './assets/viewer.js';
 import { ICONS, RIBBON } from './assets/ribbon.js';

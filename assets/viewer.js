@@ -68,7 +68,7 @@ export function createViewer(el, opts = {}) {
       const lg = new THREE.BufferGeometry(); lg.setAttribute('position', new THREE.Float32BufferAttribute(ep, 3));
       const lines = new THREE.LineSegments(lg, edgeMat.clone());
       group.add(m, lines);
-      bodies.push({ id: bd.id, name: bd.name, mesh: m, lines, faceOfTri, ranges, colors, base, geom: g, attr: g.getAttribute('color') });
+      bodies.push({ id: bd.id, name: bd.name, path: bd.path || bd.name, mesh: m, lines, faceOfTri, ranges, colors, base, geom: g, attr: g.getAttribute('color') });
     });
     if (mesh.sketches && mesh.sketches.length) {
       const ep = [];
@@ -162,6 +162,7 @@ export function createViewer(el, opts = {}) {
       if (it.type === 'rect') { const a = it.w / 2, b = it.h / 2; poly([rot(-a, -b), rot(a, -b), rot(a, b), rot(-a, b)]); }
       else if (it.type === 'circle') { const p = []; for (let i = 0; i < 72; i++) { const t = i / 72 * Math.PI * 2; p.push([it.cx + it.r * Math.cos(t), it.cy + it.r * Math.sin(t)]); } poly(p); }
       else if (it.type === 'polygon') { const p = []; const n = it.sides || 6; for (let i = 0; i < n; i++) { const t = i / n * Math.PI * 2; p.push(rot(it.r * Math.cos(t), it.r * Math.sin(t))); } poly(p); }
+      else if (it.type === 'profile') { const pts = [it.start]; for (const sg of it.segs) { if (sg.via) { const [ax, ay] = pts[pts.length - 1], [bx, by] = sg.via, [cx, cy] = sg.to; const d = 2 * (ax * (by - cy) + bx * (cy - ay) + cx * (ay - by)); if (Math.abs(d) > 1e-9) { const ux = ((ax * ax + ay * ay) * (by - cy) + (bx * bx + by * by) * (cy - ay) + (cx * cx + cy * cy) * (ay - by)) / d, uy = ((ax * ax + ay * ay) * (cx - bx) + (bx * bx + by * by) * (ax - cx) + (cx * cx + cy * cy) * (bx - ax)) / d, r = Math.hypot(ax - ux, ay - uy); let t0 = Math.atan2(ay - uy, ax - ux), t1 = Math.atan2(cy - uy, cx - ux); const tm = Math.atan2(by - uy, bx - ux); const ccw = ((tm - t0 + 2 * Math.PI) % (2 * Math.PI)) < ((t1 - t0 + 2 * Math.PI) % (2 * Math.PI)); let sweep = ccw ? ((t1 - t0 + 2 * Math.PI) % (2 * Math.PI)) : -((t0 - t1 + 2 * Math.PI) % (2 * Math.PI)); for (let i = 1; i <= 24; i++) { const t = t0 + sweep * i / 24; pts.push([ux + r * Math.cos(t), uy + r * Math.sin(t)]); } } else pts.push(sg.to); } else pts.push(sg.to); } const closed = Math.hypot(pts[0][0] - pts[pts.length - 1][0], pts[0][1] - pts[pts.length - 1][1]) < 1e-6; if (closed) pts.pop(); for (let i = 0; i < pts.length - (closed ? 0 : 1); i++) { const a = w(...pts[i]), b = w(...pts[(i + 1) % pts.length]); segs.push(a.x, a.y, a.z + 0.05, b.x, b.y, b.z + 0.05); } }
       else if (it.type === 'slot') { const L = it.length / 2, r = it.width / 2, p = []; for (let i = 0; i <= 24; i++) { const t = -Math.PI / 2 + i / 24 * Math.PI; p.push(rot(L + r * Math.cos(t), r * Math.sin(t))); } for (let i = 0; i <= 24; i++) { const t = Math.PI / 2 + i / 24 * Math.PI; p.push(rot(-L + r * Math.cos(t), r * Math.sin(t))); } poly(p); }
     }
     return segs;
@@ -173,6 +174,31 @@ export function createViewer(el, opts = {}) {
     if (reveal > 0) { const total = g.attributes.position.count; const start = performance.now(); sketchReveal.userData.anim = () => { const f = Math.min(1, (performance.now() - start) / reveal); g.setDrawRange(0, Math.floor(total * f / 2) * 2); return f >= 1; }; }
   }
   function hideSketch() { if (sketchReveal) { overlay.remove(sketchReveal); sketchReveal = null; } }
+  // ---- pose (per-body matrices) and explode (per-body offsets), both eased over `ms`
+  let poseAnim = null;
+  const _byName = n => bodies.find(b => b.name === n || (b.path && b.path === n) || (b.path && b.path.endsWith('/' + n)));
+  function setPose(mats = {}, { ms = 700, explode = null, amount = 1 } = {}) {
+    const targets = new Map();
+    for (const b of bodies) {
+      const m = new THREE.Matrix4(); const arr = mats[b.name] || mats[b.path];
+      if (arr) m.fromArray(arr);
+      const off = explode && (explode[b.name] || explode[b.path]);
+      if (off) m.premultiply(new THREE.Matrix4().makeTranslation(off[0] * amount, off[1] * amount, off[2] * amount));
+      targets.set(b, m);
+    }
+    const from = new Map(bodies.map(b => [b, b.mesh.matrix.clone()]));
+    for (const b of bodies) { b.mesh.matrixAutoUpdate = false; b.lines.matrixAutoUpdate = false; }
+    if (!ms) { for (const [b, m] of targets) { b.mesh.matrix.copy(m); b.lines.matrix.copy(m); } poseAnim = null; return Promise.resolve(); }
+    return new Promise(res => { poseAnim = { from, targets, start: performance.now(), ms, done: res }; });
+  }
+  function resetPose() { poseAnim = null; for (const b of bodies) { b.mesh.matrix.identity(); b.lines.matrix.identity(); } }
+  const _p0 = new THREE.Vector3(), _q0 = new THREE.Quaternion(), _s0 = new THREE.Vector3(), _p1 = new THREE.Vector3(), _q1 = new THREE.Quaternion(), _s1 = new THREE.Vector3();
+  function tickPose() {
+    if (!poseAnim) return;
+    const t = Math.min(1, (performance.now() - poseAnim.start) / poseAnim.ms), e = ease(t);
+    for (const [b, m1] of poseAnim.targets) { const m0 = poseAnim.from.get(b); m0.decompose(_p0, _q0, _s0); m1.decompose(_p1, _q1, _s1); _p0.lerp(_p1, e); _q0.slerp(_q1, e); b.mesh.matrix.compose(_p0, _q0, _s1); b.lines.matrix.copy(b.mesh.matrix); }
+    if (t >= 1) { const d = poseAnim.done; poseAnim = null; d && d(); }
+  }
   // ---- loop
   const ro = new ResizeObserver(() => resize()); ro.observe(el);
   function resize() { const w = el.clientWidth || 300, h = el.clientHeight || 300; renderer.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix(); }
@@ -184,10 +210,11 @@ export function createViewer(el, opts = {}) {
     if (camAnim) { const t = Math.min(1, (performance.now() - camAnim.start) / camAnim.ms), e = ease(t); camera.position.lerpVectors(camAnim.p0, camAnim.p1, e); controls.target.lerpVectors(camAnim.t0, camAnim.t1, e); if (t >= 1) { const d = camAnim.done; camAnim = null; d && d(); } }
     if (fadeStart) { const f = Math.min(1, (performance.now() - fadeStart) / 420); for (const b of bodies) { b.mesh.material.opacity = f; b.lines.material.opacity = .85 * f; } if (f >= 1) fadeStart = 0; }
     if (sketchReveal && sketchReveal.userData.anim && sketchReveal.userData.anim()) sketchReveal.userData.anim = null;
+    tickPose();
     controls.update(); renderer.render(scene, camera);
   }
   frame();
-  return { scene, camera, controls, renderer, setModel, fitView, viewFrom, animateTo, select, setGhost, showMarker, hideMarker, pick, setToolpaths, setToolpathProgress, clearToolpaths, showSketch, hideSketch, faces: () => faces, bbox: () => bbox, setAutoRotate: v => { controls.autoRotate = !!v; }, dispose: () => { running = false; ro.disconnect(); io.disconnect(); renderer.dispose(); el.innerHTML = ''; } };
+  return { scene, camera, controls, renderer, setModel, fitView, viewFrom, animateTo, select, setGhost, showMarker, hideMarker, pick, setToolpaths, setToolpathProgress, clearToolpaths, showSketch, hideSketch, setPose, resetPose, faces: () => faces, bbox: () => bbox, setAutoRotate: v => { controls.autoRotate = !!v; }, dispose: () => { running = false; ro.disconnect(); io.disconnect(); renderer.dispose(); el.innerHTML = ''; } };
 }
 
 // tiny python highlighter for code panels: one pass over the source so markup is never re-matched

@@ -46,7 +46,7 @@ export function mountPlayer(root, tut, { onDone, next } = {}) {
   const sleep = ms => new Promise(res => { if (state.tok.c) return res(); const t = setTimeout(() => { state.timers.delete(t); res(); }, ms / state.speed); state.timers.add(t); });
   const cancel = () => { state.tok.c = true; state.tok = { c: false }; for (const t of state.timers) clearTimeout(t); state.timers.clear(); };
   const scroll = () => { msgs.scrollTop = msgs.scrollHeight; };
-  const KIND = { user: 'You', agent: 'Agent', tool: 'Tool call', model: 'Model', select: 'Select', note: 'Tip', code: 'Script', gcode: 'G-code', sketchmode: 'Sketch', ribbon: 'Ribbon', toolpaths: 'CAM', params: 'Parameters' };
+  const KIND = { pose: 'Animate', user: 'You', agent: 'Agent', tool: 'Tool call', model: 'Model', select: 'Select', note: 'Tip', code: 'Script', gcode: 'G-code', sketchmode: 'Sketch', ribbon: 'Ribbon', toolpaths: 'CAM', params: 'Parameters' };
   const caption = (html, s, i) => { if (!html) return; narr.innerHTML = (s ? `<span class="k">${KIND[s.kind] || s.kind}</span>` : '') + md(html); narrN.textContent = i != null ? `${i + 1} / ${tut.steps.length}` : '—'; narr.parentElement.classList.remove('pulse'); void narr.offsetWidth; narr.parentElement.classList.add('pulse'); };
   const tab = name => root.querySelectorAll('.pl-tabs span').forEach(t => t.classList.toggle('on', t.textContent === name));
   const ribbonOn = id => root.querySelectorAll('[data-tool]').forEach(el => el.classList.toggle('on', el.dataset.tool === id));
@@ -92,7 +92,7 @@ export function mountPlayer(root, tut, { onDone, next } = {}) {
     const r = document.createElement('div'); r.className = 'res'; r.textContent = s.result || ''; t.appendChild(r); scroll();
   }
   async function stepModel(s, q) {
-    const mesh = tut.meshes[s.mesh]; sk.classList.remove('show'); viewer.hideSketch(); ribbonOn(null); cmd.classList.remove('show'); viewer.hideMarker();
+    const mesh = tut.meshes[s.mesh]; sk.classList.remove('show'); viewer.hideSketch(); ribbonOn(null); cmd.classList.remove('show'); viewer.hideMarker(); design.classList.remove('show');
     viewer.setModel(mesh, { fit: state.fitted ? (state.sketchView ? (q ? true : 'animate') : false) : (q ? true : 'animate'), fade: !q }); state.fitted = true; state.sketchView = false;
     setTree(mesh); 
   }
@@ -111,7 +111,9 @@ export function mountPlayer(root, tut, { onDone, next } = {}) {
     ribbonOn('sketch');
     if (!q) await viewer.viewFrom(s.plane.z_dir.map((v, i) => v + (i === 2 ? 0.0001 : 0)), 800); else viewer.viewFrom(s.plane.z_dir, 0);
     if (state.tok.c) return;
-    sk.innerHTML = `<div class="h">✎ Sketch on ${esc(s.plane.label || 'face')}</div><div class="tools"><span class="on">Rect</span><span>Circle</span><span>Polygon</span><span>Slot</span><span>Subtract</span></div>${s.items.map(it => `<div class="it"><span>${it.type}${it.mode === 'subtract' ? ' −' : ''}</span><em>${it.type === 'rect' ? `${it.w}×${it.h} @ ${it.cx},${it.cy}` : it.type === 'circle' ? `r${it.r} @ ${it.cx},${it.cy}` : ''}</em></div>`).join('')}<div class="b"><span>Cancel</span><span class="ok">Finish</span></div>`;
+    const GL = { coincident: '⦿', on: '⊙', horizontal: 'H', vertical: 'V', parallel: '∥', perpendicular: '⊥', tangent: '◡', equal: '=', concentric: '◎', midpoint: '◇', fix: '⚓' };
+    const cons = (s.constraints || []).map(c => `<div class="it"><span><b style="color:#9fc6ff;display:inline-block;width:14px">${GL[c.type] || '↔'}</b> ${c.type}${c.value != null ? ` = ${c.value}${c.type === 'angle' ? '°' : ''}` : ''}</span><em>${c.refs.map(r => `${r.i + 1}${r.p ? '.' + r.p : r.e != null ? '/' + r.e : ''}`).join(' · ')}</em></div>`).join('');
+    sk.innerHTML = `<div class="h">✎ Sketch on ${esc(s.plane.label || 'face')}</div><div class="tools"><span class="${s.tool === 'select' ? 'on' : ''}">Select</span><span class="${!s.tool || s.tool === 'line' ? 'on' : ''}">Line</span><span>Arc</span><span>Rect</span><span>Circle</span><span>Slot</span></div>${s.dof != null ? `<div class="it"><span style="color:${s.dof === 0 ? 'var(--ok, #3ee6c6)' : 'inherit'}">${s.dof === 0 ? 'fully constrained' : s.dof + ' degrees of freedom'}</span></div>` : ''}${s.items.map(it => `<div class="it"><span>${it.type}${it.mode === 'subtract' ? ' −' : ''}</span><em>${it.type === 'rect' ? `${it.w}×${it.h} @ ${it.cx},${it.cy}` : it.type === 'circle' ? `r${it.r} @ ${it.cx},${it.cy}` : it.type === 'profile' ? `${it.segs.length} segments` : ''}</em></div>`).join('')}${cons ? `<div class="h" style="margin-top:6px;font-size:10px;text-transform:uppercase;letter-spacing:.3px;color:var(--dim)">Constraints (${s.constraints.length})</div>${cons}` : ''}<div class="b"><span>Cancel</span><span class="ok">Finish</span></div>`;
     sk.classList.add('show'); viewer.showSketch(s.plane, s.items, { reveal: q ? 0 : 1800 / state.speed }); state.sketchView = true; 
   }
   async function stepRibbon(s, q) {
@@ -139,14 +141,20 @@ export function mountPlayer(root, tut, { onDone, next } = {}) {
     if (!q) { await sleep(900); if (state.tok.c) return; row.classList.add('hot'); await sleep(500); const to = String(s.change[1]); for (let i = 1; i <= to.length; i++) { if (state.tok.c) return; val.textContent = to.slice(0, i); await sleep(220); } await sleep(400); }
     else { row.classList.add('hot'); val.textContent = String(s.change[1]); }
   }
-  const IMPL = { params: stepParams, user: stepUser, agent: stepAgent, tool: stepTool, model: stepModel, select: stepSelect, note: stepNote, code: stepCode, gcode: stepGcode, sketchmode: stepSketch, ribbon: stepRibbon, toolpaths: stepToolpaths };
+  async function stepPose(s, q) {
+    hidePanel(); const hudEl = hud;
+    if (s.panel) { design.innerHTML = `<div class="t">▶ Animate <em>${esc(s.panel)}</em></div>` + (s.sliders || []).map(([k, v]) => `<div class="prow"><label>${esc(k)}</label><span>${esc(v)}</span></div>`).join(''); design.classList.add('show'); }
+    await viewer.setPose(s.mats || {}, { ms: q ? 0 : (s.ms || 900), explode: s.explode || null, amount: s.amount == null ? 1 : s.amount });
+    if (!q && s.sequence) { for (const m of s.sequence) { if (state.tok.c) return; await viewer.setPose(m, { ms: s.ms || 900, explode: s.explode || null, amount: s.amount == null ? 1 : s.amount }); } }
+  }
+  const IMPL = { pose: stepPose, params: stepParams, user: stepUser, agent: stepAgent, tool: stepTool, model: stepModel, select: stepSelect, note: stepNote, code: stepCode, gcode: stepGcode, sketchmode: stepSketch, ribbon: stepRibbon, toolpaths: stepToolpaths };
   const dwell = s => Math.min(7000, 1200 + ((s.narr || s.caption || '').length) * 30);
 
   function reset() { cancel(); msgs.innerHTML = ''; chips.innerHTML = ''; input.innerHTML = ''; design.classList.remove('show'); tab('Chat'); narr.innerHTML = 'Press <b>Play</b> to start, or step with the arrows below.'; narrN.textContent = '—'; viewer.setModel({ bodies: [], faces: [], sketches: [], summary: 'empty design' }, { fit: false, fade: false }); tree.innerHTML = '<div class="row" style="color:var(--dim)">no bodies yet</div>'; hud.textContent = 'untitled · empty design'; cmd.classList.remove('show'); sk.classList.remove('show'); camBox.classList.remove('show'); hidePanel(); ribbonOn(null); viewer.clearToolpaths(); viewer.hideSketch(); viewer.hideMarker(); $('[data-tp]').classList.remove('on'); $('[data-end]').classList.remove('show'); state.fitted = false; }
   function ui() {
     $('[data-st]').textContent = `step ${state.idx} / ${tut.steps.length}`;
     [...$('[data-prog]').children].forEach((el, i) => { el.classList.toggle('done', i < state.idx); el.classList.toggle('cur', i === state.idx - 1); });
-    const s = tut.steps[Math.max(0, state.idx - 1)]; $('[data-lab]').textContent = state.idx ? ({ params: 'Parameters', user: 'you type', agent: 'agent replies', tool: 'tool: ' + (s.name || ''), model: 'model rebuilt', select: 'you click a face', note: 'tip', code: 'the script', gcode: 'G-code', sketchmode: 'sketch mode', ribbon: 'ribbon: ' + (s.tool || ''), toolpaths: 'toolpaths' })[s.kind] : 'ready';
+    const s = tut.steps[Math.max(0, state.idx - 1)]; $('[data-lab]').textContent = state.idx ? ({ params: 'Parameters', user: 'you type', agent: 'agent replies', tool: 'tool: ' + (s.name || ''), model: 'model rebuilt', pose: 'animate', select: 'you click a face', note: 'tip', code: 'the script', gcode: 'G-code', sketchmode: 'sketch mode', ribbon: 'ribbon: ' + (s.tool || ''), toolpaths: 'toolpaths' })[s.kind] : 'ready';
     $('[data-play]').textContent = state.playing ? '❚❚ Pause' : (state.idx >= tut.steps.length ? '↻ Replay' : '▶ Play');
   }
   async function runStep(i, q) { const s = tut.steps[i]; caption(s.narr || s.caption || '', s, i); await IMPL[s.kind](s, q); }

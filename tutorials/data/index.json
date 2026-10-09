@@ -21,10 +21,24 @@
   "steps": 8
  },
  {
+  "id": "constraints",
+  "title": "Constrain a sketch",
+  "minutes": 3,
+  "intro": "Lines snap and constraints appear as you draw; dimensions drive the geometry; drag a point and the solver keeps every rule. Then the agent cuts the sketch into the part.",
+  "steps": 10
+ },
+ {
   "id": "ribbon",
   "title": "Tweak it by hand \u2014 still code",
   "minutes": 3,
   "intro": "The ribbon works like a desktop CAD tool: pick a face or edges, type a number, OK. Under the hood every operation is written into the script, so hand edits and agent edits live in the same file.",
+  "steps": 8
+ },
+ {
+  "id": "assembly",
+  "title": "Assemble, check, animate",
+  "minutes": 3,
+  "intro": "Two gears on a plate, meshing. The agent checks every pair of bodies for interference, declares the joints and the gear ratio in the script, and the viewer turns them and explodes them.",
   "steps": 8
  },
  {
