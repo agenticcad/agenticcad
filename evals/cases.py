@@ -905,6 +905,24 @@ CASES += [
          graders=[no_agent_error(), expect_tools_used("build_machine", "screenshot"),
                   machine_model_checks("z1 + 4th", table=(206, 206), clearance=116, travel=(200, 200, 100), min_parts=25,
                                        moving={"y": "table", "x": "head", "z": "head", "a": "table"})]),
+    Case("machine_carvera_air_photos", tags=["machine", "cam", "photos"], images=reference_photos("carvera_air"),
+         prompt=("Here are Makera's product photos of the Carvera Air (front, three-quarter, canopy open with the pendant, the MDF bed, and the 4th-axis module on the bed). "
+                 "The built-in model (get_machine_code 'Carvera Air + 4th axis') is just blocks: keep its verified numbers and reuse them — work area 300 × 200 × 130, "
+                 "bed 306 × 222 (15 mm MDF spoilboard with the 66 Ø6 holes from bed_holes('carvera_air_mdf') on a 15 mm aluminium plate), bed moves in Y under the fixed "
+                 "rear bridge, head moves X along the bridge rods (Ø20) and Z, home = head back-left with the spindle at (-150, 100) and the nose bottom 120 above the bed at Z top, "
+                 "spindle nose Ø 16 × 21 under a Ø 33.6 × 8 collar (reference), head block 120 × 98 × 200 (reference), footprint about 500 × 450 × 450, and when `fourth` is true "
+                 "the 4th-axis module (chuck Ø 52 with four jaws, axis 46 above the bed, tailstock Ø 14 live centre, max Ø 92 × 200, same rotary numbers). "
+                 "Now make it look like the Carvera Air in the photos: a white/light-grey lower body with the CARVERA AIR badge at the front and small feet, and above it a large "
+                 "smoked-blue tinted canopy that wraps the front and the whole top as one shell (flat top, chamfered front top edge, hinged at the rear so it lifts), light grey "
+                 "rear and side panels, the bridge with its linear rods, cable chains and the head visible through the canopy, the LED light bar, the touch-screen pendant on an arm "
+                 "at the right side, the dust-collection hose, the tool-length setter and probe near the front of the bed. Keep the part names 'spoilboard', 'spindle nose' and "
+                 "'enclosure' and the sources keys 'work area', 'gantry clearance' and 'bed 306×222 and hole grid'. Use 'paint_light' for the body, 'acrylic' for the canopy (it must "
+                 "stay transparent). This script must build for both 'Carvera Air' and 'Carvera Air + 4th axis' (use `fourth`): build it for 'Carvera Air + 4th axis', screenshot from "
+                 "the front, iso and right, compare with the photos, iterate at least once until the silhouette matches, then save the same script for 'Carvera Air' with build_machine. "
+                 "Tell me what you estimated."),
+         graders=[no_agent_error(), expect_tools_used("build_machine", "screenshot"),
+                  machine_model_checks("air + 4th", table=(306, 222), clearance=120, travel=(300, 200, 130), min_parts=25,
+                                       moving={"y": "table", "x": "head", "z": "head", "a": "table"})]),
     Case("ext_mass_cost_panel", tags=["ext"],
          prompt="Write an extension with a panel that estimates mass and material cost per body: a material dropdown per body "
                 "(aluminium, steel, brass, PLA with sensible densities and $/kg), a table with mass and cost per body, and totals. "

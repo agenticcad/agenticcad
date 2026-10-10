@@ -240,7 +240,9 @@ Agent-native, like the CAD side: a second script per design, `cam.py`, written b
   The built-ins live in [machine_scripts/](machine_scripts/) and are the fallback for any machine without its own
   script, so **Code tab ▸ machine.py** always has a starting point: edit, Run, and the machine has its own model.
   **Settings ▸ Machines ▸ Model** has *Show in viewer* (works without a CAM program) and *Edit as script…*; the agent's
-  `get_machine_code` / `build_machine` do the same from chat ("add my Shapeoko 5 Pro to the library and model it").
+  `get_machine_code` / `build_machine` do the same from chat ("add my Shapeoko 5 Pro to the library and model it"), and
+  photos dropped into the chat are used as references: the built-in Z1, Carvera Air and Haas VF-4 models were made that
+  way from the makers' product photos, every number tagged verified / reference / estimated.
 - Not yet: drilling cycles (GRBL has none), thread milling, side-setup simulation.
 
 ## 3D printing (external slicer)

@@ -5,6 +5,8 @@ features, patch bumps fix things. The version shown in the UI header comes from 
 
 ## [Unreleased]
 
+## [0.27.0] — 2026-10-10
+
 ### Added
 - **Machines are scripts: model your own machine.** Every library machine's 3D model is now a Python script in the same
   spirit as `design.py` and `cam.py`: `machines/<slug>.machine.py` in the workspace, written against a small kinematic
@@ -19,9 +21,10 @@ features, patch bumps fix things. The version shown in the UI header comes from 
   it" is a chat request; two evals (`machine_shapeoko_5_pro`, `machine_tormach_1100m`) grade the result against the
   brief. Deleting a machine deletes its script. `GET /api/cam/machine_code`, WebSocket `run_machine` /
   `get_machine_code`.
-- **Built-in models rebuilt from the makers' photos.** The Makera Z1 (plain and 4th axis) and the Haas VF-4 built-ins
+- **Built-in models rebuilt from the makers' photos.** The Makera Z1 and Carvera Air (plain and 4th axis) and the Haas VF-4 built-ins
   were modelled by the agent against the manufacturers' product photos (charcoal plinth and wrap-around tinted canopy on
-  the Z1; enclosure, wings, doors, side-mount changer with its cover, pendant, auger and chute on the VF-4), with every
+  the Z1; white body and chamfered canopy with the pendant arm on the Air; enclosure, wings, doors, side-mount changer
+  with its cover, pendant, auger and chute on the VF-4), with every
   number sourced as verified / reference / estimated. The other Haas models share a detailed parametric VMC script
   (umbrella or side-mount changer by model). Drop photos of your own machine into the chat with "model my machine" and
   the agent works the same way. New material `paint_red`.
