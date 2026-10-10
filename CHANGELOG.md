@@ -5,6 +5,12 @@ features, patch bumps fix things. The version shown in the UI header comes from 
 
 ## [Unreleased]
 
+## [0.29.1] — 2026-10-10
+
+### Fixed
+- **Haas VF-4 doors:** they now meet at the centre when closed (they were modelled part-open, as in Haas's photos) and
+  park out in the wings when opened, outer edge flush with the enclosure side.
+
 ## [0.29.0] — 2026-10-10
 
 ### Added

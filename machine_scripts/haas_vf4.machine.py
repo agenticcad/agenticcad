@@ -196,16 +196,18 @@ part("door header", "base", hdr, "paint_light")
 part("lower front panel", "base", cbox(-open_hw, open_hw, y_front + 50, y_face, z_base, z_sill), "paint_dark")
 part("status light", "base", cyl_z(28, 110, at=(xw - 330, y_face + 60), zmin=zs(y_face + 60) - 5), "paint_white")
 
-# ---------------- sliding doors (shown part-open as in the photos) ----------------
+# ---------------- sliding doors: closed = meeting at the centre; open = parked out in the wings (each on its own track) ----------------
+door_w = 830.0
 frames, panes, handles = [], [], []
 for sx, y0 in ((-1, -715), (1, -692)):
-    x0, x1 = sorted((sx * 555, sx * 1385))
+    x0, x1 = sorted((sx * 0.0, sx * door_w))
     frames.append(cbox(x0, x1, y0, y0 + 20, z_sill + 5, z_head - 5) - cbox(x0 + 80, x1 - 80, y0 - 1, y0 + 21, 80, 900))
     panes.append(cbox(x0 + 80, x1 - 80, y0 + 7, y0 + 13, 80, 900))
-    hx_ = sx * 600
+    hx_ = sx * 60                                                           # handles near the meeting edge
     handles.append(cyl_z(14, 420, at=(hx_, -745), zmin=60) + cyl_y(10, 30, hx_, 90, -745) + cyl_y(10, 30, hx_, 450, -745))
-node("door L", "base", door="slide", direction=(-1, 0, 0), open=240)     # the doors slide apart into the wings until the opening is clear
-node("door R", "base", door="slide", direction=(1, 0, 0), open=240)
+door_slide = xw - door_w                                                    # outer edge flush with the enclosure side when open
+node("door L", "base", door="slide", direction=(-1, 0, 0), open=door_slide)
+node("door R", "base", door="slide", direction=(1, 0, 0), open=door_slide)
 for i, nd in enumerate(("door L", "door R")):
     part(f"front door {'L' if i == 0 else 'R'}", nd, frames[i], "paint_dark", collision=True)
     part(f"door window {'L' if i == 0 else 'R'}", nd, panes[i], "acrylic")
@@ -276,5 +278,5 @@ machine(key="haas", home=(0.0, 0.0, nose_z), travel=(tx, ty, tz), clearance=nose
                  "table thickness 90, table top 890 above floor, castings, saddle, column 640-1250": "estimated",
                  "coolant tank": "estimated"},
         notes="Haas VF-4 with 40+1 side-mount tool changer. Table moves X on the saddle, saddle moves Y, spindle head moves Z on the column. "
-              "Home = spindle at Z top over the table centre. Doors are shown part-open as in Haas' photos. "
+              "Home = spindle at Z top over the table centre. Doors close at the centre and slide out into the wings (Open doors in the CAM tab). "
               "Red accents (logos, nozzles, e-stop) use the 'anodised' material because the machine material set has no red.")
