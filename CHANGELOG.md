@@ -5,6 +5,12 @@ features, patch bumps fix things. The version shown in the UI header comes from 
 
 ## [Unreleased]
 
+## [0.27.1] — 2026-10-10
+
+### Fixed
+- **Carvera Air model:** the canopy's front pane now leans back from the base trim to the chamfered top edge as on the
+  real machine (it was vertical); the LED bar moved inside the leaned pane.
+
 ## [0.27.0] — 2026-10-10
 
 ### Added

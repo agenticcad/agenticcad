@@ -27,7 +27,8 @@ W, D = 500.0, 450.0
 yf, yr = -165.0, 285.0                      # front / rear faces (same placement as the built-in model)
 z_feet, z_body, z_trim, z_top = -100.0, -82.0, -45.0, 356.0
 cham_x, cham_y = 35.0, 70.0                 # chamfered front corners (plan)
-top_cy, top_cz = 50.0, 55.0                 # chamfer on the canopy's front-top edge
+top_cy, top_cz = 45.0, 50.0                 # chamfer on the canopy's front-top edge
+lean = 90.0                                 # the front pane leans back from the trim up to the top chamfer (photos)
 t_can = 4.0
 y_hinge = 265.0                             # canopy top ends at the rear hinge bar
 y_side = 235.0                              # canopy sides end at the light-grey rear side panels
@@ -37,7 +38,9 @@ def plan_face(rear):
                               (W / 2, yf + cham_y), (W / 2, rear), close=True))
 
 def side_face(rear, bottom):
-    return make_face(Polyline((yf, bottom), (rear, bottom), (rear, z_top), (yf + top_cy, z_top), (yf, z_top - top_cz), close=True))
+    # vertical below the trim, then the front pane leans back to the chamfered top edge
+    return make_face(Polyline((yf, bottom), (rear, bottom), (rear, z_top), (yf + lean + top_cy, z_top), (yf + lean, z_top - top_cz),
+                              (yf, z_trim + 15), close=True))
 
 def plan_solid(face2d, z0, z1):
     return Pos(0, 0, z0) * extrude(face2d, amount=z1 - z0)
@@ -90,7 +93,7 @@ for hxk in (-150, 150):
     h = cyl_x(5, 40, y_hinge, z_top + 2, hxk - 20)
     hinges = h if hinges is None else hinges + h
 part("canopy hinges", "base", hinges, "paint_dark")
-part("LED light bar", "base", box(400, 10, 6, at=(0, -112, 0), zmin=329), "paint_white")
+part("LED light bar", "base", box(400, 10, 6, at=(0, -80, 0), zmin=329), "paint_white")
 
 # touch-screen pendant on an arm at the right side
 part("pendant arm", "base", box(20, 30, 50, at=(W / 2 + 10, 262, 0), zmin=135) + box(40, 12, 12, at=(W / 2 + 40, 256, 0), zmin=154), "paint_light")
@@ -170,7 +173,7 @@ machine(key="air_4axis" if fourth else "air", home=(hx, hy, nose_z), travel=(300
                  "spindle nose Ø16×21, collar Ø33.6×8": "reference: community simplified model — measure yours",
                  "head 120×98×200, rods Ø20": "reference: community simplified model",
                  "enclosure 500×450×450": "verified: makera.com footprint (W 500 × D 450 × H 450); top at +356 / 456 overall so the head clears the canopy",
-                 "canopy, panels, frame, chamfers": "estimated: Makera product photos (chamfers 35×70 plan, 50×55 front-top, 4 mm acrylic)",
+                 "canopy, panels, frame, chamfers, lean": "estimated: Makera product photos (chamfers 35×70 plan, 50×55 front-top, front pane leans back 90 over its height, 4 mm acrylic)",
                  "pendant, hose, cable chains, LED bar, setter, probe, feet": "estimated: Makera product photos",
                  "4th axis": "reference: chuck parts from the community model; Ø92×200 verified: makera.com"},
         notes="Moving bed in Y under a fixed rear bridge; the head moves X along the bridge rods and Z. Canopy hinged at the rear bar (shown closed). Cable chains and hose are drawn at the home pose.")
