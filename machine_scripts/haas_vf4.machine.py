@@ -205,7 +205,7 @@ for sx, y0 in ((-1, -715), (1, -692)):
     panes.append(cbox(x0 + 80, x1 - 80, y0 + 7, y0 + 13, 80, 900))
     hx_ = sx * 60                                                           # handles near the meeting edge
     handles.append(cyl_z(14, 420, at=(hx_, -745), zmin=60) + cyl_y(10, 30, hx_, 90, -745) + cyl_y(10, 30, hx_, 450, -745))
-door_slide = xw - door_w                                                    # outer edge flush with the enclosure side when open
+door_slide = (xw - 25) - door_w - 10                                        # parked inside the wing pocket (which ends 25 mm inside the side wall)
 node("door L", "base", door="slide", direction=(-1, 0, 0), open=door_slide)
 node("door R", "base", door="slide", direction=(1, 0, 0), open=door_slide)
 for i, nd in enumerate(("door L", "door R")):

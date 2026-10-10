@@ -5,6 +5,11 @@ features, patch bumps fix things. The version shown in the UI header comes from 
 
 ## [Unreleased]
 
+## [0.30.1] — 2026-10-10
+
+### Fixed
+- **Haas doors** no longer poke through the enclosure side when fully open: they park inside the wing pockets.
+
 ## [0.30.0] — 2026-10-10
 
 ### Added
