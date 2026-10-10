@@ -493,6 +493,50 @@ def gearhead_checks(run: Run):
     return out
 
 
+def machine_model_checks(name_sub: str, table: tuple[float, float] | None = None, clearance: float | None = None,
+                         travel: tuple[float, float, float] | None = None, min_parts: int = 6, tol: float = 0.08,
+                         moving: dict[str, str] | None = None):
+    """The agent saved a machine model script for a library machine matching `name_sub`; it runs, its numbers match the
+    brief within `tol` (relative), it has enough parts, collision parts, a nose profile, and the axes move the right
+    bodies (`moving` = {axis: 'head'|'table'})."""
+    def g(run: Run):
+        import machine_script as ms
+        ws = run.workspace
+        ms_dir = ws / "machines"
+        recs = {m.name: m for m in run.agent.library.machines().values()}
+        name = next((n for n in recs if name_sub.lower() in n.lower()), None)
+        out = [check(f"machine '{name_sub}' in the library", name is not None, str(list(recs)))]
+        if name is None:
+            return out
+        p = ms.user_path(name, ws)
+        out.append(check("model script saved", p is not None and p.exists(), str(sorted(x.name for x in ms_dir.glob('*.machine.py')))))
+        if not (p and p.exists()):
+            return out
+        try:
+            model = ms.run(p.read_text(), recs[name], ws)
+        except Exception as e:  # noqa: BLE001
+            return out + [check("script runs", False, str(e))]
+        out.append(check("script runs", True, ms.summary(model)))
+        out.append(check(f"≥{min_parts} parts", len(model.parts) >= min_parts, f"{len(model.parts)} parts"))
+        out.append(check("collision parts marked", any(p.collision for p in model.parts), str([p.name for p in model.parts if p.collision])))
+        out.append(check("no invalid solids", not model.warnings, str(model.warnings)))
+        rel = lambda a, b: abs(a - b) <= tol * max(abs(b), 1.0)
+        if table:
+            out.append(check(f"table ≈ {table[0]} × {table[1]}", rel(model.table["x"], table[0]) and rel(model.table["y"], table[1]), f"{model.table.get('x')} × {model.table.get('y')}"))
+        if clearance is not None:
+            out.append(check(f"clearance ≈ {clearance}", rel(model.clearance, clearance), str(model.clearance)))
+        if travel:
+            out.append(check(f"travel ≈ {travel}", all(rel(a, b) for a, b in zip(model.travel, travel)), str(model.travel)))
+        for ax, mode in (moving or {}).items():
+            got = [n.mode for n in model.nodes if n.axis == ax]
+            out.append(check(f"{ax.upper()} axis moves the {mode}", mode in got, f"{ax}: {got}"))
+        # the nose profile starts small (a collet nut / nose) and sits at the clearance height at home
+        out.append(check("nose profile from a collet nut/nose", model.nose and model.nose[0]["r"] <= 40, str(model.nose[:2])))
+        out.append(check("home nose height = clearance", abs(model.home[2] - model.clearance) < 1e-6, f"home {model.home}, clearance {model.clearance}"))
+        return out
+    return g
+
+
 CASES: list[Case] = [
     Case("cad_box_hole", tags=["cad"],
          prompt="Make a 20 × 30 × 10 mm block centred on the origin with a Ø5 through hole down the centre (Z axis). Single body called Block.",
@@ -779,6 +823,25 @@ result = {"Plate": plate, "Post": Pos(0, 0, 10) * Cylinder(4, 20)}
 '''
 
 CASES += [
+    Case("machine_shapeoko_5_pro", tags=["machine", "cam"],
+         prompt=("Add my Shapeoko 5 Pro 4×4 to the machine library and model it so the Machine view and the collision check work. "
+                 "It's a GRBL router (Carbide Motion), fixed bed with a hybrid T-slot/MDF table 1245 × 1245 mm, the gantry moves in Y along ball-screw rails on both sides, "
+                 "the Z-Plus-style carriage moves X across the gantry and Z. Travel 1220 × 1220 × 102 mm, max feed 10000 mm/min, rapid 10000. Spindle: a Carbide Compact Router, "
+                 "Ø 65 mm body, 1/4\" collet with a Ø 19 mm collet nut, 12,000–30,000 rpm. The collet nut is 120 mm above the table at Z top. "
+                 "The T-slot bed has 7 aluminium T-tracks 12 mm wide running in X at 165 mm pitch, MDF strips between them, 22 mm thick. "
+                 "Model it, show it to me, and tell me what you estimated."),
+         graders=[no_agent_error(), expect_tools_used("build_machine", "screenshot"),
+                  machine_model_checks("shapeoko", table=(1245, 1245), clearance=120, travel=(1220, 1220, 102), min_parts=8,
+                                       moving={"y": "head", "x": "head", "z": "head"})]),
+    Case("machine_tormach_1100m", tags=["machine", "cam"],
+         prompt=("Add a Tormach 1100M to the library (post linuxcnc, PathPilot) and build its machine model. Travel 457 × 279 × 419 mm (X × Y × Z), "
+                 "table 876 × 240 mm with three 16 mm T-slots at 95 mm pitch, the table moves in X on a saddle that moves in Y; the spindle head moves Z on the column. "
+                 "BT30 spindle, 10,000 rpm max, spindle nose Ø 70 mm; with a BT30 ER32 holder (Ø 50 mm nut, 25 mm long nut, 60 mm gauge length) the nut face is 560 mm above the table at Z top. "
+                 "Full enclosure with sliding front doors. Rapids 5000 mm/min, 10-station power drawbar tool changes (atc). "
+                 "Model it and check it in the viewer."),
+         graders=[no_agent_error(), expect_tools_used("build_machine", "screenshot"),
+                  machine_model_checks("tormach", table=(876, 240), clearance=560, travel=(457, 279, 419), min_parts=7,
+                                       moving={"x": "table", "y": "table", "z": "head"})]),
     Case("ext_mass_cost_panel", tags=["ext"],
          prompt="Write an extension with a panel that estimates mass and material cost per body: a material dropdown per body "
                 "(aluminium, steel, brass, PLA with sensible densities and $/kg), a table with mass and cost per body, and totals. "

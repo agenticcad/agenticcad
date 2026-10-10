@@ -305,6 +305,27 @@ the CAM tab live in one line at the top of cam.py, `overrides({"Pocket": {"feed"
 fraction of Ø): always keep that line when you rewrite the script, and keep op names stable so it still matches. After build_cam, use `screenshot`
 to look at the toolpaths (they are drawn over the model; rapids red, cuts coloured per op).
 `export_gcode` writes the .nc file. `save_machine` / `save_tool` edit the libraries (JSON dicts; see cam_context).
+Machine models (what the Machine view shows and the collision check uses): every library machine has a model script.
+`get_machine_code(name)` returns the user's machines/<slug>.machine.py or the built-in it falls back to (Makera Z1,
+Carvera Air, Haas VMC, parametric gantry router) as a starting point; `build_machine(name, code)` validates it, saves it
+as that machine's own model and shows it in the viewer — then take a `screenshot` (iso, then front) and fix what looks
+wrong before reporting. Script API (build123d namespace + helpers; machine frame X right, Y back (away from the
+operator), Z up, origin = centre of the table top, mm): node(name, parent=None, axis='x'|'y'|'z'|'a', mode='head'|'table',
+stock=False, pivot=None) — head nodes move with the tool, table nodes carry the work the opposite way, exactly one
+node has stock=True (where the work sits), rotary nodes need pivot=(x, y, z) on the axis; part(name, node, shape,
+material, collision=False) with any build123d shape (helpers box(x, y, z, at=(cx, cy, cz), zmin=), cyl_z(r, h, at=(x, y),
+zmin=), cyl_x(r, length, y, z, xmin), cyl_y(r, length, x, z, ymin), shell(outer, inner, at=, zmin=, inner_zmin=,
+opening=('front', w, h)), import_step('vendor.step') from workspace/imports); machine(home=(spindle x, y, nose-bottom z
+at Z top), travel=(x, y, z), clearance=nose height above the table at Z top, nose=[{name, r, h}, ...] from the nose
+bottom upwards (collet nut, nose, collar, head), table={'x', 'y', 't'}, rotary=None or {axis_y, axis_z, chuck_face_x,
+chuck_r, tail_x, tail_r, max_diameter, max_length}, spoilboard=mm, stickout=None, sources={'what': 'verified|reference|
+estimated: where from'}, notes=''). Materials: cast, paint_light, paint_white, paint_dark, paint_blue, ground_steel,
+steel, stainless, alu, anodised, mdf, acrylic, panel (ghosted enclosure sheet), rubber, carbide. `machine_record` (the
+library Machine: travel, post, rotary...) and `fourth` (its 4th axis is installed) are available in the script. Model
+exactly what the tool can hit (table/bed top and its holes or slots, spindle nose and holder, chuck and tailstock,
+walls near the work: collision=True) and the rest representatively; put the home pose at machine zero (spindle at Z
+top); record every number's source, ask the user for measurements you don't have (nose diameter, clearance, bed
+size) rather than inventing them, and mark guesses estimated.
 """
 
 SCREENSHOT_VIEWS = ["iso", "iso_back", "front", "back", "left", "right", "top", "bottom"]
@@ -439,6 +460,8 @@ class CadAgent:
         self.config: str | None = None        # active configuration (named parameter overrides declared in the script)
         ck.WORKSPACE = workspace
         ck.LIBRARY = self.parts
+        import machine_models as _mmod
+        _mmod.WORKSPACE = workspace            # user machine model scripts: <workspace>/machines/<slug>.machine.py
         (workspace / "imports").mkdir(exist_ok=True)
         self.tool_handlers: dict[str, Any] = {}   # filled by _make_server()
         self.auth_problem: str | None = None       # set when Claude Code is not signed in; shown as a banner in every tab
@@ -558,6 +581,34 @@ class CadAgent:
         await self.emit({"type": "cam", "program": prog.to_payload(), "code": code, "source": source,
                          "summary": prog.summary(), "gcode_lines": prog.gcode().count("\n")})
         return prog
+
+    # ------------------------------------------------------------------ machine model scripts
+    def machine_code(self, name: str) -> dict[str, Any]:
+        import machine_script
+        m = self.library.machines().get(name)
+        if m is None:
+            raise cam.CamError(f"no machine named {name!r} in the library")
+        code, is_user = machine_script.machine_code(m, self.workspace)
+        return {"name": name, "code": code, "user": is_user}
+
+    async def set_machine_code(self, name: str, code: str, source: str = "agent"):
+        """Validate a machine model script for a library machine, save it as the machine's own model and show it."""
+        import machine_models, machine_script
+        m = self.library.machines().get(name)
+        if m is None:
+            raise cam.CamError(f"no machine named {name!r} in the library (save_machine first)")
+        fname = f"{machine_script.slug(name)}.machine.py"
+        try:
+            model = await asyncio.to_thread(machine_script.run, code, m, self.workspace, fname)
+        except machine_script.MachineScriptError as e:
+            raise cam.CamError(str(e)) from e
+        p = machine_script.user_path(name, self.workspace)
+        p.write_text(code)
+        machine_models.clear_cache()
+        text = machine_script.summary(model)
+        await self.emit({"type": "machine", "name": name, "code": code, "summary": text, "source": source, "user": True, "show": True})
+        await self.emit({"type": "library", **self.library_payload()})
+        return model, text
 
     async def _check_model(self) -> tuple[ck.Model, str | None]:
         """The model the interference / motion checks run on. Real (helical) threads make booleans very slow and
@@ -1169,7 +1220,7 @@ class CadAgent:
     def library_payload(self) -> dict[str, Any]:
         from dataclasses import asdict
         return {"machines": [asdict(m) for m in self.library.machines().values()],
-                "tools": [asdict(t) for t in self.library.tools()]}
+                "tools": [asdict(t) for t in self.library.tools()], "machine_scripts": self.library.machine_scripts()}
 
     def _write_state(self) -> None:
         (self.workspace / "state.json").write_text(json.dumps({"design": self.design_name, "config": self.config}))
@@ -1731,6 +1782,32 @@ class CadAgent:
             await agent.emit({"type": "library", **agent.library_payload()})
             return {"content": [{"type": "text", "text": f"saved machine '{m.name}'"}]}
 
+        @tool("build_machine",
+              "Build and save the 3D machine model script for a library machine (`name` must exist; save_machine first for "
+              "a new machine). The script uses node(...)/part(...)/machine(...) in the machine frame (see the CAM notes). "
+              "It is validated, saved as machines/<slug>.machine.py and shown in the viewer's Machine view: take a "
+              "`screenshot` (iso and front) afterwards to check it. Returns the model summary or the script error.",
+              {"type": "object", "properties": {"name": {"type": "string"}, "code": {"type": "string"}}, "required": ["name", "code"]})
+        async def build_machine(args: dict[str, Any]) -> dict[str, Any]:
+            try:
+                _, text = await agent.set_machine_code(args["name"], args["code"])
+            except cam.CamError as e:
+                return {"content": [{"type": "text", "text": f"MACHINE SCRIPT FAILED\n{e}"}], "is_error": True}
+            except Exception as e:  # noqa: BLE001
+                return {"content": [{"type": "text", "text": f"MACHINE SCRIPT FAILED\n{type(e).__name__}: {e}"}], "is_error": True}
+            return {"content": [{"type": "text", "text": text + "\nSaved and shown in the viewer (Machine view). Use `screenshot` to check it."}]}
+
+        @tool("get_machine_code", "The machine model script of a library machine: the user's own machines/<slug>.machine.py, "
+              "or the built-in model it uses (Makera Z1, Carvera Air, Haas VMC or the parametric gantry router) as a starting point.",
+              {"type": "object", "properties": {"name": {"type": "string"}}, "required": ["name"]})
+        async def get_machine_code(args: dict[str, Any]) -> dict[str, Any]:
+            try:
+                r = agent.machine_code(args["name"])
+            except cam.CamError as e:
+                return {"content": [{"type": "text", "text": str(e)}], "is_error": True}
+            head = f"# {'own script' if r['user'] else 'built-in model'} for {r['name']}\n"
+            return {"content": [{"type": "text", "text": head + r["code"]}]}
+
         @tool("save_tool", "Create or update a tool (same number replaces). `tool` fields: number, name, type "
               "(flat|ball|vbit|drill|chamfer), diameter, flutes, flute_length, rpm, feed, plunge, stepdown, stepover "
               "(fraction of diameter), angle, notes.",
@@ -2098,7 +2175,7 @@ class CadAgent:
             slicing_tools = [slicer_info, slice_for_printing]
 
         tools = [build_model, *([] if LEGACY_BUILD else [edit_model]), inspect_model, screenshot, export_model, get_code, save_design,
-                 cam_context, build_cam, get_cam_code, export_gcode, simulate_cam, check_interference, check_motion, feeds_speeds, save_machine, save_tool,
+                 cam_context, build_cam, get_cam_code, export_gcode, simulate_cam, check_interference, check_motion, feeds_speeds, save_machine, save_tool, build_machine, get_machine_code,
                  get_parameters, set_parameters, measure_tool, mass_properties, make_drawings, library_tool, kit_tool, sketch_tool,
                  extension_tool, show_panel, configurations_tool] + ext_tools + slicing_tools
         self.tool_handlers = {t.name: t.handler for t in tools}     # name -> async handler (tests call these directly)

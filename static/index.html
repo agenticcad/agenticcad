@@ -494,7 +494,8 @@
       <textarea id="code" spellcheck="false"></textarea>
       <div id="codeerr"></div>
       <div id="codebar">
-        <select id="code-which" class="btn" style="padding:4px 6px"><option value="design">design.py</option><option value="cam">cam.py</option></select>
+        <select id="code-which" class="btn" style="padding:4px 6px"><option value="design">design.py</option><option value="cam">cam.py</option><option value="machine">machine.py</option></select>
+        <select id="code-machine" class="btn" style="padding:4px 6px;display:none;max-width:200px" title="Which machine's model script"></select>
         <span id="code-hint" style="color:var(--muted);font-size:11px;flex:1">build123d · <code>result</code> = shape or {name: shape} · ⌘↩ runs</span>
         <button class="btn" id="code-reload">Reload</button>
         <button class="btn primary" id="code-run">Run</button>
@@ -672,6 +673,11 @@ function tickTween() {
 }
 function fitCamera(dir) {
   if (!bbox) return;
+  if (!fitCamera.inPose && typeof machineOn !== 'undefined' && machineOn && machineRig) {   // the machine view frames the machine
+    scene.updateMatrixWorld(true);
+    const bb = new THREE.Box3().setFromObject(machineRig.root);
+    if (!bb.isEmpty()) { const saved = bbox; bbox = bb; fitCamera.inPose = true; try { return fitCamera(dir); } finally { bbox = saved; fitCamera.inPose = false; } }
+  }
   if (!fitCamera.inPose && typeof isPosed === 'function' && model && isPosed()) {   // frame the exploded / posed bodies
     scene.updateMatrixWorld();
     const bb = new THREE.Box3(); for (const b of model.bodies.values()) if (b.mesh.visible) bb.expandByObject(b.mesh);
@@ -945,7 +951,7 @@ async function renderScreenshot(spec) {
   }
 }
 
-window.agenticcad = { renderScreenshot, get model() { return model; }, get machine() { return { on: machineOn, rig: machineRig, set: setMachine, pose: poseRig, stage: stageGroup }; }, get sketch() { return sk; }, get extDefs() { return extDefs; }, get extPanels() { return extPanels; }, scene, camera, renderer, send: (o) => send(o) };
+window.agenticcad = { renderScreenshot, get model() { return model; }, get machine() { return { on: machineOn, rig: machineRig, set: setMachine, pose: poseRig, stage: stageGroup, preview: machinePreview }; }, get sketch() { return sk; }, get extDefs() { return extDefs; }, get extPanels() { return extPanels; }, scene, camera, renderer, send: (o) => send(o) };
 
 // toolbar
 document.getElementById('fit').onclick = () => fitCamera();
@@ -1449,7 +1455,7 @@ function bitAt(bits, idx) { return (bits[idx >> 3] >> (7 - (idx & 7))) & 1; }
 // with the tool, table nodes carry the work the opposite way), the stage (model, stock, toolpaths, simulation) rides on
 // the stock node and the tool hangs from the spindle. Posed from the simulation slider; collisions the simulator found
 // flash the parts involved red.
-var machineOn = false, machineRig = null, machineLoading = null;
+var machineOn = false, machineRig = null, machineLoading = null, machinePreview = null;   // machinePreview: a library machine shown without / instead of the program's
 const machineEdgeMat = new THREE.LineBasicMaterial({ color: 0x0c0f13, transparent: true, opacity: 0.35 });
 const machineHitMat = new THREE.MeshStandardMaterial({ color: 0xff2d2d, emissive: 0xff2d2d, emissiveIntensity: 0.55, roughness: 0.5, side: THREE.DoubleSide });
 const AXIS_V = { x: new THREE.Vector3(1, 0, 0), y: new THREE.Vector3(0, 1, 0), z: new THREE.Vector3(0, 0, 1) };
@@ -1466,12 +1472,14 @@ function disposeRig() {
   machineRig = null;
 }
 function rotaryKey() { return program && (program.setups || []).some(x => x.rotary) ? 'rot' : 'flat'; }
+function rigMachineName() { return machinePreview || (program ? program.machine : null); }
 async function loadMachineRig() {
-  if (!program) return null;
-  if (machineRig && machineRig.name === program.machine && machineRig.rotaryKey === rotaryKey()) { placeRig(); attachStage(); return machineRig; }
+  const name = rigMachineName();
+  if (!name) return null;
+  if (machineRig && machineRig.name === name && machineRig.rotaryKey === rotaryKey()) { placeRig(); attachStage(); return machineRig; }
   if (machineLoading) return machineLoading;
   machineLoading = (async () => {
-    const r = await fetch('/api/cam/machine_model?quality=normal').then(r => r.json());
+    const r = await fetch('/api/cam/machine_model?quality=normal' + (machinePreview ? '&name=' + encodeURIComponent(machinePreview) : '')).then(r => r.json());
     if (r.error) throw new Error(r.error);
     disposeRig();
     const root = new THREE.Group(); root.name = 'machine';
@@ -1493,7 +1501,7 @@ async function loadMachineRig() {
     }
     const stockNode = nodes.get((r.machine.nodes.find(n => n.stock) || r.machine.nodes[0]).name);
     const headZ = [...nodes.values()].find(g => g.userData.node.axis === 'z' && g.userData.node.mode === 'head') || root;
-    machineRig = { name: program.machine, rotaryKey: rotaryKey(), data: r.machine, materials: r.materials, root, nodes, parts, stockNode, headZ, origin: new THREE.Vector3(), tool: null };
+    machineRig = { name, rotaryKey: rotaryKey(), data: r.machine, materials: r.materials, root, nodes, parts, stockNode, headZ, origin: new THREE.Vector3(), tool: null };
     scene.add(root); placeRig(); attachStage();
     if (r.warnings && r.warnings.length) console.warn('machine model', r.warnings);
     return machineRig;
@@ -1501,7 +1509,9 @@ async function loadMachineRig() {
   return machineLoading;
 }
 function placeRig() {   // the machine origin (table top centre) in model coordinates: stock centred on the table, or on the 4th axis 5 mm off the chuck
-  const d = machineRig.data, st = program.stock, rs = (program.setups || []).find(x => x.rotary), o = machineRig.origin;
+  const d = machineRig.data, o = machineRig.origin;
+  if (!program) { o.set(0, 0, 0); machineRig.root.position.copy(o); return; }        // preview: the model sits at the machine origin
+  const st = program.stock, rs = (program.setups || []).find(x => x.rotary);
   if (rs && d.rotary) o.set(st.xmin - d.rotary.chuck_face_x - 5, rs.axis[0] - d.rotary.axis_y, rs.axis[1] - d.rotary.axis_z);
   else o.set((st.xmin + st.xmax) / 2, (st.ymin + st.ymax) / 2, st.zmin);
   machineRig.root.position.copy(o);
@@ -1553,8 +1563,13 @@ function flashMachine(hits) {
     p.mesh.material = hit ? machineHitMat : p.mat;
   }
 }
-async function setMachine(on) {
-  if (on && !program) { addMsg('system', "Build a CAM program first: the Machine view shows the program's machine around the stock and plays the simulation on it."); return; }
+async function setMachine(on, name) {
+  if (name) machinePreview = name;
+  if (on && !rigMachineName()) {
+    const first = (library.machines || [])[0];
+    if (first) machinePreview = first.name;                                    // no program: preview the first library machine
+    else { addMsg('system', 'No machines in the library: add one in Settings ▸ Machines, or build a CAM program.'); return; }
+  }
   machineOn = on;
   try {
     if (on) { scene.environment = await ensureEnv(); await loadMachineRig(); }
@@ -1562,7 +1577,7 @@ async function setMachine(on) {
   } catch (e) { machineOn = false; stageHome(); addMsg('error', 'Machine model: ' + e.message); }
   if (machineRig) machineRig.root.visible = machineOn;
   if (grid) grid.visible = !renderOn && !machineOn; if (axes) axes.visible = !renderOn && !machineOn;
-  if (program && sim) applySim(+simRange.value);
+  if (program && sim) applySim(+simRange.value); else if (machineOn && machineRig) { poseRig(null, 0, null); flashMachine([]); }
   if (machineOn) fitMachine();
   if (renderOn) renderGround();
   syncRibbon();
@@ -1571,8 +1586,7 @@ function fitMachine() {
   if (!machineRig) return;
   scene.updateMatrixWorld(true);
   const bb = new THREE.Box3().setFromObject(machineRig.root); if (bb.isEmpty()) return;
-  const saved = bbox; bbox = bb; fitCamera.inPose = true;
-  try { fitCamera(new THREE.Vector3(1, -1.25, 0.75).normalize()); } finally { bbox = saved; fitCamera.inPose = false; }
+  fitCamera(new THREE.Vector3(1, -1.25, 0.75).normalize());
 }
 function drawSimFrame(f, final) {
   for (const m of [simMesh, simLow]) if (m) { camGroup.remove(m); m.traverse(o => o.geometry && o.geometry.dispose()); }
@@ -4029,7 +4043,9 @@ function libraryEditor(mPane, tPane) {
     if (pane.querySelector('#m-model') !== el) return;                 // the pane was re-rendered meanwhile
     const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;');
     const tier = s => { const t = (String(s).split(':')[0] || '').trim(); const col = { verified: '#4caf7a', reference: '#e0a93a', estimated: '#8a94a3', user: '#4ea1ff' }[t] || '#8a94a3'; return `<span style="display:inline-block;padding:0 6px;border-radius:9px;font-size:10.5px;background:${col}22;color:${col};border:1px solid ${col}55">${esc(t)}</span>`; };
-    el.className = ''; el.innerHTML = `<div class="set-h">Machine model<span class="muted">${esc(d.name)} · the Machine view (ribbon ▸ Output) and the simulator's collision check</span></div>
+    const own = (library.scripts || []).includes(cur.m.name);
+    el.className = ''; el.innerHTML = `<div class="set-h">Machine model<span class="muted">${esc(d.name)} · ${own ? 'your own script (machines/' + esc(d.name.toLowerCase().replace(/[^a-z0-9\-_]+/g, '-')) + '.machine.py)' : 'built-in model'} · the Machine view (ribbon ▸ Output) and the simulator's collision check</span></div>
+      <div style="display:flex;gap:6px;margin:4px 0 8px;flex-wrap:wrap"><button class="btn small" data-a="show-machine">Show in viewer</button><button class="btn small" data-a="edit-machine">${own ? 'Edit script…' : 'Edit as script…'}</button><span class="muted" style="font-size:12px;align-self:center">or ask the agent: “model my machine…”</span></div>
       <div class="kv" style="font-size:12.5px">
         <div>Table</div><div>${d.table.x} × ${d.table.y} mm${d.spoilboard ? ` · spoilboard ${d.spoilboard} mm (cuts into it are allowed)` : ''}</div>
         <div>Travel</div><div>${d.travel.join(' × ')} mm · nose ${d.clearance} mm above the table at Z top</div>
@@ -4043,6 +4059,8 @@ function libraryEditor(mPane, tPane) {
       <div class="muted" style="margin-top:10px">Overrides (JSON): <code>nose</code> [{name, r, h}…] from the nose bottom up, <code>spoilboard</code>, <code>clearance</code>, <code>stickout</code> in mm. Measure your machine and put the real numbers here; Save writes them to the library.</div>
       <textarea data-a="model-json" spellcheck="false" style="width:100%;box-sizing:border-box;min-height:56px;margin-top:4px;background:#0f1216;color:var(--text);border:1px solid var(--line);border-radius:6px;font:12px/1.4 ui-monospace,Menlo,monospace;padding:6px">${esc(JSON.stringify(cur.m.model || {}))}</textarea>
       <div data-a="model-err" style="color:var(--red,#ff6b6b);font-size:12px"></div>`;
+    el.querySelector('[data-a=show-machine]').onclick = () => { if (modal.__close) modal.__close(null); setMachine(true, cur.m.name); };
+    el.querySelector('[data-a=edit-machine]').onclick = () => { if (modal.__close) modal.__close(null); machineCodeName = cur.m.name; document.querySelector('.tab[data-pane=code]').click(); showMachineCode('machine'); };
     const ta = el.querySelector('[data-a=model-json]'), err = el.querySelector('[data-a=model-err]');
     ta.onchange = () => { try { const v = JSON.parse(ta.value || '{}'); cur.m.model = Object.keys(v).length ? v : null; cur.dirty = true; err.textContent = ''; const it = mPane.querySelector(`.it[data-i="${sel}"] .dot`); if (!it) { const n = mPane.querySelector(`.it[data-i="${sel}"] div`); if (n) n.innerHTML += ' <span class="dot">●</span>'; } } catch (e) { err.textContent = e.message; } };
   }
@@ -4110,10 +4128,21 @@ function connect() {
       case 'sliced': loadSlice(m); break;
       case 'library_parts': libParts = m.parts; renderLibrary(); break;
       case 'drawings': renderDrawings(m.design, m.files); break;
-      case 'library': library = { machines: m.machines, tools: m.tools }; renderCamTab(); break;
+      case 'library': library = { machines: m.machines, tools: m.tools, scripts: m.machine_scripts || [] }; renderCamTab(); if (codeWhich === 'machine') fillMachineSelect(); break;
+      case 'machine':                            // a machine model script: loaded for the Code tab, or built (by the user or the agent)
+        if (m.name === machineCodeName || m.source !== 'load') { machineCode = m.code; machineCodeUser = !!m.user; }
+        if (codeWhich === 'machine' && m.name === machineCodeName && (!codeDirty || m.source !== 'agent')) { codeEl.value = m.code; codeDirty = false; document.getElementById('code-hint').innerHTML = codeHint(); }
+        if (m.source !== 'load') {
+          document.getElementById('codeerr').textContent = '';
+          addMsg('system', `machine model built: ${m.name}` + (m.source === 'user' ? ' (from the Code panel)' : ''));
+          if (m.show) setMachine(true, m.name); else if (machineOn && machineRig && machineRig.name === m.name) { disposeRig(); loadMachineRig().then(() => { if (program && sim) applySim(+simRange.value); else poseRig(null, 0, null); }); }
+        }
+        break;
+      case 'machine_error': document.getElementById('codeerr').textContent = m.text; addMsg('error', `machine model script failed (${m.name}) — see Code tab`); break;
       case 'cam':
         camCode = m.code || ''; lastGcodeLines = m.gcode_lines || 0; loadProgram(m.program);
-        if (machineOn) { if (m.program) { const was = machineRig && machineRig.name + machineRig.rotaryKey; loadMachineRig().then(() => { applySim(+simRange.value); if (machineRig && machineRig.name + machineRig.rotaryKey !== was) fitMachine(); }).catch(e => addMsg('error', 'Machine model: ' + e.message)); } else setMachine(false); }
+        if (m.program && machinePreview && machinePreview !== m.program.machine) machinePreview = null;   // a program picks its own machine
+        if (machineOn) { if (m.program || machinePreview) { const was = machineRig && machineRig.name + machineRig.rotaryKey; loadMachineRig().then(() => { if (m.program) applySim(+simRange.value); else poseRig(null, 0, null); if (machineRig && machineRig.name + machineRig.rotaryKey !== was) fitMachine(); }).catch(e => addMsg('error', 'Machine model: ' + e.message)); } else setMachine(false); }
         if (codeWhich === 'cam' && (!codeDirty || m.source === 'user')) { codeEl.value = camCode; codeDirty = false; }
         document.getElementById('codeerr').textContent = '';
         if (m.source === 'user') addMsg('system', 'CAM program rebuilt from Code panel');
@@ -4253,14 +4282,39 @@ window.cm = cm;
 // small adapter so the rest of the code can keep using codeEl.value
 const codeEl = { get value() { return cm.getValue(); }, set value(v) { settingCode = true; cm.setValue(v); settingCode = false; } };
 let designCode = '', codeWhich = 'design';
+// machine model scripts (Code tab ▸ machine.py): one per library machine, the user's own or the built-in it uses
+let machineCode = '', machineCodeName = '', machineCodeUser = false;
+const codeMachineEl = document.getElementById('code-machine');
+function fillMachineSelect() {
+  const names = (library.machines || []).map(m => m.name);
+  if (!machineCodeName || !names.includes(machineCodeName)) machineCodeName = (machinePreview && names.includes(machinePreview)) ? machinePreview : (program && names.includes(program.machine)) ? program.machine : (names[0] || '');
+  codeMachineEl.innerHTML = names.map(n => `<option ${n === machineCodeName ? 'selected' : ''}>${n.replace(/&/g, '&amp;').replace(/</g, '&lt;')}</option>`).join('');
+}
+function requestMachineCode(name) { machineCodeName = name; codeDirty = false; if (name) send({ type: 'get_machine_code', name }); else codeEl.value = '# no machines in the library — add one in Settings ▸ Machines\n'; }
+function codeHint() {
+  return codeWhich === 'design' ? 'build123d · <code>result</code> = shape or {name: shape} · ⌘↩ runs'
+    : codeWhich === 'cam' ? 'cam_kernel · assign <code>program</code> · ⌘↩ builds toolpaths'
+    : `machine model · <code>node</code> / <code>part</code> / <code>machine(…)</code> · ⌘↩ builds and saves it for ${machineCodeName || 'the machine'}${machineCodeUser ? '' : ' (built-in model shown; Run makes it your own)'}`;
+}
+function showMachineCode(which) {
+  codeWhich = which || 'machine'; document.getElementById('code-which').value = 'machine'; codeMachineEl.style.display = ''; fillMachineSelect();
+  document.getElementById('code-hint').innerHTML = codeHint(); document.getElementById('codeerr').textContent = '';
+  requestMachineCode(machineCodeName);
+}
 document.getElementById('code-which').onchange = e => {
   codeWhich = e.target.value; codeDirty = false;
+  codeMachineEl.style.display = codeWhich === 'machine' ? '' : 'none';
+  if (codeWhich === 'machine') { showMachineCode('machine'); return; }
   codeEl.value = codeWhich === 'design' ? designCode : (camCode || '# CAM script — see the CAM tab. Assign `program`.\n');
-  document.getElementById('code-hint').innerHTML = codeWhich === 'design' ? 'build123d · <code>result</code> = shape or {name: shape} · ⌘↩ runs' : 'cam_kernel · assign <code>program</code> · ⌘↩ builds toolpaths';
+  document.getElementById('code-hint').innerHTML = codeHint();
   document.getElementById('codeerr').textContent = '';
 };
-document.getElementById('code-run').onclick = () => { send({ type: codeWhich === 'design' ? 'run_code' : 'run_cam', code: codeEl.value }); };
-document.getElementById('code-reload').onclick = () => { codeDirty = false; if (codeWhich === 'design') send({ type: 'get_model' }); else codeEl.value = camCode; };
+codeMachineEl.onchange = e => requestMachineCode(e.target.value);
+document.getElementById('code-run').onclick = () => {
+  if (codeWhich === 'machine') { if (!machineCodeName) return; document.getElementById('codeerr').textContent = ''; send({ type: 'run_machine', name: machineCodeName, code: codeEl.value }); return; }
+  send({ type: codeWhich === 'design' ? 'run_code' : 'run_cam', code: codeEl.value });
+};
+document.getElementById('code-reload').onclick = () => { codeDirty = false; if (codeWhich === 'design') send({ type: 'get_model' }); else if (codeWhich === 'cam') codeEl.value = camCode; else requestMachineCode(machineCodeName); };
 </script>
 </body>
 </html>

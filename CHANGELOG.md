@@ -5,6 +5,21 @@ features, patch bumps fix things. The version shown in the UI header comes from 
 
 ## [Unreleased]
 
+### Added
+- **Machines are scripts: model your own machine.** Every library machine's 3D model is now a Python script in the same
+  spirit as `design.py` and `cam.py`: `machines/<slug>.machine.py` in the workspace, written against a small kinematic
+  API (`node(...)` for the moving axes, `part(...)` for build123d shapes with a material and a collision flag,
+  `machine(...)` for home, travel, clearance, the nose profile, table and 4th axis) in the design-script namespace, so
+  vendor CAD can be attached with `import_step`. The built-in Makera Z1, Carvera Air, Haas VMC and gantry-router models
+  are the same kind of script ([machine_scripts/](machine_scripts/)) and are what a machine falls back to. **Code tab ▸
+  machine.py** shows the script of any library machine (the built-in one as a starting point), Run validates it,
+  saves it as that machine's own model and shows it; **Settings ▸ Machines ▸ Model** gains *Show in viewer* (the
+  Machine view now works without a CAM program, with the current design sitting on the table) and *Edit as script…*.
+  The agent gets `get_machine_code` and `build_machine` and a brief on the API, so "add my Shapeoko 5 Pro and model
+  it" is a chat request; two evals (`machine_shapeoko_5_pro`, `machine_tormach_1100m`) grade the result against the
+  brief. Deleting a machine deletes its script. `GET /api/cam/machine_code`, WebSocket `run_machine` /
+  `get_machine_code`.
+
 ## [0.26.0] — 2026-10-10
 
 ### Added

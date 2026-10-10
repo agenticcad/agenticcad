@@ -233,6 +233,14 @@ Agent-native, like the CAD side: a second script per design, `cam.py`, written b
   contacts are listed in the summary with the op, move, position and depth. Every number carries its source and
   accuracy tier (`verified` / `reference` / `estimated`) in **Settings ▸ Machines ▸ Model**, where measured values
   (nose profile, stickout, spoilboard, clearance) can be entered per machine.
+- **Model your own machine** ([machine_script.py](machine_script.py)): a machine's model is a script,
+  `workspace/machines/<slug>.machine.py`, in the design-script namespace plus `node(name, parent, axis, mode, stock,
+  pivot)`, `part(name, node, shape, material, collision)` and `machine(home, travel, clearance, nose, table, rotary,
+  spoilboard, sources, notes)`, with helpers (`box`, `cyl_z/x/y`, `shell`, `bed_holes`, `import_step` for vendor CAD).
+  The built-ins live in [machine_scripts/](machine_scripts/) and are the fallback for any machine without its own
+  script, so **Code tab ▸ machine.py** always has a starting point: edit, Run, and the machine has its own model.
+  **Settings ▸ Machines ▸ Model** has *Show in viewer* (works without a CAM program) and *Edit as script…*; the agent's
+  `get_machine_code` / `build_machine` do the same from chat ("add my Shapeoko 5 Pro to the library and model it").
 - Not yet: drilling cycles (GRBL has none), thread milling, side-setup simulation.
 
 ## 3D printing (external slicer)

@@ -378,10 +378,19 @@ async def cam_machine_model(quality: str = "normal", name: str | None = None, in
         return JSONResponse({"error": "no CAM program (or unknown machine name)"}, status_code=404)
     try:
         if info:                                                       # numbers and sources only (Settings ▸ Machines ▸ Model)
-            return {"machine": machine_models.model_for(m).to_payload()}
-        return await asyncio.to_thread(machine_models.cached_payload, m, quality if quality in ("draft", "normal", "fine") else "normal")
+            return {"machine": (await asyncio.to_thread(machine_models.model_for, m, agent.workspace)).to_payload()}
+        return await asyncio.to_thread(machine_models.cached_payload, m, quality if quality in ("draft", "normal", "fine") else "normal", agent.workspace)
     except Exception as e:  # noqa: BLE001
         return JSONResponse({"error": str(e)}, status_code=400)
+
+
+@app.get("/api/cam/machine_code")
+async def cam_machine_code(name: str):
+    """A library machine's model script (the user's own, or the built-in it uses)."""
+    try:
+        return agent.machine_code(name)
+    except cam.CamError as e:
+        return JSONResponse({"error": str(e)}, status_code=404)
 
 
 @app.get("/api/cam/sim/frame/{k}")
@@ -820,6 +829,19 @@ async def _dispatch(ws: WebSocket, msg: dict) -> None:
             await ws.send_text(json.dumps({"type": "cam_error", "text": str(e)}))
         except Exception as e:  # noqa: BLE001
             await ws.send_text(json.dumps({"type": "cam_error", "text": f"{type(e).__name__}: {e}"}))
+    elif t == "run_machine":
+        try:
+            await agent.set_machine_code(msg.get("name", ""), msg.get("code", ""), source="user")
+            agent.notes.append(f"The user edited and rebuilt the machine model script of '{msg.get('name', '')}' by hand in the Code panel.")
+        except cam.CamError as e:
+            await ws.send_text(json.dumps({"type": "machine_error", "name": msg.get("name", ""), "text": str(e)}))
+        except Exception as e:  # noqa: BLE001
+            await ws.send_text(json.dumps({"type": "machine_error", "name": msg.get("name", ""), "text": f"{type(e).__name__}: {e}"}))
+    elif t == "get_machine_code":
+        try:
+            await ws.send_text(json.dumps({"type": "machine", **agent.machine_code(msg.get("name", "")), "source": "load", "show": False}))
+        except cam.CamError as e:
+            await ws.send_text(json.dumps({"type": "machine_error", "name": msg.get("name", ""), "text": str(e)}))
     elif t == "set_override":
         try:
             await agent.set_op_override(str(msg.get("key") or ""), msg.get("values"))

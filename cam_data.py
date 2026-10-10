@@ -154,9 +154,17 @@ class Library:
 
     def delete_machine(self, name: str) -> bool:
         p = self.machines_dir / f"{_slug(name)}.json"
+        script = self.machines_dir / f"{_slug(name)}.machine.py"
+        if script.exists():
+            script.unlink()
         if p.exists():
             p.unlink(); return True
         return False
+
+    def machine_scripts(self) -> list[str]:
+        """Names of machines that have their own model script (<slug>.machine.py)."""
+        slugs = {p.name[:-len(".machine.py")] for p in self.machines_dir.glob("*.machine.py")}
+        return [m.name for m in self.machines().values() if _slug(m.name) in slugs]
 
     # ---- tools
     def tools(self) -> list[Tool]:
