@@ -648,6 +648,23 @@ def _ring_coords(ring, climb_ccw: bool) -> list[tuple[float, float]]:
     return coords
 
 
+def _nn_order(items: list, xy, start=None) -> list:
+    """Greedy nearest-neighbour order of `items` by xy(item), starting nearest `start` (or the first item)."""
+    rest = list(items)
+    if not rest:
+        return []
+    out = []
+    cur = start
+    while rest:
+        if cur is None:
+            nxt = rest.pop(0)
+        else:
+            i = min(range(len(rest)), key=lambda k: (xy(rest[k])[0] - cur[0]) ** 2 + (xy(rest[k])[1] - cur[1]) ** 2)
+            nxt = rest.pop(i)
+        out.append(nxt); cur = xy(nxt)
+    return out
+
+
 def _levels(z_top: float, z_bottom: float, stepdown: float) -> list[float]:
     if z_bottom > z_top:
         raise CamError(f"z_bottom ({z_bottom}) is above z_top ({z_top})")
@@ -861,27 +878,36 @@ def pocket(setup: Setup, tool: Tool, polys, z_top: float, z_bottom: float, stepd
             op.warnings.append(f"rest: {tool.label()} does not fit in what {rest_from.label()} left")
             return op
         raise CamError(f"pocket: tool Ø{tool.diameter} does not fit in the region")
-    inner_ok = region.buffer(-tool.radius + 1e-6)   # where the tool centre may travel at depth
     levels = _levels(z_top, z_bottom, stepdown or tool.stepdown)
-    op.params = dict(z_top=z_top, z_bottom=z_bottom, stepover=so, passes=len(levels), rings=len(shells))
-    for z in levels:
+    # separate regions (two pockets) are finished one after the other through all depths — not one level across all of
+    # them — and visited nearest-neighbour; within a region the next level is plunged where the tool already is
+    regions = _nn_order(_polys(region), lambda R: (R.centroid.x, R.centroid.y), pb.pos[:2] if pb.pos else None)
+    op.params = dict(z_top=z_top, z_bottom=z_bottom, stepover=so, passes=len(levels), rings=len(shells), regions=len(regions))
+    for R in regions:
+        shells_R = [[q for q in ps if R.covers(q.representative_point())] for ps in shells]
+        shells_R = [ps for ps in shells_R if ps]
+        if not shells_R:
+            continue
+        inner_ok = R.buffer(-tool.radius + 1e-6)   # where the tool centre may travel at depth inside this region
         first = True
-        for ps in reversed(shells):        # innermost first
-            for q in ps:
-                q = orient(q, 1.0)
-                rings = [_ring_coords(q.exterior, False)] + [_ring_coords(h, True) for h in q.interiors]
-                if not climb:
-                    rings = [r[::-1] for r in rings]
-                for ring in rings:
-                    start = ring[0]
-                    if first or pb.pos is None or pb.pos[2] > z + 1e-6 or \
-                            not inner_ok.covers(LineString([pb.pos[:2], start])):
-                        pb.rapid_xy(*start); pb.plunge_to(z); first = False
-                    else:
+        for z in levels:
+            for ps in reversed(shells_R):        # innermost first
+                for q in ps:
+                    q = orient(q, 1.0)
+                    rings = [_ring_coords(q.exterior, False)] + [_ring_coords(h, True) for h in q.interiors]
+                    if not climb:
+                        rings = [r[::-1] for r in rings]
+                    for ring in rings:
+                        start = ring[0]
+                        if first or pb.pos is None or not inner_ok.covers(LineString([pb.pos[:2], start])):
+                            pb.rapid_xy(*start); pb.plunge_to(z); first = False
+                        else:
+                            if pb.pos[2] > z + 1e-6:
+                                pb.plunge_to(z)                      # next level: straight down where the tool is (cleared floor)
+                            pb.feed_to(start[0], start[1], z)
+                        for x, y in ring[1:]:
+                            pb.feed_to(x, y, z)
                         pb.feed_to(start[0], start[1], z)
-                    for x, y in ring[1:]:
-                        pb.feed_to(x, y, z)
-                    pb.feed_to(start[0], start[1], z)
         pb.retract()
     pb.retract()
     return op
@@ -1160,21 +1186,34 @@ def drill(setup: Setup, tool: Tool, points, z_top: float | None = None, z_bottom
     items = list(points) if isinstance(points, (list, tuple)) else [points]
     if not items:
         raise CamError("drill: no points")
-    count = 0
+    # one visit per location: holes() reports a counterbore and its through hole as two Hole objects at the same XY —
+    # merge them into one z range so the hole is drilled once, to full depth, with all its pecks before moving on
+    locs: list[list] = []                       # [x, y, z_top, z_bottom, through, min_dia]
     for it in items:
         if isinstance(it, Hole):
             x, y = it.x, it.y
             zt = it.z_top if z_top is None else z_top
             zb = it.z_bottom if z_bottom is None else z_bottom
-            if it.through and z_bottom is None:
-                zb -= tool.diameter * 0.3 + 0.5    # break through cleanly
             if it.diameter < tool.diameter - 1e-6:
                 op.warnings.append(f"hole Ø{it.diameter:.2f} at ({x:.1f},{y:.1f}) is smaller than tool Ø{tool.diameter}")
+            thr, dia = bool(it.through), it.diameter
         else:
             x, y = float(it[0]), float(it[1])
             if z_top is None or z_bottom is None:
                 raise CamError("drill: z_top and z_bottom are required for (x, y) points")
-            zt, zb = z_top, z_bottom
+            zt, zb, thr, dia = z_top, z_bottom, False, tool.diameter
+        same = next((L for L in locs if abs(L[0] - x) < 0.05 and abs(L[1] - y) < 0.05), None)
+        if same is not None:
+            same[2] = max(same[2], zt); same[3] = min(same[3], zb); same[4] = same[4] or thr; same[5] = min(same[5], dia)
+        else:
+            locs.append([x, y, zt, zb, thr, dia])
+    if z_bottom is None:
+        for L in locs:
+            if L[4]:
+                L[3] -= tool.diameter * 0.3 + 0.5    # break through cleanly
+    locs = _nn_order(locs, lambda L: (L[0], L[1]), pb.pos[:2] if pb.pos else None)   # shortest hop to the next hole
+    count = 0
+    for x, y, zt, zb, _thr, _dia in locs:
         pk = (tool.diameter * 2) if peck == "auto" else peck
         pb.rapid_xy(x, y)
         pb._add(RAPID, x, y, zt + retract)
@@ -1191,7 +1230,7 @@ def drill(setup: Setup, tool: Tool, points, z_top: float | None = None, z_bottom
             pb._add(RAPID, x, y, zt + retract)
         count += 1
     pb.retract()
-    op.params = dict(holes=count, peck=peck)
+    op.params = dict(holes=count, peck=peck, merged=len(items) - len(locs))
     return op
 
 

@@ -5,6 +5,17 @@ features, patch bumps fix things. The version shown in the UI header comes from 
 
 ## [Unreleased]
 
+## [0.33.1] — 2026-10-11
+
+### Fixed
+- **Drilling finishes each hole.** `holes()` reports a counterbore and its through hole as two entries at the same
+  position; `drill` drilled them as two visits, so a pecked hole looked like "one peck, next hole, come back".
+  Same-position holes are now merged into one visit to full depth with all its pecks, and holes are visited in
+  nearest-neighbour order.
+- **Pockets finish one region before the next.** `pocket` cut every region one level at a time (hopping between
+  pockets at each depth); it now takes each region through all its depths, plunging the next level where the tool
+  already is instead of retracting to safe Z, and visits regions nearest-neighbour.
+
 ## [0.33.0] — 2026-10-11
 
 ### Added

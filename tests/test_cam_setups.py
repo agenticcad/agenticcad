@@ -347,3 +347,46 @@ def test_fanuc_rotary_uses_inverse_time(machines, shaft):
     # a Haas TM-1 without a changer stops the operator before each tool change
     g2 = two_sided(machines["Haas TM-1"], ck.run_script(PLATE)).gcode()
     assert g2.count("M00") >= 2 and re.search(r"^T1 M06$", g2, re.M)
+
+
+# ------------------------------------------------------------------ toolpath ordering: finish each feature before the next
+
+def test_drill_finishes_each_hole_and_merges_counterbores(machines):
+    code = '''
+plate = Box(80, 50, 12, align=(Align.CENTER, Align.CENTER, Align.MIN))
+for x in (-30, 30, 0):
+    plate = plate - Pos(x, 0, 6) * Cylinder(2.5, 12)
+plate = plate - Pos(30, 0, 8) * Cylinder(5, 4)
+result = {"P": plate}
+'''
+    m = ck.run_script(code)
+    hs = cam.holes(m.shape)
+    assert sum(1 for h in hs if abs(h.x - 30) < 0.1) == 2                   # the counterbore and its through hole
+    st = cam.Setup(machines["Makera Z1"], cam.Stock.from_model(m, margin=2, top=1))
+    drill = cam.Tool(5, "3 mm drill", "drill", 3.0, 2, 30, rpm=8000, feed=300, plunge=150, stepdown=3.0, stepover=1.0, angle=118)
+    op = cam.drill(st, drill, hs, peck=3.0)
+    visits = []
+    for mv in op.moves:
+        k = (round(mv[1], 1), round(mv[2], 1))
+        if not visits or visits[-1] != k:
+            visits.append(k)
+    assert visits == [(-30.0, 0.0), (0.0, 0.0), (30.0, 0.0)] and op.params["holes"] == 3 and op.params["merged"] == 1
+    # every peck of a hole happens before the next hole; the merged hole goes to the full depth (through: + breakthrough)
+    plunges = [mv for mv in op.moves if mv[0] == cam.PLUNGE and abs(mv[1] - 30) < 0.1]
+    assert len(plunges) >= 4 and min(p[3] for p in plunges) < 0.0
+
+
+def test_pocket_finishes_each_region_before_the_next(machines, plate):
+    st = cam.Setup(machines["Makera Z1"], cam.Stock.from_model(plate, margin=3, top=1))
+    t = flat()
+    op = cam.pocket(st, t, [cam.rect(-28, 2, -8, 14), cam.rect(8, -14, 28, -2)], z_top=12, z_bottom=6, stepdown=2.0)
+    assert op.params["regions"] == 2 and op.params["passes"] == 3
+    runs = []
+    for mv in op.moves:
+        side = "L" if mv[1] < 0 else "R"
+        if not runs or runs[-1] != side:
+            runs.append(side)
+    assert len(runs) == 2                                                     # one region fully, then the other
+    # within a region the deeper levels start with a plunge where the tool is, not a retract to safe Z
+    safe_rapids = sum(1 for mv in op.moves if mv[0] == cam.RAPID and mv[3] >= st.safe_z - 1e-6)
+    assert safe_rapids <= 4
