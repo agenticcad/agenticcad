@@ -890,6 +890,21 @@ CASES += [
          graders=[no_agent_error(), expect_tools_used("build_machine", "screenshot"),
                   machine_model_checks("vf-4", table=(1320.8, 457.2), clearance=741.7, travel=(1270, 508, 635), min_parts=25,
                                        moving={"x": "table", "y": "table", "z": "head"})]),
+    Case("machine_makera_z1_photos", tags=["machine", "cam", "photos"], images=reference_photos("makera_z1"),
+         prompt=("Here are Makera's own product photos of the Z1 (front, three-quarter, in use with the canopy open, side views) and of its 4th-axis module. "
+                 "The built-in model (get_machine_code 'Makera Z1 + 4th axis') has the insides modelled well but its case is WRONG — it was guessed. Uplift the case to match the photos: "
+                 "the Z1 is a dark charcoal lower base/plinth with the MAKERA badge and the power button, and above it one large smoked-acrylic canopy that wraps the whole "
+                 "front and the top as a single tinted shell with a rounded front top edge, hinged at the rear so the whole canopy lifts up; the sides are light grey/silver "
+                 "sheet panels with the diagonal split between the tinted canopy and the grey panel (the 'MAKERA Z1' lettering runs along that diagonal), an LED light bar "
+                 "inside along the top rear, the bridge and spindle visible through the canopy. Keep every verified number and all the internal parts from the built-in "
+                 "(bed, holes, rods, bridge, carriages, spindle, 4th axis under `fourth`), keep home (-108, 101, 116), keep the part names 'spoilboard', 'spindle nose' and "
+                 "'enclosure' and the sources keys 'work area', 'gantry clearance' and 'bed 206×206 and hole grid'. Use materials: 'paint_dark' for the plinth, 'paint_light' "
+                 "for the side panels, 'acrylic' for the canopy (it must stay transparent so the inside is visible), and keep the enclosure footprint about 355 × 435 × 449. "
+                 "Build it for 'Makera Z1 + 4th axis', screenshot from the front, iso and right views, compare with the photos, iterate at least once until the silhouette matches, "
+                 "then save the same script for 'Makera Z1' too with build_machine. Tell me what you estimated."),
+         graders=[no_agent_error(), expect_tools_used("build_machine", "screenshot"),
+                  machine_model_checks("z1 + 4th", table=(206, 206), clearance=116, travel=(200, 200, 100), min_parts=25,
+                                       moving={"y": "table", "x": "head", "z": "head", "a": "table"})]),
     Case("ext_mass_cost_panel", tags=["ext"],
          prompt="Write an extension with a panel that estimates mass and material cost per body: a material dropdown per body "
                 "(aluminium, steel, brass, PLA with sensible densities and $/kg), a table with mass and cost per body, and totals. "

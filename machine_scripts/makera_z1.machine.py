@@ -2,8 +2,8 @@
 # Frame: X right, Y back, Z up, origin = centre of the bed top (spoilboard top) with the bed at machine zero (forward).
 # Verified: makera.com (work area 200×200×100, gantry clearance 115, 4th axis Ø80×150), Makera Z1-MDF-v2.1 bed file
 # (206×206×6, 36 counterbored M5 holes). Reference: Carvera Community simplified Z1 model (spindle nose Ø16×20,
-# head 65×70×190, enclosure 355×435×449, chuck Ø52). Everything else (rods, carriages, chains, probe dock, tool setter,
-# window, LED, feet) is ESTIMATED from photos — representative, not measured.
+# head 65×70×190, enclosure 355×435×449, chuck Ø52). Case styling (plinth / canopy / diagonal split) from Makera's
+# product photos; its proportions are ESTIMATED. Rods, carriages, chains, probe dock, tool setter, LED, feet: estimated.
 
 node("base")
 node("bed", "base", axis="y", mode="table", stock=not fourth)      # the bed carries the work and moves in Y
@@ -115,40 +115,99 @@ ds = ds + (cyl_x(7, 18, hy, nose_z + 27, hx + 27) - cyl_x(5, 20, hy, nose_z + 27
 part("dust shoe", "spindle", ds, "acrylic")
 part("dust shoe brush", "spindle", cyl_z(30, 16, at=(hx, hy), zmin=nose_z + 4) - cyl_z(26, 18, at=(hx, hy), zmin=nose_z + 3), "rubber")
 
-# ------------------------------------------------------------------ enclosure: white sheet metal, front window opening
-ex, ey, eh, ecy, ez0, wall = 355.0, 435.0, 449.0, 95.0, -99.0, 2.0
+# ------------------------------------------------------------------ case (from Makera's photos)
+# One rounded shell 355×435×449 (reference), split three ways:
+#   * dark charcoal plinth: the front lower band, in front of the side diagonal
+#   * smoked-acrylic canopy: the whole front above the plinth + the roof + the side triangles in front of the diagonal
+#     (one piece, hinged at the rear end of its roof so it lifts up; shown closed)
+#   * light grey sheet panels ('enclosure'): the side trapezoids behind the diagonal, the rear roof strip, rear and floor
+ex, ey, eh, ecy, ez0, wall = 355.0, 435.0, 449.0, 95.0, -99.0, 3.0
 yf = ecy - ey / 2                                  # front face y = -122.5
-outer = box(ex, ey, eh, at=(0, ecy, 0), zmin=ez0)
-outer = fillet(outer.edges().filter_by(Axis.Z), 12)
-inner = box(ex - 2 * wall, ey - 2 * wall, eh - 2 * wall, at=(0, ecy, 0), zmin=ez0 + wall)
-inner = fillet(inner.edges().filter_by(Axis.Z), 10)
-win_w, win_z0, win_z1 = 304.0, -20.0, 335.0
-enc = outer - inner - box(win_w, 10, win_z1 - win_z0, at=(0, yf + 1, 0), zmin=win_z0)
-for k in range(6):                                 # rear vent slots
-    enc = enc - box(140, 10, 5, at=(0, yf + ey - 1, 0), zmin=180 + k * 12)
-part("enclosure", "base", enc, "paint_white", collision=True)
+yr = ecy + ey / 2                                  # rear face  y = +312.5
+ztop = ez0 + eh                                    # roof z = 350
+r_top, r_bot = 32.0, 12.0                          # estimated: rounded front-top / roof / vertical edges, softer base edge
+plinth_top = -10.0                                 # estimated: plinth ≈ 89 mm tall (photos: ~1/5 of the height)
+rim_h = 12.0                                       # estimated: black rim along the canopy's lower edge
+diag_y0, diag_y1 = yf + 40.0, yf + 355.0           # estimated: side diagonal from (40 back, floor) to (355 back, roof)
 
-# large tinted flip-up front window, hinged at the top (shown closed)
-fw, fh = win_w + 8, win_z1 - win_z0 + 8
-frame = box(fw, 4, fh, at=(0, yf - 2, 0), zmin=win_z0 - 4) - box(fw - 20, 6, fh - 20, at=(0, yf - 2, 0), zmin=win_z0 + 6)
-part("front window frame", "base", frame, "paint_dark")
-part("front window", "base", box(fw - 20, 3, fh - 20, at=(0, yf - 2, 0), zmin=win_z0 + 6), "acrylic")
-part("window hinge", "base", cyl_x(3.5, 300, yf - 4.5, win_z1 + 8, -150), "steel")
-part("window handle", "base", box(120, 10, 8, at=(0, yf - 9, 0), zmin=win_z0 + 2), "paint_dark")
-# front panel: status light + power button + logo
-part("status light", "base", cyl_y(7, 3, 130, -60, yf - 3), "acrylic")
-part("status light bezel", "base", cyl_y(10, 1.5, 130, -60, yf - 1.5) - cyl_y(7.2, 2, 130, -60, yf - 1.8), "paint_dark")
-part("power button", "base", cyl_y(7, 4, 155, -60, yf - 4), "paint_dark")
+def rounded_block(w, d, h, zmin, r, rb):
+    b = box(w, d, h, at=(0, ecy, 0), zmin=zmin)
+    b = fillet(b.edges().filter_by(Axis.Z) + b.faces().sort_by(Axis.Z)[-1].edges(), r)
+    b = fillet(b.faces().sort_by(Axis.Z)[0].edges(), rb)
+    return b
+
+outer = rounded_block(ex, ey, eh, ez0, r_top, r_bot)
+inner = rounded_block(ex - 2 * wall, ey - 2 * wall, eh - 2 * wall, ez0 + wall, r_top - wall, r_bot - wall / 2)
+shell = outer - inner
+
+def diag_y(z, dy=0.0):
+    return diag_y0 + (z - ez0) * (diag_y1 - diag_y0) / eh + dy
+
+def front_of_diagonal(dy=0.0):
+    """Prism (along X) of everything in front of the side diagonal, shifted dy in Y."""
+    za, zb = ez0 - 60, ztop + 60
+    pts = [(yf - 60, za), (diag_y(za, dy), za), (diag_y(zb, dy), zb), (yf - 60, zb)]
+    return extrude(Plane.YZ * make_face(Polyline(*pts, close=True)), amount=ex, both=True)
+
+front = front_of_diagonal()
+diag_band = front - front_of_diagonal(-9.0)        # 9 mm black edge of the canopy along the diagonal and the roof joint
+below_plinth = box(ex + 20, ey + 120, plinth_top - ez0 + 60, at=(0, ecy, 0), zmin=ez0 - 60)
+rim_slab = box(ex + 20, ey + 120, rim_h, at=(0, ecy, 0), zmin=plinth_top)
+
+# grey side panels + rear + roof strip behind the canopy
+part("enclosure", "base", shell - front, "paint_light", collision=True)
+
+# dark plinth with the shallow front handle recess under the canopy lip
+plinth = shell & front & below_plinth
+plinth = plinth - box(140, 4, 10, at=(0, yf, 0), zmin=plinth_top - 10)
+part("plinth", "base", plinth, "paint_dark", collision=True)
+
+# smoked acrylic canopy (front + roof + side triangles), with its black rim and diagonal edge
+canopy_zone = shell & front - below_plinth
+part("canopy", "base", canopy_zone - rim_slab - diag_band, "acrylic", collision=True)
+part("canopy frame", "base", (canopy_zone & rim_slab) + (canopy_zone & diag_band), "paint_dark", collision=True)
+for hxp in (-60, 60):                              # rear hinges where the canopy roof meets the grey roof strip
+    hinge = box(24, 16, 6, at=(hxp, diag_y(ztop) + 2, 0), zmin=ztop - 1) + cyl_x(3.5, 24, diag_y(ztop) + 8, ztop + 3.5, hxp - 12)
+    part(f"canopy hinge {'L' if hxp < 0 else 'R'}", "base", hinge, "paint_dark")
+
+# plinth front: pill power button + MAKERA badge
+pill_z = plinth_top - 32
+pill = Plane(origin=(0, yf, pill_z), x_dir=(1, 0, 0), z_dir=(0, -1, 0)) * extrude(SlotOverall(32, 12), 1.5)
+part("power button", "base", pill, "paint_dark")
+part("power button ring", "base", Plane(origin=(0, yf + 0.2, pill_z), x_dir=(1, 0, 0), z_dir=(0, -1, 0))
+     * extrude(SlotOverall(36, 16) - SlotOverall(32.5, 12.5), 0.8), "stainless")
 try:
-    logo = Plane(origin=(-150, yf, -66), x_dir=(1, 0, 0), z_dir=(0, -1, 0)) * extrude(Text("MAKERA", 14, align=(Align.MIN, Align.MIN)), 0.8)
-    part("logo", "base", logo, "paint_dark")
+    logo = Plane(origin=(0, yf, pill_z - 26), x_dir=(1, 0, 0), z_dir=(0, -1, 0)) * extrude(
+        Text("MAKERA", 13, font_style=FontStyle.BOLD, align=(Align.CENTER, Align.CENTER)), 0.6)
+    part("logo", "base", logo, "paint_white")
 except Exception:
     pass
-# LED light strip under the roof, behind the window
-part("LED strip", "base", box(290, 10, 3, at=(0, yf + 14, 0), zmin=ez0 + eh - wall - 3), "acrylic")
+
+# 'MAKERA Z1' along the diagonal on both grey side panels (letters' tops toward the canopy)
+ang = math.atan2(eh, diag_y1 - diag_y0)
+c, s = math.cos(ang), math.sin(ang)
+zt = ez0 + 0.42 * eh                               # estimated: lettering centred a little below mid-height
+yt = diag_y(zt) + 22.0 / s                         # 22 mm off the diagonal into the grey panel
+for side in (1, -1):
+    xd = (0, c, s) if side > 0 else (0, -c, -s)
+    try:
+        txt = Plane(origin=(side * ex / 2, yt, zt), x_dir=xd, z_dir=(side, 0, 0)) * extrude(
+            Text("MAKERA  Z1", 27, font_style=FontStyle.BOLD, align=(Align.CENTER, Align.CENTER)), 0.6)
+        part(f"side lettering {'R' if side > 0 else 'L'}", "base", txt, "paint_white")
+    except Exception:
+        pass
+
+# LED light bar under the roof along the top rear (behind the canopy, in front of the bridge beam)
+part("LED bar holder", "base", box(300, 14, 6, at=(0, diag_y(ztop) - 30, 0), zmin=ztop - wall - 6), "paint_dark")
+part("LED bar", "base", box(290, 8, 2, at=(0, diag_y(ztop) - 30, 0), zmin=ztop - wall - 8), "paint_white")
+
+# rear vent grille
+for k in range(8):
+    part(f"rear vent {k}", "base", box(150, 1, 4, at=(0, yr + 0.5, 0), zmin=170 + k * 10), "paint_dark")
+
 # rubber feet
 for fx in (-150, 150):
-    for fy in (yf + 30, yf + ey - 30):
+    for fy in (yf + 30, yr - 30):
         part(f"foot {'L' if fx < 0 else 'R'}{'F' if fy < 0 else 'B'}", "base", cyl_z(12, 8, at=(fx, fy), zmin=ez0 - 8), "rubber")
 
 # ------------------------------------------------------------------ 4th-axis module (when fitted)
@@ -183,9 +242,12 @@ machine(key="z1_4axis" if fourth else "z1", home=(hx, hy, nose_z), travel=(200, 
                  "bed 206×206 and hole grid": "verified: Makera Z1-MDF-v2.1 (official bed file)",
                  "spindle nose Ø16×20": "reference: community simplified model — measure yours",
                  "head 65×70×190": "reference: community simplified model", "enclosure 355×435×449": "reference: community simplified model",
+                 "case styling (plinth, canopy, diagonal split, lettering)": "reference: Makera product photos",
+                 "plinth height 89, diagonal 40→355 mm back, edge radii 32/12, rim 12": "estimated: scaled from Makera product photos",
                  "4th axis chuck Ø52, axis 45 above bed, tailstock Ø14": "reference: community simplified model; Ø80×150 verified: makera.com",
                  "rods, carriages, bridge uprights, motors, cable chains": "estimated: from photos, representative only",
                  "probe dock and tool-length setter positions": "estimated: front rail of the bed (x −85 / +80, y −110) — measure yours",
-                 "front window, hinge, LED strip, status light, feet, dust shoe": "estimated: from photos (dust shoe Ø60 not in the nose collision stack)"},
+                 "canopy hinges, LED bar, power button, vents, feet, dust shoe": "estimated: from photos (dust shoe Ø60 not in the nose collision stack)"},
         notes="Moving bed in Y under a fixed rear bridge; the head moves X along the bridge and Z. Machine zero: head back-left, bed forward. "
-              "Front window shown closed. Detail parts beyond the verified/reference numbers are estimated.")
+              "Case: dark plinth, one smoked-acrylic canopy (front + roof + side triangles) hinged at the rear of its roof, shown closed; "
+              "light grey side panels behind the diagonal. Detail parts beyond the verified/reference numbers are estimated.")
