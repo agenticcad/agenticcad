@@ -94,9 +94,19 @@ bus = Bus()
 agent = CadAgent(WORKSPACE, bus.emit, bus.screenshot)
 
 
+_loader: asyncio.Task | None = None
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    agent.load_initial()
+    # The first design is built in the background so the window can show a splash with progress at once (a big design
+    # with real threads takes minutes). Clients get `startup` events, then the model when it lands.
+    loop = asyncio.get_running_loop()
+    agent.on_startup = lambda st: loop.call_soon_threadsafe(lambda: asyncio.ensure_future(bus.emit({"type": "startup", **st})))
+    global _loader
+    _loader = asyncio.create_task(_load_initial())
+    if os.environ.get("AGENTICCAD_STARTUP_SYNC") == "1":  # tests: the model exists before the first request
+        await _loader
     task = None
     if os.environ.get("AGENTICCAD_NO_AGENT") != "1":      # tests run the API without a Claude session
         task = asyncio.create_task(_connect_agent())
@@ -106,6 +116,21 @@ async def lifespan(app: FastAPI):
         task.cancel()
     watcher.cancel()
     await agent.stop()
+
+
+async def _load_initial() -> None:
+    try:
+        await asyncio.to_thread(agent.load_initial)
+    except Exception as e:  # noqa: BLE001
+        await bus.emit({"type": "error", "text": f"could not build the last design at startup: {e}"})
+    await bus.emit({"type": "startup", **agent.startup_payload()})
+    if agent.model:
+        await bus.emit(_model_event())
+        await bus.emit(agent.design_state())
+        await bus.emit({"type": "cam", "code": agent.cam_code, "source": "load",
+                        "program": agent.program.to_payload() if agent.program else None,
+                        "summary": agent.program.summary() if agent.program else "",
+                        "gcode_lines": agent.program.gcode().count("\n") if agent.program else 0})
 
 
 async def _watch_extensions() -> None:
@@ -123,6 +148,8 @@ async def _watch_extensions() -> None:
 
 
 async def _connect_agent() -> None:
+    if _loader is not None:
+        await _loader                                         # the agent's first context needs the built model
     if find_claude_cli() is None:
         await bus.emit({"type": "agent_missing_cli"})
         return
@@ -382,6 +409,12 @@ async def cam_machine_model(quality: str = "normal", name: str | None = None, in
         return await asyncio.to_thread(machine_models.cached_payload, m, quality if quality in ("draft", "normal", "fine") else "normal", agent.workspace)
     except Exception as e:  # noqa: BLE001
         return JSONResponse({"error": str(e)}, status_code=400)
+
+
+@app.get("/api/startup")
+async def startup_status():
+    """Startup progress for the splash screen: steps done so far, the one in progress, and `done` once the first design is built."""
+    return agent.startup_payload()
 
 
 @app.get("/api/cam/machine_code")
@@ -780,6 +813,8 @@ async def ws_endpoint(ws: WebSocket) -> None:
     await ws.accept()
     bus.clients.add(ws)
     try:
+        if not agent.startup["done"] or agent.startup["error"]:      # still building the first design: feed the splash
+            await ws.send_text(json.dumps({"type": "startup", **agent.startup_payload()}))
         if agent.model:
             await ws.send_text(json.dumps(_model_event()))
         await ws.send_text(json.dumps(agent.design_state()))

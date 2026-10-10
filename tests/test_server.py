@@ -24,6 +24,7 @@ def client(tmp_path_factory):
     ws = tmp_path_factory.mktemp("ws")
     os.environ["AGENTICCAD_WORKSPACE"] = str(ws)
     os.environ["AGENTICCAD_NO_AGENT"] = "1"
+    os.environ["AGENTICCAD_STARTUP_SYNC"] = "1"           # build the first design before serving (the app does it in the background)
     import cad_kernel as ck
     # these tests exercise the two-body demo saved as a named design (an unsaved demo working copy is upgraded to a blank start)
     (ws / "designs").mkdir(exist_ok=True); (ws / "designs" / "demo.py").write_text(ck.DEFAULT_CODE)
@@ -40,6 +41,8 @@ def test_index_and_initial_model(client):
     with client.websocket_connect("/ws") as ws:
         first = ws.receive_json()
         assert first["type"] == "model" and len(first["mesh"]["bodies"]) == 2
+    st = client.get("/api/startup").json()                                   # the splash screen's status
+    assert st["done"] and not st["error"] and any("Building" in s["text"] for s in st["steps"])
 
 
 def test_params_roundtrip_rebuilds(client):

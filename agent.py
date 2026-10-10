@@ -472,6 +472,29 @@ class CadAgent:
         cam_path = workspace / "cam.py"
         if cam_path.exists():
             self.cam_code = cam_path.read_text()
+        # startup progress (the splash screen): steps are appended as they start; `done` when the first design is built
+        self.startup: dict[str, Any] = {"steps": [], "done": False, "error": None, "started": time.time(), "design": None}
+        self.on_startup = None                 # set by the server: called (from any thread) when the status changes
+
+    def _startup_step(self, text: str, done: bool = False) -> None:
+        st = self.startup
+        if st["steps"] and not st["steps"][-1]["done"]:
+            st["steps"][-1]["done"] = True
+            st["steps"][-1]["secs"] = round(time.time() - st["steps"][-1]["t0"], 1)
+        if text:
+            st["steps"].append({"text": text, "done": False, "t0": time.time()})
+        if done:
+            st["done"] = True
+        if self.on_startup:
+            try:
+                self.on_startup(self.startup_payload())
+            except Exception:  # noqa: BLE001
+                pass
+
+    def startup_payload(self) -> dict[str, Any]:
+        st = self.startup
+        return {"steps": [{"text": s["text"], "done": s["done"], "secs": s.get("secs", round(time.time() - s["t0"], 1))} for s in st["steps"]],
+                "done": st["done"], "error": st["error"], "elapsed": round(time.time() - st["started"], 1), "design": st["design"]}
 
     # ------------------------------------------------------------------ design files
     @property
@@ -1365,6 +1388,16 @@ class CadAgent:
             await self.emit({"type": "error", "text": f"undo failed: {e}"})
 
     def load_initial(self) -> None:
+        try:
+            self._load_initial()
+        except Exception as e:  # noqa: BLE001
+            self.startup["error"] = f"{type(e).__name__}: {e}"
+            self._startup_step("", done=True)
+            raise
+        self._startup_step("", done=True)
+
+    def _load_initial(self) -> None:
+        self._startup_step("Reading the workspace")
         state_path = self.workspace / "state.json"
         name = None
         if state_path.exists():
@@ -1384,6 +1417,10 @@ class CadAgent:
             code = None                            # the demo seeded by versions before 0.11: upgrade to a blank start
         fresh = code is None
         code = code or ck.NEW_DESIGN_CODE          # first run: an empty design, not a demo
+        self.startup["design"] = self.design_name
+        n_threads = code.count("thread(") + code.count("tap(") + code.count("bolt(")
+        what = f"Building design '{self.design_name}'" if self.design_name else ("Building the current design" if not fresh else "Preparing an empty design")
+        self._startup_step(what + (" (real threads: this can take a few minutes)" if n_threads and not fresh else ""))
         try:
             self.model = ck.run_script(code, self.quality, self.workspace, self.parts, config=self.config)
         except ck.CadError:
@@ -1398,6 +1435,7 @@ class CadAgent:
             self.saved_code = code                 # an untouched empty design is not unsaved work
         (self.workspace / "model.py").write_text(code)
         if self.cam_code.strip():          # rebuild the CAM program from the working copy
+            self._startup_step("Rebuilding the CAM program")
             try:
                 self.program = self._run_cam(self.cam_code)
             except Exception:  # noqa: BLE001

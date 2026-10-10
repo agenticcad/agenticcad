@@ -5,6 +5,17 @@ features, patch bumps fix things. The version shown in the UI header comes from 
 
 ## [Unreleased]
 
+## [0.28.0] — 2026-10-10
+
+### Added
+- **Startup splash with progress.** The server now accepts connections at once and builds the last design in the
+  background, so the window shows a splash screen immediately: the steps as they run (reading the workspace, building
+  the design, rebuilding the CAM program), a progress bar, elapsed time on the step in progress, and a note when a
+  design with real threads is taking minutes. The desktop app shows its own splash even earlier, while the CAD kernel
+  loads and the server starts, then hands over to the page. `GET /api/startup` reports the status; the page falls back
+  to polling it while the build holds the server busy. `AGENTICCAD_STARTUP_SYNC=1` restores the old blocking start
+  (tests).
+
 ## [0.27.1] — 2026-10-10
 
 ### Fixed
