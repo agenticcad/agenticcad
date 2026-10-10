@@ -52,6 +52,8 @@ def builtin_key(machine) -> str:
     if "carvera" in name or "air" in name.split():
         return "carvera_air"
     if machine.post == "haas" or name.startswith("haas"):
+        if "vf-4" in name and "ss" not in name.replace("vf-4", ""):
+            return "haas_vf4"                  # photo-matched VF-4; the other Haas models use the parametric VMC
         return "haas_vmc"
     return "router"
 

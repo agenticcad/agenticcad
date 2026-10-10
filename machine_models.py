@@ -82,6 +82,7 @@ MATERIALS = {
     "paint_white": {"color": "#eceef0", "metalness": 0.05, "roughness": 0.45},
     "paint_dark": {"color": "#2f3338", "metalness": 0.2, "roughness": 0.55},
     "paint_blue": {"color": "#3b5a8f", "metalness": 0.15, "roughness": 0.5},
+    "paint_red": {"color": "#c8102e", "metalness": 0.1, "roughness": 0.45},
     "ground_steel": {"color": "#a3a8ae", "metalness": 0.95, "roughness": 0.32},
     "steel": {"color": "#8f949a", "metalness": 0.9, "roughness": 0.4},
     "stainless": {"color": "#c0c4c8", "metalness": 0.95, "roughness": 0.28},
