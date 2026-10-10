@@ -5,6 +5,16 @@ features, patch bumps fix things. The version shown in the UI header comes from 
 
 ## [Unreleased]
 
+## [0.31.0] — 2026-10-10
+
+### Changed
+- **Tabbed ribbon.** The modelling ribbon is now tabbed like Fusion: **Design** (Create, Modify, Assemble, Inspect),
+  **CAM** (Machine, Doors, Simulate, Play), **Output** (Render, Drawings, Slice) and **Extensions**. It keeps to one
+  row: labels drop to icons when the row would wrap, then groups fold into dropdowns from the right, so a 13" laptop
+  with the side panel open no longer loses a quarter of the viewer to a wrapped ribbon. The ribbon can be collapsed
+  to its tab strip (▴), and the last tab and collapsed state are remembered.
+- The CAM tab's machine picker follows the program's machine; the playback readout has its own line.
+
 ## [0.30.2] — 2026-10-10
 
 ### Changed

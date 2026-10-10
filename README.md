@@ -229,7 +229,7 @@ Agent-native, like the CAD side: a second script per design, `cam.py`, written b
   kinematic 3D model built in build123d from published and measured numbers — Makera Z1 and Carvera Air (bed with the
   real hole grid, moving bed in Y under the rear bridge, head in X/Z, 4th-axis chuck and tailstock, enclosure), Haas
   VF-2 / VF-2SS / VF-4 / Mini Mill / TM-1 (table with the real T-slots, saddle, column, CAT40 + ER32 holder, nose-to-
-  table range) and a parametric gantry router for everything else. **Machine** in the ribbon (Output, `A`) shows the
+  table range) and a parametric gantry router for everything else. **Machine** in the ribbon (CAM tab, `A`) shows the
   program's machine around the stock and plays the simulation on it: head, table and chuck move as they would, the
   tool hangs from the spindle, and any part the simulator saw collide flashes red at that move. The simulation itself
   checks the whole stack above the flutes (shank, collet nut, nose, collar, head) against the remaining stock, the
@@ -383,7 +383,7 @@ with real threads, as `exports/<design>-<name>.step` / `.stl`. The agent has the
 tool (list / set / delete / activate / export), and can write the dict directly. The active variant is remembered per
 workspace.
 
-### Modelling ribbon (Fusion-style, no agent turn)
+### Modelling ribbon (Fusion-style, tabbed, no agent turn)
 Top of the viewer: **Create** Box `B` / Cylinder `C` / Sphere `O` / Sketch `K` / Revolve `R` / Loft `G` / Sweep `W`,
 **Modify** Press/Pull `Q` / Hole `H` / Fillet `F` / Chamfer `X` / Shell `L` / Move `V` / Mirror `M` / Pattern `N`,
 **Inspect** Measure `I` / Section `S` / Interference `J`. Hover for a tooltip

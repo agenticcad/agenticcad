@@ -321,8 +321,20 @@
   .mcp-row .nm { flex:1; } .mcp-row .st { font-size:11px; padding:1px 6px; border-radius:10px; background:var(--panel2); color:var(--muted); }
   .mcp-row .st.connected { color:var(--ok); } .mcp-row .st.failed, .mcp-row .st.needs-auth { color:var(--err); }
   /* ---- modelling ribbon */
-  #ribbon { position:absolute; z-index:4; top:8px; left:150px; display:flex; flex-wrap:wrap; gap:2px; padding:4px 6px 3px; background:linear-gradient(180deg, rgba(34,39,47,.96), rgba(26,30,36,.96)); border:1px solid #333a45; border-radius:10px; box-shadow:0 6px 24px rgba(0,0,0,.35), inset 0 1px 0 rgba(255,255,255,.04); max-width:calc(100% - 205px); }
-  #ribbon .rg { display:flex; flex-direction:column; align-items:center; padding:0 5px; border-right:1px solid #2c333d; } #ribbon .rg:last-child { border-right:0; }
+  #ribbon { position:absolute; z-index:4; top:8px; left:150px; display:flex; flex-direction:column; gap:0; padding:0 6px 3px; background:linear-gradient(180deg, rgba(34,39,47,.96), rgba(26,30,36,.96)); border:1px solid #333a45; border-radius:10px; box-shadow:0 6px 24px rgba(0,0,0,.35), inset 0 1px 0 rgba(255,255,255,.04); max-width:calc(100% - 270px); }
+  #ribbon .rtabs { display:flex; align-items:center; gap:2px; padding:3px 2px 2px; border-bottom:1px solid #2c333d; margin-bottom:3px; }
+  #ribbon .rtabs button { background:none; border:0; color:#8b94a1; font:inherit; font-size:11.5px; letter-spacing:.02em; padding:3px 9px; border-radius:6px; cursor:pointer; }
+  #ribbon .rtabs button:hover { color:#fff; background:rgba(255,255,255,.06); } #ribbon .rtabs button.on { color:#fff; background:rgba(78,161,255,.18); box-shadow:inset 0 0 0 1px rgba(78,161,255,.4); }
+  #ribbon .rtabs .rcollapse { margin-left:auto; color:#6f7a88; cursor:pointer; padding:0 6px; font-size:12px; } #ribbon .rtabs .rcollapse:hover { color:#fff; }
+  #ribbon .rrow { display:flex; flex-wrap:wrap; gap:2px; }
+  #ribbon .rg { display:none; flex-direction:column; align-items:center; padding:0 5px; border-right:1px solid #2c333d; } #ribbon .rg.on { display:flex; } #ribbon .rg.on:last-of-type, #ribbon .rg.on.last { border-right:0; }
+  #ribbon.compact .rb { width:38px; height:38px; gap:0; } #ribbon.compact .rb .lb { display:none; } #ribbon.compact .rb.ext { min-width:38px; padding:0; }
+  #ribbon .rg .rgh { display:none; }
+  #ribbon .rg.fold { position:relative; justify-content:center; } #ribbon .rg.fold .rgl { display:none; }
+  #ribbon .rg.fold .rgh { display:flex; align-items:center; gap:4px; height:38px; padding:0 9px; border:0; border-radius:8px; background:transparent; color:#c9d1dc; font:inherit; font-size:11.5px; cursor:pointer; }
+  #ribbon .rg.fold .rgh:hover, #ribbon .rg.fold.open .rgh { background:rgba(255,255,255,.08); color:#fff; }
+  #ribbon .rg.fold .rgb { display:none; } #ribbon .rg.fold.open .rgb { display:flex; position:absolute; top:100%; left:0; z-index:5; padding:4px; background:linear-gradient(180deg, rgba(34,39,47,.98), rgba(26,30,36,.98)); border:1px solid #333a45; border-radius:8px; box-shadow:0 8px 24px rgba(0,0,0,.4); }
+  #ribbon.collapsed .rrow { display:none; } #ribbon.collapsed .rtabs { border-bottom:0; margin-bottom:0; }
   #cmd input[type=number]::-webkit-outer-spin-button, #cmd input[type=number]::-webkit-inner-spin-button { -webkit-appearance:none; margin:0; } #cmd input[type=number] { -moz-appearance:textfield; }
   #ribbon .rgl { font-size:9.5px; letter-spacing:.6px; text-transform:uppercase; color:#6f7a88; margin-top:1px; order:2; }
   #ribbon .rgb { display:flex; gap:2px; }
@@ -414,11 +426,17 @@
     </div>
     <div id="tree"><div class="hd" style="display:flex;align-items:center">Browser<button class="btn small" id="tree-addbody" style="display:none">+ Body</button><button class="btn small" id="tree-addpart" style="margin-left:auto;padding:1px 6px" title="Insert a part from the library">+ Part</button></div><div id="treebody"></div><div id="sketchtree"></div></div>
     <div id="ribbon">
-      <div class="rg"><div class="rgl">Create</div><div class="rgb" id="rg-create"></div></div>
-      <div class="rg"><div class="rgl">Modify</div><div class="rgb" id="rg-modify"></div></div>
-      <div class="rg"><div class="rgl">Assemble</div><div class="rgb" id="rg-assemble"></div></div>
-      <div class="rg"><div class="rgl">Inspect</div><div class="rgb" id="rg-inspect"></div></div>
-      <div class="rg"><div class="rgl">Output</div><div class="rgb" id="rg-output"></div></div>
+      <div class="rtabs"><button type="button" data-rtab="design" class="on">Design</button><button type="button" data-rtab="cam">CAM</button><button type="button" data-rtab="output">Output</button><button type="button" data-rtab="ext">Extensions</button><span class="rcollapse" title="Collapse / expand the ribbon">▴</span></div>
+      <div class="rrow">
+        <div class="rg on" data-tab="design"><div class="rgl">Create</div><div class="rgb" id="rg-create"></div></div>
+        <div class="rg on" data-tab="design"><div class="rgl">Modify</div><div class="rgb" id="rg-modify"></div></div>
+        <div class="rg on" data-tab="design"><div class="rgl">Assemble</div><div class="rgb" id="rg-assemble"></div></div>
+        <div class="rg on" data-tab="design"><div class="rgl">Inspect</div><div class="rgb" id="rg-inspect"></div></div>
+        <div class="rg" data-tab="cam"><div class="rgl">Machine</div><div class="rgb" id="rg-cam-machine"></div></div>
+        <div class="rg" data-tab="cam"><div class="rgl">Simulate</div><div class="rgb" id="rg-cam-sim"></div></div>
+        <div class="rg" data-tab="output"><div class="rgl">Output</div><div class="rgb" id="rg-output"></div></div>
+        <div class="rg" data-tab="ext"><div class="rgl">Extensions</div><div class="rgb" id="rg-ext"></div></div>
+      </div>
     </div>
     <div id="tip"></div>
     <div id="cmd"></div>
@@ -1415,7 +1433,7 @@ function simK() {                                   // moves completed at the cu
 }
 function renderSim() { const { k, f } = simK(); applySimAt(k, f); }
 function simSeek(sec, keepPlaying) { sim.clock = Math.max(0, Math.min(sim.T, sec)); simRange.value = sim.T ? Math.round(sim.clock / sim.T * 1000) : 0; renderSim(); if (!keepPlaying) simStop(); }
-function simStop() { sim.playing = false; if (sim.raf) cancelAnimationFrame(sim.raf); sim.raf = null; document.getElementById('sim-play').textContent = '▶'; }
+function simStop() { sim.playing = false; if (sim.raf) cancelAnimationFrame(sim.raf); sim.raf = null; document.getElementById('sim-play').textContent = '▶'; syncRibbon(); }
 function fmtT(sec) { sec = Math.max(0, Math.round(sec)); const h = Math.floor(sec / 3600), m = Math.floor(sec % 3600 / 60), s2 = sec % 60; return (h ? h + ':' + String(m).padStart(2, '0') : m) + ':' + String(s2).padStart(2, '0'); }
 function simOpAt(k) { if (!sim.total) return null; const i = Math.min(Math.max(0, k), sim.total - 1); return sim.index[i] ? sim.index[i][0] : null; }
 function applySim(k) { applySimAt(k, 0); }
@@ -1489,7 +1507,7 @@ document.getElementById('sim-play').onclick = e => {
   if (!sim.total) return;
   if (sim.playing) { simStop(); renderSim(); return; }
   if (sim.clock >= sim.T) sim.clock = 0;
-  sim.playing = true; e.currentTarget.textContent = '❚❚'; sim.last = performance.now();
+  sim.playing = true; e.currentTarget.textContent = '❚❚'; sim.last = performance.now(); syncRibbon();
   const step = now => {
     if (!sim.playing) return;
     sim.clock += (now - sim.last) / 1000 * sim.speed; sim.last = now;
@@ -1559,7 +1577,7 @@ function showSimAt(k) {
 }
 function bitAt(bits, idx) { return (bits[idx >> 3] >> (7 - (idx & 7))) & 1; }
 
-// ------------------------------------------------------------------ machine model (ribbon ▸ Output ▸ Machine)
+// ------------------------------------------------------------------ machine model (ribbon ▸ CAM ▸ Machine)
 // The program's machine around the stock, from /api/cam/machine_model: parts ride on kinematic nodes (head nodes move
 // with the tool, table nodes carry the work the opposite way), the stage (model, stock, toolpaths, simulation) rides on
 // the stock node and the tool hangs from the spindle. Posed from the simulation slider; collisions the simulator found
@@ -1678,7 +1696,7 @@ function setDoors(open) {                                                     //
     if (u < 1) machineDoorRaf = requestAnimationFrame(step); else machineDoorRaf = null;
   };
   machineDoorRaf = requestAnimationFrame(step);
-  syncMachineUi();
+  syncMachineUi(); syncRibbon();
 }
 function syncMachineUi() {                                                     // the CAM tab's Machine view controls
   const pick = document.getElementById('cam-machine-pick'), show = document.getElementById('cam-machine-show'), doors = document.getElementById('cam-machine-doors');
@@ -2977,10 +2995,8 @@ const extPanelsEl = document.getElementById('ext-panels');
 function extSelection() { return { faces: [...selFaces], bodies: [...selBodies].map(id => model && model.bodies.get(id) ? model.bodies.get(id).path : null).filter(Boolean) }; }
 function extSend(msg) { send({ type: 'ext', selection: extSelection(), ...msg }); }
 function renderExtRibbon() {
-  let g = document.getElementById('rg-ext-wrap');
-  if (!extDefs.panels.length) { if (g) g.remove(); return; }
-  if (!g) { g = document.createElement('div'); g.className = 'rg'; g.id = 'rg-ext-wrap'; g.innerHTML = '<div class="rgl">Extensions</div><div class="rgb" id="rg-ext"></div>'; document.getElementById('ribbon').appendChild(g); }
-  const box = g.querySelector('#rg-ext'); box.innerHTML = '';
+  const box = document.getElementById('rg-ext'); box.innerHTML = '';
+  if (!extDefs.panels.length) { box.innerHTML = '<span class="muted" style="font-size:11px;padding:0 6px;align-self:center">no extensions yet — ask the agent to write one</span>'; fitRibbon(); return; }
   for (const p of extDefs.panels) {
     const b = document.createElement('button'); b.className = 'rb ext'; b.dataset.ext = p.id;
     b.innerHTML = (p.icon ? `<span class="ic emoji">${esc(p.icon)}</span>` : `<span class="ic">${svg('pattern')}</span>`) + `<span class="lb">${esc(p.title)}</span>`;
@@ -3566,6 +3582,9 @@ const ICO = {
   section: '<path d="M4 8l8-4 8 4v8l-8 4-8-4Z"/><path d="M2 13h20" stroke-width="2"/><path d="M4 13l8 4 8-4" stroke-dasharray="2 2"/>',
   render: '<circle cx="12" cy="12" r="4.5"/><path d="M12 2.5v2.5M12 19v2.5M2.5 12H5M19 12h2.5M5.3 5.3l1.8 1.8M16.9 16.9l1.8 1.8M5.3 18.7l1.8-1.8M16.9 7.1l1.8-1.8"/>',
   joint: '<circle cx="7" cy="17" r="3"/><circle cx="17" cy="7" r="3"/><path d="M9.2 14.8l5.6-5.6"/><path d="M4 21l1-1M19 5l1-1" />',
+  doors: '<path d="M4 4h16v16H4z"/><path d="M12 4v16"/><path d="M9 12h.01M15 12h.01"/>',
+  simulate: '<path d="M4 18h16"/><path d="M6 18V9l4 3 4-6 4 4v8"/>',
+  play: '<path d="M7 4l12 8-12 8z"/>',
   machine: '<path d="M3 20h18"/><path d="M5 20v-9h14v9"/><path d="M7 11V5h4v6"/><path d="M9 5V3"/><path d="M12 15h5"/><path d="M9 11v1.5"/>',
   interference: '<circle cx="9" cy="12" r="6"/><circle cx="15" cy="12" r="6"/><path d="M12 7.2a6 6 0 0 1 0 9.6a6 6 0 0 1 0-9.6Z" fill="currentColor" stroke="none" opacity=".55"/>',
 };
@@ -3590,9 +3609,12 @@ const TOOLS = {
   joint:    { group: 'assemble', label: 'Joint',    key: 'T', hint: 'Click a circular edge (revolute: turns about it) or a straight edge (slider) on the part that should move.', picks: 'edges', steps: ['Edge', 'Joint'] },
   section:  { group: 'inspect', label: 'Section',  key: 'S', hint: 'Cut the model with a plane to see inside: base planes or a flat face, with a slider and solid hatched caps.', picks: 'face1' },
   interference: { group: 'inspect', label: 'Interference', key: 'J', hint: 'Find bodies that overlap (exact solids) and show where, in red.', picks: 'none' },
+  doors:    { group: 'cam-machine', label: 'Doors',  key: '', hint: 'Open or close the machine\'s doors / canopy (animated). Needs the machine shown.', picks: 'none' },
+  simulate: { group: 'cam-sim', label: 'Simulate', key: '', hint: 'Run the material-removal simulation of the visible operations (also checks machine collisions).', picks: 'none' },
+  play:     { group: 'cam-sim', label: 'Play',     key: '', hint: 'Play / pause the program on the machine at the speed set in the CAM tab.', picks: 'none' },
   render:   { group: 'output', label: 'Render',    key: 'E', hint: 'Studio render on / off: materials, studio lighting and soft shadows. Appearances, images and video in ▶ Animate.', picks: 'none' },
   drawings: { group: 'output', label: 'Drawings',  key: 'D', hint: 'Shop drawings (SVG + DXF) with the material and sheet from ⚙ Settings.', picks: 'none' },
-  machine:  { group: 'output', label: 'Machine',   key: 'A', hint: 'Show the CAM program\'s machine around the stock and play the simulation on it: head, table and 4th axis move as they would; parts the simulator saw collide flash red.', picks: 'none' },
+  machine:  { group: 'cam-machine', label: 'Machine',   key: 'A', hint: 'Show the CAM program\'s machine around the stock and play the simulation on it: head, table and 4th axis move as they would; parts the simulator saw collide flash red.', picks: 'none' },
   slice:    { group: 'output', label: 'Slice',     key: 'P', hint: 'Slice for 3D printing with the printer and options from ⚙ Settings; layers show in the viewer.', picks: 'none' },
 };
 let tool = null;   // { kind, picks: [snap...] }
@@ -3602,17 +3624,50 @@ for (const [k, t] of Object.entries(TOOLS)) {
   const b = document.createElement('button'); b.className = 'rb'; b.dataset.tool = k;
   b.innerHTML = `<span class="ic">${svg(k)}</span><span class="lb">${t.label}</span>`;
   b.onmouseenter = () => showTip(b, t); b.onmouseleave = hideTip;
-  b.onclick = () => activateTool(k);
+  b.onclick = () => { activateTool(k); document.querySelectorAll('#ribbon .rg.open').forEach(x => x.classList.remove('open')); };
   if (k === 'slice') b.style.display = 'none';
   document.getElementById('rg-' + t.group).appendChild(b);
 }
 placeTree();
+// ribbon tabs (Design · CAM · Output · Extensions): one row per tab; compact (icons only) when the row would wrap
+function setRibbonTab(name, remember = true) {
+  const rb = document.getElementById('ribbon');
+  rb.querySelectorAll('.rtabs [data-rtab]').forEach(b => b.classList.toggle('on', b.dataset.rtab === name));
+  const groups = [...rb.querySelectorAll('.rg')]; groups.forEach(g => { g.classList.toggle('on', g.dataset.tab === name); g.classList.remove('last'); });
+  const on = groups.filter(g => g.classList.contains('on')); if (on.length) on[on.length - 1].classList.add('last');
+  if (remember) { try { localStorage.setItem('ribbonTab', name); } catch (e) {} }
+  fitRibbon();
+}
+function ribbonTab() { const b = document.querySelector('#ribbon .rtabs [data-rtab].on'); return b ? b.dataset.rtab : 'design'; }
+function fitRibbon() {                       // one row: drop the labels when the row would wrap, then fold groups into dropdowns from the right
+  const rb = document.getElementById('ribbon'); if (!rb || rb.classList.contains('collapsed')) { placeTree(); return; }
+  const row = rb.querySelector('.rrow'), on = [...row.querySelectorAll('.rg.on')];
+  rb.classList.remove('compact'); on.forEach(g => g.classList.remove('fold', 'open'));
+  const wraps = () => { const first = on.find(g => g.offsetParent); if (!first) return false; const top = first.getBoundingClientRect().top; return on.some(g => g.getBoundingClientRect().top > top + 4); };
+  if (wraps()) rb.classList.add('compact');
+  for (let i = on.length - 1; i >= 1 && wraps(); i--) on[i].classList.add('fold');
+  if (wraps() && on[0]) on[0].classList.add('fold');
+  placeTree();
+}
+document.querySelectorAll('#ribbon .rg').forEach(g => {
+  const h = document.createElement('button'); h.type = 'button'; h.className = 'rgh'; h.innerHTML = `${g.querySelector('.rgl').textContent} <span style="opacity:.7">▾</span>`;
+  h.onclick = e => { e.stopPropagation(); const open = g.classList.contains('open'); document.querySelectorAll('#ribbon .rg.open').forEach(x => x.classList.remove('open')); if (!open) g.classList.add('open'); };
+  g.insertBefore(h, g.firstChild);
+});
+document.addEventListener('click', e => { if (!e.target.closest('#ribbon .rg.fold')) document.querySelectorAll('#ribbon .rg.open').forEach(x => x.classList.remove('open')); });
+document.querySelectorAll('#ribbon .rtabs [data-rtab]').forEach(b => b.onclick = () => setRibbonTab(b.dataset.rtab));
+document.querySelector('#ribbon .rcollapse').onclick = e => { const rb = document.getElementById('ribbon'); rb.classList.toggle('collapsed'); e.currentTarget.textContent = rb.classList.contains('collapsed') ? '▾' : '▴'; try { localStorage.setItem('ribbonCollapsed', rb.classList.contains('collapsed') ? '1' : ''); } catch (err) {} fitRibbon(); };
+window.addEventListener('resize', fitRibbon);
+(() => { let t = 'design', c = ''; try { t = localStorage.getItem('ribbonTab') || 'design'; c = localStorage.getItem('ribbonCollapsed') || ''; } catch (e) {} if (c) { document.getElementById('ribbon').classList.add('collapsed'); document.querySelector('#ribbon .rcollapse').textContent = '▾'; } setRibbonTab(t, false); })();
 function activateTool(k) {
   if (k === 'sketch') { if (tool) endTool(); if (measuring) setMeasuring(false); sk ? endSketch() : startSketch(null); return; }
   if (k === 'measure') { if (tool) endTool(); setMeasuring(!measuring); return; }
   if (k === 'drawings') { makeDrawings(); return; }
   if (k === 'render') { setRender(!renderOn); return; }
   if (k === 'machine') { setMachine(!machineOn); return; }
+  if (k === 'doors') { if (machineOn) setDoors(!machineDoorTarget); else addMsg('system', 'Show the machine first (CAM ▸ Machine) to open its doors.'); return; }
+  if (k === 'simulate') { if (program) document.getElementById('sim-run').click(); else addMsg('system', 'Build a CAM program first.'); return; }
+  if (k === 'play') { if (program) document.getElementById('sim-play').click(); else addMsg('system', 'Build a CAM program first.'); return; }
   if (k === 'slice') { runSlice(); return; }
   tool && tool.kind === k ? endTool() : startTool(k);
 }
@@ -3625,7 +3680,7 @@ function showTip(b, t) {
 }
 function hideTip() { tipEl.classList.remove('on'); }
 function syncRibbon() {
-  document.querySelectorAll('#ribbon .rb').forEach(b => b.classList.toggle('active', (tool && tool.kind === b.dataset.tool) || (b.dataset.tool === 'sketch' && !!sk) || (b.dataset.tool === 'measure' && measuring) || (b.dataset.tool === 'render' && renderOn) || (b.dataset.tool === 'machine' && machineOn)));
+  document.querySelectorAll('#ribbon .rb').forEach(b => b.classList.toggle('active', (tool && tool.kind === b.dataset.tool) || (b.dataset.tool === 'sketch' && !!sk) || (b.dataset.tool === 'measure' && measuring) || (b.dataset.tool === 'render' && renderOn) || (b.dataset.tool === 'machine' && machineOn) || (b.dataset.tool === 'doors' && !!machineDoorTarget) || (b.dataset.tool === 'play' && sim.playing)));
 }
 function startTool(kind) {
   if (measuring) setMeasuring(false); if (sk) endSketch();
@@ -4189,7 +4244,7 @@ function libraryEditor(mPane, tPane) {
     const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;');
     const tier = s => { const t = (String(s).split(':')[0] || '').trim(); const col = { verified: '#4caf7a', reference: '#e0a93a', estimated: '#8a94a3', user: '#4ea1ff' }[t] || '#8a94a3'; return `<span style="display:inline-block;padding:0 6px;border-radius:9px;font-size:10.5px;background:${col}22;color:${col};border:1px solid ${col}55">${esc(t)}</span>`; };
     const own = (library.scripts || []).includes(cur.m.name);
-    el.className = ''; el.innerHTML = `<div class="set-h">Machine model<span class="muted">${esc(d.name)} · ${own ? 'your own script (machines/' + esc(d.name.toLowerCase().replace(/[^a-z0-9\-_]+/g, '-')) + '.machine.py)' : 'built-in model'} · the Machine view (ribbon ▸ Output) and the simulator's collision check</span></div>
+    el.className = ''; el.innerHTML = `<div class="set-h">Machine model<span class="muted">${esc(d.name)} · ${own ? 'your own script (machines/' + esc(d.name.toLowerCase().replace(/[^a-z0-9\-_]+/g, '-')) + '.machine.py)' : 'built-in model'} · the Machine view (ribbon ▸ CAM) and the simulator's collision check</span></div>
       <div style="display:flex;gap:6px;margin:4px 0 8px;flex-wrap:wrap"><button class="btn small" data-a="show-machine">Show in viewer</button><button class="btn small" data-a="edit-machine">${own ? 'Edit script…' : 'Edit as script…'}</button><span class="muted" style="font-size:12px;align-self:center">or ask the agent: “model my machine…”</span></div>
       <div class="kv" style="font-size:12.5px">
         <div>Table</div><div>${d.table.x} × ${d.table.y} mm${d.spoilboard ? ` · spoilboard ${d.spoilboard} mm (cuts into it are allowed)` : ''}</div>
