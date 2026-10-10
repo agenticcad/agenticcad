@@ -130,11 +130,12 @@ def _shell(outer: tuple[float, float, float], inner: tuple[float, float, float],
 # =============================================================================== Haas vertical machining centres
 HAAS = {
     # table L×W (mm), T-slots (count, width, pitch), nose-to-table min/max, travel x/y/z, column/enclosure scale
-    "Haas VF-2": {"table": (914.4, 355.6), "slots": (3, 16.0, 125.0), "nose": (101.6, 609.6), "travel": (762, 406, 508)},
-    "Haas VF-2SS": {"table": (914.4, 355.6), "slots": (3, 16.0, 125.0), "nose": (101.6, 609.6), "travel": (762, 406, 508)},
-    "Haas VF-4": {"table": (1320.8, 457.2), "slots": (5, 16.0, 80.0), "nose": (106.7, 741.7), "travel": (1270, 508, 635)},
-    "Haas Mini Mill": {"table": (914.4, 304.8), "slots": (3, 16.0, 110.0), "nose": (101.6, 355.6), "travel": (406, 305, 254)},
-    "Haas TM-1": {"table": (1212.9, 266.7), "slots": (3, 16.0, 101.6), "nose": (101.6, 508.0), "travel": (762, 305, 406)},
+    # atc: (pockets, "smtc" side-mount drum with an exchanger arm | "carousel" umbrella under the head)
+    "Haas VF-2": {"table": (914.4, 355.6), "slots": (3, 16.0, 125.0), "nose": (101.6, 609.6), "travel": (762, 406, 508), "atc": (20, "carousel")},
+    "Haas VF-2SS": {"table": (914.4, 355.6), "slots": (3, 16.0, 125.0), "nose": (101.6, 609.6), "travel": (762, 406, 508), "atc": (24, "smtc")},
+    "Haas VF-4": {"table": (1320.8, 457.2), "slots": (5, 16.0, 80.0), "nose": (106.7, 741.7), "travel": (1270, 508, 635), "atc": (40, "smtc")},
+    "Haas Mini Mill": {"table": (914.4, 304.8), "slots": (3, 16.0, 110.0), "nose": (101.6, 355.6), "travel": (406, 305, 254), "atc": (10, "carousel")},
+    "Haas TM-1": {"table": (1212.9, 266.7), "slots": (3, 16.0, 101.6), "nose": (101.6, 508.0), "travel": (762, 305, 406), "atc": (10, "carousel")},
 }
 
 

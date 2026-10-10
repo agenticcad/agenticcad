@@ -853,6 +853,22 @@ CASES += [
          graders=[no_agent_error(), expect_tools_used("build_machine", "screenshot"),
                   machine_model_checks("vf-4", table=(1320.8, 457.2), clearance=741.7, travel=(1270, 508, 635), min_parts=12,
                                        moving={"x": "table", "y": "table", "z": "head"})]),
+    Case("machine_makera_z1_rich", tags=["machine", "cam"],
+         prompt=("Model my Makera Z1 properly: the built-in script (get_machine_code 'Makera Z1') is just blocks and I want it to look like the real "
+                 "machine. Keep what is verified in it and reuse it: work area 200 × 200 × 100, bed 206 × 206 (6 mm MDF spoilboard with the 36 counterbored "
+                 "holes from bed_holes('makera_z1_mdf') on a 12 mm aluminium plate), the bed moves in Y under the fixed rear bridge, the head moves X along the bridge "
+                 "and Z, home = head back-left with the spindle at (-108, 101) and the nose bottom 116 above the bed at Z top, spindle nose Ø 16 × 20 (reference), "
+                 "head 65 × 70 × 190 (reference), enclosure about 355 × 435 × 449 (reference), and when `fourth` is true the 4th-axis module: chuck Ø 52 with four jaws, "
+                 "axis 45 above the bed and 10 mm forward of centre, tailstock with a Ø 14 live centre, max Ø 80 × 150, with the same rotary numbers. "
+                 "Now make it look like a Z1: the white sheet-metal enclosure with its large tinted flip-up front window hinged at the top, the LED light strip, "
+                 "the status light, the bridge with its linear rods and X carriage, the Z carriage with the brushless spindle, collet nut and dust shoe, "
+                 "the wireless touch probe dock and tool-length setter near the front of the bed, cable chains, rubber feet, and the 4th-axis module when fitted. "
+                 "Keep the part names 'spoilboard', 'spindle nose' and 'enclosure' and the sources keys 'work area', 'gantry clearance' and 'bed 206×206 and hole grid'. "
+                 "This script must build for both 'Makera Z1' and 'Makera Z1 + 4th axis' (use the `fourth` flag), so build it for 'Makera Z1 + 4th axis' and then "
+                 "also save the same script for 'Makera Z1' with build_machine. Show it to me and tell me what you estimated."),
+         graders=[no_agent_error(), expect_tools_used("build_machine", "screenshot"),
+                  machine_model_checks("z1 + 4th", table=(206, 206), clearance=116, travel=(200, 200, 100), min_parts=20,
+                                       moving={"y": "table", "x": "head", "z": "head", "a": "table"})]),
     Case("ext_mass_cost_panel", tags=["ext"],
          prompt="Write an extension with a panel that estimates mass and material cost per body: a material dropdown per body "
                 "(aluminium, steel, brass, PLA with sensible densities and $/kg), a table with mass and cost per body, and totals. "
