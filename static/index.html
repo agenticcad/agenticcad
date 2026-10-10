@@ -518,9 +518,9 @@
         <button class="btn" id="sim-play" title="Play / pause">▶</button>
         <button class="btn" id="sim-fwd" title="Jump to the next operation">⏭</button>
         <input type="range" id="sim-range" min="0" max="1000" value="1000" step="1" title="Program time">
-        <select id="sim-speed" class="btn" title="Playback speed (× real time)"><option value="0.25">¼×</option><option value="0.5">½×</option><option value="1">1×</option><option value="2">2×</option><option value="5">5×</option><option value="10" selected>10×</option><option value="25">25×</option><option value="100">100×</option></select>
-        <span id="sim-info" class="muted">—</span>
+        <select id="sim-speed" class="btn" title="Playback speed (× real time)" style="margin-left:auto"><option value="0.25">¼×</option><option value="0.5">½×</option><option value="1">1×</option><option value="2">2×</option><option value="5">5×</option><option value="10" selected>10×</option><option value="25">25×</option><option value="100">100×</option></select>
       </div>
+      <div id="sim-infobar" style="display:none;padding:4px 10px 6px;font-size:11.5px"><span id="sim-info" class="muted">—</span></div>
     </div>
     <div class="pane" id="pane-code">
       <textarea id="code" spellcheck="false"></textarea>
@@ -1276,7 +1276,7 @@ function loadProgram(p) {
   originObj = new THREE.Group(); originObj.add(new THREE.AxesHelper(Math.max(6, Math.min(sx, sy) * 0.15)));
   const od = new THREE.Mesh(new THREE.SphereGeometry(Math.max(0.6, Math.min(sx, sy) * 0.012), 16, 12), new THREE.MeshBasicMaterial({ color: 0xffffff }));
   originObj.add(od); originObj.position.set(...p.origin); camGroup.add(originObj);
-  applyCamVisibility(); renderCamTab(); setupSim();
+  applyCamVisibility(); renderCamTab(); setupSim(); syncMachineUi();
 }
 function applyCamVisibility() {
   for (const c of camOps) { c.cut.visible = c.rapid.visible = showTp && c.visible; }
@@ -1289,7 +1289,7 @@ function renderCamTab() {
   const has = !!program;
   document.getElementById('cam-empty').style.display = has ? 'none' : '';
   for (const id of ['cam-setup', 'cam-ops', 'cam-gcode']) document.getElementById(id).style.display = has ? '' : 'none';
-  document.getElementById('cam-sim').style.display = has ? '' : 'none';
+  document.getElementById('cam-sim').style.display = has ? '' : 'none'; document.getElementById('sim-infobar').style.display = has ? '' : 'none';
   if (has) {
     const st = program.stock, o = program.origin;
     document.getElementById('cam-setup-body').innerHTML = `<div class="kv">
