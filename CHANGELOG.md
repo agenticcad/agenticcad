@@ -5,6 +5,8 @@ features, patch bumps fix things. The version shown in the UI header comes from 
 
 ## [Unreleased]
 
+## [0.26.0] — 2026-10-10
+
 ### Added
 - **Machine models and collision checks.** Every built-in machine now has a kinematic 3D model
   ([machine_models.py](machine_models.py)) built in build123d from published and measured numbers: Makera Z1 and
