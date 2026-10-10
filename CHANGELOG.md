@@ -5,6 +5,23 @@ features, patch bumps fix things. The version shown in the UI header comes from 
 
 ## [Unreleased]
 
+## [0.33.0] — 2026-10-11
+
+### Added
+- **Fixtures: vises, clamps, plates.** How the work is held is now part of a CAM setup: `Setup(..., fixture="Makera
+  low-profile vise", fixture_at=(x, y), fixture_rot=deg, fixture_params={...})` seats the stock's bottom-centre at the
+  fixture's work origin (thin stock is raised on parallels automatically), the viewer draws the fixture around the
+  stock and on the machine's bed, and the simulator treats every fixture part as uncuttable: the tool or holder
+  touching a jaw, a clamp bar or a plate is reported as a collision with that fixture. Built-ins: Makera low-profile
+  vise (Z1), Carvera Air vise, 4" screwless vise, 6" Kurt-style vise, tooling plate (parametric), step clamps.
+  A fixture is a script ([fixture_lib.py](fixture_lib.py), `fixture_scripts/`, `workspace/fixtures/<slug>.fixture.py`)
+  in the same spirit as machines: `part(...)` shapes plus `fixture(name, work_origin, clamp_axis, max_opening, mount,
+  sources, notes)`, with `params` and the stock size available. **CAM tab ▸ Setup** has a fixture picker (it lands in
+  a `fixtures({...})` line in cam.py, which wins over the script); **Settings ▸ Fixtures** lists them with *Show in
+  viewer* and *Edit as script…*; **Code tab ▸ fixture.py** edits and builds them; the agent gets `build_fixture` /
+  `get_fixture_code` and a brief: use the fixture you name, otherwise recommend one and say so. `GET /api/cam/fixtures`,
+  `/api/cam/fixture_model`, `/api/cam/fixture_code`; WebSocket `set_fixture`, `run_fixture`, `get_fixture_code`.
+
 ## [0.32.0] — 2026-10-10
 
 ### Changed

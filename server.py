@@ -417,6 +417,34 @@ async def startup_status():
     return agent.startup_payload()
 
 
+@app.get("/api/cam/fixtures")
+async def cam_fixtures():
+    import fixture_lib
+    return {"fixtures": fixture_lib.list_fixtures(agent.workspace)}
+
+
+@app.get("/api/cam/fixture_code")
+async def cam_fixture_code(name: str):
+    try:
+        return agent.fixture_code(name)
+    except cam.CamError as e:
+        return JSONResponse({"error": str(e)}, status_code=404)
+
+
+@app.get("/api/cam/fixture_model")
+async def cam_fixture_model(name: str, quality: str = "normal", params: str | None = None, stock: str | None = None):
+    """A fixture's tessellated parts for the viewer, built for the given params / stock size (JSON)."""
+    import fixture_lib
+    try:
+        pr = json.loads(params) if params else {}
+        stk = json.loads(stock) if stock else None
+        return await asyncio.to_thread(fixture_lib.cached_payload, name, pr, stk, quality if quality in ("draft", "normal", "fine") else "normal", agent.workspace)
+    except fixture_lib.FixtureScriptError as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"error": str(e)}, status_code=400)
+
+
 @app.get("/api/cam/machine_code")
 async def cam_machine_code(name: str):
     """A library machine's model script (the user's own, or the built-in it uses)."""
@@ -877,6 +905,26 @@ async def _dispatch(ws: WebSocket, msg: dict) -> None:
             await ws.send_text(json.dumps({"type": "machine", **agent.machine_code(msg.get("name", "")), "source": "load", "show": False}))
         except cam.CamError as e:
             await ws.send_text(json.dumps({"type": "machine_error", "name": msg.get("name", ""), "text": str(e)}))
+    elif t == "set_fixture":
+        try:
+            await agent.set_setup_fixture(str(msg.get("setup") or ""), msg.get("fixture"))
+        except cam.CamError as e:
+            await ws.send_text(json.dumps({"type": "cam_error", "text": str(e)}))
+        except Exception as e:  # noqa: BLE001
+            await ws.send_text(json.dumps({"type": "cam_error", "text": f"{type(e).__name__}: {e}"}))
+    elif t == "run_fixture":
+        try:
+            await agent.set_fixture_code(msg.get("code", ""), source="user")
+            agent.notes.append("The user edited and rebuilt a fixture script by hand in the Code panel.")
+        except cam.CamError as e:
+            await ws.send_text(json.dumps({"type": "fixture_error", "name": msg.get("name", ""), "text": str(e)}))
+        except Exception as e:  # noqa: BLE001
+            await ws.send_text(json.dumps({"type": "fixture_error", "name": msg.get("name", ""), "text": f"{type(e).__name__}: {e}"}))
+    elif t == "get_fixture_code":
+        try:
+            await ws.send_text(json.dumps({"type": "fixture", **agent.fixture_code(msg.get("name", "")), "source": "load", "show": False}))
+        except cam.CamError as e:
+            await ws.send_text(json.dumps({"type": "fixture_error", "name": msg.get("name", ""), "text": str(e)}))
     elif t == "set_override":
         try:
             await agent.set_op_override(str(msg.get("key") or ""), msg.get("values"))

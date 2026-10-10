@@ -215,9 +215,27 @@ class Setup:
     axis: tuple[float, float] | None = None
     a: float = 0.0
     wcs: str | None = None                  # G54..G59; Program assigns one per setup when None
+    # how the work is held: a fixture by name (fixture_lib: vises, clamps, plates), where it sits on the table
+    # (fixture_at = (x, y) from the table centre, fixture_rot degrees about Z) and its parameters (opening, parallel, ...).
+    # The stock's bottom-centre sits at the fixture's work origin; None = stock centred on the bare table/spoilboard.
+    fixture: str | None = None
+    fixture_at: tuple[float, float] = (0.0, 0.0)
+    fixture_rot: float = 0.0
+    fixture_params: dict | None = None
 
     def __post_init__(self):
         self.model_stock = self.stock
+        fx = _FIXTURES["table"].get(self.name)        # fixtures({...}) line in cam.py (the CAM tab's picker) wins over the script
+        if fx is not None:
+            self.fixture = fx.get("name", self.fixture) or None
+            self.fixture_at = tuple(fx.get("at", self.fixture_at))
+            self.fixture_rot = float(fx.get("rot", self.fixture_rot))
+            self.fixture_params = fx.get("params", self.fixture_params)
+        self._fixture_model = None
+        if self.fixture and self.rotary:
+            raise CamError("a fixture can't be combined with a rotary setup (the chuck holds the work)")
+        if self.fixture:
+            self.fixture_model()                        # validate now: unknown fixture / bad params fail at setup time
         if self.rotary:
             if self.machine.rotary is None:
                 raise CamError(f"{self.machine.name} has no 4th axis defined (machine.rotary); can't make a rotary setup")
@@ -250,6 +268,34 @@ class Setup:
                 self.safe_z = self.stock.top + self.machine.safe_z
             if self.clearance_z is None:
                 self.clearance_z = self.stock.top + self.machine.clearance_z
+
+    # ---- fixture (how the work is held)
+    def fixture_model(self):
+        """The fixture_lib.FixtureModel holding this setup's stock (None when the stock sits on the bare table)."""
+        if not self.fixture:
+            return None
+        if self._fixture_model is None:
+            import fixture_lib
+            ms = self.model_stock
+            stock = {"x": ms.xmax - ms.xmin, "y": ms.ymax - ms.ymin, "z": ms.zmax - ms.zmin}
+            try:
+                self._fixture_model = fixture_lib.model_for(self.fixture, self.fixture_params or {}, stock)
+            except fixture_lib.FixtureScriptError as e:
+                raise CamError(f"fixture {self.fixture!r}: {e}") from e
+        return self._fixture_model
+
+    def fixture_height(self) -> float:
+        """How far the stock bottom sits above the table (0 on the bare table)."""
+        fm = self.fixture_model()
+        return float(fm.height) if fm is not None else 0.0
+
+    def fixture_payload(self) -> dict | None:
+        fm = self.fixture_model()
+        if fm is None:
+            return None
+        return {"name": fm.name, "at": [float(self.fixture_at[0]), float(self.fixture_at[1])], "rot": float(self.fixture_rot),
+                "params": fm.params, "work_origin": list(fm.work_origin), "height": fm.height, "clamp_axis": fm.clamp_axis,
+                "max_opening": fm.max_opening}
 
     # ---- transforms (model -> setup frame)
     def _R(self) -> np.ndarray:
@@ -1590,7 +1636,7 @@ class Program:
             out_setups.append({"name": st.name, "wcs": st.wcs, "rotary": st.rotary, "a": st.a, "orient": st.orient if not st.rotary else None,
                                "axis": list(st.axis) if st.rotary else None, "origin": [float(v) for v in o],
                                "tool_axis": list(st.tool_axis_model), "stock": st.model_stock.to_dict(),
-                               "max_radius": getattr(st, "max_radius", None)})
+                               "max_radius": getattr(st, "max_radius", None), "fixture": st.fixture_payload()})
         ops = []
         for op in self.ops:
             st = self.setup_of(op)
@@ -2095,6 +2141,20 @@ def overrides(table: dict | None = None) -> None:
 def reset_overrides() -> None:
     """Start of a CAM script run: no overrides, op keys numbered from 1 again."""
     _OV.update(table={}, seen={}, depth=0, used=set())
+    _FIXTURES.update(table={})
+
+
+_FIXTURES: dict = {"table": {}}
+
+
+def fixtures(table: dict | None = None) -> None:
+    """Per-setup fixture choices, keyed by setup name: {"Top": {"name": "Makera low-profile vise", "at": [0, 0], "rot": 0,
+    "params": {"opening": 40}}}. Written by the CAM tab's fixture picker; put it before the setups. A setup named here uses
+    this fixture instead of the one in its Setup(...) call ("name": null = bare table)."""
+    for k, v in (table or {}).items():
+        if not isinstance(v, dict):
+            raise CamError(f"fixtures: '{k}' must map to a dict with name / at / rot / params")
+    _FIXTURES["table"] = dict(table or {})
 
 
 def unused_overrides() -> list[str]:

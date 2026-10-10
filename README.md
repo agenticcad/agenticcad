@@ -249,6 +249,13 @@ Agent-native, like the CAD side: a second script per design, `cam.py`, written b
   `get_machine_code` / `build_machine` do the same from chat ("add my Shapeoko 5 Pro to the library and model it"), and
   photos dropped into the chat are used as references: the built-in Z1, Carvera Air and Haas VF-4 models were made that
   way from the makers' product photos, every number tagged verified / reference / estimated.
+- **Fixtures** ([fixture_lib.py](fixture_lib.py)): `Setup(..., fixture="6\" Kurt-style vise", fixture_params={"parallel": 20})`
+  holds the stock in a vise, on clamps or on a plate; the stock sits at the fixture's work origin, the viewer draws
+  it around the stock and on the machine, and the simulator reports the tool or holder touching any fixture part as a
+  collision. Built-ins: Makera low-profile vise, Carvera Air vise, 4" screwless vise, 6" Kurt-style vise, tooling
+  plate, step clamps. Fixtures are scripts (`fixture_scripts/`, `workspace/fixtures/<slug>.fixture.py`) like machine
+  models: `part(...)` + `fixture(name, work_origin, clamp_axis, ...)`, editable in **Code tab ▸ fixture.py**, listed in
+  **Settings ▸ Fixtures**, picked per setup in the CAM tab, and written by the agent with `build_fixture`.
 - Not yet: drilling cycles (GRBL has none), thread milling, side-setup simulation.
 
 ## 3D printing (external slicer)

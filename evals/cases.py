@@ -545,6 +545,40 @@ def reference_photos(folder: str) -> list[dict] | None:
     return [{"name": f.name, "data": base64.b64encode(f.read_bytes()).decode(), "mime": "image/png" if f.suffix == ".png" else "image/jpeg"} for f in files] or None
 
 
+def fixture_used(name_sub: str | None = None):
+    """The program's first setup holds the stock in a fixture (optionally one whose name contains name_sub)."""
+    def g(run: Run):
+        p = run.program
+        if p is None:
+            return [check("program built", False, "no program")]
+        fx = p.setup.fixture_payload() if hasattr(p.setup, "fixture_payload") else None
+        out = [check("setup uses a fixture", fx is not None, str(fx))]
+        if name_sub and fx:
+            out.append(check(f"fixture is a '{name_sub}'", name_sub.lower() in fx["name"].lower(), fx["name"]))
+        return out
+    return g
+
+
+def fixture_script_checks(name_sub: str, min_parts: int = 4, clamp_axis: str | None = "y"):
+    """The agent saved a fixture script whose name contains name_sub; it runs with a sample stock and seats it."""
+    def g(run: Run):
+        import fixture_lib as fl
+        fx = [f for f in fl.list_fixtures(run.workspace) if f["user"] and name_sub.lower() in f["name"].lower()]
+        out = [check(f"fixture script '{name_sub}' saved", bool(fx), str([f["name"] for f in fl.list_fixtures(run.workspace) if f["user"]]))]
+        if not fx:
+            return out
+        try:
+            m = fl.model_for(fx[0]["name"], {}, {"x": 60, "y": 40, "z": 12}, run.workspace)
+        except Exception as e:  # noqa: BLE001
+            return out + [check("script runs", False, str(e))]
+        out += [check("script runs", True, fl.summary(m)), check(f"≥{min_parts} parts", len(m.parts) >= min_parts, str(len(m.parts))),
+                check("collision parts", any(p.collision for p in m.parts), ""), check("work origin above the table", m.height > 0, str(m.height))]
+        if clamp_axis:
+            out.append(check(f"clamps along {clamp_axis}", m.clamp_axis == clamp_axis, str(m.clamp_axis)))
+        return out
+    return g
+
+
 CASES: list[Case] = [
     Case("cad_box_hole", tags=["cad"],
          prompt="Make a 20 × 30 × 10 mm block centred on the origin with a Ø5 through hole down the centre (Z axis). Single body called Block.",
@@ -923,6 +957,18 @@ CASES += [
          graders=[no_agent_error(), expect_tools_used("build_machine", "screenshot"),
                   machine_model_checks("air + 4th", table=(306, 222), clearance=120, travel=(300, 200, 130), min_parts=25,
                                        moving={"y": "table", "x": "head", "z": "head", "a": "table"})]),
+    Case("cam_makera_vise", tags=["cam", "makera", "fixtures"], initial_code=TWO_SIDED,
+         prompt=("CAM on my Makera Z1 in aluminium with the 1/8\" flat endmill (feeds from the calculator). Hold the stock (part bbox + 3 mm, "
+                 "1 mm extra on top) in my Makera low-profile vise, jaws on the long sides. One setup from the top: face the top and clear the "
+                 "30 × 20 recess. Don't cut the outline. Simulate it and tell me if anything hits the vise."),
+         graders=[no_agent_error(), expect_program(min_ops=2, no_warnings_matching="travel|rpm|collet"), fixture_used("low-profile"),
+                  expect_tools_used("simulate_cam"), simulated_clean()]),
+    Case("fixture_screwless_vise_3in", tags=["fixtures"],
+         prompt=("Add a fixture for my 3\" screwless toolmaker's vise: hardened body 125 × 80 × 28 mm with a flat bed, jaws 76 mm wide × 14 mm deep × 18 mm "
+                 "tall, fixed jaw at the back, the moving jaw pulled by a screw along the body, max opening 70 mm. The stock sits on the body bed between the "
+                 "jaws; thin stock should go on parallels automatically like the built-in vises. Start from the built-in 4\" screwless vise script, "
+                 "save it as '3\" screwless vise', show it to me, and tell me what you estimated."),
+         graders=[no_agent_error(), expect_tools_used("build_fixture", "screenshot"), fixture_script_checks("screwless", min_parts=4, clamp_axis="y")]),
     Case("ext_mass_cost_panel", tags=["ext"],
          prompt="Write an extension with a panel that estimates mass and material cost per body: a material dropdown per body "
                 "(aluminium, steel, brass, PLA with sensible densities and $/kg), a table with mass and cost per body, and totals. "

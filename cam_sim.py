@@ -87,7 +87,7 @@ class SimResult:
             lines.append(f"Stock still standing outside the part (frame, tabs, uncut margins): {s['outside_cm3']:.2f} cm³")
         col = s.get("collisions")
         if col and col["count"]:
-            lines.append(f"COLLISIONS: {col['count']} contact(s) between the machine and the stock/table (worst {col['max_depth']:.2f} mm): "
+            lines.append(f"COLLISIONS: {col['count']} contact(s) between the tool/machine and the stock, table or fixture (worst {col['max_depth']:.2f} mm): "
                          + "; ".join(f"{h['part']} hits {h['what']} in {h['op']} at ({h['pos'][0]:.1f}, {h['pos'][1]:.1f}, {h['pos'][2]:.1f}), {h['depth']:.2f} mm"
                                      for h in col["hits"][:4]) + (" …" if col["count"] > 4 else ""))
         elif "collisions" in s:
@@ -162,6 +162,13 @@ def _sim_zmap(program, sel, part, resolution, frames, tol, machine_model=None, p
     zmin = min(b.zmin for b in st_boxes); zmax = max(b.zmax for b in st_boxes)
     area = (x1 - x0) * (y1 - y0)
     res = resolution or max(0.15, math.sqrt(area / 160_000.0))
+    # the fixture (vise / clamps / plate) of the top setup, in model coordinates: uncuttable, so the grid covers it too
+    fix_shapes = _fixture_shapes(setups)
+    if fix_shapes:
+        for shp in fix_shapes:
+            bb = shp.bounding_box()
+            x0, x1 = min(x0, bb.min.X), max(x1, bb.max.X); y0, y1 = min(y0, bb.min.Y), max(y1, bb.max.Y)
+        res = max(res, math.sqrt((x1 - x0) * (y1 - y0) / 400_000.0))      # cap the grid at ~400k cells
     nx = int(math.ceil((x1 - x0) / res)) + 1
     ny = int(math.ceil((y1 - y0) / res)) + 1
     zhi = np.full((ny, nx), -np.inf); zlo = np.full((ny, nx), np.inf)
@@ -202,6 +209,9 @@ def _sim_zmap(program, sel, part, resolution, frames, tol, machine_model=None, p
         out.frames.append((upto, q))
 
     pmaps = _part_maps_z(part, res, x0, y0, nx, ny) if part is not None else None
+    fix_hi = _fixture_map(fix_shapes, res, x0, y0, nx, ny) if fix_shapes else None
+    if fix_shapes:
+        placement = {**placement, "fixture": placement.get("fixture", setups[0].fixture_height())}
     gouged = np.zeros((ny, nx), dtype=bool)
     gouge_ops: list[str] = []
 
@@ -228,6 +238,8 @@ def _sim_zmap(program, sel, part, resolution, frames, tol, machine_model=None, p
             _stamp_z(zhi, zlo, P, K, I, tool, side, res, x0, y0, rapid_hits, op.name)
             if machine_model is not None and side == 1:
                 _collide_z(collisions, zhi, P, I, done, tool, machine_model, res, x0, y0, op.name, st_boxes[0], placement)
+            if fix_hi is not None and side == 1:
+                _collide_fixture(collisions, fix_hi, P, K, I, tool, machine_model, res, x0, y0, op.name, setups[0].fixture)
             start = end
             if next_mark is not None and end_move_done(idx, end, done, next_mark):
                 snap(next_mark); mark_i += 1
@@ -244,9 +256,12 @@ def _sim_zmap(program, sel, part, resolution, frames, tol, machine_model=None, p
     remaining = np.where(zhi > zlo, zhi - zlo, 0.0).sum() * res * res
     out.stats = {"moves": total, "ops": len(sel), "removed_cm3": round((initial - remaining) / 1000.0, 3),
                  "rapid_hits": rapid_hits[:50]}
-    if machine_model is not None:
+    if machine_model is not None or fix_hi is not None:
         out.stats["collisions"] = _collision_stats(collisions)
-        out.stats["machine"] = {"key": machine_model.key, "name": machine_model.name, "placement": placement}
+        if machine_model is not None:
+            out.stats["machine"] = {"key": machine_model.key, "name": machine_model.name, "placement": placement}
+        if fix_shapes:
+            out.stats["fixture"] = setups[0].fixture_payload()
         if has_bottom:
             out.notes.append("machine collisions are checked on top setups only; flipped (bottom) setups are not checked against the holder")
     if pmaps is not None:
@@ -694,3 +709,58 @@ def _collide_rotary(out, program, sel, mm, placement):
     out.stats["machine"] = {"key": mm.key, "name": mm.name, "placement": placement}
 
 
+
+
+# ----------------------------------------------------------------------------- fixtures (vise jaws, clamps, plates: uncuttable)
+def _fixture_shapes(setups):
+    """Collision shapes of the top setup's fixture in model coordinates (the stock's bottom-centre sits at the work origin)."""
+    st = setups[0]
+    fm = st.fixture_model() if hasattr(st, "fixture_model") else None
+    if fm is None or st.orient != "top":
+        return []
+    import fixture_lib
+    ms = st.model_stock
+    bc = ((ms.xmin + ms.xmax) / 2, (ms.ymin + ms.ymax) / 2, ms.zmin)
+    return [fixture_lib.transform_to_model(p.shape, st.fixture_rot, bc, fm.work_origin) for p in fm.parts if p.collision]
+
+
+def _fixture_map(shapes, res, x0, y0, nx, ny):
+    """Top-surface height of the fixture per cell (-inf where there is none)."""
+    from build123d import Compound
+    top = np.full((ny, nx), -np.inf)
+    mesh = _part_mesh(Compound(shapes))
+    for bd in mesh["bodies"]:
+        P = np.array(bd["positions"], dtype=float).reshape(-1, 3)
+        I = np.array(bd["indices"], dtype=np.int64).reshape(-1, 3)
+        cam._raster_triangles(P, I, top, x0, y0, res)
+    return top
+
+
+def _collide_fixture(hits, fix_hi, P, K, I, tool, mm, res, x0, y0, op_name, fixture_name):
+    """The tool (flutes included) and the holder stack must stay clear of the fixture: any contact is a collision."""
+    if len(P) == 0:
+        return
+    levels = [("tool", float(tool.radius), 0.0, float(tool.flute_length))] + (holder_levels(mm, tool) if mm is not None else [])
+    ny, nx = fix_hi.shape
+    for name, r, zb_off, h in levels:
+        c = max(1, int(r / (2 * res)))
+        coarse = _pool_max(fix_hi, c)
+        step = max(1, int(r / res))
+        rc = int(math.ceil(r / res))
+        for k in range(0, len(P), step):
+            x, y, z = P[k]; zb = z + zb_off
+            ix, iy = int(round((x - x0) / res)), int(round((y - y0) / res))
+            cx0, cx1 = max(0, (ix - rc) // c), min(coarse.shape[1] - 1, (ix + rc) // c)
+            cy0, cy1 = max(0, (iy - rc) // c), min(coarse.shape[0] - 1, (iy + rc) // c)
+            if cx0 > cx1 or cy0 > cy1 or coarse[cy0:cy1 + 1, cx0:cx1 + 1].max() <= zb + 0.02:
+                continue
+            xa, xb = max(0, ix - rc), min(nx - 1, ix + rc); ya, yb = max(0, iy - rc), min(ny - 1, iy + rc)
+            sub = fix_hi[ya:yb + 1, xa:xb + 1]
+            yy, xx = np.mgrid[ya:yb + 1, xa:xb + 1]
+            d2 = ((xx - (x - x0) / res) ** 2 + (yy - (y - y0) / res) ** 2) * res * res
+            mask = (d2 <= r * r) & (sub > zb + 0.02) & np.isfinite(sub)
+            if mask.any():
+                hits.append({"op": op_name, "move": int(I[k]), "pos": [round(float(x), 2), round(float(y), 2), round(float(z), 2)],
+                             "part": name, "what": f"fixture ({fixture_name})", "depth": round(float((sub[mask] - zb).max()), 2),
+                             "rapid": bool(K[k] == 0) if hasattr(K, "__len__") else False})
+                break

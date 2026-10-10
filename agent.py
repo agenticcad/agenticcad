@@ -305,6 +305,20 @@ the CAM tab live in one line at the top of cam.py, `overrides({"Pocket": {"feed"
 fraction of Ø): always keep that line when you rewrite the script, and keep op names stable so it still matches. After build_cam, use `screenshot`
 to look at the toolpaths (they are drawn over the model; rapids red, cuts coloured per op).
 `export_gcode` writes the .nc file. `save_machine` / `save_tool` edit the libraries (JSON dicts; see cam_context).
+Fixtures (how the work is held): Setup(..., fixture="<name>", fixture_at=(x, y) from the table centre, fixture_rot=deg,
+fixture_params={...}) seats the stock in a vise / on clamps / on a plate; the stock's bottom-centre sits at the fixture's
+work origin, thin stock is raised on parallels automatically, and the simulation reports any tool or holder contact
+with the fixture as a collision ("hits the fixture"). Built-ins: "Makera low-profile vise" (Z1), "Carvera Air vise",
+'4" screwless vise', '6" Kurt-style vise' (Haas), "Tooling plate" (params size/thickness/pitch), "Step clamps" (bars
+overhanging the stock's ±X edges). When the user names a fixture, use it; otherwise RECOMMEND one (the machine's own
+vise for small parts, step clamps or a plate for large/thin stock), use it, and say so in one line — the user can
+change it from the CAM tab (it lands in a `fixtures({...})` line in cam.py: keep that line when you rewrite the script;
+the CAM tab's choice wins over Setup(fixture=...)). Jaws grip the stock's ±Y faces: keep outside contours, facing
+overruns and probing clear of them, or expect fixture collisions in simulate_cam. New fixtures: `get_fixture_code`
+for a starting point, `build_fixture(code)`: part(name, shape, material, collision=True) in the fixture frame (X right,
+Y back, Z up, origin at the footprint centre on the table) and fixture(name, work_origin=(x, y, z) where the stock's
+bottom-centre sits, clamp_axis='y'|'x'|None, max_opening, mount={...}, sources={...}, notes); `params` (opening,
+parallel, ...) and `stock` ({x, y, z} or None) are available in the script.
 Machine models (what the Machine view shows and the collision check uses): every library machine has a model script.
 `get_machine_code(name)` returns the user's machines/<slug>.machine.py or the built-in it falls back to (Makera Z1,
 Carvera Air, Haas VMC, parametric gantry router) as a starting point; `build_machine(name, code)` validates it, saves it
@@ -404,8 +418,8 @@ def _script_names() -> set[str]:
     return _SCRIPT_NAMES
 
 
-def _find_overrides(code: str) -> tuple[dict, tuple[int, int] | None]:
-    """The table of the top-level `overrides({...})` call in a CAM script and its line span (1-based, inclusive)."""
+def _find_call(code: str, fname: str) -> tuple[dict, tuple[int, int] | None]:
+    """The table of the top-level `<fname>({...})` call in a CAM script and its line span (1-based, inclusive)."""
     import ast
     try:
         tree = ast.parse(code)
@@ -413,13 +427,30 @@ def _find_overrides(code: str) -> tuple[dict, tuple[int, int] | None]:
         return {}, None
     for node in tree.body:
         if (isinstance(node, ast.Expr) and isinstance(node.value, ast.Call) and isinstance(node.value.func, ast.Name)
-                and node.value.func.id == "overrides" and node.value.args):
+                and node.value.func.id == fname and node.value.args):
             try:
                 table = ast.literal_eval(node.value.args[0])
             except ValueError:
-                raise cam.CamError("the overrides({...}) line in cam.py is not a plain dict; edit it in the Code tab")
+                raise cam.CamError(f"the {fname}({{...}}) line in cam.py is not a plain dict; edit it in the Code tab")
             return dict(table or {}), (node.lineno, node.end_lineno)
     return {}, None
+
+
+def _find_overrides(code: str) -> tuple[dict, tuple[int, int] | None]:
+    return _find_call(code, "overrides")
+
+
+def _write_fixtures(code: str, table: dict, span: tuple[int, int] | None) -> str:
+    """Rewrite (or add, after the overrides line if any) the `fixtures({...})` line of a CAM script."""
+    line = f"fixtures({table!r})  # per-setup fixtures (CAM tab)" if table else None
+    lines = code.splitlines()
+    if span:
+        a, b = span
+        lines[a - 1:b] = [line] if line else []
+    elif line:
+        _, ov = _find_overrides(code)
+        lines.insert(ov[1] if ov else 0, line)
+    return "\n".join(lines) + ("\n" if code.endswith("\n") or not code else "")
 
 
 def _write_overrides(code: str, table: dict, span: tuple[int, int] | None) -> str:
@@ -465,6 +496,9 @@ class CadAgent:
         ck.LIBRARY = self.parts
         import machine_models as _mmod
         _mmod.WORKSPACE = workspace            # user machine model scripts: <workspace>/machines/<slug>.machine.py
+        import fixture_lib as _fxl
+        _fxl.WORKSPACE = workspace             # user fixture scripts: <workspace>/fixtures/<slug>.fixture.py
+        (workspace / "fixtures").mkdir(exist_ok=True)
         (workspace / "imports").mkdir(exist_ok=True)
         self.tool_handlers: dict[str, Any] = {}   # filled by _make_server()
         self.auth_problem: str | None = None       # set when Claude Code is not signed in; shown as a banner in every tab
@@ -673,6 +707,51 @@ class CadAgent:
         if note:
             res["notes"].insert(0, note)
         return res
+
+    async def set_setup_fixture(self, setup: str, spec: dict | None) -> cam.Program | None:
+        """CAM tab: hold a setup's stock in a fixture (spec = {name, at, rot, params}; name None = bare table; spec None =
+        back to what the script says) by rewriting the `fixtures({...})` line of cam.py, then rebuild."""
+        if not self.cam_code.strip():
+            raise cam.CamError("no CAM script")
+        table, span = _find_call(self.cam_code, "fixtures")
+        if spec is None:
+            table.pop(setup, None)
+        else:
+            entry = {"name": spec.get("name") or None}
+            if spec.get("at"): entry["at"] = [float(spec["at"][0]), float(spec["at"][1])]
+            if spec.get("rot"): entry["rot"] = float(spec["rot"])
+            if spec.get("params"): entry["params"] = dict(spec["params"])
+            table[setup] = entry
+        code = _write_fixtures(self.cam_code, table, span)
+        prog = await self.set_cam_code(code, source="user")
+        self.notes.append(f"The user changed the fixture of setup '{setup}' in the CAM tab to {spec!r}. It lives in the `fixtures({{...}})` "
+                          "line of cam.py; keep that line when you rewrite the script.")
+        return prog
+
+    # ------------------------------------------------------------------ fixture scripts (vises, clamps, plates)
+    def fixture_code(self, name: str) -> dict[str, Any]:
+        import fixture_lib
+        try:
+            code, is_user = fixture_lib.fixture_code(name, self.workspace)
+        except fixture_lib.FixtureScriptError as e:
+            raise cam.CamError(str(e)) from e
+        return {"name": name, "code": code, "user": is_user}
+
+    async def set_fixture_code(self, code: str, source: str = "agent") -> tuple[Any, str]:
+        """Validate a fixture script (built with a sample stock), save it as fixtures/<slug>.fixture.py under the name the
+        script declares, and show it in the viewer."""
+        import fixture_lib
+        try:
+            model = await asyncio.to_thread(fixture_lib.run, code, {}, {"x": 60.0, "y": 40.0, "z": 12.0}, self.workspace, "fixture.py")
+        except fixture_lib.FixtureScriptError as e:
+            raise cam.CamError(str(e)) from e
+        p = fixture_lib.user_path(model.name, self.workspace)
+        p.parent.mkdir(parents=True, exist_ok=True); p.write_text(code)
+        fixture_lib.clear_cache()
+        text = fixture_lib.summary(model)
+        await self.emit({"type": "fixture", "name": model.name, "code": code, "summary": text, "source": source, "user": True, "show": True})
+        await self.emit({"type": "library", **self.library_payload()})
+        return model, text
 
     async def set_op_override(self, key: str, values: dict | None) -> cam.Program | None:
         """CAM tab: set (or with empty/None values, clear) the tool overrides of one operation by rewriting the
@@ -1245,8 +1324,10 @@ class CadAgent:
 
     def library_payload(self) -> dict[str, Any]:
         from dataclasses import asdict
+        import fixture_lib
         return {"machines": [asdict(m) for m in self.library.machines().values()],
-                "tools": [asdict(t) for t in self.library.tools()], "machine_scripts": self.library.machine_scripts()}
+                "tools": [asdict(t) for t in self.library.tools()], "machine_scripts": self.library.machine_scripts(),
+                "fixtures": fixture_lib.list_fixtures(self.workspace)}
 
     def _write_state(self) -> None:
         (self.workspace / "state.json").write_text(json.dumps({"design": self.design_name, "config": self.config}))
@@ -1838,6 +1919,31 @@ class CadAgent:
                 return {"content": [{"type": "text", "text": f"MACHINE SCRIPT FAILED\n{type(e).__name__}: {e}"}], "is_error": True}
             return {"content": [{"type": "text", "text": text + "\nSaved and shown in the viewer (Machine view). Use `screenshot` to check it."}]}
 
+        @tool("build_fixture",
+              "Build and save a FIXTURE script (a vise, clamps, a tooling plate, a pallet...) written with part(...) and "
+              "fixture(name=..., work_origin=..., clamp_axis=..., ...) in the fixture frame (see the CAM notes). It is validated "
+              "with a sample stock, saved as fixtures/<slug>.fixture.py under the name it declares, listed in the library and "
+              "shown in the viewer; use `screenshot` afterwards. Returns the fixture summary or the script error.",
+              {"type": "object", "properties": {"code": {"type": "string"}}, "required": ["code"]})
+        async def build_fixture(args: dict[str, Any]) -> dict[str, Any]:
+            try:
+                _, text = await agent.set_fixture_code(args["code"])
+            except cam.CamError as e:
+                return {"content": [{"type": "text", "text": f"FIXTURE SCRIPT FAILED\n{e}"}], "is_error": True}
+            except Exception as e:  # noqa: BLE001
+                return {"content": [{"type": "text", "text": f"FIXTURE SCRIPT FAILED\n{type(e).__name__}: {e}"}], "is_error": True}
+            return {"content": [{"type": "text", "text": text + "\nSaved and shown in the viewer. Use it with Setup(..., fixture=<name>)."}]}
+
+        @tool("get_fixture_code", "The script of a fixture (a built-in like 'Makera low-profile vise', '6\" Kurt-style vise', "
+              "'Tooling plate', 'Step clamps', or one of the user's) as a starting point for a new one.",
+              {"type": "object", "properties": {"name": {"type": "string"}}, "required": ["name"]})
+        async def get_fixture_code(args: dict[str, Any]) -> dict[str, Any]:
+            try:
+                r = agent.fixture_code(args["name"])
+            except cam.CamError as e:
+                return {"content": [{"type": "text", "text": str(e)}], "is_error": True}
+            return {"content": [{"type": "text", "text": f"# {'own script' if r['user'] else 'built-in fixture'}: {r['name']}\n" + r["code"]}]}
+
         @tool("get_machine_code", "The machine model script of a library machine: the user's own machines/<slug>.machine.py, "
               "or the built-in model it uses (Makera Z1, Carvera Air, Haas VMC or the parametric gantry router) as a starting point.",
               {"type": "object", "properties": {"name": {"type": "string"}}, "required": ["name"]})
@@ -2216,7 +2322,7 @@ class CadAgent:
             slicing_tools = [slicer_info, slice_for_printing]
 
         tools = [build_model, *([] if LEGACY_BUILD else [edit_model]), inspect_model, screenshot, export_model, get_code, save_design,
-                 cam_context, build_cam, get_cam_code, export_gcode, simulate_cam, check_interference, check_motion, feeds_speeds, save_machine, save_tool, build_machine, get_machine_code,
+                 cam_context, build_cam, get_cam_code, export_gcode, simulate_cam, check_interference, check_motion, feeds_speeds, save_machine, save_tool, build_machine, get_machine_code, build_fixture, get_fixture_code,
                  get_parameters, set_parameters, measure_tool, mass_properties, make_drawings, library_tool, kit_tool, sketch_tool,
                  extension_tool, show_panel, configurations_tool] + ext_tools + slicing_tools
         self.tool_handlers = {t.name: t.handler for t in tools}     # name -> async handler (tests call these directly)
