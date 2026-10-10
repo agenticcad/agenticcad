@@ -5,6 +5,11 @@ features, patch bumps fix things. The version shown in the UI header comes from 
 
 ## [Unreleased]
 
+## [0.30.2] — 2026-10-10
+
+### Changed
+- **Machine view framing:** showing the machine frames the whole machine, hiding it frames the part(s) again, so no manual zooming when switching.
+
 ## [0.30.1] — 2026-10-10
 
 ### Fixed
