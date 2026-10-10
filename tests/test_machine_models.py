@@ -49,10 +49,11 @@ def test_payload_shapes_and_home_geometry(machines):
     assert pay["machine"]["key"] == "z1" and len(pay["parts"]) == len(z1.parts) and not pay["warnings"]
     for p in pay["parts"]:
         assert len(p["positions"]) % 3 == 0 and len(p["indices"]) % 3 == 0 and max(p["indices"]) * 3 < len(p["positions"])
-    # the spindle nose part sits exactly at the home position: nose bottom at clearance height
-    nose = next(p for p in z1.parts if p.name == "spindle nose")
-    bb = nose.shape.bounding_box()
-    assert bb.min.Z == pytest.approx(116, abs=1e-6) and bb.center().X == pytest.approx(z1.home[0]) and bb.center().Y == pytest.approx(z1.home[1])
+    # the nose stack (collet nut + spindle nose) sits exactly at the home position: its bottom at clearance height
+    stack = [p for p in z1.parts if p.name in ("spindle nose", "collet nut")]
+    bbs = [p.shape.bounding_box() for p in stack]
+    assert min(bb.min.Z for bb in bbs) == pytest.approx(116, abs=1e-6)
+    assert all(bb.center().X == pytest.approx(z1.home[0], abs=0.5) and bb.center().Y == pytest.approx(z1.home[1], abs=0.5) for bb in bbs)
     haas = mm.haas_vmc("Haas VF-2")
     tb = next(p for p in haas.parts if p.name == "table").shape.bounding_box()
     assert tb.max.Z == pytest.approx(0) and tb.max.X - tb.min.X == pytest.approx(914.4)

@@ -11,3 +11,4 @@ build/
 dist/
 logs/
 .briefcase/
+evals/reference/haas_vf4/

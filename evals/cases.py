@@ -537,6 +537,14 @@ def machine_model_checks(name_sub: str, table: tuple[float, float] | None = None
     return g
 
 
+def reference_photos(folder: str) -> list[dict] | None:
+    """Reference photos for a case from evals/reference/<folder>/*.jpg|png (not in the repo: vendor images stay local)."""
+    import pathlib
+    d = pathlib.Path(__file__).parent / "reference" / folder
+    files = sorted([*d.glob("*.jpg"), *d.glob("*.png")]) if d.exists() else []
+    return [{"name": f.name, "data": base64.b64encode(f.read_bytes()).decode(), "mime": "image/png" if f.suffix == ".png" else "image/jpeg"} for f in files] or None
+
+
 CASES: list[Case] = [
     Case("cad_box_hole", tags=["cad"],
          prompt="Make a 20 × 30 × 10 mm block centred on the origin with a Ø5 through hole down the centre (Z axis). Single body called Block.",
@@ -869,6 +877,19 @@ CASES += [
          graders=[no_agent_error(), expect_tools_used("build_machine", "screenshot"),
                   machine_model_checks("z1 + 4th", table=(206, 206), clearance=116, travel=(200, 200, 100), min_parts=20,
                                        moving={"y": "table", "x": "head", "z": "head", "a": "table"})]),
+    Case("machine_haas_vf4_photos", tags=["machine", "cam", "photos"], images=reference_photos("haas_vf4"),
+         prompt=("Here are Haas's own product photos of the VF-4: front three-quarter, front angle, left angle, right side, table, tool changer and spindle. "
+                 "Model my Haas VF-4 to match them as closely as you can — start from get_machine_code('Haas VF-4') (the built-in model, already detailed) and make it "
+                 "more realistic against the photos: the sheet-metal enclosure shape and proportions (the sloped top, the side panels, the rear electrical cabinet), "
+                 "the two sliding front doors with their windows and the door frame, the side-mount tool changer and its cover on the left, the control pendant on its arm "
+                 "on the right, the spindle head and its covers, the way covers, chip auger trough, and the Haas colours (light grey panels, dark grey base, red accents). "
+                 "Keep every verified number: travel 1270 × 508 × 635, table 1320.8 × 457.2 with five 16 mm T-slots at 80 mm pitch, nose-to-table 106.7–741.7, "
+                 "CAT40 flange Ø 63.5, ER32 nut Ø 50 × 25, gauge 101.6, 40+1 side-mount changer. Mark what the tool can hit as collision geometry, keep the part names "
+                 "'table', 'spindle nose', 'ER32 nut' and 'enclosure', record where every number came from (the photos are a source: say 'reference: Haas product photo'), "
+                 "build it, compare your screenshots with the photos from the same angles, iterate at least once, and tell me what you estimated."),
+         graders=[no_agent_error(), expect_tools_used("build_machine", "screenshot"),
+                  machine_model_checks("vf-4", table=(1320.8, 457.2), clearance=741.7, travel=(1270, 508, 635), min_parts=25,
+                                       moving={"x": "table", "y": "table", "z": "head"})]),
     Case("ext_mass_cost_panel", tags=["ext"],
          prompt="Write an extension with a panel that estimates mass and material cost per body: a material dropdown per body "
                 "(aluminium, steel, brass, PLA with sensible densities and $/kg), a table with mass and cost per body, and totals. "
