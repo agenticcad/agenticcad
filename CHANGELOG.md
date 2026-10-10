@@ -5,6 +5,16 @@ features, patch bumps fix things. The version shown in the UI header comes from 
 
 ## [Unreleased]
 
+## [0.30.0] — 2026-10-10
+
+### Added
+- **Simulation playback like the real machine.** Playback is now time-based: every move takes its real time (distance at
+  the programmed feed, rapids at the machine's rapid rate, A moves at the rotary's speed) and the tool moves
+  continuously along each move instead of jumping per move. A speed control (¼× to 100× real time), ⏮ / ⏭ to jump
+  between operations, the slider in program time, and a readout of setup · operation · tool · move · elapsed / total.
+  The operations list shows setup headers (WCS, orientation), highlights the operation being run and has ▶ to play
+  from any operation or setup. On the Machine view a flipped (bottom) setup turns the work over on the table.
+
 ## [0.29.1] — 2026-10-10
 
 ### Fixed

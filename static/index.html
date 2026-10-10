@@ -9,6 +9,9 @@
   * { box-sizing:border-box; }
   html,body { margin:0; height:100%; overflow:hidden; background:var(--bg); color:var(--text); font:13px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Inter,sans-serif; }
   #app { display:flex; height:100%; }
+  .oprow.cur { background:rgba(78,161,255,.14); box-shadow:inset 2px 0 0 var(--accent2); }
+  .oprow.setuphead { color:var(--accent2); font-size:11px; text-transform:uppercase; letter-spacing:.06em; margin-top:6px; }
+  .oprow .jump { margin-left:auto; opacity:.55; cursor:pointer; padding:0 4px; } .oprow .jump:hover { opacity:1; color:var(--accent2); }
   /* ---- startup splash: shown until the first design is built (big designs with real threads take minutes) */
   #splash { position:fixed; inset:0; z-index:2000; background:var(--bg); display:flex; align-items:center; justify-content:center; transition:opacity .35s; }
   #splash.hide { opacity:0; pointer-events:none; }
@@ -511,8 +514,11 @@
       </div>
       <div id="cam-sim" style="display:none">
         <button class="btn" id="sim-run" title="Simulate material removal for the visible operations">Simulate</button>
+        <button class="btn" id="sim-back" title="Jump to the previous operation">⏮</button>
         <button class="btn" id="sim-play" title="Play / pause">▶</button>
-        <input type="range" id="sim-range" min="0" max="0" value="0" step="1">
+        <button class="btn" id="sim-fwd" title="Jump to the next operation">⏭</button>
+        <input type="range" id="sim-range" min="0" max="1000" value="1000" step="1" title="Program time">
+        <select id="sim-speed" class="btn" title="Playback speed (× real time)"><option value="0.25">¼×</option><option value="0.5">½×</option><option value="1">1×</option><option value="2">2×</option><option value="5">5×</option><option value="10" selected>10×</option><option value="25">25×</option><option value="100">100×</option></select>
         <span id="sim-info" class="muted">—</span>
       </div>
     </div>
@@ -1295,13 +1301,25 @@ function renderCamTab() {
       + ((program.setups || []).length > 1 || (program.setups || []).some(x => x.rotary) ? '<div class="kv" style="margin-top:6px">' + program.setups.map((x, i) =>
         `<div>${x.name}</div><div>${x.wcs} · ${x.rotary ? `4th axis · A ${x.a}°` : 'orient ' + x.orient} · ${program.ops.filter(o => (o.setup || 0) === i).length} ops</div>`).join('') + '</div>' : '');
     const ops = document.getElementById('cam-ops-body'); ops.innerHTML = '';
+    let lastSetup = -1;
     program.ops.forEach((op, i) => {
-      const r = document.createElement('div'); r.className = 'oprow';
+      const si = op.setup || 0, stp = (program.setups || [])[si];
+      if (stp && (program.setups.length > 1 || stp.rotary) && si !== lastSetup) {
+        lastSetup = si;
+        const h = document.createElement('div'); h.className = 'oprow setuphead';
+        h.innerHTML = `<span>Setup ${stp.name} · ${stp.wcs} · ${stp.rotary ? '4th axis' : 'orient ' + stp.orient}</span><span class="jump" title="Play from this setup">▶</span>`;
+        h.querySelector('.jump').onclick = () => { if (sim.opStart[i] >= 0) simSeek(sim.t[sim.opStart[i]], sim.playing); };
+        ops.appendChild(h);
+      }
+      const r = document.createElement('div'); r.className = 'oprow'; r.dataset.op = i;
       const nov = Object.keys(op.overrides || {}).length, open = opOpen.has(op.key);
       r.innerHTML = `<input type="checkbox" ${camOps[i]?.visible ? 'checked' : ''}><span class="car">${op.key ? (open ? '▾' : '▸') : ''}</span><span class="sw" style="background:${op.color}"></span><span class="nm">${i + 1}. ${op.name} <span class="muted">${op.kind}</span>${nov ? `<span class="ovb" title="${Object.entries(op.overrides).map(([k, v]) => k + ' ' + v).join(', ')}">override</span>` : ''}</span><span class="meta">T${op.tool.number} Ø${op.tool.diameter} · ${op.time.toFixed(1)} min</span>`;
       r.querySelector('input').onchange = e => { camOps[i].visible = e.target.checked; applyCamVisibility(); if (simRes) clearSim(); setupSim(); };
       r.title = Object.entries(op.params || {}).map(([k, v]) => `${k}=${Array.isArray(v) ? v.join('×') : (typeof v === 'number' ? +v.toFixed(3) : v)}`).join('  ');
       if (op.key) for (const q of r.querySelectorAll('.nm, .car')) q.onclick = () => { opOpen.has(op.key) ? opOpen.delete(op.key) : opOpen.add(op.key); renderCamTab(); };
+      const j = document.createElement('span'); j.className = 'jump'; j.textContent = '▶'; j.title = 'Play from this operation';
+      j.onclick = ev => { ev.stopPropagation(); if (sim.opStart[i] >= 0) simSeek(sim.t[sim.opStart[i]], true); if (!sim.playing) document.getElementById('sim-play').click(); };
+      r.appendChild(j);
       ops.appendChild(r);
       if (open) ops.appendChild(opEditor(op));
     });
@@ -1364,17 +1382,47 @@ document.getElementById('gcode-dl').onclick = () => window.open('/api/gcode');
 document.getElementById('gcode-preview').onclick = async () => { const pre = document.getElementById('gcode-pre'); pre.textContent = await fetch('/api/gcode/preview').then(r => r.text()); pre.style.display = pre.style.display === 'none' ? '' : 'none'; };
 
 // simulation: slider over all visible moves, tool marker, draw range
-let sim = { total: 0, index: [], playing: false, timer: null };
+let sim = { total: 0, index: [], playing: false, timer: null, t: new Float64Array(1), T: 0, clock: 0, opStart: [], speed: 10, raf: null, last: 0 };
 const simRange = document.getElementById('sim-range'), simInfo = document.getElementById('sim-info');
+function machineRapid() { const m = (library.machines || []).find(x => x.name === (program && program.machine)); return (m && m.rapid) || 3000; }
+function machineRotarySpeed() { const m = (library.machines || []).find(x => x.name === (program && program.machine)); return (m && m.rotary && m.rotary.max_speed) || 1800; }
 function setupSim() {
-  sim.index = []; let n = 0;
-  camOps.forEach((c, oi) => { if (!c.visible) return; for (let i = 0; i < c.op.moves.length; i++) sim.index.push([oi, i]); n += c.op.moves.length; });
-  sim.total = n; simRange.max = n; simRange.value = n; applySim(n);
+  // the move list in playback order and a time model: every move takes distance / feed (rapids at the machine's rapid rate,
+  // A moves at the rotary's max speed), so playback runs like the real program, scaled by the speed control
+  sim.index = []; sim.opStart = []; let n = 0;
+  camOps.forEach((c, oi) => { sim.opStart[oi] = c.visible ? n : -1; if (!c.visible) return; for (let i = 0; i < c.op.moves.length; i++) sim.index.push([oi, i]); n += c.op.moves.length; });
+  sim.total = n; sim.t = new Float64Array(n + 1);
+  const rapid = machineRapid(), rot = machineRotarySpeed(); let prev = null, acc = 0;
+  for (let i = 0; i < n; i++) {
+    const [oi, mi] = sim.index[i], mv = camOps[oi].op.moves[mi];
+    if (prev) {
+      const d = Math.hypot(mv[1] - prev[1], mv[2] - prev[2], mv[3] - prev[3]);
+      const f = (mv[0] === 0 || mi === 0) ? rapid : Math.max(mv[4] || 1, 1);
+      const da = (mv.length > 5 && prev.length > 5) ? Math.abs(mv[5] - prev[5]) : 0;
+      acc += Math.max(d / f, da / rot) * 60;
+    }
+    sim.t[i + 1] = acc; prev = mv;
+  }
+  sim.T = acc; sim.clock = acc; simRange.value = 1000; renderSim();
 }
-function applySim(k) {
-  k = Math.max(0, Math.min(k, sim.total));
+function simK() {                                   // moves completed at the current clock, and the fraction into the next
+  const t = sim.t, n = sim.total; if (!n) return { k: 0, f: 0 };
+  if (sim.clock >= sim.T) return { k: n, f: 0 };
+  let lo = 0, hi = n;                               // largest k with t[k] <= clock
+  while (lo < hi) { const m = (lo + hi + 1) >> 1; if (t[m] <= sim.clock) lo = m; else hi = m - 1; }
+  const dur = t[lo + 1] - t[lo];
+  return { k: lo, f: dur > 0 ? (sim.clock - t[lo]) / dur : 0 };
+}
+function renderSim() { const { k, f } = simK(); applySimAt(k, f); }
+function simSeek(sec, keepPlaying) { sim.clock = Math.max(0, Math.min(sim.T, sec)); simRange.value = sim.T ? Math.round(sim.clock / sim.T * 1000) : 0; renderSim(); if (!keepPlaying) simStop(); }
+function simStop() { sim.playing = false; if (sim.raf) cancelAnimationFrame(sim.raf); sim.raf = null; document.getElementById('sim-play').textContent = '▶'; }
+function fmtT(sec) { sec = Math.max(0, Math.round(sec)); const h = Math.floor(sec / 3600), m = Math.floor(sec % 3600 / 60), s2 = sec % 60; return (h ? h + ':' + String(m).padStart(2, '0') : m) + ':' + String(s2).padStart(2, '0'); }
+function simOpAt(k) { if (!sim.total) return null; const i = Math.min(Math.max(0, k), sim.total - 1); return sim.index[i] ? sim.index[i][0] : null; }
+function applySim(k) { applySimAt(k, 0); }
+function applySimAt(k, f) {
+  k = Math.max(0, Math.min(k, sim.total)); f = Math.max(0, Math.min(f || 0, 1));
   // per op: how many moves are included
-  const counts = new Map(); for (const c of camOps) counts.set(c, c.visible ? 0 : 0);
+  const counts = new Map(); for (const c of camOps) counts.set(c, 0);
   for (let i = 0; i < k; i++) { const [oi] = sim.index[i]; counts.set(camOps[oi], (counts.get(camOps[oi]) || 0) + 1); }
   for (const c of camOps) {
     const m = c.visible ? (k >= sim.total ? c.op.moves.length : (counts.get(c) || 0)) : 0;
@@ -1382,39 +1430,74 @@ function applySim(k) {
   }
   if (toolObj) { camGroup.remove(toolObj); toolObj = null; }
   simInfo.style.color = '';
-  if (k > 0 && k < sim.total) {
-    const [oi, mi] = sim.index[k - 1]; const c = camOps[oi]; const mv = c.op.moves[mi]; const t = c.op.tool;
+  const speedTxt = sim.playing ? ` · ${sim.speed}×` : '';
+  const timeTxt = `${fmtT(sim.clock)} / ${fmtT(sim.T)}`;
+  if (k < sim.total && (k > 0 || f > 0 || sim.playing || sim.clock > 0 || sim.T === 0 ? true : false)) {
+    // the move in progress is move k (travelling from the end of move k-1); its op is the current op
+    const [oi, mi] = sim.index[k]; const c = camOps[oi]; const nxt = c.op.moves[mi]; const t = c.op.tool;
+    const [oip, mip] = k > 0 ? sim.index[k - 1] : sim.index[k]; const mv = camOps[oip].op.moves[mip];
+    // interpolated tool position between the end of move k-1 and the end of move k (the real motion, not a jump per move)
+    const pos = new THREE.Vector3(mv[1] + (nxt[1] - mv[1]) * f, mv[2] + (nxt[2] - mv[2]) * f, mv[3] + (nxt[3] - mv[3]) * f);
+    const st = program.setups ? program.setups[c.op.setup || 0] : null;
+    const a0 = st && st.rotary ? (mv.length > 5 ? mv[5] : st.a) : 0, a1 = st && st.rotary ? (nxt.length > 5 ? nxt[5] : st.a) : 0, a = a0 + (a1 - a0) * f;
+    const setupTxt = st && (program.setups.length > 1 || st.rotary) ? `${st.name} · ` : '';
+    const opTxt = `${setupTxt}${oi + 1}/${camOps.length} ${c.op.name} · T${t.number} · move ${mi + 1}/${c.op.moves.length} · ${nxt[0] === 0 ? 'rapid' : 'F' + nxt[4]}`;
     if (machineOn && machineRig) {                                   // the machine carries the tool (and the work, on table axes)
-      const st = program.setups ? program.setups[c.op.setup || 0] : null;
-      const a = st && st.rotary ? (mv.length > 5 ? mv[5] : st.a) : 0;
-      poseRig(new THREE.Vector3(mv[1], mv[2], mv[3]), a, t);
+      stageFlip(!!(st && st.orient === 'bottom'));
+      poseRig(pos, a, t);
       const hits = machineHitsAt(c.op.name, mi); flashMachine(hits);
-      simInfo.textContent = `${c.op.name} · move ${mi + 1}/${c.op.moves.length} · ${mv[0] === 0 ? 'rapid' : 'F' + mv[4]} · (${mv[1].toFixed(1)}, ${mv[2].toFixed(1)}, ${mv[3].toFixed(2)})`
-        + (hits.length ? ` · ⚠ ${hits[0].part} hits the ${hits[0].what} (${hits[0].depth} mm)` : '');
+      simInfo.textContent = `${opTxt} · ${timeTxt}${speedTxt}` + (hits.length ? ` · ⚠ ${hits[0].part} hits the ${hits[0].what} (${hits[0].depth} mm)` : '')
+        + (st && st.orient && !['top', 'bottom'].includes(st.orient) ? ' · side setup: shown unflipped' : '');
       if (hits.length) simInfo.style.color = 'var(--red, #ff6b6b)';
     } else {
       const h = Math.max(t.diameter * 4, 12); const g = new THREE.CylinderGeometry(t.diameter / 2, t.type === 'ball' ? t.diameter / 2 : t.diameter / 2, h, 24); g.rotateX(Math.PI / 2); g.translate(0, 0, h / 2);
       toolObj = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color: 0xffffff, transparent: true, opacity: 0.7, metalness: 0.4, roughness: 0.3 }));
-      toolObj.position.set(mv[1], mv[2], mv[3]); toolObj.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), toolAxisFor(c.op, mv)); camGroup.add(toolObj);
-      simInfo.textContent = `${c.op.name} · move ${mi + 1}/${c.op.moves.length} · ${mv[0] === 0 ? 'rapid' : 'F' + mv[4]} · (${mv[1].toFixed(1)}, ${mv[2].toFixed(1)}, ${mv[3].toFixed(2)})`;
+      toolObj.position.copy(pos); toolObj.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), toolAxisFor(c.op, f < 0.5 ? mv : nxt)); camGroup.add(toolObj);
+      simInfo.textContent = `${opTxt} · (${pos.x.toFixed(1)}, ${pos.y.toFixed(1)}, ${pos.z.toFixed(2)}) · ${timeTxt}${speedTxt}`;
     }
   } else {
-    simInfo.textContent = k === 0 ? 'start' : `complete · ${program ? program.time.toFixed(1) : 0} min`;
-    if (machineOn && machineRig) { const c0 = camOps.find(c => c.visible) || camOps[0]; poseRig(null, 0, c0 ? c0.op.tool : null); flashMachine([]); }
+    simInfo.textContent = `complete · ${fmtT(sim.T)}` + (program ? ` (${program.time.toFixed(1)} min est.)` : '');
+    if (machineOn && machineRig) { stageFlip(false); const c0 = camOps.find(c => c.visible) || camOps[0]; poseRig(null, 0, c0 ? c0.op.tool : null); flashMachine([]); }
   }
+  markCurrentOp(simOpAt(k));
   if (simRes) showSimAt(k);
 }
+function markCurrentOp(oi) {
+  document.querySelectorAll('#cam-ops-body .oprow[data-op]').forEach(r => r.classList.toggle('cur', +r.dataset.op === oi));
+}
+// flipped (bottom) setups on the machine: the work is turned over on the table, so the stage rotates 180° about X through the stock centre
+function stageFlip(on) {
+  if (!machineRig || machineRig.flip === on) return;
+  machineRig.flip = on;
+  const st = program.stock, c = new THREE.Vector3((st.xmin + st.xmax) / 2, (st.ymin + st.ymax) / 2, (st.zmin + st.zmax) / 2);
+  const M = new THREE.Matrix4().makeTranslation(-machineRig.origin.x, -machineRig.origin.y, -machineRig.origin.z);
+  if (on) M.multiply(new THREE.Matrix4().makeTranslation(c.x, c.y, c.z)).multiply(new THREE.Matrix4().makeRotationX(Math.PI)).multiply(new THREE.Matrix4().makeTranslation(-c.x, -c.y, -c.z));
+  M.decompose(stageGroup.position, stageGroup.quaternion, stageGroup.scale);
+}
+function flipPoint(v) { const st = program.stock; return new THREE.Vector3(v.x, (st.ymin + st.ymax) - v.y, (st.zmin + st.zmax) - v.z); }
 function toolAxisFor(op, mv) {
   const st = program && program.setups ? program.setups[op.setup || 0] : null;
   if (!st) return new THREE.Vector3(0, 0, 1);
   if (st.rotary) { const a = (mv.length > 5 ? mv[5] : st.a) * Math.PI / 180; return new THREE.Vector3(0, Math.sin(a), Math.cos(a)); }
   return new THREE.Vector3(...st.tool_axis).normalize();
 }
-simRange.oninput = () => applySim(+simRange.value);
+simRange.oninput = () => { sim.clock = +simRange.value / 1000 * sim.T; renderSim(); };
+document.getElementById('sim-speed').onchange = e => { sim.speed = +e.target.value; renderSim(); };
+document.getElementById('sim-back').onclick = () => { const oi = simOpAt(simK().k); const cur = oi == null ? 0 : sim.opStart[oi]; const atStart = cur >= 0 && sim.clock - sim.t[cur] < 1.5; let prev = oi; if (atStart) { prev = null; for (let i = (oi ?? camOps.length) - 1; i >= 0; i--) if (sim.opStart[i] >= 0) { prev = i; break; } } simSeek(prev == null ? 0 : sim.t[sim.opStart[prev]], sim.playing); };
+document.getElementById('sim-fwd').onclick = () => { const oi = simOpAt(simK().k); let nxt = null; for (let i = (oi ?? -1) + 1; i < camOps.length; i++) if (sim.opStart[i] >= 0) { nxt = i; break; } simSeek(nxt == null ? sim.T : sim.t[sim.opStart[nxt]], sim.playing); };
 document.getElementById('sim-play').onclick = e => {
-  sim.playing = !sim.playing; e.currentTarget.textContent = sim.playing ? '❚❚' : '▶';
-  if (sim.playing) { if (+simRange.value >= sim.total) simRange.value = 0; sim.timer = setInterval(() => { const v = +simRange.value + Math.max(1, Math.round(sim.total / 600)); simRange.value = v; applySim(v); if (v >= sim.total) { clearInterval(sim.timer); sim.playing = false; e.currentTarget.textContent = '▶'; } }, 30); }
-  else clearInterval(sim.timer);
+  if (!sim.total) return;
+  if (sim.playing) { simStop(); renderSim(); return; }
+  if (sim.clock >= sim.T) sim.clock = 0;
+  sim.playing = true; e.currentTarget.textContent = '❚❚'; sim.last = performance.now();
+  const step = now => {
+    if (!sim.playing) return;
+    sim.clock += (now - sim.last) / 1000 * sim.speed; sim.last = now;
+    if (sim.clock >= sim.T) { sim.clock = sim.T; simRange.value = 1000; renderSim(); simStop(); return; }
+    simRange.value = Math.round(sim.clock / sim.T * 1000); renderSim();
+    sim.raf = requestAnimationFrame(step);
+  };
+  sim.raf = requestAnimationFrame(step);
 };
 let lastGcodeLines = 0;
 
@@ -1456,7 +1539,7 @@ function startSim(payload) {
     `<div style="${/^(GOUGES|RAPIDS|COLLISIONS)/.test(l) ? 'color:var(--red,#ff6b6b);font-weight:600' : ''}">${l.replace(/&/g, '&amp;').replace(/</g, '&lt;')}</div>`).join('');
   if (stockObj) stockObj.visible = false;
   ghostPart(true);
-  showSimAt(+simRange.value);
+  showSimAt(simK().k);
 }
 async function getSimFrame(i) {
   if (simCache.has(i)) return simCache.get(i);
@@ -1543,7 +1626,7 @@ function placeRig() {   // the machine origin (table top centre) in model coordi
   else o.set((st.xmin + st.xmax) / 2, (st.ymin + st.ymax) / 2, st.zmin);
   machineRig.root.position.copy(o);
 }
-function attachStage() { machineRig.stockNode.add(stageGroup); stageGroup.position.copy(machineRig.origin).negate(); stageGroup.quaternion.identity(); }
+function attachStage() { machineRig.stockNode.add(stageGroup); machineRig.flip = false; stageGroup.position.copy(machineRig.origin).negate(); stageGroup.quaternion.identity(); stageGroup.scale.set(1, 1, 1); }
 function stickoutFor(t) {
   const fl = t ? (+t.flute_length || 10) : 10, d = machineRig && machineRig.data;
   if (d && d.stickout) return Math.max(+d.stickout, fl);
@@ -1555,7 +1638,7 @@ function poseRig(tip, aDeg, t) {
   const d = machineRig.data, home = d.home, stick = stickoutFor(t);
   let target;
   if (tip) {
-    const m = tip.clone().sub(machineRig.origin);                             // machine coordinates of the tool tip
+    const m = (machineRig.flip ? flipPoint(tip) : tip.clone()).sub(machineRig.origin);   // machine coordinates of the tool tip
     if (d.rotary && aDeg) { const p = new THREE.Vector3(0, d.rotary.axis_y, d.rotary.axis_z); m.sub(p).applyAxisAngle(AXIS_V.x, aDeg * Math.PI / 180).add(p); }
     target = [m.x, m.y, m.z + stick];                                          // where the nose bottom has to be
   } else target = [home[0], home[1], home[2]];
@@ -1639,7 +1722,7 @@ async function setMachine(on, name) {
   } catch (e) { machineOn = false; stageHome(); addMsg('error', 'Machine model: ' + e.message); }
   if (machineRig) machineRig.root.visible = machineOn;
   if (grid) grid.visible = !renderOn && !machineOn; if (axes) axes.visible = !renderOn && !machineOn;
-  if (program && sim) applySim(+simRange.value); else if (machineOn && machineRig) { poseRig(null, 0, null); flashMachine([]); }
+  if (program && sim) renderSim(); else if (machineOn && machineRig) { poseRig(null, 0, null); flashMachine([]); }
   if (machineOn) fitMachine();
   if (renderOn) renderGround();
   syncRibbon(); syncMachineUi();
@@ -4239,14 +4322,14 @@ function connect() {
         if (m.source !== 'load') {
           document.getElementById('codeerr').textContent = '';
           addMsg('system', `machine model built: ${m.name}` + (m.source === 'user' ? ' (from the Code panel)' : ''));
-          if (m.show) setMachine(true, m.name); else if (machineOn && machineRig && machineRig.name === m.name) { disposeRig(); loadMachineRig().then(() => { if (program && sim) applySim(+simRange.value); else poseRig(null, 0, null); }); }
+          if (m.show) setMachine(true, m.name); else if (machineOn && machineRig && machineRig.name === m.name) { disposeRig(); loadMachineRig().then(() => { if (program && sim) renderSim(); else poseRig(null, 0, null); }); }
         }
         break;
       case 'machine_error': document.getElementById('codeerr').textContent = m.text; addMsg('error', `machine model script failed (${m.name}) — see Code tab`); break;
       case 'cam':
         camCode = m.code || ''; lastGcodeLines = m.gcode_lines || 0; loadProgram(m.program);
         if (m.program && machinePreview && machinePreview !== m.program.machine) machinePreview = null;   // a program picks its own machine
-        if (machineOn) { if (m.program || machinePreview) { const was = machineRig && machineRig.name + machineRig.rotaryKey; loadMachineRig().then(() => { if (m.program) applySim(+simRange.value); else poseRig(null, 0, null); if (machineRig && machineRig.name + machineRig.rotaryKey !== was) fitMachine(); }).catch(e => addMsg('error', 'Machine model: ' + e.message)); } else setMachine(false); }
+        if (machineOn) { if (m.program || machinePreview) { const was = machineRig && machineRig.name + machineRig.rotaryKey; loadMachineRig().then(() => { if (m.program) renderSim(); else poseRig(null, 0, null); if (machineRig && machineRig.name + machineRig.rotaryKey !== was) fitMachine(); }).catch(e => addMsg('error', 'Machine model: ' + e.message)); } else setMachine(false); }
         if (codeWhich === 'cam' && (!codeDirty || m.source === 'user')) { codeEl.value = camCode; codeDirty = false; }
         document.getElementById('codeerr').textContent = '';
         if (m.source === 'user') addMsg('system', 'CAM program rebuilt from Code panel');

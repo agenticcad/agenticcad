@@ -216,6 +216,10 @@ Agent-native, like the CAD side: a second script per design, `cam.py`, written b
   measures the tool after each manual change), M3 only after a tool is active, G28 park, M600 between setups,
   9 work offsets, no arcs while A moves, and A-axis feeds computed the way the firmware interprets F on mixed
   linear + rotary moves. Collet size is checked (1/8" standard).
+- **Playback**: the CAM bar plays the program in real time scaled by a speed control (¼× to 100×): moves take their
+  real time at the programmed feed and the machine's rapid rate, the tool moves continuously, ⏮ / ⏭ jump between
+  operations, the operations list shows setup headers and the operation being run (▶ plays from any of them), and on
+  the Machine view a flipped setup turns the work over on the table.
 - **Simulation**: `simulate_cam` (agent) or **Simulate** in the CAM bar runs a material-removal simulation of all
   visible ops or one: a two-sided height map for top/bottom setups, a radial map for 4th-axis setups. The viewer
   shows the stock being cut in step with the slider, with gouges in red and material left in amber on the last
