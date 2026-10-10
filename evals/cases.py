@@ -842,6 +842,17 @@ CASES += [
          graders=[no_agent_error(), expect_tools_used("build_machine", "screenshot"),
                   machine_model_checks("tormach", table=(876, 240), clearance=560, travel=(457, 279, 419), min_parts=7,
                                        moving={"x": "table", "y": "table", "z": "head"})]),
+    Case("machine_haas_vf4", tags=["machine", "cam"],
+         prompt=("Model my Haas VF-4 properly for the Machine view and the collision check. There is a built-in VF-4 in the library "
+                 "(get_machine_code shows the built-in script) but it is just blocks: I want it to look like the real machine. Verified numbers: "
+                 "travel 1270 × 508 × 635 mm, table 1320.8 × 457.2 mm with five 16 mm T-slots at 80 mm pitch, spindle nose to table 106.7–741.7 mm, "
+                 "CAT40 spindle (nose Ø 90), 8,100 rpm, 40+1 side-mount tool changer on the left of the column, Haas enclosure with two sliding front doors and "
+                 "windows, the control pendant on the right. Model the table, saddle, base casting, column, spindle head with the CAT40 + ER32 holder "
+                 "(flange Ø 63.5, ER32 nut Ø 50 × 25, gauge length 101.6), the side-mount changer carousel, the enclosure with its door windows and pendant. "
+                 "Mark anything the tool could hit as collision geometry, record where every number came from, then show it to me and tell me what you estimated."),
+         graders=[no_agent_error(), expect_tools_used("build_machine", "screenshot"),
+                  machine_model_checks("vf-4", table=(1320.8, 457.2), clearance=741.7, travel=(1270, 508, 635), min_parts=12,
+                                       moving={"x": "table", "y": "table", "z": "head"})]),
     Case("ext_mass_cost_panel", tags=["ext"],
          prompt="Write an extension with a panel that estimates mass and material cost per body: a material dropdown per body "
                 "(aluminium, steel, brass, PLA with sensible densities and $/kg), a table with mass and cost per body, and totals. "
