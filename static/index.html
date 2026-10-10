@@ -33,7 +33,16 @@
   #splash .sp-err { color:var(--err); }
   #viewer { flex:1; position:relative; min-width:0; overflow:hidden; }
   #viewer > canvas { display:block; position:absolute; inset:0; }
-  #toolbar { position:absolute; z-index:4; top:10px; left:10px; display:flex; gap:6px; flex-wrap:wrap; align-items:center; }
+  /* ---- header: top strip (brand, File, tabs, Settings) + a tool band of fixed height that never wraps */
+  #hdr { position:absolute; z-index:4; top:0; left:0; right:0; background:linear-gradient(180deg, #1e222a 0%, #191c22 100%); border-bottom:1px solid #2b313b; box-shadow:0 6px 20px rgba(0,0,0,.35); }
+  #hdr .hdr-top { display:flex; align-items:stretch; height:38px; padding:0 10px 0 12px; border-bottom:1px solid #262c36; }
+  #hdr .hdr-left, #hdr .hdr-right { display:flex; align-items:center; gap:2px; } #hdr .hdr-right { margin-left:auto; }
+  #hdr .brand { display:flex; align-items:center; color:var(--accent2); margin-right:6px; }
+  #hdr .hbtn { background:none; border:0; color:#c9d1dc; font:inherit; font-size:12.5px; padding:5px 9px; border-radius:7px; cursor:pointer; display:inline-flex; align-items:center; gap:6px; }
+  #hdr .hbtn:hover, #hdr .menu.open .hbtn { background:rgba(255,255,255,.07); color:#fff; } #hdr .hbtn .chev { font-size:10px; opacity:.7; }
+  #hdr .rtabs { display:flex; align-items:stretch; margin-left:14px; gap:2px; }
+  #hdr .rtabs button { background:none; border:0; border-bottom:2px solid transparent; margin-bottom:-1px; color:#8b94a1; font:inherit; font-size:12.5px; letter-spacing:.04em; padding:0 14px; cursor:pointer; transition:color .12s; }
+  #hdr .rtabs button:hover { color:#e6e9ee; } #hdr .rtabs button.on { color:#fff; border-bottom-color:var(--accent); }
   .btn { background:var(--panel); border:1px solid var(--line); color:var(--text); padding:5px 9px; border-radius:6px; cursor:pointer; font-size:12px; }
   .btn:hover { background:var(--panel2); }
   .btn.active { border-color:var(--accent2); color:var(--accent2); }
@@ -49,7 +58,7 @@
   .dd div:hover { background:var(--panel2); }
   .dd div span { float:right; color:var(--muted); }
   .dd hr { border:0; border-top:1px solid var(--line); margin:4px 0; }
-  #cubewrap { position:absolute; z-index:3; top:8px; right:12px; width:110px; display:flex; flex-direction:column; align-items:center; gap:2px; }
+  #cubewrap { position:absolute; z-index:3; top:116px; right:12px; width:110px; display:flex; flex-direction:column; align-items:center; gap:2px; }
   #cube { width:110px; height:110px; cursor:pointer; display:block; position:static; }
   #home { padding:2px 8px; font-size:13px; line-height:1.2; }
   #bottombar { position:absolute; z-index:3; bottom:10px; left:50%; transform:translateX(-50%); display:flex; gap:6px; align-items:center; white-space:nowrap; background:rgba(28,32,39,.85); border:1px solid var(--line); border-radius:8px; padding:4px; }
@@ -321,20 +330,16 @@
   .mcp-row .nm { flex:1; } .mcp-row .st { font-size:11px; padding:1px 6px; border-radius:10px; background:var(--panel2); color:var(--muted); }
   .mcp-row .st.connected { color:var(--ok); } .mcp-row .st.failed, .mcp-row .st.needs-auth { color:var(--err); }
   /* ---- modelling ribbon */
-  #ribbon { position:absolute; z-index:4; top:8px; left:150px; display:flex; flex-direction:column; gap:0; padding:0 6px 3px; background:linear-gradient(180deg, rgba(34,39,47,.96), rgba(26,30,36,.96)); border:1px solid #333a45; border-radius:10px; box-shadow:0 6px 24px rgba(0,0,0,.35), inset 0 1px 0 rgba(255,255,255,.04); max-width:calc(100% - 270px); }
-  #ribbon .rtabs { display:flex; align-items:center; gap:2px; padding:3px 2px 2px; border-bottom:1px solid #2c333d; margin-bottom:3px; }
-  #ribbon .rtabs button { background:none; border:0; color:#8b94a1; font:inherit; font-size:11.5px; letter-spacing:.02em; padding:3px 9px; border-radius:6px; cursor:pointer; }
-  #ribbon .rtabs button:hover { color:#fff; background:rgba(255,255,255,.06); } #ribbon .rtabs button.on { color:#fff; background:rgba(78,161,255,.18); box-shadow:inset 0 0 0 1px rgba(78,161,255,.4); }
-  #ribbon .rtabs .rcollapse { margin-left:auto; color:#6f7a88; cursor:pointer; padding:0 6px; font-size:12px; } #ribbon .rtabs .rcollapse:hover { color:#fff; }
-  #ribbon .rrow { display:flex; flex-wrap:wrap; gap:2px; }
-  #ribbon .rg { display:none; flex-direction:column; align-items:center; padding:0 5px; border-right:1px solid #2c333d; } #ribbon .rg.on { display:flex; } #ribbon .rg.on:last-of-type, #ribbon .rg.on.last { border-right:0; }
-  #ribbon.compact .rb { width:38px; height:38px; gap:0; } #ribbon.compact .rb .lb { display:none; } #ribbon.compact .rb.ext { min-width:38px; padding:0; }
+  #ribbon { height:68px; display:flex; align-items:center; padding:0 8px; }
+  #ribbon .rrow { display:flex; flex-wrap:nowrap; gap:2px; height:100%; align-items:stretch; overflow:hidden; width:100%; }
+  #ribbon .rg { display:none; flex-direction:column; align-items:center; justify-content:center; padding:0 6px; border-right:1px solid #262c36; } #ribbon .rg.on { display:flex; } #ribbon .rg.on.last { border-right:0; }
+  #ribbon.compact .rb { width:40px; height:40px; gap:0; } #ribbon.compact .rb .lb { display:none; } #ribbon.compact .rb.ext { min-width:40px; padding:0; }
   #ribbon .rg .rgh { display:none; }
   #ribbon .rg.fold { position:relative; justify-content:center; } #ribbon .rg.fold .rgl { display:none; }
   #ribbon .rg.fold .rgh { display:flex; align-items:center; gap:4px; height:38px; padding:0 9px; border:0; border-radius:8px; background:transparent; color:#c9d1dc; font:inherit; font-size:11.5px; cursor:pointer; }
   #ribbon .rg.fold .rgh:hover, #ribbon .rg.fold.open .rgh { background:rgba(255,255,255,.08); color:#fff; }
   #ribbon .rg.fold .rgb { display:none; } #ribbon .rg.fold.open .rgb { display:flex; position:absolute; top:100%; left:0; z-index:5; padding:4px; background:linear-gradient(180deg, rgba(34,39,47,.98), rgba(26,30,36,.98)); border:1px solid #333a45; border-radius:8px; box-shadow:0 8px 24px rgba(0,0,0,.4); }
-  #ribbon.collapsed .rrow { display:none; } #ribbon.collapsed .rtabs { border-bottom:0; margin-bottom:0; }
+
   #cmd input[type=number]::-webkit-outer-spin-button, #cmd input[type=number]::-webkit-inner-spin-button { -webkit-appearance:none; margin:0; } #cmd input[type=number] { -moz-appearance:textfield; }
   #ribbon .rgl { font-size:9.5px; letter-spacing:.6px; text-transform:uppercase; color:#6f7a88; margin-top:1px; order:2; }
   #ribbon .rgb { display:flex; gap:2px; }
@@ -366,7 +371,7 @@
   #cmd .in.sel select { width:100%; background:#0f1216; color:#e6e9ee; border:1px solid #333a45; border-radius:7px; padding:6px 9px; font:inherit; } #cmd .in.sel select:focus { outline:none; border-color:#4ea1ff; }
   #cmd .sw { position:relative; width:36px; height:20px; display:inline-block; cursor:pointer; } #cmd .sw input { opacity:0; width:0; height:0; } #cmd .sw span { position:absolute; inset:0; background:#2c333d; border-radius:20px; transition:.15s; } #cmd .sw span:before { content:""; position:absolute; width:14px; height:14px; left:3px; top:3px; background:#98a3b1; border-radius:50%; transition:.15s; } #cmd .sw input:checked + span { background:#4ea1ff; } #cmd .sw input:checked + span:before { transform:translateX(16px); background:#fff; }
   #cmd .ft { display:flex; align-items:center; gap:6px; padding:8px 12px 10px; border-top:1px solid #2c333d; margin-top:4px; } #cmd .ft .hint { flex:1; color:#6f7a88; font-size:10.5px; } #cmd .ft .btn.primary { display:flex; align-items:center; gap:4px; }
-  body.sketching #ribbon, body.sketching #cmd, body.sketching #toolbar { display:none; }
+  body.sketching #hdr, body.sketching #cmd { display:none; }
   body.tooling #viewer > canvas { cursor:crosshair; }
   #codeerr { color:var(--err); font-size:11px; white-space:pre-wrap; max-height:120px; overflow:auto; padding:0 12px 8px; }
   /* modal */
@@ -386,9 +391,12 @@
   <div class="sp-bar indet" id="sp-bar"><div id="sp-fill"></div></div><ul id="sp-steps"></ul><div class="sp-hint" id="sp-hint"></div></div></div>
 <div id="app">
   <div id="viewer">
-    <div id="toolbar">
-      <div class="menu" id="filemenu"><button class="btn">File ▾</button>
-        <div class="dd">
+    <div id="hdr">
+      <div class="hdr-top">
+        <div class="hdr-left">
+          <span class="brand" title="AgenticCAD"><svg width="20" height="20" viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M16 3 28 9.5v13L16 29 4 22.5v-13L16 3Z"/><path d="M16 16 28 9.5M16 16v13M16 16 4 9.5"/><circle cx="16" cy="16" r="3" fill="#ff8c42" stroke="none"/></svg></span>
+          <div class="menu" id="filemenu"><button class="hbtn">File <span class="chev">▾</span></button>
+            <div class="dd">
           <div data-act="new">New</div>
           <div data-act="open">Open…</div>
           <div data-act="save">Save <span>⌘S</span></div>
@@ -405,7 +413,22 @@
           <hr>
           <div data-act="settings">Settings…</div>
         </div></div>
-      <button class="btn" id="settings-btn" title="Settings: agent, drawings, 3D printing" style="display:inline-flex;align-items:center;gap:6px"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.2"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>Settings</button>
+        </div>
+        <nav class="rtabs" role="tablist"><button type="button" data-rtab="design" class="on">Design</button><button type="button" data-rtab="cam">CAM</button><button type="button" data-rtab="output">Output</button><button type="button" data-rtab="ext">Extensions</button></nav>
+        <div class="hdr-right"><button class="hbtn" id="settings-btn" title="Settings: agent, drawings, 3D printing, machines, tools"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.2"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>Settings</button></div>
+      </div>
+      <div id="ribbon">
+        <div class="rrow">
+          <div class="rg on" data-tab="design"><div class="rgl">Create</div><div class="rgb" id="rg-create"></div></div>
+          <div class="rg on" data-tab="design"><div class="rgl">Modify</div><div class="rgb" id="rg-modify"></div></div>
+          <div class="rg on" data-tab="design"><div class="rgl">Assemble</div><div class="rgb" id="rg-assemble"></div></div>
+          <div class="rg on" data-tab="design"><div class="rgl">Inspect</div><div class="rgb" id="rg-inspect"></div></div>
+          <div class="rg" data-tab="cam"><div class="rgl">Machine</div><div class="rgb" id="rg-cam-machine"></div></div>
+          <div class="rg" data-tab="cam"><div class="rgl">Simulate</div><div class="rgb" id="rg-cam-sim"></div></div>
+          <div class="rg" data-tab="output"><div class="rgl">Output</div><div class="rgb" id="rg-output"></div></div>
+          <div class="rg" data-tab="ext"><div class="rgl">Extensions</div><div class="rgb" id="rg-ext"></div></div>
+        </div>
+      </div>
     </div>
     <div id="cubewrap" title="Click a face, edge or corner to look from there · drag to orbit"><canvas id="cube" width="220" height="220"></canvas>
       <button class="btn" id="home" title="Home view (fit)">⌂</button></div>
@@ -425,19 +448,6 @@
       <button class="btn active" id="layers-toggle" title="Show sliced layers" style="display:none">Layers</button>
     </div>
     <div id="tree"><div class="hd" style="display:flex;align-items:center">Browser<button class="btn small" id="tree-addbody" style="display:none">+ Body</button><button class="btn small" id="tree-addpart" style="margin-left:auto;padding:1px 6px" title="Insert a part from the library">+ Part</button></div><div id="treebody"></div><div id="sketchtree"></div></div>
-    <div id="ribbon">
-      <div class="rtabs"><button type="button" data-rtab="design" class="on">Design</button><button type="button" data-rtab="cam">CAM</button><button type="button" data-rtab="output">Output</button><button type="button" data-rtab="ext">Extensions</button><span class="rcollapse" title="Collapse / expand the ribbon">▴</span></div>
-      <div class="rrow">
-        <div class="rg on" data-tab="design"><div class="rgl">Create</div><div class="rgb" id="rg-create"></div></div>
-        <div class="rg on" data-tab="design"><div class="rgl">Modify</div><div class="rgb" id="rg-modify"></div></div>
-        <div class="rg on" data-tab="design"><div class="rgl">Assemble</div><div class="rgb" id="rg-assemble"></div></div>
-        <div class="rg on" data-tab="design"><div class="rgl">Inspect</div><div class="rgb" id="rg-inspect"></div></div>
-        <div class="rg" data-tab="cam"><div class="rgl">Machine</div><div class="rgb" id="rg-cam-machine"></div></div>
-        <div class="rg" data-tab="cam"><div class="rgl">Simulate</div><div class="rgb" id="rg-cam-sim"></div></div>
-        <div class="rg" data-tab="output"><div class="rgl">Output</div><div class="rgb" id="rg-output"></div></div>
-        <div class="rg" data-tab="ext"><div class="rgl">Extensions</div><div class="rgb" id="rg-ext"></div></div>
-      </div>
-    </div>
     <div id="tip"></div>
     <div id="cmd"></div>
     <svg id="sketch-svg"></svg>
@@ -758,7 +768,7 @@ function resize() {
   renderer.setSize(w, h, true); camera.aspect = w / h; camera.updateProjectionMatrix();
 }
 window.addEventListener('resize', resize); resize();
-function placeTree() { const rb = document.getElementById('ribbon'); if (!rb) return; const tb = document.getElementById('toolbar'); rb.style.left = (tb.offsetLeft + tb.offsetWidth + 10) + 'px'; const y = rb.offsetTop + rb.offsetHeight + 10; document.getElementById('tree').style.top = y + 'px'; document.getElementById('cmd').style.top = Math.max(150, y) + 'px'; }
+function placeTree() { const h = document.getElementById('hdr'); if (!h) return; const y = (h.offsetParent ? h.offsetHeight : 0) + 10; document.getElementById('tree').style.top = y + 'px'; document.getElementById('cmd').style.top = Math.max(150, y) + 'px'; }
 window.addEventListener('resize', placeTree); setTimeout(placeTree, 0);
 // the Parameters card stacks under the Browser and follows its height
 function placeParams() { const t = document.getElementById('tree'), c = document.getElementById('params-card'); c.style.top = (t.offsetTop + t.offsetHeight + 8) + 'px'; c.style.maxHeight = Math.max(80, viewerEl.clientHeight - t.offsetTop - t.offsetHeight - 60) + 'px'; }
@@ -3007,7 +3017,7 @@ function renderExtRibbon() {
   for (const id of Object.keys(extPanels)) if (!id.startsWith('eph:') && !extDefs.panels.some(p => p.id === id)) extClose(id);   // its file went away
   syncExtRibbon();
 }
-function placeExtPanels() { const r = document.getElementById('ribbon'); if (r && r.offsetParent) extPanelsEl.style.top = (r.getBoundingClientRect().bottom - document.getElementById('viewer').getBoundingClientRect().top + 8) + 'px'; }
+function placeExtPanels() { const r = document.getElementById('hdr'); if (r && r.offsetParent) extPanelsEl.style.top = (r.getBoundingClientRect().bottom - document.getElementById('viewer').getBoundingClientRect().top + 8) + 'px'; }
 window.addEventListener('resize', placeExtPanels);
 function syncExtRibbon() { document.querySelectorAll('#rg-ext .rb').forEach(b => b.classList.toggle('active', !!extPanels[b.dataset.ext])); }
 function extOpen(pid) { const st = extPanels[pid] ? extPanels[pid].state : {}; const p = extEnsure(pid, (extDefs.panels.find(x => x.id === pid) || {}).title || pid); extQueue(p, { op: 'open', panel: pid, state: st }); }
@@ -3632,22 +3642,22 @@ placeTree();
 // ribbon tabs (Design · CAM · Output · Extensions): one row per tab; compact (icons only) when the row would wrap
 function setRibbonTab(name, remember = true) {
   const rb = document.getElementById('ribbon');
-  rb.querySelectorAll('.rtabs [data-rtab]').forEach(b => b.classList.toggle('on', b.dataset.rtab === name));
+  document.querySelectorAll('#hdr .rtabs [data-rtab]').forEach(b => b.classList.toggle('on', b.dataset.rtab === name));
   const groups = [...rb.querySelectorAll('.rg')]; groups.forEach(g => { g.classList.toggle('on', g.dataset.tab === name); g.classList.remove('last'); });
   const on = groups.filter(g => g.classList.contains('on')); if (on.length) on[on.length - 1].classList.add('last');
   if (remember) { try { localStorage.setItem('ribbonTab', name); } catch (e) {} }
   fitRibbon();
 }
-function ribbonTab() { const b = document.querySelector('#ribbon .rtabs [data-rtab].on'); return b ? b.dataset.rtab : 'design'; }
-function fitRibbon() {                       // one row: drop the labels when the row would wrap, then fold groups into dropdowns from the right
-  const rb = document.getElementById('ribbon'); if (!rb || rb.classList.contains('collapsed')) { placeTree(); return; }
+function ribbonTab() { const b = document.querySelector('#hdr .rtabs [data-rtab].on'); return b ? b.dataset.rtab : 'design'; }
+function fitRibbon() {                       // the band keeps its height: labels go first, then groups fold into dropdowns from the right
+  const rb = document.getElementById('ribbon'); if (!rb) return;
   const row = rb.querySelector('.rrow'), on = [...row.querySelectorAll('.rg.on')];
   rb.classList.remove('compact'); on.forEach(g => g.classList.remove('fold', 'open'));
-  const wraps = () => { const first = on.find(g => g.offsetParent); if (!first) return false; const top = first.getBoundingClientRect().top; return on.some(g => g.getBoundingClientRect().top > top + 4); };
-  if (wraps()) rb.classList.add('compact');
-  for (let i = on.length - 1; i >= 1 && wraps(); i--) on[i].classList.add('fold');
-  if (wraps() && on[0]) on[0].classList.add('fold');
-  placeTree();
+  const over = () => row.scrollWidth > row.clientWidth + 1;
+  if (over()) rb.classList.add('compact');
+  for (let i = on.length - 1; i >= 1 && over(); i--) on[i].classList.add('fold');
+  if (over() && on[0]) on[0].classList.add('fold');
+  placeTree(); if (typeof placeExtPanels === 'function') placeExtPanels();
 }
 document.querySelectorAll('#ribbon .rg').forEach(g => {
   const h = document.createElement('button'); h.type = 'button'; h.className = 'rgh'; h.innerHTML = `${g.querySelector('.rgl').textContent} <span style="opacity:.7">▾</span>`;
@@ -3655,10 +3665,9 @@ document.querySelectorAll('#ribbon .rg').forEach(g => {
   g.insertBefore(h, g.firstChild);
 });
 document.addEventListener('click', e => { if (!e.target.closest('#ribbon .rg.fold')) document.querySelectorAll('#ribbon .rg.open').forEach(x => x.classList.remove('open')); });
-document.querySelectorAll('#ribbon .rtabs [data-rtab]').forEach(b => b.onclick = () => setRibbonTab(b.dataset.rtab));
-document.querySelector('#ribbon .rcollapse').onclick = e => { const rb = document.getElementById('ribbon'); rb.classList.toggle('collapsed'); e.currentTarget.textContent = rb.classList.contains('collapsed') ? '▾' : '▴'; try { localStorage.setItem('ribbonCollapsed', rb.classList.contains('collapsed') ? '1' : ''); } catch (err) {} fitRibbon(); };
+document.querySelectorAll('#hdr .rtabs [data-rtab]').forEach(b => b.onclick = () => setRibbonTab(b.dataset.rtab));
 window.addEventListener('resize', fitRibbon);
-(() => { let t = 'design', c = ''; try { t = localStorage.getItem('ribbonTab') || 'design'; c = localStorage.getItem('ribbonCollapsed') || ''; } catch (e) {} if (c) { document.getElementById('ribbon').classList.add('collapsed'); document.querySelector('#ribbon .rcollapse').textContent = '▾'; } setRibbonTab(t, false); })();
+(() => { let t = 'design'; try { t = localStorage.getItem('ribbonTab') || 'design'; } catch (e) {} setRibbonTab(t, false); })();
 function activateTool(k) {
   if (k === 'sketch') { if (tool) endTool(); if (measuring) setMeasuring(false); sk ? endSketch() : startSketch(null); return; }
   if (k === 'measure') { if (tool) endTool(); setMeasuring(!measuring); return; }

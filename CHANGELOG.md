@@ -5,6 +5,15 @@ features, patch bumps fix things. The version shown in the UI header comes from 
 
 ## [Unreleased]
 
+## [0.32.0] — 2026-10-10
+
+### Changed
+- **A proper header.** The floating File / Settings buttons and the floating ribbon are replaced by one header that
+  spans the viewer: brand mark and **File** menu on the left, real tabs (**Design · CAM · Output · Extensions**) with
+  an indicator, **Settings** on the right, and a tool band of fixed height beneath. The band never changes size: labels
+  drop to icons when the row would overflow, then groups fold into dropdowns from the right. The Browser tree and
+  the ViewCube sit under the header instead of being pushed around by it.
+
 ## [0.31.0] — 2026-10-10
 
 ### Changed
