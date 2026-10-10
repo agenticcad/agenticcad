@@ -496,6 +496,11 @@
     </div>
     <div class="pane" id="pane-cam">
       <div id="cam-body">
+        <div class="cam-sec" id="cam-machine"><h4>Machine view</h4>
+          <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap"><select id="cam-machine-pick" class="btn" style="padding:4px 6px;max-width:230px" title="Which machine to show"></select>
+            <button class="btn small" id="cam-machine-show" title="Show the machine around the design (A)">Show machine</button>
+            <button class="btn small" id="cam-machine-doors" title="Open or close the machine's doors / canopy" disabled>Open doors</button></div>
+          <div class="muted" style="font-size:11.5px;margin-top:4px">The design sits on the machine's bed; with a CAM program the simulation plays on the program's machine and collisions flash red.</div></div>
         <div id="cam-empty" class="cam-sec" style="color:var(--muted)">No CAM program yet. Ask the agent, e.g. <i>"Make a CAM program for the Generic 3018: face the stock, drill the holes, pocket the bore and cut the outline with 4 tabs."</i> The agent writes <code>cam.py</code> (see the Code tab) against your machine and tool libraries. <div style="margin-top:8px"><button class="btn small" data-open-libs="machines">Machines &amp; tools…</button></div></div>
         <div class="cam-sec" id="cam-setup" style="display:none"><h4>Setup <button class="btn small" data-open-libs="machines" title="Settings ▸ Machines / Tools">Machines &amp; tools…</button></h4><div id="cam-setup-body"></div></div>
         <div class="cam-sec" id="cam-simres" style="display:none"><h4>Simulation <button class="btn small" id="sim-clear">Hide</button></h4><div id="cam-simres-body" style="white-space:pre-wrap"></div></div>
@@ -972,7 +977,7 @@ async function renderScreenshot(spec) {
   }
 }
 
-window.agenticcad = { renderScreenshot, get model() { return model; }, get machine() { return { on: machineOn, rig: machineRig, set: setMachine, pose: poseRig, stage: stageGroup, preview: machinePreview }; }, get sketch() { return sk; }, get extDefs() { return extDefs; }, get extPanels() { return extPanels; }, scene, camera, renderer, send: (o) => send(o) };
+window.agenticcad = { renderScreenshot, get model() { return model; }, get machine() { return { on: machineOn, rig: machineRig, set: setMachine, pose: poseRig, stage: stageGroup, preview: machinePreview, doors: setDoors, get door() { return machineDoor; } }; }, get sketch() { return sk; }, get extDefs() { return extDefs; }, get extPanels() { return extPanels; }, scene, camera, renderer, send: (o) => send(o) };
 
 // toolbar
 document.getElementById('fit').onclick = () => fitCamera();
@@ -1477,6 +1482,7 @@ function bitAt(bits, idx) { return (bits[idx >> 3] >> (7 - (idx & 7))) & 1; }
 // the stock node and the tool hangs from the spindle. Posed from the simulation slider; collisions the simulator found
 // flash the parts involved red.
 var machineOn = false, machineRig = null, machineLoading = null, machinePreview = null;   // machinePreview: a library machine shown without / instead of the program's
+var machineDoor = 0, machineDoorTarget = 0, machineDoorRaf = null;   // doors: 0 closed … 1 open (animated)
 const machineEdgeMat = new THREE.LineBasicMaterial({ color: 0x0c0f13, transparent: true, opacity: 0.35 });
 const machineHitMat = new THREE.MeshStandardMaterial({ color: 0xff2d2d, emissive: 0xff2d2d, emissiveIntensity: 0.55, roughness: 0.5, side: THREE.DoubleSide });
 const AXIS_V = { x: new THREE.Vector3(1, 0, 0), y: new THREE.Vector3(0, 1, 0), z: new THREE.Vector3(0, 0, 1) };
@@ -1523,7 +1529,7 @@ async function loadMachineRig() {
     const stockNode = nodes.get((r.machine.nodes.find(n => n.stock) || r.machine.nodes[0]).name);
     const headZ = [...nodes.values()].find(g => g.userData.node.axis === 'z' && g.userData.node.mode === 'head') || root;
     machineRig = { name, rotaryKey: rotaryKey(), data: r.machine, materials: r.materials, root, nodes, parts, stockNode, headZ, origin: new THREE.Vector3(), tool: null };
-    scene.add(root); placeRig(); attachStage();
+    scene.add(root); placeRig(); attachStage(); syncMachineUi();
     if (r.warnings && r.warnings.length) console.warn('machine model', r.warnings);
     return machineRig;
   })().finally(() => { machineLoading = null; });
@@ -1545,6 +1551,7 @@ function stickoutFor(t) {
 }
 function poseRig(tip, aDeg, t) {
   if (!machineRig) return;
+  machineRig.lastPose = [tip, aDeg, t];
   const d = machineRig.data, home = d.home, stick = stickoutFor(t);
   let target;
   if (tip) {
@@ -1554,6 +1561,12 @@ function poseRig(tip, aDeg, t) {
   } else target = [home[0], home[1], home[2]];
   for (const g of machineRig.nodes.values()) {
     const n = g.userData.node; g.position.set(0, 0, 0); g.quaternion.identity();
+    if (n.door) {                                                              // doors follow the doors toggle, not the tool
+      const dir = new THREE.Vector3(...(n.direction || [1, 0, 0])).normalize();
+      if (n.door === 'hinge') { const p = new THREE.Vector3(...(n.pivot || [0, 0, 0])); g.quaternion.setFromAxisAngle(dir, (n.open || 0) * machineDoor * Math.PI / 180); g.position.copy(p).sub(p.clone().applyQuaternion(g.quaternion)); }
+      else g.position.copy(dir).multiplyScalar((n.open || 0) * machineDoor);
+      continue;
+    }
     if (!n.axis) continue;
     if (n.axis === 'a') {
       const p = new THREE.Vector3(...(n.pivot || [0, 0, 0])); g.quaternion.setFromAxisAngle(AXIS_V.x, (aDeg || 0) * Math.PI / 180);
@@ -1570,6 +1583,34 @@ function poseRig(tip, aDeg, t) {
     grp.add(flutes, shank); grp.position.set(home[0], home[1], home[2] - stick); machineRig.headZ.add(grp); machineRig.tool = grp;
   }
 }
+function rigHasDoors() { return !!(machineRig && machineRig.data.nodes.some(n => n.door)); }
+function setDoors(open) {                                                     // animate the door nodes over ~700 ms
+  machineDoorTarget = open ? 1 : 0;
+  if (machineDoorRaf) cancelAnimationFrame(machineDoorRaf);
+  const from = machineDoor, to = machineDoorTarget, t0 = performance.now(), dur = 700;
+  const step = now => {
+    const u = Math.min(1, (now - t0) / dur), e = u < 0.5 ? 2 * u * u : 1 - Math.pow(-2 * u + 2, 2) / 2;
+    machineDoor = from + (to - from) * e;
+    if (machineRig) poseRig(...(machineRig.lastPose || [null, 0, null]));
+    if (u < 1) machineDoorRaf = requestAnimationFrame(step); else machineDoorRaf = null;
+  };
+  machineDoorRaf = requestAnimationFrame(step);
+  syncMachineUi();
+}
+function syncMachineUi() {                                                     // the CAM tab's Machine view controls
+  const pick = document.getElementById('cam-machine-pick'), show = document.getElementById('cam-machine-show'), doors = document.getElementById('cam-machine-doors');
+  if (!pick) return;
+  const names = (library.machines || []).map(m => m.name);
+  const want = machineOn && machineRig ? machineRig.name : (machinePreview || (program && program.machine) || pick.value || names[0] || '');
+  if ([...pick.options].map(o => o.value).join('|') !== names.join('|')) pick.innerHTML = names.map(n => `<option value="${n.replace(/&/g, '&amp;').replace(/"/g, '&quot;')}">${n.replace(/&/g, '&amp;').replace(/</g, '&lt;')}</option>`).join('');
+  if (names.includes(want)) pick.value = want;
+  show.textContent = machineOn ? 'Hide machine' : 'Show machine'; show.classList.toggle('active', machineOn); show.disabled = !names.length;
+  doors.disabled = !(machineOn && rigHasDoors()); doors.textContent = machineDoorTarget ? 'Close doors' : 'Open doors';
+  doors.title = machineOn && !rigHasDoors() ? 'This machine model has no door nodes (node(..., door="hinge"|"slide"))' : "Open or close the machine's doors / canopy";
+}
+document.getElementById('cam-machine-pick').onchange = e => { if (machineOn) setMachine(true, e.target.value); else machinePreview = e.target.value; };
+document.getElementById('cam-machine-show').onclick = () => { const n = document.getElementById('cam-machine-pick').value; if (machineOn && machineRig && machineRig.name === n) setMachine(false); else setMachine(true, n || undefined); };
+document.getElementById('cam-machine-doors').onclick = () => setDoors(!machineDoorTarget);
 function machineHitsAt(opName, mi) {
   const col = simRes && simRes.stats && simRes.stats.collisions; if (!col || !col.count) return [];
   return (col.all || col.hits).filter(h => h.op === opName && Math.abs(h.move - mi) <= 3);
@@ -1601,7 +1642,7 @@ async function setMachine(on, name) {
   if (program && sim) applySim(+simRange.value); else if (machineOn && machineRig) { poseRig(null, 0, null); flashMachine([]); }
   if (machineOn) fitMachine();
   if (renderOn) renderGround();
-  syncRibbon();
+  syncRibbon(); syncMachineUi();
 }
 function fitMachine() {
   if (!machineRig) return;
@@ -4191,7 +4232,7 @@ function connect() {
       case 'sliced': loadSlice(m); break;
       case 'library_parts': libParts = m.parts; renderLibrary(); break;
       case 'drawings': renderDrawings(m.design, m.files); break;
-      case 'library': library = { machines: m.machines, tools: m.tools, scripts: m.machine_scripts || [] }; renderCamTab(); if (codeWhich === 'machine') fillMachineSelect(); break;
+      case 'library': library = { machines: m.machines, tools: m.tools, scripts: m.machine_scripts || [] }; renderCamTab(); syncMachineUi(); if (codeWhich === 'machine') fillMachineSelect(); break;
       case 'machine':                            // a machine model script: loaded for the Code tab, or built (by the user or the agent)
         if (m.name === machineCodeName || m.source !== 'load') { machineCode = m.code; machineCodeUser = !!m.user; }
         if (codeWhich === 'machine' && m.name === machineCodeName && (!codeDirty || m.source !== 'agent')) { codeEl.value = m.code; codeDirty = false; document.getElementById('code-hint').innerHTML = codeHint(); }

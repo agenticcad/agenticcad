@@ -5,6 +5,21 @@ features, patch bumps fix things. The version shown in the UI header comes from 
 
 ## [Unreleased]
 
+## [0.29.0] — 2026-10-10
+
+### Added
+- **Machine view in the CAM tab.** A *Machine view* section at the top of the CAM tab (no program needed): pick any
+  library machine, **Show machine** / **Hide machine**, and **Open doors** / **Close doors**.
+- **Doors and lids in machine models.** A machine script can declare door nodes, `node(name, parent, door="hinge",
+  pivot=..., direction=..., open=degrees)` for a lid that swings about a hinge line or `door="slide"` with
+  `open=mm` for sliding doors; the parts on that node animate open and closed in the viewer instead of the model
+  being rebuilt. The built-in Makera Z1 and Carvera Air canopies lift about their rear hinges and the Haas doors
+  slide apart. The agent's brief asks for door nodes on any machine with a cover.
+
+### Fixed
+- **Makera Z1 model:** the invented front accessory rail, probe dock and standing probe are gone; the tool-length
+  sensor now sits in a cutout at the rear-right corner of the bed (position estimated, per reviews — measure yours).
+
 ## [0.28.0] — 2026-10-10
 
 ### Added

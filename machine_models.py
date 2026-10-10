@@ -47,6 +47,8 @@ class Node:
     stock: bool = False           # the work rides here
     pivot: tuple[float, float, float] | None = None   # rotary nodes: a point on the axis (machine frame)
     direction: tuple[float, float, float] = (1.0, 0.0, 0.0)
+    door: str | None = None       # "hinge" (swings `open` degrees about the line through pivot along direction) | "slide" (moves `open` mm along direction)
+    open: float = 0.0             # how far a door node moves when the doors are open
 
 
 @dataclass
@@ -72,7 +74,8 @@ class MachineModel:
                 "nose": self.nose, "table": self.table, "rotary": self.rotary, "sources": self.sources, "notes": self.notes,
                 "spoilboard": self.spoilboard, "stickout": self.stickout, "warnings": list(getattr(self, "warnings", [])),
                 "nodes": [{"name": n.name, "parent": n.parent, "axis": n.axis, "mode": n.mode, "stock": n.stock,
-                           "pivot": list(n.pivot) if n.pivot else None, "direction": list(n.direction)} for n in self.nodes]}
+                           "pivot": list(n.pivot) if n.pivot else None, "direction": list(n.direction), "door": n.door, "open": n.open}
+                          for n in self.nodes]}
 
 
 # viewer materials: a small painted-metal / plastic / glass palette (PBR values), keyed by Part.material

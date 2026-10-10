@@ -100,3 +100,37 @@ def test_machine_script_api_and_ws(client):
     assert r["user"] and r["code"] == GOOD
     r = client.get("/api/cam/machine_model?name=Generic%203018&quality=draft").json()
     assert r["machine"]["key"] == "generic-3018" and {p["name"] for p in r["parts"]} == {"bed", "gantry", "spindle body", "collet nut"}
+
+
+DOORS = GOOD + '''
+node("lid", "base", door="hinge", pivot=(0, 150, 200), direction=(1, 0, 0), open=-80)
+part("lid", "lid", box(400, 300, 4, at=(0, 0, 0), zmin=200), "acrylic")
+node("door L", "base", door="slide", direction=(-1, 0, 0), open=300)
+part("door L", "door L", box(200, 4, 150, at=(-100, -152, 0), zmin=0), "panel")
+'''
+
+
+def test_door_nodes_validate_and_reach_the_payload():
+    model = ms.run(DOORS, rec())
+    doors = {n.name: n for n in model.nodes if n.door}
+    assert doors["lid"].door == "hinge" and doors["lid"].open == -80 and doors["lid"].pivot == (0, 150, 200)
+    assert doors["door L"].door == "slide" and doors["door L"].direction == (-1.0, 0.0, 0.0)
+    pay = model.to_payload()
+    nd = {n["name"]: n for n in pay["nodes"]}
+    assert nd["lid"]["door"] == "hinge" and nd["lid"]["open"] == -80 and nd["door L"]["direction"] == [-1.0, 0.0, 0.0]
+    assert "door (hinge, open -80)" in ms.summary(model)
+    for code, msg in [("node('base'); node('d', 'base', door='swing')", "door must be"),
+                      ("node('base'); node('d', 'base', door='hinge', direction=(1,0,0), open=10)", "needs pivot"),
+                      ("node('base'); node('d', 'base', door='slide', direction=(0,0,0), open=10)", "non-zero"),
+                      ("node('base'); node('d', 'base', door='slide', direction=(1,0,0))", "needs open"),
+                      ("node('base'); node('d', 'base', axis='x', door='slide', direction=(1,0,0), open=10)", "has no axis")]:
+        with pytest.raises(ms.MachineScriptError, match=msg):
+            ms.run(code, rec())
+
+
+def test_builtins_have_doors_where_the_machine_has_them(tmp_path):
+    lib = Library(tmp_path).machines()
+    doors = {n: [x.door for x in mm.model_for(lib[n], tmp_path).nodes if x.door] for n in ("Makera Z1", "Carvera Air", "Haas VF-4", "Haas VF-2", "Generic 3018")}
+    assert doors["Makera Z1"] == ["hinge"] and doors["Carvera Air"] == ["hinge"] and doors["Haas VF-4"] == ["slide", "slide"] and doors["Haas VF-2"] == ["slide", "slide"] and doors["Generic 3018"] == []
+    z1 = mm.model_for(lib["Makera Z1"], tmp_path)
+    assert any(p.name == "tool length sensor" and p.node == "bed" for p in z1.parts) and not any("probe" in p.name or "rail" in p.name for p in z1.parts)

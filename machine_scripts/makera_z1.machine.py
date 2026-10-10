@@ -3,7 +3,7 @@
 # Verified: makera.com (work area 200×200×100, gantry clearance 115, 4th axis Ø80×150), Makera Z1-MDF-v2.1 bed file
 # (206×206×6, 36 counterbored M5 holes). Reference: Carvera Community simplified Z1 model (spindle nose Ø16×20,
 # head 65×70×190, enclosure 355×435×449, chuck Ø52). Case styling (plinth / canopy / diagonal split) from Makera's
-# product photos; its proportions are ESTIMATED. Rods, carriages, chains, probe dock, tool setter, LED, feet: estimated.
+# product photos; its proportions are ESTIMATED. Rods, carriages, chains, tool-length sensor size, LED, feet: estimated.
 
 node("base")
 node("bed", "base", axis="y", mode="table", stock=not fourth)      # the bed carries the work and moves in Y
@@ -35,6 +35,7 @@ holes = bed_holes("makera_z1_mdf")
 for (u, v) in holes:
     x, y = u - 103, v - 103
     mdf = mdf - cyl_z(2.75, mdf_t + 1, at=(x, y), zmin=-mdf_t - 0.5) - cyl_z(5.0, 3.0, at=(x, y), zmin=-3.0)
+mdf = mdf - cyl_z(11, mdf_t + 2, at=(88.0, 88.0), zmin=-mdf_t - 1)        # cutout for the tool-length sensor (rear-right)
 part("spoilboard", "bed", mdf, "mdf", collision=True)
 part("bed carriage", "bed", box(180, 180, 26, zmin=-mdf_t - alu_t - 26), "paint_dark")
 
@@ -47,19 +48,11 @@ for x in (-70, 70):
         yb = b if yb is None else yb + b
 part("Y bearings", "bed", yb, "alu")
 
-# front accessory rail on the bed: tool-length setter (front-left) and wireless probe dock (front-right) — estimated
-rail_y0, rail_y1 = -116.0, -103.0
-ry = (rail_y0 + rail_y1) / 2
-part("accessory rail", "bed", box(206, rail_y1 - rail_y0, 12, at=(0, ry, 0), zmin=-18), "anodised")
-tls = cyl_z(6, 11, at=(-85, ry), zmin=-3) + cyl_z(4.5, 3, at=(-85, ry), zmin=8)
-part("tool length setter", "bed", tls, "steel", collision=True)
-part("tool setter base", "bed", box(20, 12, 3, at=(-85, ry, 0), zmin=-6), "paint_dark")
-dock = box(28, 12, 16, at=(80, ry, 0), zmin=-6) - cyl_z(4.0, 12, at=(80, ry), zmin=-2)
-part("probe dock", "bed", dock, "paint_dark", collision=True)
-probe = (cyl_z(1.0, 10, at=(80, ry), zmin=0) + Pos(80, ry, 0) * Sphere(1.5)
-         + cyl_z(7.5, 26, at=(80, ry), zmin=10) + cyl_z(3.0, 14, at=(80, ry), zmin=36))
-probe = probe - cyl_z(7.6, 1.0, at=(80, ry), zmin=30) + cyl_z(7.0, 1.0, at=(80, ry), zmin=30)
-part("wireless probe", "bed", probe, "stainless", collision=True)
+# tool-length sensor set into a cutout at the REAR-RIGHT corner of the bed (reviews: "the tool-length sensor occupies the
+# rear-right corner"); the Z1 has no fixed probe dock — the wired 3D probe is a tool that goes in the collet. Estimated size.
+tls_x, tls_y = 88.0, 88.0
+part("tool length sensor housing", "bed", cyl_z(10, 15, at=(tls_x, tls_y), zmin=-6), "anodised", collision=True)
+part("tool length sensor", "bed", cyl_z(6, 3, at=(tls_x, tls_y), zmin=9), "steel", collision=True)
 
 # ------------------------------------------------------------------ base: frame, Y rods, Y screw, Y cable chain
 part("base frame", "base", box(300, 400, 20, at=(0, 95, 0), zmin=-97), "paint_dark")
@@ -164,8 +157,9 @@ part("plinth", "base", plinth, "paint_dark", collision=True)
 
 # smoked acrylic canopy (front + roof + side triangles), with its black rim and diagonal edge
 canopy_zone = shell & front - below_plinth
-part("canopy", "base", canopy_zone - rim_slab - diag_band, "acrylic", collision=True)
-part("canopy frame", "base", (canopy_zone & rim_slab) + (canopy_zone & diag_band), "paint_dark", collision=True)
+node("canopy", "base", door="hinge", pivot=(0.0, diag_y(ztop) + 8, ztop + 3.5), direction=(1, 0, 0), open=-80)   # lifts up about the rear hinge line
+part("canopy", "canopy", canopy_zone - rim_slab - diag_band, "acrylic", collision=True)
+part("canopy frame", "canopy", (canopy_zone & rim_slab) + (canopy_zone & diag_band), "paint_dark", collision=True)
 for hxp in (-60, 60):                              # rear hinges where the canopy roof meets the grey roof strip
     hinge = box(24, 16, 6, at=(hxp, diag_y(ztop) + 2, 0), zmin=ztop - 1) + cyl_x(3.5, 24, diag_y(ztop) + 8, ztop + 3.5, hxp - 12)
     part(f"canopy hinge {'L' if hxp < 0 else 'R'}", "base", hinge, "paint_dark")
@@ -246,7 +240,7 @@ machine(key="z1_4axis" if fourth else "z1", home=(hx, hy, nose_z), travel=(200, 
                  "plinth height 89, diagonal 40→355 mm back, edge radii 32/12, rim 12": "estimated: scaled from Makera product photos",
                  "4th axis chuck Ø52, axis 45 above bed, tailstock Ø14": "reference: community simplified model; Ø80×150 verified: makera.com",
                  "rods, carriages, bridge uprights, motors, cable chains": "estimated: from photos, representative only",
-                 "probe dock and tool-length setter positions": "estimated: front rail of the bed (x −85 / +80, y −110) — measure yours",
+                 "tool-length sensor at the rear-right corner of the bed": "reference: reviews (fauxhammer); position (88, 88) and size estimated — measure yours",
                  "canopy hinges, LED bar, power button, vents, feet, dust shoe": "estimated: from photos (dust shoe Ø60 not in the nose collision stack)"},
         notes="Moving bed in Y under a fixed rear bridge; the head moves X along the bridge and Z. Machine zero: head back-left, bed forward. "
               "Case: dark plinth, one smoked-acrylic canopy (front + roof + side triangles) hinged at the rear of its roof, shown closed; "

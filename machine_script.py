@@ -5,9 +5,13 @@
 
 A script runs in the design-script namespace (build123d, `import_step`, maths) plus a small kinematic API:
 
-    node(name, parent=None, axis=None, mode="head", stock=False, pivot=None)
+    node(name, parent=None, axis=None, mode="head", stock=False, pivot=None, door=None, direction=(1, 0, 0), open=0)
         axis x|y|z|a; mode "head" (moves with the tool) or "table" (carries the work the opposite way);
         stock=True on the one node the work rides on; pivot = a point on a rotary axis (machine frame).
+        door="hinge" swings the node's parts `open` degrees about the line through pivot along direction when the
+        doors are opened in the viewer (a lid hinged at the back: pivot on the hinge line, direction (1, 0, 0),
+        open=-80 lifts the front); door="slide" moves them `open` mm along direction (a sliding door: direction
+        (-1, 0, 0), open=700). Door nodes carry the parts that move with the door and animate in the viewer.
     part(name, node, shape, material="cast", collision=False)
         any build123d shape in the machine frame (X right, Y back, Z up, origin = table top centre);
         collision=True for geometry the tool/holder must not hit (table, chuck, tailstock, head, walls).
@@ -87,9 +91,23 @@ def run(code: str, machine, workspace: Path | None = None, filename: str = "mach
     parts: list[mm.Part] = []
     meta: dict[str, Any] = {}
 
-    def node(name, parent=None, axis=None, mode="head", stock=False, pivot=None):
+    def node(name, parent=None, axis=None, mode="head", stock=False, pivot=None, door=None, direction=(1.0, 0.0, 0.0), open=0.0):
         if not isinstance(name, str) or not name:
             raise MachineScriptError("node(): name must be a non-empty string")
+        if door is not None:
+            if door not in ("hinge", "slide"):
+                raise MachineScriptError(f"node({name!r}): door must be 'hinge' or 'slide' (got {door!r})")
+            if axis is not None:
+                raise MachineScriptError(f"node({name!r}): a door node has no axis (it moves with the doors toggle, not with the tool)")
+            if door == "hinge" and pivot is None:
+                raise MachineScriptError(f"node({name!r}): a hinged door needs pivot=(x, y, z), a point on its hinge line")
+            try:
+                d = tuple(float(v) for v in direction)
+                assert len(d) == 3 and sum(v * v for v in d) > 0
+            except Exception:
+                raise MachineScriptError(f"node({name!r}): direction must be a non-zero (x, y, z) vector") from None
+            if not float(open):
+                raise MachineScriptError(f"node({name!r}): a door needs open=<degrees or mm> (how far it moves when opened)")
         if axis not in AXES:
             raise MachineScriptError(f"node({name!r}): axis must be one of x, y, z, a (got {axis!r})")
         if mode not in MODES:
@@ -98,7 +116,8 @@ def run(code: str, machine, workspace: Path | None = None, filename: str = "mach
             raise MachineScriptError(f"node({name!r}): a node with that name already exists")
         if axis == "a" and pivot is None:
             raise MachineScriptError(f"node({name!r}): a rotary (axis='a') node needs pivot=(x, y, z), a point on its axis")
-        nodes.append(mm.Node(name, parent, axis, mode, bool(stock), tuple(map(float, pivot)) if pivot is not None else None))
+        nodes.append(mm.Node(name, parent, axis, mode, bool(stock), tuple(map(float, pivot)) if pivot is not None else None,
+                             tuple(float(v) for v in direction), door, float(open or 0.0)))
 
     def part(name, node_name, shape, material="cast", collision=False):
         if not isinstance(name, str) or not name:
@@ -201,7 +220,7 @@ def summary(model: mm.MachineModel) -> str:
     """What the agent sees after build_machine."""
     lines = [f"Machine model '{model.name}': {len(model.parts)} parts on {len(model.nodes)} nodes"]
     for n in model.nodes:
-        how = (f"{n.axis.upper()} {n.mode}" if n.axis else "fixed") + (" · carries the work" if n.stock else "")
+        how = (f"{n.axis.upper()} {n.mode}" if n.axis else (f"door ({n.door}, open {n.open:g})" if n.door else "fixed")) + (" · carries the work" if n.stock else "")
         kids = [p.name for p in model.parts if p.node == n.name]
         lines.append(f"  {n.name}" + (f" < {n.parent}" if n.parent else "") + f": {how}; parts: {', '.join(kids) or '-'}")
     lines.append(f"home (spindle X, Y, nose Z) = {model.home}, travel {model.travel}, clearance {model.clearance} mm, "

@@ -86,7 +86,8 @@ inner = plan_solid(P_in, -300, 600) & side_solid(S_in)
 canopy = outer - inner
 for s in (-1, 1):
     canopy = canopy - box(20, 80, z_top - t_can - 0.5 - z_trim + 20, at=(s * (W / 2 - 5), y_side + 40, 0), zmin=z_trim - 20)
-part("canopy", "base", canopy, "acrylic")
+node("canopy", "base", door="hinge", pivot=(0.0, y_hinge, z_top), direction=(1, 0, 0), open=-75)   # lifts up about the rear hinge bar
+part("canopy", "canopy", canopy, "acrylic")
 part("canopy trim", "base", plan_solid(P_body, z_trim, z_trim + 15) - plan_solid(P_in, z_trim - 1, z_trim + 16), "paint_dark")
 hinges = None
 for hxk in (-150, 150):

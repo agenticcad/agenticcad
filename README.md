@@ -239,7 +239,9 @@ Agent-native, like the CAD side: a second script per design, `cam.py`, written b
   spoilboard, sources, notes)`, with helpers (`box`, `cyl_z/x/y`, `shell`, `bed_holes`, `import_step` for vendor CAD).
   The built-ins live in [machine_scripts/](machine_scripts/) and are the fallback for any machine without its own
   script, so **Code tab ▸ machine.py** always has a starting point: edit, Run, and the machine has its own model.
-  **Settings ▸ Machines ▸ Model** has *Show in viewer* (works without a CAM program) and *Edit as script…*; the agent's
+  The **CAM tab ▸ Machine view** section picks any library machine, shows or hides it (no program needed) and opens or
+  closes its doors; door nodes (`node(..., door="hinge"|"slide", ...)`) animate in the viewer. **Settings ▸ Machines ▸
+  Model** has *Show in viewer* and *Edit as script…*; the agent's
   `get_machine_code` / `build_machine` do the same from chat ("add my Shapeoko 5 Pro to the library and model it"), and
   photos dropped into the chat are used as references: the built-in Z1, Carvera Air and Haas VF-4 models were made that
   way from the makers' product photos, every number tagged verified / reference / estimated.

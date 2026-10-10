@@ -311,8 +311,11 @@ Carvera Air, Haas VMC, parametric gantry router) as a starting point; `build_mac
 as that machine's own model and shows it in the viewer — then take a `screenshot` (iso, then front) and fix what looks
 wrong before reporting. Script API (build123d namespace + helpers; machine frame X right, Y back (away from the
 operator), Z up, origin = centre of the table top, mm): node(name, parent=None, axis='x'|'y'|'z'|'a', mode='head'|'table',
-stock=False, pivot=None) — head nodes move with the tool, table nodes carry the work the opposite way, exactly one
-node has stock=True (where the work sits), rotary nodes need pivot=(x, y, z) on the axis; part(name, node, shape,
+stock=False, pivot=None, door=None, direction=(1,0,0), open=0) — head nodes move with the tool, table nodes carry the
+work the opposite way, exactly one node has stock=True (where the work sits), rotary nodes need pivot=(x, y, z) on the
+axis; door nodes (door='hinge' with pivot on the hinge line + direction + open=degrees, e.g. a lid hinged at the back:
+direction (1,0,0), open=-80; or door='slide' with direction + open=mm) carry the lid/door parts and animate when the
+user opens the doors in the viewer — give every machine with a cover or doors such nodes; part(name, node, shape,
 material, collision=False) with any build123d shape (helpers box(x, y, z, at=(cx, cy, cz), zmin=), cyl_z(r, h, at=(x, y),
 zmin=), cyl_x(r, length, y, z, xmin), cyl_y(r, length, x, z, ymin), shell(outer, inner, at=, zmin=, inner_zmin=,
 opening=('front', w, h)), import_step('vendor.step') from workspace/imports); machine(home=(spindle x, y, nose-bottom z

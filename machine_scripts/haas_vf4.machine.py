@@ -204,9 +204,12 @@ for sx, y0 in ((-1, -715), (1, -692)):
     panes.append(cbox(x0 + 80, x1 - 80, y0 + 7, y0 + 13, 80, 900))
     hx_ = sx * 600
     handles.append(cyl_z(14, 420, at=(hx_, -745), zmin=60) + cyl_y(10, 30, hx_, 90, -745) + cyl_y(10, 30, hx_, 450, -745))
-part("front doors", "base", Compound(frames), "paint_dark", collision=True)
-part("door windows", "base", Compound(panes), "acrylic")
-part("door handles", "base", Compound(handles), "stainless")
+node("door L", "base", door="slide", direction=(-1, 0, 0), open=760)     # the doors slide apart into the wings
+node("door R", "base", door="slide", direction=(1, 0, 0), open=760)
+for i, nd in enumerate(("door L", "door R")):
+    part(f"front door {'L' if i == 0 else 'R'}", nd, frames[i], "paint_dark", collision=True)
+    part(f"door window {'L' if i == 0 else 'R'}", nd, panes[i], "acrylic")
+    part(f"door handle {'L' if i == 0 else 'R'}", nd, handles[i], "stainless")
 
 # ---------------- left wing: VF-4 badge, toolholder shelf, tray ----------------
 part("VF-4 badge", "base", cbox(-1490, -1070, -796, -790, 780, 960), RED)
