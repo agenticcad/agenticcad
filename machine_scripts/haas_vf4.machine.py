@@ -204,8 +204,8 @@ for sx, y0 in ((-1, -715), (1, -692)):
     panes.append(cbox(x0 + 80, x1 - 80, y0 + 7, y0 + 13, 80, 900))
     hx_ = sx * 600
     handles.append(cyl_z(14, 420, at=(hx_, -745), zmin=60) + cyl_y(10, 30, hx_, 90, -745) + cyl_y(10, 30, hx_, 450, -745))
-node("door L", "base", door="slide", direction=(-1, 0, 0), open=760)     # the doors slide apart into the wings
-node("door R", "base", door="slide", direction=(1, 0, 0), open=760)
+node("door L", "base", door="slide", direction=(-1, 0, 0), open=240)     # the doors slide apart into the wings until the opening is clear
+node("door R", "base", door="slide", direction=(1, 0, 0), open=240)
 for i, nd in enumerate(("door L", "door R")):
     part(f"front door {'L' if i == 0 else 'R'}", nd, frames[i], "paint_dark", collision=True)
     part(f"door window {'L' if i == 0 else 'R'}", nd, panes[i], "acrylic")

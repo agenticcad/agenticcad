@@ -162,8 +162,9 @@ for sx, y0 in ((-1, ey0 - 44), (1, ey0 - 22)):                                  
     frames.append(box(dw, 18, dh, at=(cx, y0 + 9, 0), zmin=dz0) - box(pane_w, 30, pane_h, at=(cx, y0 + 9, 0), zmin=250))
     panes.append(box(pane_w, 6, pane_h, at=(cx, y0 + 9, 0), zmin=250))
     handles.append(box(40, 40, 500, at=(cx - sx * (dw / 2 - 60), y0 - 20, 0), zmin=350))
-node("door L", "base", door="slide", direction=(-1, 0, 0), open=dw * 0.9)   # the doors slide apart into the wings
-node("door R", "base", door="slide", direction=(1, 0, 0), open=dw * 0.9)
+door_slide = max(200.0, ex / 2 - dw)                                         # until the door's outer edge reaches the enclosure side
+node("door L", "base", door="slide", direction=(-1, 0, 0), open=door_slide)  # the doors slide apart into the wings
+node("door R", "base", door="slide", direction=(1, 0, 0), open=door_slide)
 for i, nd in enumerate(("door L", "door R")):
     part(f"front door {'L' if i == 0 else 'R'}", nd, frames[i], "panel", collision=True)
     part(f"door window {'L' if i == 0 else 'R'}", nd, panes[i], "acrylic")
