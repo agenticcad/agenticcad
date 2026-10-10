@@ -81,6 +81,8 @@ class Machine:
     collet: float = 0.0                     # largest tool shank the spindle takes (mm); 0 = unchecked
     # stepdown caps for the feeds calculator, mm per pass by material ("*" = any other material); {} = no cap
     max_stepdown: dict = field(default_factory=dict)
+    # machine model overrides (Settings ▸ Machines ▸ Model): {"nose": [{name, r, h}...], "spoilboard": mm, "clearance": mm, "stickout": mm}
+    model: dict | None = None
 
     def stepdown_cap(self, material: str) -> float | None:
         caps = {MATERIAL_ALIASES.get(str(k).lower().strip(), str(k).lower().strip()): v for k, v in self.max_stepdown.items()}

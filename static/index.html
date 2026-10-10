@@ -543,6 +543,7 @@ function makeHelpers(size) {
   axes = new THREE.AxesHelper(s / 4); scene.add(axes);
 }
 makeHelpers(60);
+const stageGroup = new THREE.Group(); stageGroup.name = 'stage'; scene.add(stageGroup);   // the work: model, stock, toolpaths, simulation
 
 // body base tints (Fusion keeps everything grey; a light tint per body helps tell them apart)
 const BODY_TINTS = [0x9fb0c2, 0xb7b09a, 0x9fc0b0, 0xb0a0c0, 0xc0a89a, 0x9ab5c8, 0xb8c09a, 0xc09aa8];
@@ -578,7 +579,7 @@ let firstLoad = true;
 let showEdges = true;
 
 function loadMesh(data) {
-  if (model) for (const b of model.bodies.values()) { scene.remove(b.mesh); scene.remove(b.lines); b.mesh.geometry.dispose(); b.lines.geometry.dispose(); }
+  if (model) for (const b of model.bodies.values()) { stageGroup.remove(b.mesh); stageGroup.remove(b.lines); b.mesh.geometry.dispose(); b.lines.geometry.dispose(); }
   const faces = new Map(data.faces.map(f => [f.id, f]));
   const bodies = new Map();
   data.bodies.forEach((bd, i) => {
@@ -598,7 +599,7 @@ function loadMesh(data) {
     for (const pl of bd.edges) for (let k = 0; k + 5 < pl.length; k += 3) segs.push(pl[k], pl[k+1], pl[k+2], pl[k+3], pl[k+4], pl[k+5]);
     const lgeo = new THREE.BufferGeometry(); lgeo.setAttribute('position', new THREE.Float32BufferAttribute(segs, 3));
     const lines = new THREE.LineSegments(lgeo, edgeMat);
-    scene.add(mesh); scene.add(lines);
+    stageGroup.add(mesh, lines);
     const edgeLines = (bd.edgeInfo || []).map((info, k) => { const pl = bd.edges[k] || []; const pts = []; for (let q = 0; q + 2 < pl.length; q += 3) pts.push([pl[q], pl[q+1], pl[q+2]]); return { info, pts }; });
     bodies.set(bd.id, { id: bd.id, name: bd.name, path: bd.path, mesh, lines, faceOfTri, ranges, colors, base: new THREE.Color(BODY_TINTS[i % BODY_TINTS.length]), faceIds: bd.faceRanges.map(r => r[0]), bboxMin: bd.bboxMin, bboxMax: bd.bboxMax, edgeLines });
   });
@@ -944,7 +945,7 @@ async function renderScreenshot(spec) {
   }
 }
 
-window.agenticcad = { renderScreenshot, get model() { return model; }, get sketch() { return sk; }, get extDefs() { return extDefs; }, get extPanels() { return extPanels; }, scene, camera, renderer, send: (o) => send(o) };
+window.agenticcad = { renderScreenshot, get model() { return model; }, get machine() { return { on: machineOn, rig: machineRig, set: setMachine, pose: poseRig, stage: stageGroup }; }, get sketch() { return sk; }, get extDefs() { return extDefs; }, get extPanels() { return extPanels; }, scene, camera, renderer, send: (o) => send(o) };
 
 // toolbar
 document.getElementById('fit').onclick = () => fitCamera();
@@ -1189,7 +1190,7 @@ async function runSlice() {
 function setStatusHint(t) { const h = document.getElementById('hover'); if (t) { h.dataset.prev = h.textContent; h.textContent = t; } else if (h.dataset.prev != null) { h.textContent = h.dataset.prev; delete h.dataset.prev; } }
 
 // ------------------------------------------------------------------ CAM: toolpaths, stock, simulation, library
-const camGroup = new THREE.Group(); scene.add(camGroup);
+const camGroup = new THREE.Group(); stageGroup.add(camGroup);
 let program = null, camCode = '', library = { machines: [], tools: [] };
 let camOps = [];          // [{op, cut: LineSegments, rapid: LineSegments, visible, cutCounts: Int32Array, rapidCounts: Int32Array}]
 let stockObj = null, originObj = null, toolObj = null, showTp = true, showStock = true;
@@ -1348,13 +1349,27 @@ function applySim(k) {
     c.cut.geometry.setDrawRange(0, c.cutCounts[m] * 2); c.rapid.geometry.setDrawRange(0, c.rapidCounts[m] * 2);
   }
   if (toolObj) { camGroup.remove(toolObj); toolObj = null; }
+  simInfo.style.color = '';
   if (k > 0 && k < sim.total) {
     const [oi, mi] = sim.index[k - 1]; const c = camOps[oi]; const mv = c.op.moves[mi]; const t = c.op.tool;
-    const h = Math.max(t.diameter * 4, 12); const g = new THREE.CylinderGeometry(t.diameter / 2, t.type === 'ball' ? t.diameter / 2 : t.diameter / 2, h, 24); g.rotateX(Math.PI / 2); g.translate(0, 0, h / 2);
-    toolObj = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color: 0xffffff, transparent: true, opacity: 0.7, metalness: 0.4, roughness: 0.3 }));
-    toolObj.position.set(mv[1], mv[2], mv[3]); toolObj.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), toolAxisFor(c.op, mv)); camGroup.add(toolObj);
-    simInfo.textContent = `${c.op.name} · move ${mi + 1}/${c.op.moves.length} · ${mv[0] === 0 ? 'rapid' : 'F' + mv[4]} · (${mv[1].toFixed(1)}, ${mv[2].toFixed(1)}, ${mv[3].toFixed(2)})`;
-  } else simInfo.textContent = k === 0 ? 'start' : `complete · ${program ? program.time.toFixed(1) : 0} min`;
+    if (machineOn && machineRig) {                                   // the machine carries the tool (and the work, on table axes)
+      const st = program.setups ? program.setups[c.op.setup || 0] : null;
+      const a = st && st.rotary ? (mv.length > 5 ? mv[5] : st.a) : 0;
+      poseRig(new THREE.Vector3(mv[1], mv[2], mv[3]), a, t);
+      const hits = machineHitsAt(c.op.name, mi); flashMachine(hits);
+      simInfo.textContent = `${c.op.name} · move ${mi + 1}/${c.op.moves.length} · ${mv[0] === 0 ? 'rapid' : 'F' + mv[4]} · (${mv[1].toFixed(1)}, ${mv[2].toFixed(1)}, ${mv[3].toFixed(2)})`
+        + (hits.length ? ` · ⚠ ${hits[0].part} hits the ${hits[0].what} (${hits[0].depth} mm)` : '');
+      if (hits.length) simInfo.style.color = 'var(--red, #ff6b6b)';
+    } else {
+      const h = Math.max(t.diameter * 4, 12); const g = new THREE.CylinderGeometry(t.diameter / 2, t.type === 'ball' ? t.diameter / 2 : t.diameter / 2, h, 24); g.rotateX(Math.PI / 2); g.translate(0, 0, h / 2);
+      toolObj = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color: 0xffffff, transparent: true, opacity: 0.7, metalness: 0.4, roughness: 0.3 }));
+      toolObj.position.set(mv[1], mv[2], mv[3]); toolObj.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), toolAxisFor(c.op, mv)); camGroup.add(toolObj);
+      simInfo.textContent = `${c.op.name} · move ${mi + 1}/${c.op.moves.length} · ${mv[0] === 0 ? 'rapid' : 'F' + mv[4]} · (${mv[1].toFixed(1)}, ${mv[2].toFixed(1)}, ${mv[3].toFixed(2)})`;
+    }
+  } else {
+    simInfo.textContent = k === 0 ? 'start' : `complete · ${program ? program.time.toFixed(1) : 0} min`;
+    if (machineOn && machineRig) { const c0 = camOps.find(c => c.visible) || camOps[0]; poseRig(null, 0, c0 ? c0.op.tool : null); flashMachine([]); }
+  }
   if (simRes) showSimAt(k);
 }
 function toolAxisFor(op, mv) {
@@ -1406,7 +1421,7 @@ function startSim(payload) {
   clearSim(); simRes = payload;
   const el = document.getElementById('cam-simres'); el.style.display = '';
   document.getElementById('cam-simres-body').innerHTML = payload.summary.split('\n').map(l =>
-    `<div style="${/^(GOUGES|RAPIDS)/.test(l) ? 'color:var(--red,#ff6b6b);font-weight:600' : ''}">${l.replace(/&/g, '&amp;').replace(/</g, '&lt;')}</div>`).join('');
+    `<div style="${/^(GOUGES|RAPIDS|COLLISIONS)/.test(l) ? 'color:var(--red,#ff6b6b);font-weight:600' : ''}">${l.replace(/&/g, '&amp;').replace(/</g, '&lt;')}</div>`).join('');
   if (stockObj) stockObj.visible = false;
   ghostPart(true);
   showSimAt(+simRange.value);
@@ -1428,6 +1443,137 @@ function showSimAt(k) {
   getSimFrame(want).then(f => { if (simFetch === want && simRes) { drawSimFrame(f, want === fr.length - 1); simFrameShown = want; } });
 }
 function bitAt(bits, idx) { return (bits[idx >> 3] >> (7 - (idx & 7))) & 1; }
+
+// ------------------------------------------------------------------ machine model (ribbon ▸ Output ▸ Machine)
+// The program's machine around the stock, from /api/cam/machine_model: parts ride on kinematic nodes (head nodes move
+// with the tool, table nodes carry the work the opposite way), the stage (model, stock, toolpaths, simulation) rides on
+// the stock node and the tool hangs from the spindle. Posed from the simulation slider; collisions the simulator found
+// flash the parts involved red.
+var machineOn = false, machineRig = null, machineLoading = null;
+const machineEdgeMat = new THREE.LineBasicMaterial({ color: 0x0c0f13, transparent: true, opacity: 0.35 });
+const machineHitMat = new THREE.MeshStandardMaterial({ color: 0xff2d2d, emissive: 0xff2d2d, emissiveIntensity: 0.55, roughness: 0.5, side: THREE.DoubleSide });
+const AXIS_V = { x: new THREE.Vector3(1, 0, 0), y: new THREE.Vector3(0, 1, 0), z: new THREE.Vector3(0, 0, 1) };
+function machineMat(m) {
+  const mat = new THREE.MeshPhysicalMaterial({ color: new THREE.Color(m.color || '#888888'), metalness: m.metalness ?? 0.3, roughness: m.roughness ?? 0.6, side: THREE.DoubleSide,
+    transparent: m.opacity != null, opacity: m.opacity ?? 1, depthWrite: m.opacity == null, clearcoat: (m.metalness ?? 0) < 0.5 ? 0.25 : 0, clearcoatRoughness: 0.3, envMapIntensity: 0.9 });
+  mat.clippingPlanes = material.clippingPlanes; return mat;
+}
+function stageHome() { scene.add(stageGroup); stageGroup.position.set(0, 0, 0); stageGroup.quaternion.identity(); }
+function disposeRig() {
+  if (!machineRig) return;
+  stageHome(); scene.remove(machineRig.root);
+  machineRig.root.traverse(o => { if (o.geometry) o.geometry.dispose(); if (o.material && o.material !== machineHitMat && o.material.dispose) o.material.dispose(); });
+  machineRig = null;
+}
+function rotaryKey() { return program && (program.setups || []).some(x => x.rotary) ? 'rot' : 'flat'; }
+async function loadMachineRig() {
+  if (!program) return null;
+  if (machineRig && machineRig.name === program.machine && machineRig.rotaryKey === rotaryKey()) { placeRig(); attachStage(); return machineRig; }
+  if (machineLoading) return machineLoading;
+  machineLoading = (async () => {
+    const r = await fetch('/api/cam/machine_model?quality=normal').then(r => r.json());
+    if (r.error) throw new Error(r.error);
+    disposeRig();
+    const root = new THREE.Group(); root.name = 'machine';
+    const nodes = new Map();
+    for (const n of r.machine.nodes) { const g = new THREE.Group(); g.name = 'machine:' + n.name; g.userData.node = n; nodes.set(n.name, g); }
+    for (const n of r.machine.nodes) (n.parent && nodes.get(n.parent) ? nodes.get(n.parent) : root).add(nodes.get(n.name));
+    const parts = [];
+    for (const p of r.parts) {
+      const geo = new THREE.BufferGeometry(); const pos = new Float32Array(p.positions);
+      geo.setAttribute('position', new THREE.BufferAttribute(pos, 3)); geo.setIndex(p.indices);
+      if (p.normals && p.normals.length === pos.length) geo.setAttribute('normal', new THREE.BufferAttribute(new Float32Array(p.normals), 3)); else geo.computeVertexNormals();
+      const mdef = r.materials[p.material] || r.materials.cast || {};
+      const mesh = new THREE.Mesh(geo, machineMat(mdef)); mesh.userData.machinePart = p.name; mesh.castShadow = mesh.receiveShadow = mdef.opacity == null;
+      if (mdef.opacity != null) mesh.renderOrder = 9;
+      const segs = []; for (const pl of (p.edges || [])) for (let k = 0; k + 5 < pl.length; k += 3) segs.push(pl[k], pl[k+1], pl[k+2], pl[k+3], pl[k+4], pl[k+5]);
+      const lines = new THREE.LineSegments(new THREE.BufferGeometry().setAttribute('position', new THREE.Float32BufferAttribute(segs, 3)), machineEdgeMat);
+      (nodes.get(p.node) || root).add(mesh, lines);
+      parts.push({ name: p.name, node: p.node, collision: p.collision, mesh, lines, mat: mesh.material });
+    }
+    const stockNode = nodes.get((r.machine.nodes.find(n => n.stock) || r.machine.nodes[0]).name);
+    const headZ = [...nodes.values()].find(g => g.userData.node.axis === 'z' && g.userData.node.mode === 'head') || root;
+    machineRig = { name: program.machine, rotaryKey: rotaryKey(), data: r.machine, materials: r.materials, root, nodes, parts, stockNode, headZ, origin: new THREE.Vector3(), tool: null };
+    scene.add(root); placeRig(); attachStage();
+    if (r.warnings && r.warnings.length) console.warn('machine model', r.warnings);
+    return machineRig;
+  })().finally(() => { machineLoading = null; });
+  return machineLoading;
+}
+function placeRig() {   // the machine origin (table top centre) in model coordinates: stock centred on the table, or on the 4th axis 5 mm off the chuck
+  const d = machineRig.data, st = program.stock, rs = (program.setups || []).find(x => x.rotary), o = machineRig.origin;
+  if (rs && d.rotary) o.set(st.xmin - d.rotary.chuck_face_x - 5, rs.axis[0] - d.rotary.axis_y, rs.axis[1] - d.rotary.axis_z);
+  else o.set((st.xmin + st.xmax) / 2, (st.ymin + st.ymax) / 2, st.zmin);
+  machineRig.root.position.copy(o);
+}
+function attachStage() { machineRig.stockNode.add(stageGroup); stageGroup.position.copy(machineRig.origin).negate(); stageGroup.quaternion.identity(); }
+function stickoutFor(t) {
+  const fl = t ? (+t.flute_length || 10) : 10, d = machineRig && machineRig.data;
+  if (d && d.stickout) return Math.max(+d.stickout, fl);
+  return (t && +t.stickout) || fl + 6;
+}
+function poseRig(tip, aDeg, t) {
+  if (!machineRig) return;
+  const d = machineRig.data, home = d.home, stick = stickoutFor(t);
+  let target;
+  if (tip) {
+    const m = tip.clone().sub(machineRig.origin);                             // machine coordinates of the tool tip
+    if (d.rotary && aDeg) { const p = new THREE.Vector3(0, d.rotary.axis_y, d.rotary.axis_z); m.sub(p).applyAxisAngle(AXIS_V.x, aDeg * Math.PI / 180).add(p); }
+    target = [m.x, m.y, m.z + stick];                                          // where the nose bottom has to be
+  } else target = [home[0], home[1], home[2]];
+  for (const g of machineRig.nodes.values()) {
+    const n = g.userData.node; g.position.set(0, 0, 0); g.quaternion.identity();
+    if (!n.axis) continue;
+    if (n.axis === 'a') {
+      const p = new THREE.Vector3(...(n.pivot || [0, 0, 0])); g.quaternion.setFromAxisAngle(AXIS_V.x, (aDeg || 0) * Math.PI / 180);
+      g.position.copy(p).sub(p.clone().applyQuaternion(g.quaternion)); continue;
+    }
+    const i = 'xyz'.indexOf(n.axis), v = (target[i] - home[i]) * (n.mode === 'table' ? -1 : 1);
+    g.position.copy(AXIS_V[n.axis]).multiplyScalar(v);
+  }
+  if (machineRig.tool) { machineRig.headZ.remove(machineRig.tool); machineRig.tool.traverse(o => o.geometry && o.geometry.dispose()); machineRig.tool = null; }
+  if (t) {                                                                     // the tool hangs from the nose bottom (home pose; the spindle node carries it)
+    const r = t.diameter / 2, fl = Math.min(+t.flute_length || 10, stick), grp = new THREE.Group();
+    const flutes = new THREE.Mesh(new THREE.CylinderGeometry(r, r * (t.type === 'vbit' ? 0.05 : 1), fl, 24).rotateX(Math.PI / 2).translate(0, 0, fl / 2), new THREE.MeshStandardMaterial({ color: 0xd8dde3, metalness: 0.85, roughness: 0.35 }));
+    const shank = new THREE.Mesh(new THREE.CylinderGeometry(r, r, Math.max(stick - fl, 0.01), 24).rotateX(Math.PI / 2).translate(0, 0, fl + Math.max(stick - fl, 0.01) / 2), new THREE.MeshStandardMaterial({ color: 0x9aa0a6, metalness: 0.9, roughness: 0.4 }));
+    grp.add(flutes, shank); grp.position.set(home[0], home[1], home[2] - stick); machineRig.headZ.add(grp); machineRig.tool = grp;
+  }
+}
+function machineHitsAt(opName, mi) {
+  const col = simRes && simRes.stats && simRes.stats.collisions; if (!col || !col.count) return [];
+  return (col.all || col.hits).filter(h => h.op === opName && Math.abs(h.move - mi) <= 3);
+}
+function flashMachine(hits) {
+  if (!machineRig) return;
+  const what = new Set(hits.map(h => h.what)), headHit = hits.some(h => h.what === 'stock' && h.part !== 'tool');
+  for (const p of machineRig.parts) {
+    const inHead = p.mesh.parent === machineRig.headZ, onStock = p.mesh.parent === machineRig.stockNode;
+    const hit = (headHit && inHead && p.collision) || (what.has('chuck') && /chuck/.test(p.name)) || (what.has('tailstock') && /tailstock/.test(p.name))
+      || ((what.has('table') || what.has('bed under the spoilboard')) && p.collision && onStock && !/chuck|tail|rail|housing|jaws/.test(p.name));
+    p.mesh.material = hit ? machineHitMat : p.mat;
+  }
+}
+async function setMachine(on) {
+  if (on && !program) { addMsg('system', "Build a CAM program first: the Machine view shows the program's machine around the stock and plays the simulation on it."); return; }
+  machineOn = on;
+  try {
+    if (on) { scene.environment = await ensureEnv(); await loadMachineRig(); }
+    else { stageHome(); if (!renderOn) scene.environment = null; }
+  } catch (e) { machineOn = false; stageHome(); addMsg('error', 'Machine model: ' + e.message); }
+  if (machineRig) machineRig.root.visible = machineOn;
+  if (grid) grid.visible = !renderOn && !machineOn; if (axes) axes.visible = !renderOn && !machineOn;
+  if (program && sim) applySim(+simRange.value);
+  if (machineOn) fitMachine();
+  if (renderOn) renderGround();
+  syncRibbon();
+}
+function fitMachine() {
+  if (!machineRig) return;
+  scene.updateMatrixWorld(true);
+  const bb = new THREE.Box3().setFromObject(machineRig.root); if (bb.isEmpty()) return;
+  const saved = bbox; bbox = bb; fitCamera.inPose = true;
+  try { fitCamera(new THREE.Vector3(1, -1.25, 0.75).normalize()); } finally { bbox = saved; fitCamera.inPose = false; }
+}
 function drawSimFrame(f, final) {
   for (const m of [simMesh, simLow]) if (m) { camGroup.remove(m); m.traverse(o => o.geometry && o.geometry.dispose()); }
   simMesh = simLow = null;
@@ -3088,6 +3234,7 @@ function renderMatFor(b) {
 function renderGround() {
   if (!ground || !model) return;
   const bb = new THREE.Box3(); for (const b of model.bodies.values()) if (b.mesh.visible) bb.expandByObject(b.mesh);
+  if (machineOn && machineRig) bb.expandByObject(machineRig.root);
   if (bb.isEmpty()) return;
   const size = bb.getSize(new THREE.Vector3()), c = bb.getCenter(new THREE.Vector3()), r = Math.max(size.x, size.y, size.z);
   ground.position.set(c.x, c.y, bb.min.z - 0.02); ground.scale.setScalar(r * 6);
@@ -3109,7 +3256,7 @@ async function setRender(on) {
     keyShadow.visible = ground.visible = true;
     applyRenderMats();
   } else {
-    scene.environment = null; renderer.toneMapping = THREE.NoToneMapping; renderer.shadowMap.enabled = false;
+    scene.environment = machineOn ? envTex : null; renderer.toneMapping = THREE.NoToneMapping; renderer.shadowMap.enabled = false;
     if (keyShadow) keyShadow.visible = ground.visible = false;
     if (model) for (const b of model.bodies.values()) { b.mesh.material = material; b.mesh.castShadow = b.mesh.receiveShadow = false; }
     for (const m of renderMats.values()) m.dispose(); renderMats.clear();
@@ -3125,7 +3272,7 @@ function applyRenderMats() {
 const BGS = { studio: 0x3a3f47, dark: 0x14171c, light: 0xe9ebee };
 function applyRenderBg() {
   scene.background = renderOn ? new THREE.Color(BGS[renderBg] ?? BGS.studio) : null;
-  if (grid) grid.visible = !renderOn; if (axes) axes.visible = !renderOn;
+  if (grid) grid.visible = !renderOn && !machineOn; if (axes) axes.visible = !renderOn && !machineOn;
   for (const b of model ? model.bodies.values() : []) b.lines.visible = !renderOn && showEdges && b.mesh.visible;
   sketchGroup.visible = !renderOn;
 }
@@ -3260,6 +3407,7 @@ const ICO = {
   section: '<path d="M4 8l8-4 8 4v8l-8 4-8-4Z"/><path d="M2 13h20" stroke-width="2"/><path d="M4 13l8 4 8-4" stroke-dasharray="2 2"/>',
   render: '<circle cx="12" cy="12" r="4.5"/><path d="M12 2.5v2.5M12 19v2.5M2.5 12H5M19 12h2.5M5.3 5.3l1.8 1.8M16.9 16.9l1.8 1.8M5.3 18.7l1.8-1.8M16.9 7.1l1.8-1.8"/>',
   joint: '<circle cx="7" cy="17" r="3"/><circle cx="17" cy="7" r="3"/><path d="M9.2 14.8l5.6-5.6"/><path d="M4 21l1-1M19 5l1-1" />',
+  machine: '<path d="M3 20h18"/><path d="M5 20v-9h14v9"/><path d="M7 11V5h4v6"/><path d="M9 5V3"/><path d="M12 15h5"/><path d="M9 11v1.5"/>',
   interference: '<circle cx="9" cy="12" r="6"/><circle cx="15" cy="12" r="6"/><path d="M12 7.2a6 6 0 0 1 0 9.6a6 6 0 0 1 0-9.6Z" fill="currentColor" stroke="none" opacity=".55"/>',
 };
 const svg = (k, size = 20) => `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">${ICO[k]}</svg>`;
@@ -3285,6 +3433,7 @@ const TOOLS = {
   interference: { group: 'inspect', label: 'Interference', key: 'J', hint: 'Find bodies that overlap (exact solids) and show where, in red.', picks: 'none' },
   render:   { group: 'output', label: 'Render',    key: 'E', hint: 'Studio render on / off: materials, studio lighting and soft shadows. Appearances, images and video in ▶ Animate.', picks: 'none' },
   drawings: { group: 'output', label: 'Drawings',  key: 'D', hint: 'Shop drawings (SVG + DXF) with the material and sheet from ⚙ Settings.', picks: 'none' },
+  machine:  { group: 'output', label: 'Machine',   key: 'A', hint: 'Show the CAM program\'s machine around the stock and play the simulation on it: head, table and 4th axis move as they would; parts the simulator saw collide flash red.', picks: 'none' },
   slice:    { group: 'output', label: 'Slice',     key: 'P', hint: 'Slice for 3D printing with the printer and options from ⚙ Settings; layers show in the viewer.', picks: 'none' },
 };
 let tool = null;   // { kind, picks: [snap...] }
@@ -3304,6 +3453,7 @@ function activateTool(k) {
   if (k === 'measure') { if (tool) endTool(); setMeasuring(!measuring); return; }
   if (k === 'drawings') { makeDrawings(); return; }
   if (k === 'render') { setRender(!renderOn); return; }
+  if (k === 'machine') { setMachine(!machineOn); return; }
   if (k === 'slice') { runSlice(); return; }
   tool && tool.kind === k ? endTool() : startTool(k);
 }
@@ -3316,7 +3466,7 @@ function showTip(b, t) {
 }
 function hideTip() { tipEl.classList.remove('on'); }
 function syncRibbon() {
-  document.querySelectorAll('#ribbon .rb').forEach(b => b.classList.toggle('active', (tool && tool.kind === b.dataset.tool) || (b.dataset.tool === 'sketch' && !!sk) || (b.dataset.tool === 'measure' && measuring) || (b.dataset.tool === 'render' && renderOn)));
+  document.querySelectorAll('#ribbon .rb').forEach(b => b.classList.toggle('active', (tool && tool.kind === b.dataset.tool) || (b.dataset.tool === 'sketch' && !!sk) || (b.dataset.tool === 'measure' && measuring) || (b.dataset.tool === 'render' && renderOn) || (b.dataset.tool === 'machine' && machineOn)));
 }
 function startTool(kind) {
   if (measuring) setMeasuring(false); if (sk) endSketch();
@@ -3787,7 +3937,7 @@ function libraryEditor(mPane, tPane) {
       <div class="mach-wrap"><div><div class="mach-list">${ms.map((x, i) => `<div class="it ${i === sel ? 'on' : ''}" data-i="${i}"><div>${x.m.name || '(unnamed)'}${x.dirty ? ' <span class="dot">●</span>' : ''}</div><div class="sub">${x.m.travel.x}×${x.m.travel.y}×${x.m.travel.z} · ${x.m.post}${x.m.rotary ? ' · 4th axis' : ''}</div></div>`).join('')}</div>
         <div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap"><button class="btn small" data-a="new">+ New</button><button class="btn small" data-a="dup" ${cur ? '' : 'disabled'}>Duplicate</button><button class="btn small" data-a="del" ${cur ? '' : 'disabled'}>Delete</button></div></div>
       <div>${cur ? `<div class="set-grid" id="m-form">${MACHINE_FIELDS.map(f => machineField(cur.m, f)).join('')}</div>
-        <div style="margin-top:10px"><button class="btn small" data-a="json">Edit as JSON…</button></div>` : '<div class="muted">No machines. Add one.</div>'}</div></div>`;
+        <div style="margin-top:10px"><button class="btn small" data-a="json">Edit as JSON…</button></div><div id="m-model" class="muted" style="margin-top:14px">loading the machine model…</div>` : '<div class="muted">No machines. Add one.</div>'}</div></div>`;
     mPane.querySelectorAll('.it').forEach(e => e.onclick = () => { sel = +e.dataset.i; renderMachines(); });
     mPane.querySelector('[data-a=new]').onclick = () => { ms.push({ orig: null, dirty: true, m: { name: 'My router', controller: 'grbl', post: 'grbl', units: 'mm', travel: { x: 300, y: 300, z: 60 }, max_feed: { x: 3000, y: 3000, z: 600 }, rapid: 3000, spindle: { min: 5000, max: 24000 }, tool_change: 'pause', coolant: false, safe_z: 5, clearance_z: 15, program_start: [], program_end: [], arcs: true, arc_tolerance: 0.05, notes: '', rotary: null, collet: 0 } }); sel = ms.length - 1; renderMachines(); };
     const dup = mPane.querySelector('[data-a=dup]'); if (dup) dup.onclick = () => { const c = clone(cur.m); c.name += ' copy'; ms.push({ orig: null, dirty: true, m: c }); sel = ms.length - 1; renderMachines(); };
@@ -3799,6 +3949,7 @@ function libraryEditor(mPane, tPane) {
       js.replaceWith(ta); ta.after(ok);
     };
     if (!cur) return;
+    renderMachineModel(mPane, cur);
     mPane.querySelectorAll('#m-form [data-p]').forEach(e => {
       const set = () => {
         const [k, sub] = e.dataset.p.split('.'), m = cur.m, t = e.dataset.t;
@@ -3870,6 +4021,31 @@ function libraryEditor(mPane, tPane) {
     };
     if (ts.length) calc();
   }
+  async function renderMachineModel(pane, cur) {   // Settings ▸ Machines ▸ Model: the numbers the Machine view and the collision check use, with their sources
+    const el = pane.querySelector('#m-model'); if (!el) return;
+    let d;
+    try { const r = await fetch('/api/cam/machine_model?info=1&name=' + encodeURIComponent(cur.m.name || '')).then(r => r.json()); if (r.error) throw new Error(r.error); d = r.machine; }
+    catch (e) { el.textContent = 'machine model: ' + e.message; return; }
+    if (pane.querySelector('#m-model') !== el) return;                 // the pane was re-rendered meanwhile
+    const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;');
+    const tier = s => { const t = (String(s).split(':')[0] || '').trim(); const col = { verified: '#4caf7a', reference: '#e0a93a', estimated: '#8a94a3', user: '#4ea1ff' }[t] || '#8a94a3'; return `<span style="display:inline-block;padding:0 6px;border-radius:9px;font-size:10.5px;background:${col}22;color:${col};border:1px solid ${col}55">${esc(t)}</span>`; };
+    el.className = ''; el.innerHTML = `<div class="set-h">Machine model<span class="muted">${esc(d.name)} · the Machine view (ribbon ▸ Output) and the simulator's collision check</span></div>
+      <div class="kv" style="font-size:12.5px">
+        <div>Table</div><div>${d.table.x} × ${d.table.y} mm${d.spoilboard ? ` · spoilboard ${d.spoilboard} mm (cuts into it are allowed)` : ''}</div>
+        <div>Travel</div><div>${d.travel.join(' × ')} mm · nose ${d.clearance} mm above the table at Z top</div>
+        <div>Home</div><div>spindle at (${d.home[0]}, ${d.home[1]}) from the table centre</div>
+        <div>Above the tool</div><div>${d.nose.map(l => `${esc(l.name)} Ø${(2 * l.r).toFixed(1)} × ${l.h}`).join(' → ')}${d.stickout ? ` · stickout ${d.stickout} mm` : ' · stickout = flute length + 6'}</div>
+        ${d.rotary ? `<div>4th axis</div><div>axis ${d.rotary.axis_z} mm above the bed · chuck Ø${2 * d.rotary.chuck_r} · up to Ø${d.rotary.max_diameter} × ${d.rotary.max_length}</div>` : ''}
+      </div>
+      <div class="muted" style="margin:8px 0 3px">Where the numbers come from</div>
+      <div style="font-size:12px;line-height:1.65">${Object.entries(d.sources).map(([k, v]) => `<div>${tier(v)} <b>${esc(k)}</b> <span class="muted">— ${esc(String(v).replace(/^\w+:\s*/, ''))}</span></div>`).join('')}</div>
+      ${d.notes ? `<div class="muted" style="margin-top:6px;font-size:12px">${esc(d.notes)}</div>` : ''}
+      <div class="muted" style="margin-top:10px">Overrides (JSON): <code>nose</code> [{name, r, h}…] from the nose bottom up, <code>spoilboard</code>, <code>clearance</code>, <code>stickout</code> in mm. Measure your machine and put the real numbers here; Save writes them to the library.</div>
+      <textarea data-a="model-json" spellcheck="false" style="width:100%;box-sizing:border-box;min-height:56px;margin-top:4px;background:#0f1216;color:var(--text);border:1px solid var(--line);border-radius:6px;font:12px/1.4 ui-monospace,Menlo,monospace;padding:6px">${esc(JSON.stringify(cur.m.model || {}))}</textarea>
+      <div data-a="model-err" style="color:var(--red,#ff6b6b);font-size:12px"></div>`;
+    const ta = el.querySelector('[data-a=model-json]'), err = el.querySelector('[data-a=model-err]');
+    ta.onchange = () => { try { const v = JSON.parse(ta.value || '{}'); cur.m.model = Object.keys(v).length ? v : null; cur.dirty = true; err.textContent = ''; const it = mPane.querySelector(`.it[data-i="${sel}"] .dot`); if (!it) { const n = mPane.querySelector(`.it[data-i="${sel}"] div`); if (n) n.innerHTML += ' <span class="dot">●</span>'; } } catch (e) { err.textContent = e.message; } };
+  }
   async function confirmInline(btn, what) { if (btn.dataset.armed) return true; btn.dataset.armed = '1'; btn.textContent = 'Click again to ' + what; setTimeout(() => { if (btn.isConnected) { delete btn.dataset.armed; btn.textContent = 'Delete'; } }, 3000); return false; }
   renderMachines(); renderTools();
   return {
@@ -3937,6 +4113,7 @@ function connect() {
       case 'library': library = { machines: m.machines, tools: m.tools }; renderCamTab(); break;
       case 'cam':
         camCode = m.code || ''; lastGcodeLines = m.gcode_lines || 0; loadProgram(m.program);
+        if (machineOn) { if (m.program) { const was = machineRig && machineRig.name + machineRig.rotaryKey; loadMachineRig().then(() => { applySim(+simRange.value); if (machineRig && machineRig.name + machineRig.rotaryKey !== was) fitMachine(); }).catch(e => addMsg('error', 'Machine model: ' + e.message)); } else setMachine(false); }
         if (codeWhich === 'cam' && (!codeDirty || m.source === 'user')) { codeEl.value = camCode; codeDirty = false; }
         document.getElementById('codeerr').textContent = '';
         if (m.source === 'user') addMsg('system', 'CAM program rebuilt from Code panel');

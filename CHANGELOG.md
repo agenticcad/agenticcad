@@ -5,6 +5,21 @@ features, patch bumps fix things. The version shown in the UI header comes from 
 
 ## [Unreleased]
 
+### Added
+- **Machine models and collision checks.** Every built-in machine now has a kinematic 3D model
+  ([machine_models.py](machine_models.py)) built in build123d from published and measured numbers: Makera Z1 and
+  Carvera Air (bed with the real hole grid from the official/community bed files, moving bed under the rear bridge,
+  head in X/Z, 4th-axis chuck and tailstock, enclosure), Haas VF-2 / VF-2SS / VF-4 / Mini Mill / TM-1 (table with the
+  real T-slots, saddle, column, CAT40 + ER32 holder, verified nose-to-table range) and a parametric gantry router for
+  other machines. **Machine** in the ribbon (Output, `A`) shows the program's machine around the stock and plays the
+  simulation on it: head, table and chuck move as they would, the tool hangs from the spindle, and parts the simulator
+  saw collide flash red at that move. The simulator checks the whole stack above the flutes (shank, collet nut, nose,
+  collar, head) against the remaining stock, the tool tip against the bed under the spoilboard, and the holder against
+  the 4th-axis chuck and tailstock; contacts are reported in the summary and in `simulate_cam`. **Settings ▸ Machines ▸
+  Model** lists every number with its source and accuracy tier (verified / reference / estimated) and takes measured
+  overrides (nose profile, stickout, spoilboard, clearance) per machine (`"model"` in the machine JSON). `GET
+  /api/cam/machine_model` serves the tessellated model. CAM remains experimental.
+
 ## [0.25.0] — 2026-10-10
 
 ### Added

@@ -221,7 +221,19 @@ Agent-native, like the CAD side: a second script per design, `cam.py`, written b
   shows the stock being cut in step with the slider, with gouges in red and material left in amber on the last
   frame; the summary reports removed volume, gouges (depth, area, which op), material left on the part, stock
   left outside it, and rapids through material. Side setups (front/back/left/right) are not simulated yet.
-- Not yet: drilling cycles (GRBL has none), thread milling, holder/shank collision checks.
+- **Machine models and collision checks** ([machine_models.py](machine_models.py)): every built-in machine has a
+  kinematic 3D model built in build123d from published and measured numbers — Makera Z1 and Carvera Air (bed with the
+  real hole grid, moving bed in Y under the rear bridge, head in X/Z, 4th-axis chuck and tailstock, enclosure), Haas
+  VF-2 / VF-2SS / VF-4 / Mini Mill / TM-1 (table with the real T-slots, saddle, column, CAT40 + ER32 holder, nose-to-
+  table range) and a parametric gantry router for everything else. **Machine** in the ribbon (Output, `A`) shows the
+  program's machine around the stock and plays the simulation on it: head, table and chuck move as they would, the
+  tool hangs from the spindle, and any part the simulator saw collide flashes red at that move. The simulation itself
+  checks the whole stack above the flutes (shank, collet nut, nose, collar, head) against the remaining stock, the
+  tool tip against the bed under the spoilboard, and the holder against the chuck and tailstock on 4th-axis jobs;
+  contacts are listed in the summary with the op, move, position and depth. Every number carries its source and
+  accuracy tier (`verified` / `reference` / `estimated`) in **Settings ▸ Machines ▸ Model**, where measured values
+  (nose profile, stickout, spoilboard, clearance) can be entered per machine.
+- Not yet: drilling cycles (GRBL has none), thread milling, side-setup simulation.
 
 ## 3D printing (external slicer)
 
@@ -519,9 +531,10 @@ but nothing here has been run on a real machine yet by anyone but the author.
 ### Known gaps
 - **One project, one session.** A single global design and one agent session per server; two browsers
   or two people will interfere. Chat history is not persisted across server restarts.
-- **CAM simulation is tool-tip only.** It finds gouges, leftover material and rapids through stock, but not
-  a holder or shank hitting a wall; flute-length vs depth is left to the agent's judgement. Side setups and
-  mixed 4th-axis + flat programs are simulated separately. Time estimates ignore acceleration.
+- **CAM simulation is a height map.** It finds gouges, leftover material, rapids through stock and holder /
+  nose / head contacts with the stock and bed, but the machine models' castings and enclosures are representative
+  (the work-area numbers are verified; see Settings ▸ Machines ▸ Model). Side setups and mixed 4th-axis + flat
+  programs are simulated separately. Time estimates ignore acceleration.
 - **Adaptive corners rely on feed reduction**, not on geometry; ring-shaped regions still retract for
   some links. No trochoidal slotting op, no rest for 3D, no Z-level (waterline) finishing.
 - **Sketches have no constraint solver**: dimensions apply when you place or drag a point and are not kept as
@@ -539,8 +552,8 @@ but nothing here has been run on a real machine yet by anyone but the author.
 ### Roadmap (rough order)
 1. **Projects and sessions** — a project per folder, one agent session per project, persisted chat via
    SDK session resume. Prerequisite for deploying as a shared service.
-2. **CAM collision checks** — holder/shank checks against the simulated stock, side-setup simulation, realistic
-   time estimates. Then Z-level finishing, trochoidal slotting, thread milling, ramp entries.
+2. **CAM** — side-setup simulation, realistic time estimates, fixture/vice models in the machine view. Then Z-level
+   finishing, trochoidal slotting, thread milling, ramp entries.
 3. **Assembly positioning** — mate-style placement (face-to-face, concentric) for library parts, and a
    seeded standard-parts library (ISO fasteners, nuts, washers, bearings, heat-set inserts).
 4. **Sketch constraints** — driven dimensions and geometric constraints kept by a solver; sketch fillet and trim.

@@ -85,6 +85,13 @@ class SimResult:
                          f"({lf['volume_cm3']:.3f} cm³)")
         if s.get("outside_cm3"):
             lines.append(f"Stock still standing outside the part (frame, tabs, uncut margins): {s['outside_cm3']:.2f} cm³")
+        col = s.get("collisions")
+        if col and col["count"]:
+            lines.append(f"COLLISIONS: {col['count']} contact(s) between the machine and the stock/table (worst {col['max_depth']:.2f} mm): "
+                         + "; ".join(f"{h['part']} hits {h['what']} in {h['op']} at ({h['pos'][0]:.1f}, {h['pos'][1]:.1f}, {h['pos'][2]:.1f}), {h['depth']:.2f} mm"
+                                     for h in col["hits"][:4]) + (" …" if col["count"] > 4 else ""))
+        elif "collisions" in s:
+            lines.append("No machine collisions: the holder, nose and head clear the stock; nothing cuts into the table.")
         rc = s.get("rapid_hits") or []
         if rc:
             lines.append(f"RAPIDS THROUGH MATERIAL: {len(rc)} — " + "; ".join(f"{h['op']} move {h['move']} ({h['depth']:.2f} mm deep)" for h in rc[:5]))
@@ -113,7 +120,7 @@ def _part_mesh(model_or_shape):
 
 
 def simulate(program: cam.Program, ops: list[int] | None = None, part=None, resolution: float | None = None,
-             frames: int = 48, tol: float = 0.05) -> SimResult:
+             frames: int = 48, tol: float = 0.05, machine_model=None, placement=None) -> SimResult:
     """Simulate the given ops (indices into program.ops, default all) in order. `part` (model or shape) enables the
     gouge / left-material comparison. Returns a SimResult (summary(), frame_payload(k))."""
     sel = list(range(len(program.ops))) if ops is None else [i for i in ops if 0 <= i < len(program.ops)]
@@ -123,9 +130,19 @@ def simulate(program: cam.Program, ops: list[int] | None = None, part=None, reso
     rot = [s.rotary for s in setups]
     if any(rot) and not all(rot):
         raise cam.CamError("simulate 4th-axis and flat setups separately (they use different stock models)")
+    if machine_model is None:
+        try:
+            import machine_models as _mm
+            machine_model = _mm.model_for(program.setup.machine)
+        except Exception:  # noqa: BLE001 - the machine model never stops a simulation
+            machine_model = None
     if all(rot):
-        return _sim_radial(program, sel, part, resolution, frames, tol)
-    return _sim_zmap(program, sel, part, resolution, frames, tol)
+        out = _sim_radial(program, sel, part, resolution, frames, tol)
+        if machine_model is not None:
+            _collide_rotary(out, program, sel, machine_model, placement or {})
+        return out
+    out = _sim_zmap(program, sel, part, resolution, frames, tol, machine_model, placement or {})
+    return out
 
 
 def _frame_marks(total: int, frames: int) -> list[int]:
@@ -136,7 +153,8 @@ def _frame_marks(total: int, frames: int) -> list[int]:
 
 
 # ----------------------------------------------------------------------------- zmap
-def _sim_zmap(program, sel, part, resolution, frames, tol) -> SimResult:
+def _sim_zmap(program, sel, part, resolution, frames, tol, machine_model=None, placement=None) -> SimResult:
+    placement = placement or {}
     setups = [program.setup_of(program.ops[i]) for i in sel]
     st_boxes = [s.model_stock for s in setups]
     x0 = min(b.xmin for b in st_boxes); x1 = max(b.xmax for b in st_boxes)
@@ -175,6 +193,7 @@ def _sim_zmap(program, sel, part, resolution, frames, tol) -> SimResult:
     done = 0
     mark_i = 0
     rapid_hits = []
+    collisions: list[dict] = []
 
     def snap(upto):
         q = {"zhi": _quant(zhi, zlo, zmin, zmax)}
@@ -207,6 +226,8 @@ def _sim_zmap(program, sel, part, resolution, frames, tol) -> SimResult:
             end = max(end, start + 1) if end <= start else end
             P = pts[start:end]; K = kinds[start:end]; I = idx[start:end]
             _stamp_z(zhi, zlo, P, K, I, tool, side, res, x0, y0, rapid_hits, op.name)
+            if machine_model is not None and side == 1:
+                _collide_z(collisions, zhi, P, I, done, tool, machine_model, res, x0, y0, op.name, st_boxes[0], placement)
             start = end
             if next_mark is not None and end_move_done(idx, end, done, next_mark):
                 snap(next_mark); mark_i += 1
@@ -223,6 +244,11 @@ def _sim_zmap(program, sel, part, resolution, frames, tol) -> SimResult:
     remaining = np.where(zhi > zlo, zhi - zlo, 0.0).sum() * res * res
     out.stats = {"moves": total, "ops": len(sel), "removed_cm3": round((initial - remaining) / 1000.0, 3),
                  "rapid_hits": rapid_hits[:50]}
+    if machine_model is not None:
+        out.stats["collisions"] = _collision_stats(collisions)
+        out.stats["machine"] = {"key": machine_model.key, "name": machine_model.name, "placement": placement}
+        if has_bottom:
+            out.notes.append("machine collisions are checked on top setups only; flipped (bottom) setups are not checked against the holder")
     if pmaps is not None:
         _compare_zmap(out, pmaps, zhi, zlo, res, x0, y0, nx, tol, has_bottom)
         out.stats["gouge"]["ops"] = gouge_ops
@@ -544,3 +570,127 @@ def _stamp_r_run(r, P, K, I, tool, res_x, res_a, x0, rapid_hits, op_name):
             rapid_hits.append({"op": op_name, "move": int(owner[j]) + 1, "depth": round(float(depth[j]), 3)})
         if cut.any():
             np.minimum.at(r, (IA[cut], IX[cut]), S1[cut])
+
+
+# ----------------------------------------------------------------------------- machine collisions (holder / nose / head / table)
+def tool_stickout(tool: cam.Tool) -> float:
+    """How far the tool projects below the nose/nut face: flute length plus the shank that clears the collet (estimated)."""
+    return float(getattr(tool, "stickout", 0) or 0) or (float(tool.flute_length) + 6.0)
+
+
+def _collision_stats(hits: list[dict]) -> dict:
+    if not hits:
+        return {"count": 0, "max_depth": 0.0, "hits": []}
+    # one entry per (op, part, what) keeps the worst depth; the list is sorted deepest first
+    best: dict[tuple, dict] = {}
+    for h in hits:
+        k = (h["op"], h["part"], h["what"])
+        if k not in best or h["depth"] > best[k]["depth"]:
+            best[k] = h
+    return {"count": len(hits), "max_depth": max(h["depth"] for h in hits), "hits": sorted(best.values(), key=lambda h: -h["depth"])[:50],
+            "all": sorted(hits, key=lambda h: -h["depth"])[:400]}
+
+
+def holder_levels(machine_model, tool: cam.Tool) -> list[tuple[str, float, float, float]]:
+    """(name, radius, bottom above the tool tip, height) for everything above the flutes: the tool shank, then the
+    machine's nose profile (collet nut, nose, collar, head)."""
+    stick = tool_stickout(tool)
+    ov = getattr(machine_model, "stickout", None)
+    if ov:
+        stick = max(float(ov), float(tool.flute_length))
+    levels = [("tool shank", tool.radius, float(tool.flute_length), max(stick - float(tool.flute_length), 0.0))]
+    z = stick
+    for lvl in machine_model.nose:
+        levels.append((lvl["name"], float(lvl["r"]), z, float(lvl["h"])))
+        z += float(lvl["h"])
+    return levels
+
+
+def _pool_max(zhi: np.ndarray, c: int) -> np.ndarray:
+    """Block-max of zhi over c×c cells (padded with -inf)."""
+    ny, nx = zhi.shape
+    py, px = (-ny) % c, (-nx) % c
+    Z = np.pad(zhi, ((0, py), (0, px)), constant_values=-np.inf)
+    return Z.reshape(Z.shape[0] // c, c, Z.shape[1] // c, c).max(axis=(1, 3))
+
+
+def _collide_z(hits, zhi, P, I, done, tool, mm, res, x0, y0, op_name, stock, placement):
+    """After a piece of moves is stamped: does any level of the holder stack dip below the remaining stock around it, or
+    does the tool tip go below the table (through the spoilboard)? Sampled every r/2 along the path."""
+    if len(P) == 0:
+        return
+    levels = holder_levels(mm, tool)
+    ny, nx = zhi.shape
+    spoil = float(mm.spoilboard) + float(placement.get("fixture", 0.0))
+    table_z = stock.zmin - float(placement.get("fixture", 0.0))      # table top in model Z (stock sits on it)
+    for name, r, zb_off, h in levels:
+        if r <= tool.radius + 1e-6 and name == "tool shank":
+            continue                                                   # the flutes clear their own radius
+        c = max(1, int(r / (2 * res)))                                 # coarse cells ~ r/2
+        coarse = _pool_max(zhi, c)
+        step = max(1, int((r / 2) / (res / 2)))                        # sample spacing ≤ r/2 (samples are res/2 apart)
+        rc = int(math.ceil(r / res))
+        for k in range(0, len(P), step):
+            x, y, z = P[k]
+            zb = z + zb_off
+            ix, iy = int(round((x - x0) / res)), int(round((y - y0) / res))
+            cx0, cx1 = max(0, (ix - rc) // c), min(coarse.shape[1] - 1, (ix + rc) // c)
+            cy0, cy1 = max(0, (iy - rc) // c), min(coarse.shape[0] - 1, (iy + rc) // c)
+            if cx0 > cx1 or cy0 > cy1:
+                continue
+            if coarse[cy0:cy1 + 1, cx0:cx1 + 1].max() <= zb + 0.02:
+                continue
+            # exact: cells within r of the axis, above the level's bottom
+            xa, xb = max(0, ix - rc), min(nx - 1, ix + rc); ya, yb = max(0, iy - rc), min(ny - 1, iy + rc)
+            sub = zhi[ya:yb + 1, xa:xb + 1]
+            yy, xx = np.mgrid[ya:yb + 1, xa:xb + 1]
+            d2 = ((xx - (x - x0) / res) ** 2 + (yy - (y - y0) / res) ** 2) * res * res
+            mask = (d2 <= r * r) & (d2 > tool.radius * tool.radius) & (sub > zb + 0.02) & np.isfinite(sub)
+            if mask.any():
+                depth = float((sub[mask] - zb).max())
+                hits.append({"op": op_name, "move": int(I[k]), "pos": [round(float(x), 2), round(float(y), 2), round(float(z), 2)],
+                             "part": name, "what": "stock", "depth": round(depth, 2)})
+                break                                                  # one hit per level per piece is enough to report
+    # the tool tip through the spoilboard into the table
+    zmin = float(P[:, 2].min())
+    if zmin < table_z - spoil - 0.02:
+        k = int(np.argmin(P[:, 2]))
+        hits.append({"op": op_name, "move": int(I[k]), "pos": [round(float(P[k, 0]), 2), round(float(P[k, 1]), 2), round(zmin, 2)],
+                     "part": "tool", "what": "table" if spoil <= 0 else "bed under the spoilboard", "depth": round(table_z - spoil - zmin, 2)})
+
+
+def _collide_rotary(out, program, sel, mm, placement):
+    """4th-axis setups: the holder stack against the chuck face and the tailstock (the stock is handled radially)."""
+    rot = mm.rotary
+    if not rot:
+        return
+    hits = []
+    st = program.setup_of(program.ops[sel[0]])
+    stock = st.model_stock
+    dx = float(placement.get("x", 0.0))
+    # stock placement along the rotary: its xmin sits `gap` from the chuck jaws unless a placement says otherwise
+    gap = float(placement.get("chuck_gap", 5.0))
+    chuck_face_model = stock.xmin - gap
+    tail_model = chuck_face_model + (rot["tail_x"] - rot["chuck_face_x"])
+    for i in sel:
+        op = program.ops[i]
+        if not op.moves:
+            continue
+        levels = holder_levels(mm, op.tool)
+        P = st.to_model(np.array([m[1:4] for m in op.moves], dtype=float))
+        for name, r, zb_off, h in levels:
+            if name == "tool shank":
+                continue
+            # chuck: a disc of radius chuck_r on the axis; the level is a cylinder of radius r from zb up h along the tool axis
+            near = P[:, 0] - r < chuck_face_model + dx
+            if near.any():
+                k = int(np.argmax(near)); hits.append({"op": op.name, "move": k, "pos": [round(float(v), 2) for v in P[k]], "part": name, "what": "chuck", "depth": round(float(chuck_face_model + dx - (P[k, 0] - r)), 2)})
+                break
+            near = P[:, 0] + r > tail_model + dx
+            if near.any():
+                k = int(np.argmax(near)); hits.append({"op": op.name, "move": k, "pos": [round(float(v), 2) for v in P[k]], "part": name, "what": "tailstock", "depth": round(float((P[k, 0] + r) - (tail_model + dx)), 2)})
+                break
+    out.stats["collisions"] = _collision_stats(hits)
+    out.stats["machine"] = {"key": mm.key, "name": mm.name, "placement": placement}
+
+

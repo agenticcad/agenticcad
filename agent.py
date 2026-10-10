@@ -281,8 +281,12 @@ Stepover arguments are fractions of the tool diameter (0.1 = 0.1×D), not mm. A 
 reach square inside corners (shoulders, ends of flats): expect material left there in the simulation and clean them
 with a flat `rotary_finish(..., mode="rings", stepover=0.1)` limited to the shoulder with x_range=(x0, x1).
 After building a program, check it with `simulate_cam`: it removes material from the stock along every move and
-reports gouges into the part (with the op that caused them), material left on the part, and rapids through
-material. Fix gouges and rapid hits before exporting; the user can scrub the simulation in the CAM tab.
+reports gouges into the part (with the op that caused them), material left on the part, rapids through
+material, and machine collisions: the collet nut / spindle nose / head against the remaining stock (narrow cuts deeper
+than the flutes), the tool through the spoilboard into the bed, and the holder against the chuck or tailstock on
+4th-axis jobs. Fix gouges, rapid hits and collisions before exporting (shorter tool stickout, a longer tool, a wider
+pocket, or shallower depth); the user can scrub the simulation in the CAM tab and watch it on the machine model
+(ribbon ▸ Machine).
 Makera Z1 / Carvera Air post (machine.post == "makera"): M6 Tn runs the whole manual change (moves to the change
 position, waits for the button, measures the tool length), lines ≤ 63 characters, no canned cycles or coolant,
 feeds on A moves are converted to the firmware's own rule. The Z1 is light (150 W, 1/8" collet): aluminium < 1 mm
@@ -1637,8 +1641,10 @@ class CadAgent:
 
         @tool("simulate_cam", "Simulate material removal for the CAM program (all ops, or `ops` = 1-based op numbers) and "
               "compare with the part: gouges into the part (depth, area, which op), material left on the part, stock left "
-              "outside it, rapids through material. Shows the result in the CAM tab. Flat setups (top/flipped) and 4th-axis "
-              "setups are simulated separately.",
+              "outside it, rapids through material, and MACHINE COLLISIONS: the collet nut / spindle nose / head against the "
+              "remaining stock (deep narrow cuts), the tool through the spoilboard into the bed, and the holder against the "
+              "4th-axis chuck or tailstock. Shows the result in the CAM tab (the Machine toggle plays it on the machine model). "
+              "Flat setups (top/flipped) and 4th-axis setups are simulated separately.",
               {"type": "object", "properties": {"ops": {"type": "array", "items": {"type": "integer"}},
                                                 "resolution": {"type": "number"}}, "required": []})
         async def simulate_cam(args: dict[str, Any]) -> dict[str, Any]:

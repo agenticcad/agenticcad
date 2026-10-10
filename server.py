@@ -368,6 +368,22 @@ async def cam_simulate(body: SimBody):
     return res.to_payload() | {"ops": agent.sim_ops}
 
 
+@app.get("/api/cam/machine_model")
+async def cam_machine_model(quality: str = "normal", name: str | None = None, info: bool = False):
+    """The kinematic 3D model of the program's machine (or `name`) for the viewer's Machine toggle: tessellated parts,
+    materials, nodes, home/travel/nose profile and the accuracy flags of every number."""
+    import machine_models
+    m = agent.library.machines().get(name) if name else (agent.program.setup.machine if agent.program is not None else None)
+    if m is None:
+        return JSONResponse({"error": "no CAM program (or unknown machine name)"}, status_code=404)
+    try:
+        if info:                                                       # numbers and sources only (Settings ▸ Machines ▸ Model)
+            return {"machine": machine_models.model_for(m).to_payload()}
+        return await asyncio.to_thread(machine_models.cached_payload, m, quality if quality in ("draft", "normal", "fine") else "normal")
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"error": str(e)}, status_code=400)
+
+
 @app.get("/api/cam/sim/frame/{k}")
 async def cam_sim_frame(k: int):
     if agent.sim is None:
