@@ -7,7 +7,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M16 3 28 9.5v13L16 29 4 22.5v-13L16 3Z' fill='none' stroke='%234ea1ff' stroke-width='2'/%3E%3Ccircle cx='16' cy='16' r='4' fill='%23ff8c42'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="../assets/site.css?v=0.29.0">
+<link rel="stylesheet" href="../assets/site.css?v=0.30.0">
 <style>
   .docs{display:grid;grid-template-columns:250px 1fr;gap:56px;padding:44px 0 80px}
   .toc{position:sticky;top:76px;align-self:start;max-height:calc(100vh - 100px);overflow:auto;font-size:13px;padding-right:8px}
@@ -301,6 +301,7 @@ program.<span class="hl-f">add</span>(<span class="hl-f">contour</span>(setup, t
 
     <h2 id="cam-sim">Simulation</h2>
     <p><b>Simulate</b> in the CAM bar (or the agent's <code>simulate_cam</code> tool) removes material from the stock along every move of the visible operations: all of them, or just one. The viewer shows the stock being cut in step with the slider; on the last frame gouges are red and material left on the part amber. The summary reports the volume removed, gouges (depth, area and the operation that caused them), material left on the part, stock still standing outside it, and rapids that pass through material. Top and bottom setups use a two-sided height map, 4th-axis setups a radial map around the axis. Side setups are not simulated yet.</p>
+    <p><b>Playback</b> runs the program the way the machine would: each move takes its real time (distance at the programmed feed, rapids at the machine's rapid rate, A moves at the rotary's speed) and the tool moves continuously along it. A speed control runs from ¼× to 100× real time, ⏮ / ⏭ jump between operations, the slider is program time, and the readout shows setup · operation · tool · move · elapsed / total. The operations list has setup headers (WCS and orientation), highlights the operation being run, and ▶ plays from any operation or setup. On the Machine view a flipped (bottom) setup turns the work over on the table.</p>
     <h3 id="machine-view">Machine view and collision checks</h3>
     <p>Every built-in machine has a kinematic 3D model: the Makera Z1 and Carvera Air (bed with the real hole grid, moving bed under the rear bridge, head in X and Z, 4th-axis chuck and tailstock, enclosure), the Haas VF-2, VF-2SS, VF-4, Mini Mill and TM-1 (table with the real T-slots, saddle, column, CAT40 spindle with an ER32 holder, verified nose-to-table range) and a parametric gantry router for anything else. <b>Machine</b> in the ribbon (Output group, <kbd>A</kbd>) or the CAM tab's <b>Machine view</b> section shows the program's machine around the stock and plays the simulation on it: the head, table and chuck move as they would on the real machine, the tool hangs from the spindle, and any part the simulator saw collide flashes red at that move.</p>
     <p>The simulation checks the whole stack above the flutes (shank, collet nut, nose, collar, head) against the remaining stock, the tool tip against the bed under the spoilboard, and the holder against the chuck and tailstock on 4th-axis jobs. Contacts are listed in the summary with the operation, move, position and depth, and the agent sees them in <code>simulate_cam</code>. <b>Settings ▸ Machines ▸ Model</b> shows every number with its source and accuracy tier (verified, reference, estimated) and takes measured overrides per machine: nose profile, tool stickout, spoilboard thickness and gantry clearance. The work-area numbers are verified; castings and enclosures are representative, so treat the view as a check on the tool, holder and table, not a rendering of your exact machine.</p>
@@ -463,7 +464,7 @@ program.<span class="hl-f">add</span>(<span class="hl-f">pocket</span>(bot, tool
   </main>
 </div>
 <footer><div class="wrap"><span>© 2026 AgenticCAD · PolyForm Noncommercial 1.0.0</span><a href="../terms.html">Terms</a><a href="../privacy.html">Privacy</a><a href="#" data-cookie-settings>Cookie settings</a><a href="https://github.com/agenticcad/agenticcad">GitHub</a><a href="../tutorials/">Tutorials</a><a href="../index.html">Home</a></div></footer>
-<script src="../assets/site.js?v=0.29.0"></script>
+<script src="../assets/site.js?v=0.30.0"></script>
 <script>
   const links = [...document.querySelectorAll('.toc a')], heads = links.map(a => document.querySelector(a.getAttribute('href')));
   const io = new IntersectionObserver(() => { let cur = 0; heads.forEach((h, i) => { if (h && h.getBoundingClientRect().top < 120) cur = i; }); links.forEach((a, i) => a.classList.toggle('on', i === cur)); }, { rootMargin: '-100px 0px -70% 0px', threshold: [0, 1] });
