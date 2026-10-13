@@ -5,6 +5,16 @@ features, patch bumps fix things. The version shown in the UI header comes from 
 
 ## [Unreleased]
 
+## [0.36.4] — 2026-10-14
+
+### Fixed
+- **Ticks around circular rims in the rendered stock.** About one rim triangle in twenty spans the fold between the
+  top face and a curved wall, and it was shaded with its own 45° facet. Every vertex now keeps the exact surface
+  planes found by the edge solve, and each triangle corner shades with the plane nearest its own orientation, so a
+  fold-spanning triangle blends from face to wall instead of catching the light; around a Ø16 pocket rim no corner
+  carries a stray normal any more (105 did).
+
+
 ## [0.36.3] — 2026-10-14
 
 ### Fixed

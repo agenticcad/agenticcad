@@ -194,7 +194,7 @@ function meshChunk(cx, cy, cz) {
   const cA = [cx * CS - 1, cy * CS - 1, cz * CS - 1], cB = [Math.min(nx - 2, cx * CS + CS - 1), Math.min(ny - 2, cy * CS + CS - 1), Math.min(nz - 2, cz * CS + CS - 1)];
   for (let a = 0; a < 3; a++) if (cA[a] < 0) cA[a] = 0;
   const W = CS + 1, vmap = new Int32Array(W * W * W).fill(-1);
-  const pos = [], nrm = [], col = [], idx = [];
+  const pos = [], nrm = [], col = [], idx = [], vpl = [], vpc = [];   // vpl: up to 4 plane normals per vertex, vpc: how many
   const V = (i, j, k) => m[k * NXY + j * nx + i];
   const off = [[0, 0, 0], [1, 0, 0], [0, 1, 0], [1, 1, 0], [0, 0, 1], [1, 0, 1], [0, 1, 1], [1, 1, 1]];
   const edges = [[0, 1], [2, 3], [4, 5], [6, 7], [0, 2], [1, 3], [4, 6], [5, 7], [0, 4], [1, 5], [2, 6], [3, 7]];
@@ -203,7 +203,8 @@ function meshChunk(cx, cy, cz) {
     let pos8 = 0, neg8 = 0;
     for (let c = 0; c < 8; c++) { const v = V(i + off[c][0], j + off[c][1], k + off[c][2]); cv[c] = v; if (v > 0) pos8++; else neg8++; }
     if (!pos8 || !neg8) continue;
-    let sx = 0, sy = 0, sz = 0, ne = 0;
+    let sx = 0, sy = 0, sz = 0, ne = 0, npl = 0;
+    const pl = PL; pl.fill(0);                                                        // plane clusters: x y z weight ×4
     let axx = 0, axy = 0, axz = 0, ayy = 0, ayz = 0, azz = 0, bx = 0, by = 0, bz = 0;   // QEF normal equations
     for (const [a, b] of edges) {
       const va = cv[a], vb = cv[b]; if ((va > 0) === (vb > 0)) continue;
@@ -231,6 +232,11 @@ function meshChunk(cx, cy, cz) {
       const gl = Math.hypot(gx, gy, gz); if (gl < 1e-9) continue; gx /= gl; gy /= gl; gz /= gl;
       const d = gx * px + gy * py + gz * pz;
       axx += gx * gx; axy += gx * gy; axz += gx * gz; ayy += gy * gy; ayz += gy * gz; azz += gz * gz; bx += gx * d; by += gy * d; bz += gz * d;
+      // outward normal (−gradient) into a plane cluster
+      let put = -1;
+      for (let q = 0; q < npl; q++) { const w = pl[q * 4 + 3]; if ((-gx * pl[q * 4] - gy * pl[q * 4 + 1] - gz * pl[q * 4 + 2]) / w >= EDGE_COS * 0.98) { put = q; break; } }
+      if (put < 0 && npl < 4) { put = npl++; }
+      if (put >= 0) { pl[put * 4] -= gx; pl[put * 4 + 1] -= gy; pl[put * 4 + 2] -= gz; pl[put * 4 + 3] += 1; }
     }
     const mx = sx / ne, my = sy / ne, mz = sz / ne;
     // solve (AᵀA + λI) x = Aᵀb + λ m  (3×3, Cramer's rule); λ keeps flat areas at the mass point
@@ -254,6 +260,8 @@ function meshChunk(cx, cy, cz) {
     const gl = Math.hypot(gx, gy, gz) || 1; gx /= -gl; gy /= -gl; gz /= -gl;
     vmap[((k - cA[2]) * W + (j - cA[1])) * W + (i - cA[0])] = pos.length / 3;
     pos.push(vx, vy, vz); nrm.push(gx, gy, gz); const o = col.length; col.length += 3; vertexColor(vx, vy, col, o);
+    vpc.push(npl);
+    for (let q = 0; q < 4; q++) { if (q < npl) { const l = Math.hypot(pl[q * 4], pl[q * 4 + 1], pl[q * 4 + 2]) || 1; vpl.push(pl[q * 4] / l, pl[q * 4 + 1] / l, pl[q * 4 + 2] / l); } else vpl.push(0, 0, 0); }
   }
   if (!pos.length) return { pos: new Float32Array(0), nrm: new Float32Array(0), col: new Float32Array(0), uv: new Float32Array(0), tan: new Float32Array(0), idx: new Uint32Array(0) };
   const vat = (i, j, k) => (i < cA[0] || j < cA[1] || k < cA[2] || i > cB[0] || j > cB[1] || k > cB[2]) ? -1 : vmap[((k - cA[2]) * W + (j - cA[1])) * W + (i - cA[0])];
@@ -265,13 +273,14 @@ function meshChunk(cx, cy, cz) {
     if ((V(i, j + 1, k) > 0) !== v0) quad(vat(i - 1, j, k - 1), vat(i - 1, j, k), vat(i, j, k), vat(i, j, k - 1), !v0);
     if ((V(i, j, k + 1) > 0) !== v0) quad(vat(i - 1, j - 1, k), vat(i, j - 1, k), vat(i, j, k), vat(i - 1, j, k), !v0);
   }
-  return hardEdges(pos, col, idx);
+  return hardEdges(pos, col, idx, vpl, vpc);
 }
 
 // per-vertex normals from the incident faces, split where faces disagree by more than 35° (a milled edge stays sharp,
 // a curved wall stays smooth); uv = planar projection on the vertex's dominant axis, in cm (for brushed-finish maps)
 let EDGE_COS = Math.cos(35 * Math.PI / 180);
-function hardEdges(pos, col, idx) {
+const PL = new Float64Array(16);
+function hardEdges(pos, col, idx, vpl, vpc) {
   const nv = pos.length / 3, nf = idx.length / 3, fn = new Float32Array(nf * 3);
   for (let f = 0; f < nf; f++) {
     const a = idx[f * 3] * 3, b = idx[f * 3 + 1] * 3, c = idx[f * 3 + 2] * 3;
@@ -297,9 +306,22 @@ function hardEdges(pos, col, idx) {
     T.push(tx, ty, tz, 1); UV.push((x * tx + y * ty + z * tz) / 10, (x * bx + y * by + z * bz) / 10);
     return k;
   };
+  const copies = new Int32Array(4);
   for (let v = 0; v < nv; v++) {
-    const a0 = cnt[v], a1 = cnt[v + 1];
-    for (let j = a0; j < a1; j++) {                      // greedy clusters of agreeing faces, one vertex copy per cluster
+    const a0 = cnt[v], a1 = cnt[v + 1], np = vpc ? vpc[v] : 0;
+    if (np > 0) {
+      // the exact surface planes at this vertex (from the stamp's normals): each face corner takes the nearest one, so a
+      // triangle that spans a fold blends from one plane to the other instead of showing its own facet
+      copies.fill(-1);
+      for (let j = a0; j < a1; j++) {
+        const f = (around[j] / 3) | 0; let best = 0, bd = -2;
+        for (let q = 0; q < np; q++) { const d = fn[f * 3] * vpl[(v * 4 + q) * 3] + fn[f * 3 + 1] * vpl[(v * 4 + q) * 3 + 1] + fn[f * 3 + 2] * vpl[(v * 4 + q) * 3 + 2]; if (d > bd) { bd = d; best = q; } }
+        if (copies[best] < 0) copies[best] = pushV(v, vpl[(v * 4 + best) * 3], vpl[(v * 4 + best) * 3 + 1], vpl[(v * 4 + best) * 3 + 2]);
+        newIdx[around[j]] = copies[best];
+      }
+      continue;
+    }
+    for (let j = a0; j < a1; j++) {                      // fallback: greedy clusters of agreeing faces, one vertex copy per cluster
       if (used[j]) continue;
       const f0 = (around[j] / 3) | 0; let sx = 0, sy = 0, sz = 0; const members = [];
       for (let k = j; k < a1; k++) {
