@@ -32,6 +32,13 @@ function reset(d) {
   const nx = Math.ceil(sx / h) + 4, ny = Math.ceil(sy / h) + 4, nz = Math.ceil(sz / h) + 3;
   const x0 = g.x0 + fx0 * g.res - h * 1.5, y0 = g.y0 + fy0 * g.res - h * 1.5, z0 = g.zmin - h;
   const m = new Int8Array(nx * ny * nz).fill(-SCALE);
+  if (d.box) {                                           // the untouched stock is a box: exact field, flat faces, sharp edges
+    const B = d.box;
+    for (let iz = 0; iz < nz; iz++) { const z = z0 + iz * h, dz = Math.min(B.zmax - z, z - B.zmin);
+      for (let iy = 0; iy < ny; iy++) { const y = y0 + iy * h, dy = Math.min(B.ymax - y, y - B.ymin);
+        for (let ix = 0; ix < nx; ix++) { const x = x0 + ix * h, v = Math.min(dz, dy, B.xmax - x, x - B.xmin) / h;
+          m[(iz * ny + iy) * nx + ix] = v >= 1 ? SCALE : v <= -1 ? -SCALE : Math.round(v * SCALE); } } }
+  } else {
   // column SDF from the height map: for every nearby cell level (top, bottom) the material is bounded above and below
   // and, laterally, by the distance to the nearest cell whose top is lower (or bottom higher) — so flat areas are exact
   // and walls the keyframe already holds land between voxels at the server's resolution instead of on them
@@ -72,6 +79,7 @@ function reset(d) {
         v /= h; m[iz * nx * ny + base] = v >= 1 ? SCALE : v <= -1 ? -SCALE : Math.round(v * SCALE);
       }
     }
+  }
   }
   const ncx = Math.ceil((nx - 1) / CS), ncy = Math.ceil((ny - 1) / CS), ncz = Math.ceil((nz - 1) / CS);
   G = { gen: d.gen, h, x0, y0, z0, nx, ny, nz, m, ncx, ncy, ncz, dirty: new Set(), srv: g, gouge: d.gouge || null, left: d.left || null, final: !!d.final, colors: d.colors };
@@ -142,7 +150,7 @@ function flush() {
   for (const id of G.dirty) {
     const cx = id % G.ncx, cy = Math.floor(id / G.ncx) % G.ncy, cz = Math.floor(id / (G.ncx * G.ncy));
     const r = meshChunk(cx, cy, cz);
-    chunks.push({ id, pos: r.pos, nrm: r.nrm, col: r.col, idx: r.idx }); transfer.push(r.pos.buffer, r.nrm.buffer, r.col.buffer, r.idx.buffer);
+    chunks.push({ id, pos: r.pos, nrm: r.nrm, col: r.col, uv: r.uv, idx: r.idx }); transfer.push(r.pos.buffer, r.nrm.buffer, r.col.buffer, r.uv.buffer, r.idx.buffer);
   }
   G.dirty.clear();
   self.postMessage({ type: 'mesh', gen: G.gen, chunks, ms: Date.now() - t0, resetMs: G.resetMs || 0, voxels: G.nx * G.ny * G.nz }, transfer); G.resetMs = 0;
@@ -191,7 +199,7 @@ function meshChunk(cx, cy, cz) {
     vmap[((k - cA[2]) * W + (j - cA[1])) * W + (i - cA[0])] = pos.length / 3;
     pos.push(vx, vy, vz); nrm.push(gx, gy, gz); const o = col.length; col.length += 3; vertexColor(vx, vy, col, o);
   }
-  if (!pos.length) return { pos: new Float32Array(0), nrm: new Float32Array(0), col: new Float32Array(0), idx: new Uint32Array(0) };
+  if (!pos.length) return { pos: new Float32Array(0), nrm: new Float32Array(0), col: new Float32Array(0), uv: new Float32Array(0), idx: new Uint32Array(0) };
   const vat = (i, j, k) => (i < cA[0] || j < cA[1] || k < cA[2] || i > cB[0] || j > cB[1] || k > cB[2]) ? -1 : vmap[((k - cA[2]) * W + (j - cA[1])) * W + (i - cA[0])];
   const quad = (a, b, c, d, flip) => { if (a < 0 || b < 0 || c < 0 || d < 0) return; if (flip) idx.push(a, d, c, a, c, b); else idx.push(a, b, c, a, c, d); };
   const pA = [cx * CS, cy * CS, cz * CS], pB = [Math.min(nx - 2, cx * CS + CS - 1), Math.min(ny - 2, cy * CS + CS - 1), Math.min(nz - 2, cz * CS + CS - 1)];
@@ -201,5 +209,45 @@ function meshChunk(cx, cy, cz) {
     if ((V(i, j + 1, k) > 0) !== v0) quad(vat(i - 1, j, k - 1), vat(i - 1, j, k), vat(i, j, k), vat(i, j, k - 1), !v0);
     if ((V(i, j, k + 1) > 0) !== v0) quad(vat(i - 1, j - 1, k), vat(i, j - 1, k), vat(i, j, k), vat(i - 1, j, k), !v0);
   }
-  return { pos: new Float32Array(pos), nrm: new Float32Array(nrm), col: new Float32Array(col), idx: new Uint32Array(idx) };
+  return hardEdges(pos, col, idx);
+}
+
+// per-vertex normals from the incident faces, split where faces disagree by more than 35° (a milled edge stays sharp,
+// a curved wall stays smooth); uv = planar projection on the vertex's dominant axis, in cm (for brushed-finish maps)
+const EDGE_COS = Math.cos(35 * Math.PI / 180);
+function hardEdges(pos, col, idx) {
+  const nv = pos.length / 3, nf = idx.length / 3, fn = new Float32Array(nf * 3);
+  for (let f = 0; f < nf; f++) {
+    const a = idx[f * 3] * 3, b = idx[f * 3 + 1] * 3, c = idx[f * 3 + 2] * 3;
+    const ux = pos[b] - pos[a], uy = pos[b + 1] - pos[a + 1], uz = pos[b + 2] - pos[a + 2], vx = pos[c] - pos[a], vy = pos[c + 1] - pos[a + 1], vz = pos[c + 2] - pos[a + 2];
+    const x = uy * vz - uz * vy, y = uz * vx - ux * vz, z = ux * vy - uy * vx, l = Math.hypot(x, y, z) || 1;
+    fn[f * 3] = x / l; fn[f * 3 + 1] = y / l; fn[f * 3 + 2] = z / l;
+  }
+  const cnt = new Int32Array(nv + 1); for (let i = 0; i < idx.length; i++) cnt[idx[i] + 1]++;
+  for (let v = 0; v < nv; v++) cnt[v + 1] += cnt[v];
+  const around = new Int32Array(idx.length), fill = cnt.slice(0, nv);
+  for (let i = 0; i < idx.length; i++) { const v = idx[i]; around[fill[v]++] = i; }   // corner index i (its face is i / 3)
+  const P = [], N = [], C = [], UV = [], newIdx = new Uint32Array(idx.length), used = new Uint8Array(idx.length);
+  const pushV = (v, nx, ny, nz) => {
+    const k = P.length / 3, x = pos[v * 3], y = pos[v * 3 + 1], z = pos[v * 3 + 2];
+    P.push(x, y, z); N.push(nx, ny, nz); C.push(col[v * 3], col[v * 3 + 1], col[v * 3 + 2]);
+    const ax = Math.abs(nx), ay = Math.abs(ny), az = Math.abs(nz);
+    if (az >= ax && az >= ay) UV.push(x / 10, y / 10); else if (ax >= ay) UV.push(y / 10, z / 10); else UV.push(x / 10, z / 10);
+    return k;
+  };
+  for (let v = 0; v < nv; v++) {
+    const a0 = cnt[v], a1 = cnt[v + 1];
+    for (let j = a0; j < a1; j++) {                      // greedy clusters of agreeing faces, one vertex copy per cluster
+      if (used[j]) continue;
+      const f0 = (around[j] / 3) | 0; let sx = 0, sy = 0, sz = 0; const members = [];
+      for (let k = j; k < a1; k++) {
+        if (used[k]) continue;
+        const f = (around[k] / 3) | 0;
+        if (fn[f * 3] * fn[f0 * 3] + fn[f * 3 + 1] * fn[f0 * 3 + 1] + fn[f * 3 + 2] * fn[f0 * 3 + 2] >= EDGE_COS) { used[k] = 1; members.push(around[k]); sx += fn[f * 3]; sy += fn[f * 3 + 1]; sz += fn[f * 3 + 2]; }
+      }
+      const l = Math.hypot(sx, sy, sz) || 1, nvI = pushV(v, sx / l, sy / l, sz / l);
+      for (const corner of members) newIdx[corner] = nvI;
+    }
+  }
+  return { pos: new Float32Array(P), nrm: new Float32Array(N), col: new Float32Array(C), uv: new Float32Array(UV), idx: newIdx };
 }

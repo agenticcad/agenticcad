@@ -1740,17 +1740,32 @@ function liveReset(f, kf, final, quiet = false) {
   }
   liveRefresh();
 }
+let brushedTex = null;
+function brushedRoughness() {                         // fine machining lines: a tileable roughness map (uv is cm, so streaks ~0.1 mm apart)
+  if (brushedTex) return brushedTex;
+  const n = 512, cv = document.createElement('canvas'); cv.width = cv.height = n; const ctx = cv.getContext('2d');
+  const img = ctx.createImageData(n, n), d = img.data;
+  let seed = 7; const rnd = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
+  const rows = new Float32Array(n); for (let y = 0; y < n; y++) rows[y] = 0.55 + 0.45 * rnd();
+  for (let y = 0; y < n; y++) { const base = rows[y] * 0.6 + rows[(y + 1) % n] * 0.25 + rows[(y + n - 1) % n] * 0.15; for (let x = 0; x < n; x++) { const v = Math.max(0, Math.min(255, (0.25 + 0.5 * base + (rnd() - 0.5) * 0.12) * 255)); const i = (y * n + x) * 4; d[i] = d[i + 1] = d[i + 2] = v; d[i + 3] = 255; } }
+  ctx.putImageData(img, 0, 0);
+  brushedTex = new THREE.CanvasTexture(cv); brushedTex.wrapS = brushedTex.wrapT = THREE.RepeatWrapping; brushedTex.repeat.set(6, 6); brushedTex.anisotropy = 8;
+  return brushedTex;
+}
 function stockMaterial() {
-  const flat = !(live && live.vox);                   // the voxel mesh carries smooth field normals; the height map is faceted
-  const m = renderedMode
-    ? new THREE.MeshPhysicalMaterial({ vertexColors: true, metalness: 0.92, roughness: 0.42, flatShading: flat, side: THREE.DoubleSide, envMapIntensity: 0.9, clearcoat: 0.0 })
-    : new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.7, metalness: 0.08, flatShading: flat, side: THREE.DoubleSide });
+  const vox = !!(live && live.vox);                   // the voxel mesh carries split-edge normals and planar uvs; the height map is faceted
+  let m;
+  if (renderedMode) {
+    // 6061-style aluminium: a bright metal with a satin, lightly brushed finish and anisotropic highlights
+    m = new THREE.MeshPhysicalMaterial({ vertexColors: true, metalness: 1.0, roughness: vox ? 0.34 : 0.42, flatShading: !vox, side: THREE.DoubleSide, envMapIntensity: 1.7, clearcoat: 0.0 });
+    if (vox) { m.roughnessMap = brushedRoughness(); m.anisotropy = 0.55; }
+  } else m = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.7, metalness: 0.08, flatShading: !vox, side: THREE.DoubleSide });
   m.clippingPlanes = material.clippingPlanes; return m;
 }
 // ---- voxel stock (Settings ▸ General ▸ Simulation stock): a signed-distance field in static/voxel_stock.js (Web Worker),
 // stamped with every move and meshed with surface nets per chunk, so walls are smooth and the stock is a true 3D solid
 let vox = null, voxGen = 0;
-function stockColors() { const c = v => [v.r, v.g, v.b]; return { base: c(new THREE.Color(renderedMode ? 0xaeb3b9 : 0xc9b48a)), red: c(new THREE.Color(0xff3b3b)), amber: c(new THREE.Color(0xffb020)) }; }
+function stockColors() { const c = v => [v.r, v.g, v.b]; return { base: c(new THREE.Color(renderedMode ? 0xd9dde2 : 0xc9b48a)), red: c(new THREE.Color(0xff3b3b)), amber: c(new THREE.Color(0xffb020)) }; }
 function voxWorker() {
   if (vox) return vox.worker;
   let w; try { w = new Worker('/static/voxel_stock.js'); } catch (e) { viewerPrefs.voxel = false; addMsg('system', 'Voxel stock unavailable (' + e.message + '); using the height map.'); return null; }
@@ -1771,7 +1786,8 @@ function voxReset(f, final, prev, quiet = false) {
   // the previous stock stays on screen until the first chunks of the new field arrive (no flash of an empty vise)
   voxDropOld(); vox.old = [prev && prev.mesh, prev && prev.low].filter(Boolean);
   simMesh = new THREE.Group(); simMesh.renderOrder = 2; camGroup.add(simMesh); simLow = null;
-  w.postMessage({ type: 'reset', gen: live.gen, h, grid: g, zhi: live.zhi, zlo: live.zlo, gouge: final && f.gouge ? f.gouge : null, left: final && f.left ? f.left : null, final, colors: stockColors(), quiet: !!quiet });
+  const stk = program && program.stock, box = (f.upto === 0 && stk && !stk.radius) ? { xmin: stk.xmin, xmax: stk.xmax, ymin: stk.ymin, ymax: stk.ymax, zmin: stk.zmin, zmax: stk.zmax } : null;   // untouched box stock: exact
+  w.postMessage({ type: 'reset', gen: live.gen, h, grid: g, zhi: live.zhi, zlo: live.zlo, gouge: final && f.gouge ? f.gouge : null, left: final && f.left ? f.left : null, final, colors: stockColors(), quiet: !!quiet, box });
   return true;
 }
 function voxOnMesh(d) {
@@ -1784,7 +1800,7 @@ function voxOnMesh(d) {
     if (!mesh) { mesh = new THREE.Mesh(new THREE.BufferGeometry(), stockMaterial()); mesh.castShadow = mesh.receiveShadow = true; simMesh.add(mesh); vox.chunks.set(c.id, mesh); }
     else { mesh.geometry.dispose(); mesh.geometry = new THREE.BufferGeometry(); }
     const geo = mesh.geometry;
-    geo.setAttribute('position', new THREE.BufferAttribute(c.pos, 3)); geo.setAttribute('normal', new THREE.BufferAttribute(c.nrm, 3)); geo.setAttribute('color', new THREE.BufferAttribute(c.col, 3));
+    geo.setAttribute('position', new THREE.BufferAttribute(c.pos, 3)); geo.setAttribute('normal', new THREE.BufferAttribute(c.nrm, 3)); geo.setAttribute('color', new THREE.BufferAttribute(c.col, 3)); if (c.uv) geo.setAttribute('uv', new THREE.BufferAttribute(c.uv, 2));
     geo.setIndex(new THREE.BufferAttribute(c.idx, 1)); geo.computeBoundingSphere();
   }
 }

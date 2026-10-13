@@ -5,6 +5,15 @@ features, patch bumps fix things. The version shown in the UI header comes from 
 
 ## [Unreleased]
 
+## [0.36.2] — 2026-10-13
+
+### Changed
+- **The rendered stock looks like aluminium.** The voxel mesh now carries split-edge normals (milled edges stay sharp,
+  curved walls stay smooth) and planar UVs, and the rendered material is a bright metal with a satin, lightly brushed
+  roughness map and anisotropic highlights. The untouched box stock is built from its exact dimensions rather than
+  the height map, so its outer faces are flat instead of finely striped.
+
+
 ## [0.36.1] — 2026-10-13
 
 ### Fixed
