@@ -218,7 +218,11 @@ Agent-native, like the CAD side: a second script per design, `cam.py`, written b
   linear + rotary moves. Collet size is checked (1/8" standard).
 - **Rendered simulation**: *Rendered* in the CAM bar plays the program as a studio render: metallic stock machined
   live in front of you (the viewer stamps the tool along every move), a chrome holder with a spinning fluted tool, the
-  camera following the cut, and a HUD with the step, tool changes and the speed factor.
+  camera following the cut with depth of field (Settings ▸ General to turn it off), and a HUD with the step, tool
+  changes and the speed factor.
+- **Voxel stock**: the stock you watch being machined is a signed-distance voxel solid in a Web Worker
+  ([static/voxel_stock.js](static/voxel_stock.js)), stamped with every move and meshed with surface nets, so walls
+  are smooth and floors exact; Settings ▸ General ▸ *Simulation stock* falls back to a lighter height map.
 - **Playback**: the CAM bar plays the program in real time scaled by a speed control (¼× to 100×): moves take their
   real time at the programmed feed and the machine's rapid rate, the tool moves continuously, ⏮ / ⏭ jump between
   operations, the operations list shows setup headers and the operation being run (▶ plays from any of them), and on
@@ -557,8 +561,9 @@ but nothing here has been run on a real machine yet by anyone but the author.
 ### Known gaps
 - **One project, one session.** A single global design and one agent session per server; two browsers
   or two people will interfere. Chat history is not persisted across server restarts.
-- **CAM simulation is a height map.** It finds gouges, leftover material, rapids through stock and holder /
-  nose / head contacts with the stock and bed, but the machine models' castings and enclosures are representative
+- **CAM simulation checks run on a height map.** They find gouges, leftover material, rapids through stock and holder /
+  nose / head contacts with the stock and bed (the viewer's voxel stock is for watching, not for the checks), but the
+  machine models' castings and enclosures are representative
   (the work-area numbers are verified; see Settings ▸ Machines ▸ Model). Side setups and mixed 4th-axis + flat
   programs are simulated separately. Time estimates ignore acceleration.
 - **Adaptive corners rely on feed reduction**, not on geometry; ring-shaped regions still retract for

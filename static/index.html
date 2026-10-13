@@ -776,6 +776,7 @@ function fitCamera(dir) {
 function resize() {
   const w = viewerEl.clientWidth, h = viewerEl.clientHeight;
   renderer.setSize(w, h, true); camera.aspect = w / h; camera.updateProjectionMatrix();
+  if (typeof composer !== 'undefined' && composer) { composer.setPixelRatio(renderer.getPixelRatio()); composer.setSize(w, h); }
 }
 window.addEventListener('resize', resize); resize();
 function placeTree() { const h = document.getElementById('hdr'); if (!h) return; const y = (h.offsetParent ? h.offsetHeight : 0) + 10; document.getElementById('tree').style.top = y + 'px'; document.getElementById('cmd').style.top = Math.max(150, y) + 'px'; }
@@ -870,7 +871,7 @@ function tickMeasureLabel() {
 }
 
 // render loop (started after the ViewCube exists)
-(function animate() { requestAnimationFrame(animate); tickTween(); if (typeof tickRendered === 'function') tickRendered(); if (typeof tickAnim === 'function') tickAnim(performance.now()); controls.update(); renderer.render(scene, camera); renderCube(); tickMeasureLabel(); drawSketchOverlay(); })();
+(function animate() { requestAnimationFrame(animate); tickTween(); if (typeof tickRendered === 'function') tickRendered(); if (typeof tickAnim === 'function') tickAnim(performance.now()); controls.update(); if (typeof renderFrame === 'function') renderFrame(); else renderer.render(scene, camera); renderCube(); tickMeasureLabel(); drawSketchOverlay(); })();
 
 
 // picking
@@ -1021,7 +1022,7 @@ async function renderScreenshot(spec) {
   }
 }
 
-window.agenticcad = { renderScreenshot, get model() { return model; }, get machine() { return { on: machineOn, rig: machineRig, set: setMachine, pose: poseRig, stage: stageGroup, preview: machinePreview, doors: setDoors, get door() { return machineDoor; } }; }, get sketch() { return sk; }, get extDefs() { return extDefs; }, get extPanels() { return extPanels; }, scene, camera, renderer, send: (o) => send(o) };
+window.agenticcad = { renderScreenshot, get model() { return model; }, get machine() { return { on: machineOn, rig: machineRig, set: setMachine, pose: poseRig, stage: stageGroup, preview: machinePreview, doors: setDoors, get door() { return machineDoor; } }; }, get sketch() { return sk; }, get extDefs() { return extDefs; }, get extPanels() { return extPanels; }, scene, camera, renderer, send: (o) => send(o), THREE, get stockObj() { return stockObj; }, get simMesh() { return simMesh; } };
 
 // toolbar
 document.getElementById('fit').onclick = () => fitCamera();
@@ -1345,7 +1346,7 @@ async function loadFixture(p) {
 }
 function applyCamVisibility() {
   for (const c of camOps) { c.cut.visible = c.rapid.visible = showTp && c.visible; }
-  if (stockObj) stockObj.visible = showStock; if (originObj) originObj.visible = showStock || showTp; if (fixtureObj) fixtureObj.visible = showStock;
+  if (stockObj) stockObj.visible = showStock && !simRes; if (originObj) originObj.visible = !renderedMode && (showStock || showTp); if (fixtureObj) fixtureObj.visible = showStock;
 }
 document.getElementById('tp-toggle').onclick = e => { showTp = !showTp; e.currentTarget.classList.toggle('active', showTp); applyCamVisibility(); };
 document.getElementById('stock-toggle').onclick = e => { showStock = !showStock; e.currentTarget.classList.toggle('active', showStock); applyCamVisibility(); };
@@ -1648,8 +1649,9 @@ function liveReset(f, kf, final) {
   const zhi = unq(f.zhi, false), zlo = f.zlo ? unq(f.zlo, true) : null;
   // the stock's empty cells (outside its footprint) stay empty: top -inf, bottom +inf
   for (const m of [simMesh, simLow]) if (m) { camGroup.remove(m); m.traverse(o => o.geometry && o.geometry.dispose()); }
-  simMesh = simLow = null;
+  simMesh = simLow = null; if (vox) vox.chunks.clear();
   live = { kf, upto: f.upto, zhi, zlo, grid: g, final, lastK: f.upto, lastF: 0 };
+  if (viewerPrefs.voxel && typeof Worker !== 'undefined') { if (voxReset(f, final)) return; }
   const colTop = new Float32Array(N * 3), colLow = zlo ? new Float32Array(N * 3) : null;
   const base = renderedMode ? new THREE.Color(0xaeb3b9) : new THREE.Color(0xc9b48a), red = new THREE.Color(0xff3b3b), amber = new THREE.Color(0xffb020);
   for (let n = 0; n < N; n++) {
@@ -1697,13 +1699,55 @@ function liveReset(f, kf, final) {
   liveRefresh();
 }
 function stockMaterial() {
+  const flat = !(live && live.vox);                   // the voxel mesh carries smooth field normals; the height map is faceted
   const m = renderedMode
-    ? new THREE.MeshPhysicalMaterial({ vertexColors: true, metalness: 0.92, roughness: 0.42, flatShading: true, side: THREE.DoubleSide, envMapIntensity: 0.9, clearcoat: 0.0 })
-    : new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.7, metalness: 0.08, flatShading: true, side: THREE.DoubleSide });
+    ? new THREE.MeshPhysicalMaterial({ vertexColors: true, metalness: 0.92, roughness: 0.42, flatShading: flat, side: THREE.DoubleSide, envMapIntensity: 0.9, clearcoat: 0.0 })
+    : new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.7, metalness: 0.08, flatShading: flat, side: THREE.DoubleSide });
   m.clippingPlanes = material.clippingPlanes; return m;
 }
+// ---- voxel stock (Settings ▸ General ▸ Simulation stock): a signed-distance field in static/voxel_stock.js (Web Worker),
+// stamped with every move and meshed with surface nets per chunk, so walls are smooth and the stock is a true 3D solid
+let vox = null, voxGen = 0;
+function stockColors() { const c = v => [v.r, v.g, v.b]; return { base: c(new THREE.Color(renderedMode ? 0xaeb3b9 : 0xc9b48a)), red: c(new THREE.Color(0xff3b3b)), amber: c(new THREE.Color(0xffb020)) }; }
+function voxWorker() {
+  if (vox) return vox.worker;
+  let w; try { w = new Worker('/static/voxel_stock.js'); } catch (e) { viewerPrefs.voxel = false; addMsg('system', 'Voxel stock unavailable (' + e.message + '); using the height map.'); return null; }
+  vox = { worker: w, chunks: new Map(), pending: [] };
+  w.onmessage = e => voxOnMesh(e.data);
+  w.onerror = e => { addMsg('system', 'Voxel stock failed (' + (e.message || 'worker error') + '); using the height map.'); viewerPrefs.voxel = false; voxStop(); if (simRes) { live = null; simFrameShown = -1; showSimAt(simK().k); } };
+  return w;
+}
+function voxStop() { if (!vox) return; try { vox.worker.terminate(); } catch (e) {} vox = null; }
+function voxReset(f, final) {
+  const w = voxWorker(); if (!w) return false;
+  const g = live.grid, sz = Math.max(g.zmax - g.zmin, 1);
+  let cols = 0; for (let n = 0; n < live.zhi.length; n++) if (isFinite(live.zhi[n])) cols++;
+  const h = Math.min(2.0, Math.max(0.12, Math.cbrt(Math.max(cols, 1) * g.res * g.res * sz / 2.5e6)));   // ~2.5M voxels of stock at most
+  vox.stats = { resetMs: 0, meshMs: 0, voxels: 0 };
+  live.vox = true; live.h = h; live.gen = ++voxGen; vox.chunks.clear(); vox.pending = [];
+  simMesh = new THREE.Group(); simMesh.renderOrder = 2; camGroup.add(simMesh);
+  w.postMessage({ type: 'reset', gen: live.gen, h, grid: g, zhi: live.zhi, zlo: live.zlo, gouge: final && f.gouge ? f.gouge : null, left: final && f.left ? f.left : null, final, colors: stockColors() });
+  return true;
+}
+function voxOnMesh(d) {
+  if (!vox || !live || !live.vox || d.gen !== live.gen || !simMesh) return;
+  if (vox.stats) { vox.stats.resetMs += d.resetMs || 0; vox.stats.meshMs += d.ms || 0; vox.stats.voxels = d.voxels; }
+  for (const c of d.chunks) {
+    let mesh = vox.chunks.get(c.id);
+    if (!c.idx.length) { if (mesh) { simMesh.remove(mesh); mesh.geometry.dispose(); vox.chunks.delete(c.id); } continue; }
+    if (!mesh) { mesh = new THREE.Mesh(new THREE.BufferGeometry(), stockMaterial()); mesh.castShadow = mesh.receiveShadow = true; simMesh.add(mesh); vox.chunks.set(c.id, mesh); }
+    else { mesh.geometry.dispose(); mesh.geometry = new THREE.BufferGeometry(); }
+    const geo = mesh.geometry;
+    geo.setAttribute('position', new THREE.BufferAttribute(c.pos, 3)); geo.setAttribute('normal', new THREE.BufferAttribute(c.nrm, 3)); geo.setAttribute('color', new THREE.BufferAttribute(c.col, 3));
+    geo.setIndex(new THREE.BufferAttribute(c.idx, 1)); geo.computeBoundingSphere();
+  }
+}
+function voxFlush() { if (vox && live && live.vox && vox.pending.length) { vox.worker.postMessage({ type: 'stamp', gen: live.gen, segs: vox.pending }); vox.pending = []; } }
+function voxRecolor() { if (vox && live && live.vox) vox.worker.postMessage({ type: 'color', gen: live.gen, colors: stockColors() }); }
+window.addEventListener('load', () => { if (window.agenticcad) window.agenticcad.voxel = (o) => { if (o && typeof o.on === 'boolean') { viewerPrefs.voxel = o.on; if (simRes) { live = null; simFrameShown = -1; showSimAt(simK().k); } } return { on: !!(live && live.vox), h: live && live.h ? +live.h.toFixed(3) : null, stats: vox && vox.stats, chunks: vox ? vox.chunks.size : 0, tris: vox ? [...vox.chunks.values()].reduce((a, m) => a + m.geometry.index.count / 3, 0) : 0 }; }; });
 function liveRefresh() {                              // push the live maps into the mesh positions
   if (!live || !simMesh) return;
+  if (live.vox) { voxFlush(); return; }
   const { zmin } = live.grid, N = live.zhi.length;
   const pa = simMesh.geometry.attributes.position, arr = pa.array;
   for (let n = 0; n < N; n++) arr[n * 3 + 2] = isFinite(live.zhi[n]) ? live.zhi[n] : zmin;
@@ -1722,6 +1766,7 @@ function toolProfile(t, d) {                          // height of the cutting s
   return 0;
 }
 function liveStampSegment(ax, ay, az, bx, by, bz, t, side) {
+  if (live.vox) { if (vox) vox.pending.push({ ax, ay, az, bx, by, bz, side, r: t.diameter / 2, type: t.type, angle: t.angle || 0 }); return; }
   const { nx, ny, x0, y0, res } = live.grid, r = t.diameter / 2, kk = Math.ceil(r / res) + 1;
   const len = Math.hypot(bx - ax, by - ay, bz - az), nS = Math.max(1, Math.min(4000, Math.ceil(len / res)));
   const Z = side > 0 ? live.zhi : live.zlo; if (!Z) return;
@@ -1755,7 +1800,8 @@ function liveStampTo(k, f) {                          // stamp moves live.upto .
   // whole moves from the last stamped index up to k, then the partial move k
   if (live.lastK < k || (live.lastK === k && live.lastF > f)) {
     if (live.lastK === k && live.lastF > f) { /* backwards within a move: leave the floor as is (material does not grow back) */ }
-    for (let gi = live.lastK; gi < k; gi++) { if (gi === live.lastK && live.lastF > 0) stampMove(gi, 1); else stampMove(gi, 1); if (performance.now() - t0 > 40) { live.lastK = gi + 1; live.lastF = 0; liveRefresh(); return; } }
+    const budget = live.vox ? 1e9 : 40;               // the voxel worker does the stamping off-thread: queue everything
+    for (let gi = live.lastK; gi < k; gi++) { if (gi === live.lastK && live.lastF > 0) stampMove(gi, 1); else stampMove(gi, 1); if (performance.now() - t0 > budget) { live.lastK = gi + 1; live.lastF = 0; liveRefresh(); return; } }
     live.lastK = k; live.lastF = 0;
   }
   if (k < sim.total && f > live.lastF) { stampMove(k, f); live.lastF = f; }
@@ -1765,6 +1811,32 @@ function bitAt(bits, idx) { return (bits[idx >> 3] >> (7 - (idx & 7))) & 1; }
 
 // ------------------------------------------------------------------ rendered simulation (CAM ▸ Rendered): the stock machined in front of you
 var renderedMode = false, renderedSaved = null, followTool = false, simTip = null, hudTool = null, hudToolAt = 0, machineInfo = null;
+// depth of field (Settings ▸ General ▸ Rendered simulation): an EffectComposer with a bokeh pass focused on the tool
+var viewerPrefs = { dof: true, voxel: true }, composer = null, bokeh = null, dofFrames = [], dofDisabledSlow = false;
+fetch('/api/settings').then(r => r.json()).then(r => { if (r && r.settings) { if (typeof r.settings.dof === 'boolean') viewerPrefs.dof = r.settings.dof; if (r.settings.sim_stock) viewerPrefs.voxel = r.settings.sim_stock === 'voxel'; } }).catch(() => {});
+async function ensureComposer() {
+  if (composer) return composer;
+  const [{ EffectComposer }, { RenderPass }, { BokehPass }, { OutputPass }] = await Promise.all([
+    import('three/addons/postprocessing/EffectComposer.js'), import('three/addons/postprocessing/RenderPass.js'), import('three/addons/postprocessing/BokehPass.js'), import('three/addons/postprocessing/OutputPass.js')]);
+  // half-float MSAA target + OutputPass so tone mapping / sRGB match the plain renderer
+  composer = new EffectComposer(renderer, new THREE.WebGLRenderTarget(viewerEl.clientWidth, viewerEl.clientHeight, { type: THREE.HalfFloatType, samples: 4 }));
+  composer.addPass(new RenderPass(scene, camera));
+  bokeh = new BokehPass(scene, camera, { focus: 100, aperture: 0.00025, maxblur: 0.012 });
+  composer.addPass(bokeh); composer.addPass(new OutputPass());
+  composer.setPixelRatio(renderer.getPixelRatio()); composer.setSize(viewerEl.clientWidth, viewerEl.clientHeight);
+  return composer;
+}
+function dofActive() { return renderedMode && viewerPrefs.dof && !dofDisabledSlow && !!composer; }
+window.addEventListener('load', () => { if (window.agenticcad) window.agenticcad.dof = (o) => { if (o && typeof o.dof === 'boolean') { viewerPrefs.dof = o.dof; dofDisabledSlow = false; dofFrames = []; if (o.dof && renderedMode && !composer) ensureComposer().catch(() => {}); } return { pref: viewerPrefs.dof, composer: !!composer, active: dofActive(), slow: dofDisabledSlow, focus: bokeh ? +bokeh.uniforms.focus.value.toFixed(1) : null, avgMs: dofFrames.length ? +(dofFrames.reduce((a, b) => a + b, 0) / dofFrames.length).toFixed(1) : null }; }; });
+function renderFrame() {
+  if (dofActive()) {
+    const focusAt = simTip || controls.target;
+    bokeh.uniforms.focus.value = camera.position.distanceTo(focusAt);
+    const t0 = performance.now(); composer.render(); const dt = performance.now() - t0;
+    dofFrames.push(dt); if (dofFrames.length > 90) dofFrames.shift();
+    if (dofFrames.length === 90 && dofFrames.reduce((a, b) => a + b, 0) / 90 > 45) { dofDisabledSlow = true; addMsg('system', 'Depth of field switched off: this GPU takes too long per frame with it (Settings ▸ General to force it).'); }
+  } else renderer.render(scene, camera);
+}
 const hudEl = document.getElementById('simhud');
 function stockLookDefaults() { return { color: 0xd3d6da }; }
 async function setRendered(on) {
@@ -1778,14 +1850,16 @@ async function setRendered(on) {
     for (const c of camOps) { c.cut.visible = c.rapid.visible = false; }
     if (!simRes && program) { try { const btn = document.getElementById('sim-run'); if (btn && !btn.disabled) btn.click(); } catch (e) {} }
     followTool = true; hudEl.style.display = ''; document.getElementById('viewer').classList.add('rendered');
+    if (viewerPrefs.dof && !composer) { try { await ensureComposer(); } catch (e) { addMsg('system', 'Depth of field unavailable: ' + e.message); viewerPrefs.dof = false; } }
+    dofFrames = [];
     if (!machineInfo || machineInfo.name !== program.machine) fetch('/api/cam/machine_model?info=1').then(r => r.json()).then(r => { if (r.machine) machineInfo = { name: program.machine, nose: r.machine.nose, stickout: r.machine.stickout }; }).catch(() => {});
-    if (live) { for (const m of [simMesh, simLow]) if (m) { m.material = stockMaterial(); m.traverse(o => { if (o !== m && o.material) o.material = stockMaterial(); }); } }
+    if (live) { for (const m of [simMesh, simLow]) if (m) { m.material = stockMaterial(); m.traverse(o => { if (o !== m && o.material) o.material = stockMaterial(); }); } voxRecolor(); }
   } else {
     const sv = renderedSaved || {}; followTool = false; hudEl.style.display = 'none'; document.getElementById('viewer').classList.remove('rendered');
     showTp = sv.showTp ?? true; showStock = sv.showStock ?? true; showEdges = sv.edges ?? true; renderBg = sv.renderBg || 'studio';
     if (!sv.renderOn && renderOn) await setRender(false); else applyRenderBg();
     applyCamVisibility(); if (simRes && stockObj) stockObj.visible = false;
-    if (live) { for (const m of [simMesh, simLow]) if (m) { m.material = stockMaterial(); m.traverse(o => { if (o !== m && o.material) o.material = stockMaterial(); }); } }
+    if (live) { for (const m of [simMesh, simLow]) if (m) { m.material = stockMaterial(); m.traverse(o => { if (o !== m && o.material) o.material = stockMaterial(); }); } voxRecolor(); }
   }
   applyVisibility(); applyCamVisibility(); syncRibbon(); syncMachineUi();
   if (program && sim) renderSim();
@@ -4289,6 +4363,8 @@ async function openSettings(tab) {
     <label>Thinking</label><select id="s-think"><option value="omitted" ${st.thinking_display !== 'summarized' ? 'selected' : ''}>hidden</option><option value="summarized" ${st.thinking_display === 'summarized' ? 'selected' : ''}>show summary in chat</option></select>
     <label>Units</label><select id="s-units"><option value="" ${!st.units ? 'selected' : ''}>automatic (${st.units_auto} · ${st.units_auto_reason})</option><option value="mm" ${st.units === 'mm' ? 'selected' : ''}>millimetres</option><option value="in" ${st.units === 'in' ? 'selected' : ''}>inches</option></select>
     <label>Web tools</label><label style="color:var(--text)"><input id="s-web" type="checkbox" ${st.web !== false ? 'checked' : ''}> allow WebFetch / WebSearch</label>
+    <label>Simulation stock</label><select id="s-stock"><option value="voxel" ${st.sim_stock !== 'heightmap' ? 'selected' : ''}>voxel — smooth 3D stock (walls and floors meshed from a distance field, in a worker)</option><option value="heightmap" ${st.sim_stock === 'heightmap' ? 'selected' : ''}>height map — lighter, stepped walls</option></select>
+    <label>Rendered simulation</label><label style="color:var(--text)"><input id="s-dof" type="checkbox" ${st.dof !== false ? 'checked' : ''}> depth of field (cinematic focus on the cut; turn off on a weak GPU — it is also switched off automatically when the frame rate drops)</label>
     <label>Extra instructions</label><textarea id="s-extra" rows="3" placeholder="house rules, your machine, preferred materials…"></textarea>
     <label>API key</label><div style="display:flex;gap:6px;align-items:center"><input id="s-key" type="password" autocomplete="off" placeholder="${st.api_key_set ? '•••••••• (set — leave blank to keep)' : 'optional: sk-ant-… instead of the Claude Code login'}" style="flex:1">${st.api_key_set ? '<button class="btn small" id="s-key-clear" type="button">Clear</button>' : ''}</div>
   </div>
@@ -4382,7 +4458,7 @@ async function openSettings(tab) {
   }
   let clearKey = false; const kc = d.querySelector('#s-key-clear'); if (kc) kc.onclick = () => { clearKey = true; kc.textContent = 'will clear'; };
   const collect = () => ({ model: sel.value === '__custom' ? custom.value.trim() : sel.value, effort: d.querySelector('#s-effort').value, max_turns: parseInt(d.querySelector('#s-turns').value) || 60,
-    thinking_display: d.querySelector('#s-think').value, web: d.querySelector('#s-web').checked, units: d.querySelector('#s-units').value, extra_prompt: d.querySelector('#s-extra').value, mcp_servers: st.mcp_servers || {},
+    thinking_display: d.querySelector('#s-think').value, web: d.querySelector('#s-web').checked, dof: d.querySelector('#s-dof').checked, sim_stock: d.querySelector('#s-stock').value, units: d.querySelector('#s-units').value, extra_prompt: d.querySelector('#s-extra').value, mcp_servers: st.mcp_servers || {},
     api_key: clearKey ? '' : (d.querySelector('#s-key').value.trim() || '__keep__'),
     drawings: { material: d.querySelector('#s-dmat').value.trim(), sheet: d.querySelector('#s-dsheet').value },
     print: slicerInfo ? { machine: d.querySelector('#s-pmach').value, process: d.querySelector('#s-pproc').value, filament: d.querySelector('#s-pfil').value,
@@ -4397,6 +4473,8 @@ async function openSettings(tab) {
   try {
     const libMsg = await libEd.commit();
     await api('/api/settings', { settings: r.s, restart: r.restart }); loadParams();
+    if (typeof r.s.dof === 'boolean') { viewerPrefs.dof = r.s.dof; dofDisabledSlow = false; dofFrames = []; if (r.s.dof && renderedMode && !composer) ensureComposer().catch(() => {}); }
+    if (r.s.sim_stock && (r.s.sim_stock === 'voxel') !== viewerPrefs.voxel) { viewerPrefs.voxel = r.s.sim_stock === 'voxel'; if (simRes) { live = null; simFrameShown = -1; showSimAt(simK().k); } }
     addMsg('system', (r.restart ? 'settings saved · agent restarting' : 'settings saved') + (libMsg ? ' · ' + libMsg : ''));
   } catch (e) { addMsg('error', e.message); }
 }

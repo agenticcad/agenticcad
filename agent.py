@@ -2374,6 +2374,8 @@ class CadAgent:
         "draft_threads": True,             # agent builds during a turn model real=True threads plain; real build at the end
         "thinking_display": "omitted",     # omitted | summarized (shows the thinking summary in chat)
         "web": True,                       # allow WebFetch / WebSearch
+        "dof": True,                       # rendered simulation: depth of field (post-processing; off for weak GPUs)
+        "sim_stock": "voxel",              # simulation stock in the viewer: "voxel" (smooth 3D, Web Worker) or "heightmap" (lighter)
         "mcp_servers": {},                 # name -> {type: stdio|http|sse, command, args, env, url, headers, enabled}
         "extra_prompt": "",                # appended to the system prompt (house rules, machine notes...)
         "api_key": "",                     # Anthropic API key (alternative to the Claude Code login); kept in settings.json (0600)

@@ -5,6 +5,23 @@ features, patch bumps fix things. The version shown in the UI header comes from 
 
 ## [Unreleased]
 
+## [0.35.0] — 2026-10-13
+
+### Added
+- **Voxel stock.** The simulated stock in the viewer is now a true 3D solid: a signed-distance voxel field in a Web
+  Worker (`static/voxel_stock.js`) that every tool move is stamped into as a swept cylinder with the tool's end
+  profile, meshed per chunk with surface nets. Walls are smooth and land between voxels (the lateral distance to the
+  cut gives sub-voxel positions), floors are exact, and the field resets from the server's keyframes on a seek. About
+  2.5 million voxels at most, so the cell size follows the stock (≈0.25 mm on a 66 × 46 × 13 mm plate). Settings ▸
+  General ▸ *Simulation stock* switches back to the lighter height map (stepped walls) for a weak PC.
+- **Depth of field in the rendered simulation.** A bokeh post-process keeps the cut in focus and softens the
+  foreground and background, matched to the plain renderer's tone mapping. Settings ▸ General ▸ *Rendered
+  simulation* turns it off; it also switches itself off when a GPU takes too long per frame.
+
+### Fixed
+- The stock outline and the work-origin triad no longer show through the machined stock in the rendered simulation.
+
+
 ## [0.34.0] — 2026-10-13
 
 ### Added
