@@ -542,6 +542,9 @@
           <div class="muted" style="font-size:11.5px;margin-top:4px">The design sits on the machine's bed; with a CAM program the simulation plays on the program's machine and collisions flash red.</div></div>
         <div id="cam-empty" class="cam-sec" style="color:var(--muted)">No CAM program yet. Ask the agent, e.g. <i>"Make a CAM program for the Generic 3018: face the stock, drill the holes, pocket the bore and cut the outline with 4 tabs."</i> The agent writes <code>cam.py</code> (see the Code tab) against your machine and tool libraries. <div style="margin-top:8px"><button class="btn small" data-open-libs="machines">Machines &amp; tools…</button></div></div>
         <div class="cam-sec" id="cam-setup" style="display:none"><h4>Setup <button class="btn small" data-open-libs="machines" title="Settings ▸ Machines / Tools">Machines &amp; tools…</button></h4><div id="cam-setup-body"></div></div>
+        <div class="cam-sec" id="cam-playback" style="display:none"><h4>Playback <span class="muted" style="text-transform:none;letter-spacing:0;font-weight:400">speed, × real time</span></h4>
+          <div id="sim-speed-seg" style="display:flex;gap:4px;flex-wrap:wrap" title="Playback speed: 1× runs the program at the machine's feed and rapid rates"></div>
+          <div class="muted" id="sim-speed-note" style="font-size:11.5px;margin-top:5px"></div></div>
         <div class="cam-sec" id="cam-simres" style="display:none"><h4>Simulation <button class="btn small" id="sim-clear">Hide</button></h4><div id="cam-simres-body" style="white-space:pre-wrap"></div></div>
         <div class="cam-sec" id="cam-ops" style="display:none"><h4>Operations <span class="muted" style="text-transform:none;letter-spacing:0;font-weight:400">click an operation for its tool settings</span></h4><div id="cam-ops-body"></div><div id="cam-warn"></div></div>
         <div class="cam-sec" id="cam-gcode" style="display:none"><h4>G-code <span class="muted" id="cam-gcode-meta"></span></h4>
@@ -555,7 +558,7 @@
         <button class="btn" id="sim-play" title="Play / pause">▶</button>
         <button class="btn" id="sim-fwd" title="Jump to the next operation">⏭</button>
         <input type="range" id="sim-range" min="0" max="1000" value="1000" step="1" title="Program time">
-        <select id="sim-speed" class="btn" title="Playback speed (× real time)" style="margin-left:auto"><option value="0.25">¼×</option><option value="0.5">½×</option><option value="1">1×</option><option value="2">2×</option><option value="5">5×</option><option value="10" selected>10×</option><option value="25">25×</option><option value="100">100×</option></select>
+        <select id="sim-speed" class="btn" title="Playback speed (× real time)" style="margin-left:auto"><option value="0.25">¼×</option><option value="0.5">½×</option><option value="1" selected>1×</option><option value="2">2×</option><option value="5">5×</option><option value="10">10×</option><option value="25">25×</option><option value="100">100×</option></select>
       </div>
       <div id="sim-infobar" style="display:none;padding:4px 10px 6px;font-size:11.5px"><span id="sim-info" class="muted">—</span></div>
     </div>
@@ -1354,7 +1357,8 @@ document.getElementById('stock-toggle').onclick = e => { showStock = !showStock;
 function renderCamTab() {
   const has = !!program;
   document.getElementById('cam-empty').style.display = has ? 'none' : '';
-  for (const id of ['cam-setup', 'cam-ops', 'cam-gcode']) document.getElementById(id).style.display = has ? '' : 'none';
+  for (const id of ['cam-setup', 'cam-playback', 'cam-ops', 'cam-gcode']) document.getElementById(id).style.display = has ? '' : 'none';
+  if (has) renderSpeedUi();
   document.getElementById('cam-sim').style.display = has ? '' : 'none'; document.getElementById('sim-infobar').style.display = has ? '' : 'none';
   if (has) {
     const st = program.stock, o = program.origin;
@@ -1451,7 +1455,24 @@ document.getElementById('gcode-dl').onclick = () => window.open('/api/gcode');
 document.getElementById('gcode-preview').onclick = async () => { const pre = document.getElementById('gcode-pre'); pre.textContent = await fetch('/api/gcode/preview').then(r => r.text()); pre.style.display = pre.style.display === 'none' ? '' : 'none'; };
 
 // simulation: slider over all visible moves, tool marker, draw range
-let sim = { total: 0, index: [], playing: false, timer: null, t: new Float64Array(1), T: 0, clock: 0, opStart: [], speed: 10, raf: null, last: 0 };
+let sim = { total: 0, index: [], playing: false, timer: null, t: new Float64Array(1), T: 0, clock: 0, opStart: [], speed: 1, raf: null, last: 0 };
+// playback speed: 1× = the program at the machine's real feed and rapid rates (default); the choice is remembered
+const SIM_SPEEDS = [0.25, 0.5, 1, 2, 5, 10, 25, 100];
+try { const sp = +localStorage.getItem('agenticcad.simSpeed'); if (SIM_SPEEDS.includes(sp)) sim.speed = sp; } catch {}
+function speedLabel(v) { return v === 0.25 ? '¼×' : v === 0.5 ? '½×' : v + '×'; }
+function setSimSpeed(v) {
+  v = +v; if (!SIM_SPEEDS.includes(v)) return;
+  sim.speed = v; try { localStorage.setItem('agenticcad.simSpeed', String(v)); } catch {}
+  renderSpeedUi(); if (program) renderSim();
+}
+function renderSpeedUi() {
+  const sel = document.getElementById('sim-speed'); if (sel && +sel.value !== sim.speed) sel.value = String(sim.speed);
+  const seg = document.getElementById('sim-speed-seg'); if (!seg) return;
+  if (!seg.children.length) for (const v of SIM_SPEEDS) { const b = document.createElement('button'); b.className = 'btn small'; b.dataset.speed = v; b.textContent = speedLabel(v); b.onclick = () => setSimSpeed(v); seg.appendChild(b); }
+  for (const b of seg.children) b.classList.toggle('active', +b.dataset.speed === sim.speed);
+  const note = document.getElementById('sim-speed-note');
+  if (note) note.textContent = sim.T ? `${speedLabel(sim.speed)} — ${sim.speed === 1 ? 'the machine\'s real pace' : `${speedLabel(sim.speed)} the machine's pace`}: this program takes ${fmtT(sim.T)} on the machine, ${fmtT(sim.T / sim.speed)} to watch.` : 'Playback runs the program at the machine\'s feed and rapid rates; pick a multiplier to speed it up or slow it down.';
+}
 const simRange = document.getElementById('sim-range'), simInfo = document.getElementById('sim-info');
 function machineRapid() { const m = (library.machines || []).find(x => x.name === (program && program.machine)); return (m && m.rapid) || 3000; }
 function machineRotarySpeed() { const m = (library.machines || []).find(x => x.name === (program && program.machine)); return (m && m.rotary && m.rotary.max_speed) || 1800; }
@@ -1472,7 +1493,7 @@ function setupSim() {
     }
     sim.t[i + 1] = acc; prev = mv;
   }
-  sim.T = acc; sim.clock = acc; simRange.value = 1000; renderSim();
+  sim.T = acc; sim.clock = acc; simRange.value = 1000; renderSim(); if (typeof renderSpeedUi === "function") renderSpeedUi();
 }
 function simK() {                                   // moves completed at the current clock, and the fraction into the next
   const t = sim.t, n = sim.total; if (!n) return { k: 0, f: 0 };
@@ -1554,7 +1575,7 @@ function toolAxisFor(op, mv) {
   return new THREE.Vector3(...st.tool_axis).normalize();
 }
 simRange.oninput = () => { sim.clock = +simRange.value / 1000 * sim.T; renderSim(); };
-document.getElementById('sim-speed').onchange = e => { sim.speed = +e.target.value; renderSim(); };
+document.getElementById('sim-speed').onchange = e => setSimSpeed(e.target.value);
 document.getElementById('sim-back').onclick = () => { const oi = simOpAt(simK().k); const cur = oi == null ? 0 : sim.opStart[oi]; const atStart = cur >= 0 && sim.clock - sim.t[cur] < 1.5; let prev = oi; if (atStart) { prev = null; for (let i = (oi ?? camOps.length) - 1; i >= 0; i--) if (sim.opStart[i] >= 0) { prev = i; break; } } simSeek(prev == null ? 0 : sim.t[sim.opStart[prev]], sim.playing); };
 document.getElementById('sim-fwd').onclick = () => { const oi = simOpAt(simK().k); let nxt = null; for (let i = (oi ?? -1) + 1; i < camOps.length; i++) if (sim.opStart[i] >= 0) { nxt = i; break; } simSeek(nxt == null ? sim.T : sim.t[sim.opStart[nxt]], sim.playing); };
 document.getElementById('sim-play').onclick = e => {

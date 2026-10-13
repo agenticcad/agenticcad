@@ -223,7 +223,8 @@ Agent-native, like the CAD side: a second script per design, `cam.py`, written b
 - **Voxel stock**: the stock you watch being machined is a signed-distance voxel solid in a Web Worker
   ([static/voxel_stock.js](static/voxel_stock.js)), stamped with every move and meshed with surface nets, so walls
   are smooth and floors exact; Settings ▸ General ▸ *Simulation stock* falls back to a lighter height map.
-- **Playback**: the CAM bar plays the program in real time scaled by a speed control (¼× to 100×): moves take their
+- **Playback**: the CAM bar plays the program at the machine's real pace (1×) scaled by a speed control (¼× to 100×,
+  in the CAM tab's *Playback* section and the bar; the choice is remembered): moves take their
   real time at the programmed feed and the machine's rapid rate, the tool moves continuously, ⏮ / ⏭ jump between
   operations, the operations list shows setup headers and the operation being run (▶ plays from any of them), and on
   the Machine view a flipped setup turns the work over on the table.

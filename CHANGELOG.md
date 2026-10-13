@@ -5,6 +5,14 @@ features, patch bumps fix things. The version shown in the UI header comes from 
 
 ## [Unreleased]
 
+## [0.35.1] — 2026-10-13
+
+### Changed
+- **Playback runs at the machine's real pace by default** (1×, was 10×), and the CAM tab has a *Playback* section
+  with a clear speed control (¼× to 100×) that says how long the program takes on the machine and how long it takes
+  to watch at the chosen speed. The bar's speed menu stays and the two are in step; the choice is remembered.
+
+
 ## [0.35.0] — 2026-10-13
 
 ### Added
