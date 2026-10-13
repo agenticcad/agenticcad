@@ -1681,7 +1681,7 @@ function showSimAt(k, frac) {
     if (!final) liveStampTo(k, frac || 0);
   });
 }
-const VOX_RESTAMP = 20000;                            // moves the voxel worker restamps rather than loading a keyframe
+const VOX_RESTAMP = 250000;                           // moves the voxel worker restamps (≈40k moves/s) rather than loading a keyframe, whose walls are only as good as the height map's cells
 // ---- live height map + mesh (zmap mode)
 let live = null;                                      // {kf, upto, zhi, zlo, grid, geoTop, geoLow, wall, final, touched}
 function liveReset(f, kf, final, quiet = false) {
@@ -1740,7 +1740,7 @@ function liveReset(f, kf, final, quiet = false) {
   }
   liveRefresh();
 }
-let brushedTex = null;
+let brushedTex = null, stockLook = { anisotropy: 0.6, roughMap: true, roughness: 0.5, edgeDeg: 35, env: 0.9 };
 function brushedRoughness() {                         // fine machining lines: a tileable roughness map (uv is cm, so streaks ~0.1 mm apart)
   if (brushedTex) return brushedTex;
   const n = 512, cv = document.createElement('canvas'); cv.width = cv.height = n; const ctx = cv.getContext('2d');
@@ -1757,15 +1757,15 @@ function stockMaterial() {
   let m;
   if (renderedMode) {
     // 6061-style aluminium: a bright metal with a satin, lightly brushed finish and anisotropic highlights
-    m = new THREE.MeshPhysicalMaterial({ vertexColors: true, metalness: 1.0, roughness: vox ? 0.34 : 0.42, flatShading: !vox, side: THREE.DoubleSide, envMapIntensity: 1.7, clearcoat: 0.0 });
-    if (vox) { m.roughnessMap = brushedRoughness(); m.anisotropy = 0.55; }
+    m = new THREE.MeshPhysicalMaterial({ vertexColors: true, metalness: 1.0, roughness: vox ? stockLook.roughness : 0.42, flatShading: !vox, side: THREE.DoubleSide, envMapIntensity: stockLook.env, clearcoat: 0.0 });
+    if (vox) { if (stockLook.roughMap) m.roughnessMap = brushedRoughness(); m.anisotropy = stockLook.anisotropy; m.roughness = stockLook.roughness; }
   } else m = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.7, metalness: 0.08, flatShading: !vox, side: THREE.DoubleSide });
   m.clippingPlanes = material.clippingPlanes; return m;
 }
 // ---- voxel stock (Settings ▸ General ▸ Simulation stock): a signed-distance field in static/voxel_stock.js (Web Worker),
 // stamped with every move and meshed with surface nets per chunk, so walls are smooth and the stock is a true 3D solid
 let vox = null, voxGen = 0;
-function stockColors() { const c = v => [v.r, v.g, v.b]; return { base: c(new THREE.Color(renderedMode ? 0xd9dde2 : 0xc9b48a)), red: c(new THREE.Color(0xff3b3b)), amber: c(new THREE.Color(0xffb020)) }; }
+function stockColors() { const c = v => [v.r, v.g, v.b]; return { base: c(new THREE.Color(renderedMode ? 0xcfd3d8 : 0xc9b48a)), red: c(new THREE.Color(0xff3b3b)), amber: c(new THREE.Color(0xffb020)) }; }
 function voxWorker() {
   if (vox) return vox.worker;
   let w; try { w = new Worker('/static/voxel_stock.js'); } catch (e) { viewerPrefs.voxel = false; addMsg('system', 'Voxel stock unavailable (' + e.message + '); using the height map.'); return null; }
@@ -1800,12 +1800,21 @@ function voxOnMesh(d) {
     if (!mesh) { mesh = new THREE.Mesh(new THREE.BufferGeometry(), stockMaterial()); mesh.castShadow = mesh.receiveShadow = true; simMesh.add(mesh); vox.chunks.set(c.id, mesh); }
     else { mesh.geometry.dispose(); mesh.geometry = new THREE.BufferGeometry(); }
     const geo = mesh.geometry;
-    geo.setAttribute('position', new THREE.BufferAttribute(c.pos, 3)); geo.setAttribute('normal', new THREE.BufferAttribute(c.nrm, 3)); geo.setAttribute('color', new THREE.BufferAttribute(c.col, 3)); if (c.uv) geo.setAttribute('uv', new THREE.BufferAttribute(c.uv, 2));
+    geo.setAttribute('position', new THREE.BufferAttribute(c.pos, 3)); geo.setAttribute('normal', new THREE.BufferAttribute(c.nrm, 3)); geo.setAttribute('color', new THREE.BufferAttribute(c.col, 3)); if (c.uv) geo.setAttribute('uv', new THREE.BufferAttribute(c.uv, 2)); if (c.tan) geo.setAttribute('tangent', new THREE.BufferAttribute(c.tan, 4));
     geo.setIndex(new THREE.BufferAttribute(c.idx, 1)); geo.computeBoundingSphere();
   }
 }
-function voxFlush() { if (vox && live && live.vox && vox.pending.length) { vox.worker.postMessage({ type: 'stamp', gen: live.gen, segs: vox.pending }); vox.pending = []; } }
+function voxFlush() {                                 // in batches, so a long restamp shows the stock being re-cut rather than freezing
+  if (!vox || !live || !live.vox || !vox.pending.length) return;
+  for (let i = 0; i < vox.pending.length; i += 4000) vox.worker.postMessage({ type: 'stamp', gen: live.gen, segs: vox.pending.slice(i, i + 4000) });
+  vox.pending = [];
+}
 function voxRecolor() { if (vox && live && live.vox) vox.worker.postMessage({ type: 'color', gen: live.gen, colors: stockColors() }); }
+window.addEventListener('load', () => { if (window.agenticcad) window.agenticcad.stockLook = (o) => {   // test hook: material / edge variants
+  Object.assign(stockLook, o || {});
+  if (simMesh && live && live.vox) { simMesh.traverse(m => { if (m.isMesh) m.material = stockMaterial(); }); if (o && o.edgeDeg !== undefined && vox) vox.worker.postMessage({ type: 'color', gen: live.gen, colors: stockColors(), edgeDeg: stockLook.edgeDeg }); }
+  return { ...stockLook };
+}; });
 window.addEventListener('load', () => { if (window.agenticcad) window.agenticcad.voxel = (o) => { if (o && typeof o.on === 'boolean') { viewerPrefs.voxel = o.on; if (simRes) { live = null; simFrameShown = -1; showSimAt(simK().k); } } return { on: !!(live && live.vox), resets: vox ? vox.resets || 0 : 0, kf: live ? live.kf : null, lastK: live ? live.lastK : null, final: !!(live && live.final), h: live && live.h ? +live.h.toFixed(3) : null, stats: vox && vox.stats, chunks: vox ? vox.chunks.size : 0, tris: vox ? [...vox.chunks.values()].reduce((a, m) => a + m.geometry.index.count / 3, 0) : 0 }; }; });
 function liveRefresh() {                              // push the live maps into the mesh positions
   if (!live || !simMesh) return;

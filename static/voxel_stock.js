@@ -14,10 +14,11 @@ let G = null;
 
 self.onmessage = (e) => {
   const d = e.data;
-  if (d.type === 'reset') reset(d);
+  if (d.type === 'reset') { if (d.edgeDeg !== undefined) EDGE_COS = Math.cos(d.edgeDeg * Math.PI / 180); reset(d); }
   else if (d.type === 'stamp') { if (!G || d.gen !== G.gen) return; for (const s of d.segs) stamp(s); flush(); }
   else if (d.type === 'color') {                       // recolour (and, with gouge/left maps, mark the final frame's tints)
     if (!G || d.gen !== G.gen) return; G.colors = d.colors; if (d.final !== undefined) { G.final = !!d.final; G.gouge = d.gouge || null; G.left = d.left || null; }
+    if (d.edgeDeg !== undefined) EDGE_COS = Math.cos(d.edgeDeg * Math.PI / 180);
     for (let c = 0; c < G.ncx * G.ncy * G.ncz; c++) G.dirty.add(c); flush();
   }
 };
@@ -32,18 +33,23 @@ function reset(d) {
   const nx = Math.ceil(sx / h) + 4, ny = Math.ceil(sy / h) + 4, nz = Math.ceil(sz / h) + 3;
   const x0 = g.x0 + fx0 * g.res - h * 1.5, y0 = g.y0 + fy0 * g.res - h * 1.5, z0 = g.zmin - h;
   const m = new Int8Array(nx * ny * nz).fill(-SCALE);
+  const nrm = new Int8Array(nx * ny * nz * 3);          // Hermite data: the outward normal of the surface nearest each voxel
   if (d.box) {                                           // the untouched stock is a box: exact field, flat faces, sharp edges
     const B = d.box;
-    for (let iz = 0; iz < nz; iz++) { const z = z0 + iz * h, dz = Math.min(B.zmax - z, z - B.zmin);
-      for (let iy = 0; iy < ny; iy++) { const y = y0 + iy * h, dy = Math.min(B.ymax - y, y - B.ymin);
-        for (let ix = 0; ix < nx; ix++) { const x = x0 + ix * h, v = Math.min(dz, dy, B.xmax - x, x - B.xmin) / h;
-          m[(iz * ny + iy) * nx + ix] = v >= 1 ? SCALE : v <= -1 ? -SCALE : Math.round(v * SCALE); } } }
+    for (let iz = 0; iz < nz; iz++) { const z = z0 + iz * h;
+      for (let iy = 0; iy < ny; iy++) { const y = y0 + iy * h;
+        for (let ix = 0; ix < nx; ix++) { const x = x0 + ix * h;
+          const ds = [B.xmax - x, x - B.xmin, B.ymax - y, y - B.ymin, B.zmax - z, z - B.zmin];
+          let v = ds[0], w = 0; for (let q = 1; q < 6; q++) if (ds[q] < v) { v = ds[q]; w = q; }
+          const i = (iz * ny + iy) * nx + ix; v /= h;
+          m[i] = v >= 1 ? SCALE : v <= -1 ? -SCALE : Math.round(v * SCALE);
+          nrm[i * 3 + (w >> 1)] = (w & 1) ? -127 : 127; } } }
   } else {
   // column SDF from the height map: for every nearby cell level (top, bottom) the material is bounded above and below
   // and, laterally, by the distance to the nearest cell whose top is lower (or bottom higher) — so flat areas are exact
   // and walls the keyframe already holds land between voxels at the server's resolution instead of on them
   const reach = h + g.res * 0.5, kr = Math.ceil(reach / g.res);
-  const tops = new Float64Array(128), bots = new Float64Array(128), caps = new Float64Array(128);
+  const tops = new Float64Array(128), bots = new Float64Array(128), caps = new Float64Array(128), capx = new Float64Array(128), capy = new Float64Array(128);
   const wx = new Int32Array(256), wy = new Int32Array(256), wt = new Float64Array(256), wb = new Float64Array(256), wd = new Float64Array(256);
   for (let iy = 0; iy < ny; iy++) {
     const y = y0 + iy * h, cy = Math.round((y - g.y0) / g.res);
@@ -66,23 +72,25 @@ function reset(d) {
         if (!(wt[w] > wb[w]) || wd[w] > h) continue;                          // only cells that can reach this column
         let dup = false; for (let c = 0; c < nc; c++) if (tops[c] === wt[w] && bots[c] === wb[w]) { dup = true; break; }
         if (dup || nc >= 128) continue;
-        let cap = h;                                                          // lateral bound: nearest lower top / higher bottom
-        for (let v = 0; v < nw; v++) if (wt[v] < wt[w] - 1e-6 || wb[v] > wb[w] + 1e-6) { if (wd[v] < cap) cap = wd[v]; }
+        let cap = h, cx_ = 0, cy_ = 0;                                        // lateral bound: nearest lower top / higher bottom
+        for (let v = 0; v < nw; v++) if (wt[v] < wt[w] - 1e-6 || wb[v] > wb[w] + 1e-6) { if (wd[v] < cap) { cap = wd[v]; cx_ = g.x0 + wx[v] * g.res - x; cy_ = g.y0 + wy[v] * g.res - y; } }
         if (cap <= -h) continue;
-        tops[nc] = wt[w]; bots[nc] = wb[w]; caps[nc] = cap; nc++;
+        const cl = Math.hypot(cx_, cy_) || 1;
+        tops[nc] = wt[w]; bots[nc] = wb[w]; caps[nc] = cap; capx[nc] = cx_ / cl; capy[nc] = cy_ / cl; nc++;
       }
       if (!nc) continue;
       const base = iy * nx + ix;
       for (let iz = 0; iz < nz; iz++) {
-        const z = z0 + iz * h; let v = -Infinity;
-        for (let c = 0; c < nc; c++) { const a = tops[c] - z, b = z - bots[c]; let w = a < b ? a : b; if (caps[c] < w) w = caps[c]; if (w > v) v = w; }
-        v /= h; m[iz * nx * ny + base] = v >= 1 ? SCALE : v <= -1 ? -SCALE : Math.round(v * SCALE);
+        const z = z0 + iz * h; let v = -Infinity, kind = 0, bc = 0;
+        for (let c = 0; c < nc; c++) { const a = tops[c] - z, b = z - bots[c]; let w = a < b ? a : b, k = a < b ? 0 : 1; if (caps[c] < w) { w = caps[c]; k = 2; } if (w > v) { v = w; kind = k; bc = c; } }
+        const i = iz * nx * ny + base; v /= h; m[i] = v >= 1 ? SCALE : v <= -1 ? -SCALE : Math.round(v * SCALE);
+        if (kind === 0) nrm[i * 3 + 2] = 127; else if (kind === 1) nrm[i * 3 + 2] = -127; else { nrm[i * 3] = Math.round(capx[bc] * 127); nrm[i * 3 + 1] = Math.round(capy[bc] * 127); }
       }
     }
   }
   }
   const ncx = Math.ceil((nx - 1) / CS), ncy = Math.ceil((ny - 1) / CS), ncz = Math.ceil((nz - 1) / CS);
-  G = { gen: d.gen, h, x0, y0, z0, nx, ny, nz, m, ncx, ncy, ncz, dirty: new Set(), srv: g, gouge: d.gouge || null, left: d.left || null, final: !!d.final, colors: d.colors };
+  G = { gen: d.gen, h, x0, y0, z0, nx, ny, nz, m, nrm, ncx, ncy, ncz, dirty: new Set(), srv: g, gouge: d.gouge || null, left: d.left || null, final: !!d.final, colors: d.colors };
   for (let c = 0; c < ncx * ncy * ncz; c++) G.dirty.add(c);
   G.resetMs = Date.now() - t0;
   if (!d.quiet) flush();                                 // quiet: stamps follow at once, mesh after them (no flash of the uncut stock)
@@ -101,8 +109,14 @@ function markDirty(ix, iy, izA, izB) {               // voxel column (ix, iy) ch
   for (let cz = czA; cz <= czB; cz++) for (let cy = cyA; cy <= cyB; cy++) for (let cx = cxA; cx <= cxB; cx++) G.dirty.add((cz * G.ncy + cy) * G.ncx + cx);
 }
 
+function slope(type, r, angle, d) {                  // d(profile)/d(d): how the cutting surface rises with radius
+  if (type === 'ball') return d / Math.sqrt(Math.max(r * r - d * d, 1e-6));
+  if ((type === 'vbit' || type === 'chamfer' || type === 'drill') && angle) return 1 / Math.tan(angle / 2 * Math.PI / 180);
+  return 0;
+}
+
 function stamp(s) {
-  const { h, x0, y0, z0, nx, ny, nz, m } = G, r = s.r, side = s.side;
+  const { h, x0, y0, z0, nx, ny, nz, m, nrm } = G, r = s.r, side = s.side;
   const ax = s.ax, ay = s.ay, az = s.az, bx = s.bx, by = s.by, bz = s.bz;
   const dx = bx - ax, dy = by - ay, dz = bz - az, L2 = dx * dx + dy * dy;
   const ix0 = Math.max(0, Math.floor((Math.min(ax, bx) - r - h - x0) / h)), ix1 = Math.min(nx - 1, Math.ceil((Math.max(ax, bx) + r + h - x0) / h));
@@ -124,19 +138,24 @@ function stamp(s) {
       } else if (dmin < 0) zc = side > 0 ? Math.min(az, bz) : Math.max(az, bz);
       else zc = az + dz * t;
       const pr = profile(s.type, r, s.angle, Math.min(d, r)); zc += side > 0 ? pr : -pr;
+      // outward normals of the two candidate surfaces: the tool's side (toward the axis) and its end (sloped by the profile)
+      const ux = d > 1e-9 ? (ax + dx * t - px) / d : 0, uy = d > 1e-9 ? (ay + dy * t - py) / d : 0;   // toward the axis
+      const kslope = slope(s.type, r, s.angle, Math.min(d, r)), fl = Math.hypot(kslope, 1);
+      const fx = Math.round(ux * kslope / fl * 127), fy = Math.round(uy * kslope / fl * 127), fz = Math.round(side / fl * 127);   // end surface
+      const lx = Math.round(ux * 127), ly = Math.round(uy * 127);                                                              // side surface
       const base = iy * nx + ix;
       let first = -1, last = -1;
       if (side > 0) {
         for (let iz = Math.max(0, Math.floor((zc - h - z0) / h)); iz < nz; iz++) {
-          const z = z0 + iz * h; let rr = zc - z; if (dmin > rr) rr = dmin;
+          const z = z0 + iz * h; let rr = zc - z, lat = false; if (dmin > rr) { rr = dmin; lat = true; }
           const q = rr >= h ? SCALE : rr <= -h ? -SCALE : Math.round(rr / h * SCALE), i = iz * NXY + base;
-          if (q < m[i]) { m[i] = q; if (first < 0) first = iz; last = iz; }
+          if (q < m[i]) { m[i] = q; if (first < 0) first = iz; last = iz; if (lat) { nrm[i * 3] = lx; nrm[i * 3 + 1] = ly; nrm[i * 3 + 2] = 0; } else { nrm[i * 3] = fx; nrm[i * 3 + 1] = fy; nrm[i * 3 + 2] = fz; } }
         }
       } else {
         for (let iz = Math.min(nz - 1, Math.ceil((zc + h - z0) / h)); iz >= 0; iz--) {
-          const z = z0 + iz * h; let rr = z - zc; if (dmin > rr) rr = dmin;
+          const z = z0 + iz * h; let rr = z - zc, lat = false; if (dmin > rr) { rr = dmin; lat = true; }
           const q = rr >= h ? SCALE : rr <= -h ? -SCALE : Math.round(rr / h * SCALE), i = iz * NXY + base;
-          if (q < m[i]) { m[i] = q; if (last < 0) last = iz; first = iz; }
+          if (q < m[i]) { m[i] = q; if (last < 0) last = iz; first = iz; if (lat) { nrm[i * 3] = lx; nrm[i * 3 + 1] = ly; nrm[i * 3 + 2] = 0; } else { nrm[i * 3] = fx; nrm[i * 3 + 1] = fy; nrm[i * 3 + 2] = fz; } }
         }
       }
       if (first >= 0) markDirty(ix, iy, first, last);
@@ -150,7 +169,7 @@ function flush() {
   for (const id of G.dirty) {
     const cx = id % G.ncx, cy = Math.floor(id / G.ncx) % G.ncy, cz = Math.floor(id / (G.ncx * G.ncy));
     const r = meshChunk(cx, cy, cz);
-    chunks.push({ id, pos: r.pos, nrm: r.nrm, col: r.col, uv: r.uv, idx: r.idx }); transfer.push(r.pos.buffer, r.nrm.buffer, r.col.buffer, r.uv.buffer, r.idx.buffer);
+    chunks.push({ id, pos: r.pos, nrm: r.nrm, col: r.col, uv: r.uv, tan: r.tan, idx: r.idx }); transfer.push(r.pos.buffer, r.nrm.buffer, r.col.buffer, r.uv.buffer, r.tan.buffer, r.idx.buffer);
   }
   G.dirty.clear();
   self.postMessage({ type: 'mesh', gen: G.gen, chunks, ms: Date.now() - t0, resetMs: G.resetMs || 0, voxels: G.nx * G.ny * G.nz }, transfer); G.resetMs = 0;
@@ -171,7 +190,7 @@ function vertexColor(x, y, out, o) {                   // gouge / material-left 
 // surface nets over the cells of one chunk (plus a one-cell apron on the low side so quads at the border find their
 // neighbours); a vertex per cell with a sign change at the mean of its edge crossings, a quad per sign-changing edge
 function meshChunk(cx, cy, cz) {
-  const { h, x0, y0, z0, nx, ny, nz, m } = G, NXY = nx * ny;
+  const { h, x0, y0, z0, nx, ny, nz, m, nrm: vn } = G, NXY = nx * ny;
   const cA = [cx * CS - 1, cy * CS - 1, cz * CS - 1], cB = [Math.min(nx - 2, cx * CS + CS - 1), Math.min(ny - 2, cy * CS + CS - 1), Math.min(nz - 2, cz * CS + CS - 1)];
   for (let a = 0; a < 3; a++) if (cA[a] < 0) cA[a] = 0;
   const W = CS + 1, vmap = new Int32Array(W * W * W).fill(-1);
@@ -185,12 +204,49 @@ function meshChunk(cx, cy, cz) {
     for (let c = 0; c < 8; c++) { const v = V(i + off[c][0], j + off[c][1], k + off[c][2]); cv[c] = v; if (v > 0) pos8++; else neg8++; }
     if (!pos8 || !neg8) continue;
     let sx = 0, sy = 0, sz = 0, ne = 0;
+    let axx = 0, axy = 0, axz = 0, ayy = 0, ayz = 0, azz = 0, bx = 0, by = 0, bz = 0;   // QEF normal equations
     for (const [a, b] of edges) {
       const va = cv[a], vb = cv[b]; if ((va > 0) === (vb > 0)) continue;
       const t = va / (va - vb), oa = off[a], ob = off[b];
-      sx += oa[0] + (ob[0] - oa[0]) * t; sy += oa[1] + (ob[1] - oa[1]) * t; sz += oa[2] + (ob[2] - oa[2]) * t; ne++;
+      const px = oa[0] + (ob[0] - oa[0]) * t, py = oa[1] + (ob[1] - oa[1]) * t, pz = oa[2] + (ob[2] - oa[2]) * t;
+      sx += px; sy += py; sz += pz; ne++;
+      // the plane the surface follows at this crossing: the stored normal of the material-side voxel (exact Hermite data
+      // from the stamp), else the field gradient (trilinear) as a fallback
+      // both end voxels offer the normal of their nearest primitive; the one whose plane passes through this crossing
+      // (its linearised field is ~0 here) is the surface the crossing lies on — at an edge the two differ
+      let gx = 0, gy = 0, gz = 0, bestF = Infinity;
+      for (const ci of [a, b]) {
+        const co = off[ci], ni = ((k + co[2]) * NXY + (j + co[1]) * nx + (i + co[0])) * 3;
+        const nx_ = vn[ni] / 127, ny_ = vn[ni + 1] / 127, nz_ = vn[ni + 2] / 127;
+        if (nx_ === 0 && ny_ === 0 && nz_ === 0) continue;
+        const f = Math.abs(cv[ci] / SCALE - (nx_ * (px - co[0]) + ny_ * (py - co[1]) + nz_ * (pz - co[2])));   // linearised field at p: m(c) − n·(p − c), the field grows inward
+        if (f < bestF) { bestF = f; gx = -nx_; gy = -ny_; gz = -nz_; }
+      }
+      if (gx === 0 && gy === 0 && gz === 0) {
+        const u = px, v = py, w = pz;
+        gx = (1 - v) * (1 - w) * (cv[1] - cv[0]) + v * (1 - w) * (cv[3] - cv[2]) + (1 - v) * w * (cv[5] - cv[4]) + v * w * (cv[7] - cv[6]);
+        gy = (1 - u) * (1 - w) * (cv[2] - cv[0]) + u * (1 - w) * (cv[3] - cv[1]) + (1 - u) * w * (cv[6] - cv[4]) + u * w * (cv[7] - cv[5]);
+        gz = (1 - u) * (1 - v) * (cv[4] - cv[0]) + u * (1 - v) * (cv[5] - cv[1]) + (1 - u) * v * (cv[6] - cv[2]) + u * v * (cv[7] - cv[3]);
+      }
+      const gl = Math.hypot(gx, gy, gz); if (gl < 1e-9) continue; gx /= gl; gy /= gl; gz /= gl;
+      const d = gx * px + gy * py + gz * pz;
+      axx += gx * gx; axy += gx * gy; axz += gx * gz; ayy += gy * gy; ayz += gy * gz; azz += gz * gz; bx += gx * d; by += gy * d; bz += gz * d;
     }
-    const vx = x0 + (i + sx / ne) * h, vy = y0 + (j + sy / ne) * h, vz = z0 + (k + sz / ne) * h;
+    const mx = sx / ne, my = sy / ne, mz = sz / ne;
+    // solve (AᵀA + λI) x = Aᵀb + λ m  (3×3, Cramer's rule); λ keeps flat areas at the mass point
+    const lam = 0.02;
+    const a11 = axx + lam, a12 = axy, a13 = axz, a22 = ayy + lam, a23 = ayz, a33 = azz + lam;
+    const r1 = bx + lam * mx, r2 = by + lam * my, r3 = bz + lam * mz;
+    const det = a11 * (a22 * a33 - a23 * a23) - a12 * (a12 * a33 - a23 * a13) + a13 * (a12 * a23 - a22 * a13);
+    let qx = mx, qy = my, qz = mz;
+    if (Math.abs(det) > 1e-12) {
+      qx = (r1 * (a22 * a33 - a23 * a23) - a12 * (r2 * a33 - a23 * r3) + a13 * (r2 * a23 - a22 * r3)) / det;
+      qy = (a11 * (r2 * a33 - a23 * r3) - r1 * (a12 * a33 - a23 * a13) + a13 * (a12 * r3 - r2 * a13)) / det;
+      qz = (a11 * (a22 * r3 - r2 * a23) - a12 * (a12 * r3 - r2 * a13) + r1 * (a12 * a23 - a22 * a13)) / det;
+      if (!(qx >= -0.5 && qx <= 1.5 && qy >= -0.5 && qy <= 1.5 && qz >= -0.5 && qz <= 1.5)) { qx = mx; qy = my; qz = mz; }   // far outside the cell: fall back
+      else { qx = Math.min(1, Math.max(0, qx)); qy = Math.min(1, Math.max(0, qy)); qz = Math.min(1, Math.max(0, qz)); }   // keep it in the cell
+    }
+    const vx = x0 + (i + qx) * h, vy = y0 + (j + qy) * h, vz = z0 + (k + qz) * h;
     // outward normal = -gradient (the field grows into the material)
     let gx = (cv[1] + cv[3] + cv[5] + cv[7]) - (cv[0] + cv[2] + cv[4] + cv[6]);
     let gy = (cv[2] + cv[3] + cv[6] + cv[7]) - (cv[0] + cv[1] + cv[4] + cv[5]);
@@ -199,7 +255,7 @@ function meshChunk(cx, cy, cz) {
     vmap[((k - cA[2]) * W + (j - cA[1])) * W + (i - cA[0])] = pos.length / 3;
     pos.push(vx, vy, vz); nrm.push(gx, gy, gz); const o = col.length; col.length += 3; vertexColor(vx, vy, col, o);
   }
-  if (!pos.length) return { pos: new Float32Array(0), nrm: new Float32Array(0), col: new Float32Array(0), uv: new Float32Array(0), idx: new Uint32Array(0) };
+  if (!pos.length) return { pos: new Float32Array(0), nrm: new Float32Array(0), col: new Float32Array(0), uv: new Float32Array(0), tan: new Float32Array(0), idx: new Uint32Array(0) };
   const vat = (i, j, k) => (i < cA[0] || j < cA[1] || k < cA[2] || i > cB[0] || j > cB[1] || k > cB[2]) ? -1 : vmap[((k - cA[2]) * W + (j - cA[1])) * W + (i - cA[0])];
   const quad = (a, b, c, d, flip) => { if (a < 0 || b < 0 || c < 0 || d < 0) return; if (flip) idx.push(a, d, c, a, c, b); else idx.push(a, b, c, a, c, d); };
   const pA = [cx * CS, cy * CS, cz * CS], pB = [Math.min(nx - 2, cx * CS + CS - 1), Math.min(ny - 2, cy * CS + CS - 1), Math.min(nz - 2, cz * CS + CS - 1)];
@@ -214,7 +270,7 @@ function meshChunk(cx, cy, cz) {
 
 // per-vertex normals from the incident faces, split where faces disagree by more than 35° (a milled edge stays sharp,
 // a curved wall stays smooth); uv = planar projection on the vertex's dominant axis, in cm (for brushed-finish maps)
-const EDGE_COS = Math.cos(35 * Math.PI / 180);
+let EDGE_COS = Math.cos(35 * Math.PI / 180);
 function hardEdges(pos, col, idx) {
   const nv = pos.length / 3, nf = idx.length / 3, fn = new Float32Array(nf * 3);
   for (let f = 0; f < nf; f++) {
@@ -227,12 +283,18 @@ function hardEdges(pos, col, idx) {
   for (let v = 0; v < nv; v++) cnt[v + 1] += cnt[v];
   const around = new Int32Array(idx.length), fill = cnt.slice(0, nv);
   for (let i = 0; i < idx.length; i++) { const v = idx[i]; around[fill[v]++] = i; }   // corner index i (its face is i / 3)
-  const P = [], N = [], C = [], UV = [], newIdx = new Uint32Array(idx.length), used = new Uint8Array(idx.length);
+  const P = [], N = [], C = [], UV = [], T = [], newIdx = new Uint32Array(idx.length), used = new Uint8Array(idx.length);
+  // tangent = the brushed / anisotropy direction: along X on faces that look up or down, horizontal (around the wall)
+  // elsewhere — continuous over a smooth surface, so the highlight frame never tears; uv follows the tangent frame
   const pushV = (v, nx, ny, nz) => {
     const k = P.length / 3, x = pos[v * 3], y = pos[v * 3 + 1], z = pos[v * 3 + 2];
     P.push(x, y, z); N.push(nx, ny, nz); C.push(col[v * 3], col[v * 3 + 1], col[v * 3 + 2]);
-    const ax = Math.abs(nx), ay = Math.abs(ny), az = Math.abs(nz);
-    if (az >= ax && az >= ay) UV.push(x / 10, y / 10); else if (ax >= ay) UV.push(y / 10, z / 10); else UV.push(x / 10, z / 10);
+    let tx, ty, tz;
+    if (Math.abs(nz) > 0.92) { tx = 1 - nx * nx; ty = -nx * ny; tz = -nx * nz; }         // X projected onto the surface
+    else { tx = ny; ty = -nx; tz = 0; }                                                   // cross(n, Z): horizontal
+    const tl = Math.hypot(tx, ty, tz) || 1; tx /= tl; ty /= tl; tz /= tl;
+    const bx = ny * tz - nz * ty, by = nz * tx - nx * tz, bz = nx * ty - ny * tx;          // bitangent = n × t
+    T.push(tx, ty, tz, 1); UV.push((x * tx + y * ty + z * tz) / 10, (x * bx + y * by + z * bz) / 10);
     return k;
   };
   for (let v = 0; v < nv; v++) {
@@ -249,5 +311,5 @@ function hardEdges(pos, col, idx) {
       for (const corner of members) newIdx[corner] = nvI;
     }
   }
-  return { pos: new Float32Array(P), nrm: new Float32Array(N), col: new Float32Array(C), uv: new Float32Array(UV), idx: newIdx };
+  return { pos: new Float32Array(P), nrm: new Float32Array(N), col: new Float32Array(C), uv: new Float32Array(UV), tan: new Float32Array(T), idx: newIdx };
 }

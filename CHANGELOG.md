@@ -5,6 +5,21 @@ features, patch bumps fix things. The version shown in the UI header comes from 
 
 ## [Unreleased]
 
+## [0.36.3] — 2026-10-14
+
+### Fixed
+- **Beaded chamfers and striped walls on longer programs.** Programs over 20 000 moves still built the voxel stock
+  from a server keyframe (whose walls and slopes carry the height map's cell steps) on load and on every seek back.
+  The worker stamps about 40 000 moves a second, so it now restamps from the untouched stock for programs up to
+  250 000 moves, in batches so the stock is seen being re-cut; a chamfer measures within 0.001 mm of its plane.
+  Vertices carry a continuous tangent frame (brush direction along X on faces, around the wall elsewhere), so the
+  anisotropic highlight no longer tears at 45°, and the metal is toned down from the washed-out 0.36.2 look.
+- **Sharp edges on the voxel stock.** Every stamp now records the outward normal of the surface nearest each voxel
+  (Hermite data), and each mesh vertex is placed by a least-squares fit to the planes through its edge crossings
+  (dual contouring), so pocket rims, hole edges and the chamfer's borders land on the true edge instead of a one-cell
+  bevel that caught the light as a row of dots; on a Ø16 pocket rim the vertices sit within 0.015 mm of the edge.
+
+
 ## [0.36.2] — 2026-10-13
 
 ### Changed
