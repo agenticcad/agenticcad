@@ -216,6 +216,9 @@ Agent-native, like the CAD side: a second script per design, `cam.py`, written b
   measures the tool after each manual change), M3 only after a tool is active, G28 park, M600 between setups,
   9 work offsets, no arcs while A moves, and A-axis feeds computed the way the firmware interprets F on mixed
   linear + rotary moves. Collet size is checked (1/8" standard).
+- **Rendered simulation**: *Rendered* in the CAM bar plays the program as a studio render: metallic stock machined
+  live in front of you (the viewer stamps the tool along every move), a chrome holder with a spinning fluted tool, the
+  camera following the cut, and a HUD with the step, tool changes and the speed factor.
 - **Playback**: the CAM bar plays the program in real time scaled by a speed control (¼× to 100×): moves take their
   real time at the programmed feed and the machine's rapid rate, the tool moves continuously, ⏮ / ⏭ jump between
   operations, the operations list shows setup headers and the operation being run (▶ plays from any of them), and on

@@ -5,6 +5,18 @@ features, patch bumps fix things. The version shown in the UI header comes from 
 
 ## [Unreleased]
 
+## [0.34.0] — 2026-10-13
+
+### Added
+- **Rendered simulation.** *Rendered* in the CAM bar (and ribbon ▸ CAM) plays the program as a studio render: metallic
+  stock machined in front of you, the part hidden until the stock becomes it, a chrome holder stack built from the
+  machine's nose profile with a spinning fluted tool, toolpaths and wireframes hidden, a dark backdrop with a
+  vignette, a camera that follows the tool while keeping your orbit, and a HUD with the machine, the step being
+  cut, tool changes, and the speed factor. Works with the Machine view and its doors.
+- **Continuous material removal.** The simulated stock is now a live height map in the viewer: the tool is stamped
+  along every move as playback runs (the server's keyframes are seek points), so the stock changes in step with the
+  tool instead of jumping between snapshots; surfaces are flat-shaded for crisp machined floors and walls.
+
 ## [0.33.1] — 2026-10-11
 
 ### Fixed

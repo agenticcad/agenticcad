@@ -12,6 +12,13 @@
   .oprow.cur { background:rgba(78,161,255,.14); box-shadow:inset 2px 0 0 var(--accent2); }
   .oprow.setuphead { color:var(--accent2); font-size:11px; text-transform:uppercase; letter-spacing:.06em; margin-top:6px; }
   .oprow .jump { margin-left:auto; opacity:.55; cursor:pointer; padding:0 4px; } .oprow .jump:hover { opacity:1; color:var(--accent2); }
+  /* ---- rendered simulation HUD */
+  #simhud { position:absolute; inset:0; z-index:3; pointer-events:none; font-family:ui-monospace,Menlo,"SF Mono",monospace; font-size:11px; letter-spacing:.14em; color:rgba(230,233,238,.85); text-shadow:0 1px 2px rgba(0,0,0,.6); }
+  #simhud > div { position:absolute; padding:8px 12px; }
+  #simhud .hud-tl { top:120px; left:14px; } #simhud .hud-tr { top:120px; right:140px; } #simhud .hud-bl { bottom:48px; left:14px; font-size:13px; letter-spacing:.04em; font-family:inherit; font-weight:600; text-transform:none; } #simhud .hud-br { bottom:48px; right:14px; }
+  #viewer.rendered::after { content:""; position:absolute; inset:0; pointer-events:none; z-index:2; background:radial-gradient(ellipse at center, rgba(0,0,0,0) 55%, rgba(0,0,0,.45) 100%); }
+  #viewer.rendered #hover, #viewer.rendered #tree, #viewer.rendered #params-card, #viewer.rendered #ext-panels { display:none !important; }
+  #viewer.rendered #cubewrap { opacity:.55; }
   /* ---- startup splash: shown until the first design is built (big designs with real threads take minutes) */
   #splash { position:fixed; inset:0; z-index:2000; background:var(--bg); display:flex; align-items:center; justify-content:center; transition:opacity .35s; }
   #splash.hide { opacity:0; pointer-events:none; }
@@ -430,6 +437,7 @@
         </div>
       </div>
     </div>
+    <div id="simhud" style="display:none"><div class="hud-tl"></div><div class="hud-tr"></div><div class="hud-bl"></div><div class="hud-br"></div></div>
     <div id="cubewrap" title="Click a face, edge or corner to look from there · drag to orbit"><canvas id="cube" width="220" height="220"></canvas>
       <button class="btn" id="home" title="Home view (fit)">⌂</button></div>
     <div id="bottombar">
@@ -542,6 +550,7 @@
       </div>
       <div id="cam-sim" style="display:none">
         <button class="btn" id="sim-run" title="Simulate material removal for the visible operations">Simulate</button>
+        <button class="btn" id="sim-rendered" title="Rendered simulation: metallic stock, chrome holder, camera following the tool">Rendered</button>
         <button class="btn" id="sim-back" title="Jump to the previous operation">⏮</button>
         <button class="btn" id="sim-play" title="Play / pause">▶</button>
         <button class="btn" id="sim-fwd" title="Jump to the next operation">⏭</button>
@@ -708,7 +717,8 @@ function applyColors(extraHighlight = []) {
 }
 function applyVisibility() {
   const hideAll = typeof sliceData !== 'undefined' && !!sliceData && showLayers && document.getElementById('print-hide-model').checked;   // sliced-layer preview
-  for (const b of model.bodies.values()) { const vis = !hidden.has(b.id) && !hideAll; b.mesh.visible = vis; b.lines.visible = vis && showEdges && !renderOn; }
+  const stockShown = typeof renderedMode !== 'undefined' && renderedMode && !!simRes;
+  for (const b of model.bodies.values()) { const vis = !hidden.has(b.id) && !hideAll && !stockShown; b.mesh.visible = vis; b.lines.visible = vis && showEdges && !renderOn; }
   if (typeof sectionSync === 'function') sectionSync();
 }
 
@@ -860,7 +870,7 @@ function tickMeasureLabel() {
 }
 
 // render loop (started after the ViewCube exists)
-(function animate() { requestAnimationFrame(animate); tickTween(); if (typeof tickAnim === 'function') tickAnim(performance.now()); controls.update(); renderer.render(scene, camera); renderCube(); tickMeasureLabel(); drawSketchOverlay(); })();
+(function animate() { requestAnimationFrame(animate); tickTween(); if (typeof tickRendered === 'function') tickRendered(); if (typeof tickAnim === 'function') tickAnim(performance.now()); controls.update(); renderer.render(scene, camera); renderCube(); tickMeasureLabel(); drawSketchOverlay(); })();
 
 
 // picking
@@ -1502,15 +1512,17 @@ function applySimAt(k, f) {
     const opTxt = `${setupTxt}${oi + 1}/${camOps.length} ${c.op.name} · T${t.number} · move ${mi + 1}/${c.op.moves.length} · ${nxt[0] === 0 ? 'rapid' : 'F' + nxt[4]}`;
     if (machineOn && machineRig) {                                   // the machine carries the tool (and the work, on table axes)
       stageFlip(!!(st && st.orient === 'bottom'));
-      poseRig(pos, a, t);
+      poseRig(pos, a, t); simTip = machineRig.tool ? machineRig.tool.getWorldPosition(new THREE.Vector3()) : pos.clone();
       const hits = machineHitsAt(c.op.name, mi); flashMachine(hits);
       simInfo.textContent = `${opTxt} · ${timeTxt}${speedTxt}` + (hits.length ? ` · ⚠ ${hits[0].part} hits the ${hits[0].what} (${hits[0].depth} mm)` : '')
         + (st && st.orient && !['top', 'bottom'].includes(st.orient) ? ' · side setup: shown unflipped' : '');
       if (hits.length) simInfo.style.color = 'var(--red, #ff6b6b)';
     } else {
-      const h = Math.max(t.diameter * 4, 12); const g = new THREE.CylinderGeometry(t.diameter / 2, t.type === 'ball' ? t.diameter / 2 : t.diameter / 2, h, 24); g.rotateX(Math.PI / 2); g.translate(0, 0, h / 2);
-      toolObj = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color: 0xffffff, transparent: true, opacity: 0.7, metalness: 0.4, roughness: 0.3 }));
+      if (renderedMode) toolObj = holderMesh(t);
+      else { const h = Math.max(t.diameter * 4, 12); const g = new THREE.CylinderGeometry(t.diameter / 2, t.type === 'ball' ? t.diameter / 2 : t.diameter / 2, h, 24); g.rotateX(Math.PI / 2); g.translate(0, 0, h / 2);
+        toolObj = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color: 0xffffff, transparent: true, opacity: 0.7, metalness: 0.4, roughness: 0.3 })); }
       toolObj.position.copy(pos); toolObj.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), toolAxisFor(c.op, f < 0.5 ? mv : nxt)); camGroup.add(toolObj);
+      simTip = pos.clone();
       simInfo.textContent = `${opTxt} · (${pos.x.toFixed(1)}, ${pos.y.toFixed(1)}, ${pos.z.toFixed(2)}) · ${timeTxt}${speedTxt}`;
     }
   } else {
@@ -1518,7 +1530,8 @@ function applySimAt(k, f) {
     if (machineOn && machineRig) { stageFlip(false); const c0 = camOps.find(c => c.visible) || camOps[0]; poseRig(null, 0, c0 ? c0.op.tool : null); flashMachine([]); }
   }
   markCurrentOp(simOpAt(k));
-  if (simRes) showSimAt(k);
+  if (simRes) showSimAt(k, f);
+  hudUpdate(k, f);
 }
 function markCurrentOp(oi) {
   document.querySelectorAll('#cam-ops-body .oprow[data-op]').forEach(r => r.classList.toggle('cur', +r.dataset.op === oi));
@@ -1571,7 +1584,7 @@ function ghostPart(on) {                       // see the simulated stock throug
   material.transparent = on; material.opacity = on ? 0.18 : 1; material.depthWrite = !on; material.needsUpdate = true;
 }
 function clearSim() {
-  ghostPart(false);
+  ghostPart(false); live = null;
   for (const m of [simMesh, simLow]) if (m) { camGroup.remove(m); m.traverse(o => o.geometry && o.geometry.dispose()); }
   simMesh = simLow = null; simRes = null; simFrameShown = -1; simCache.clear();
   document.getElementById('cam-simres').style.display = 'none';
@@ -1606,17 +1619,227 @@ async function getSimFrame(i) {
   for (const [k, v] of Object.entries(f.data)) out[k] = (k === 'gouge' || k === 'left') ? new Uint8Array(await inflateB64(v)) : new Uint16Array(await inflateB64(v));
   simCache.set(i, out); return out;
 }
-function showSimAt(k) {
+function showSimAt(k, frac) {
   if (!simRes) return;
   const fr = simRes.frames; let i = 0;
   for (let j = 0; j < fr.length; j++) if (fr[j] <= k) i = j;
   if (k >= sim.total) i = fr.length - 1;
-  if (i === simFrameShown) return;
+  if (simRes.mode !== 'zmap') {                       // radial (4th axis): keyframes only
+    if (i === simFrameShown) return;
+    const want = i; simFetch = want;
+    getSimFrame(want).then(f => { if (simFetch === want && simRes) { drawSimFrame(f, want === fr.length - 1); simFrameShown = want; } });
+    return;
+  }
+  const final = k >= sim.total;
+  if (live && live.kf === i && !final && k >= live.upto) { liveStampTo(k, frac || 0); return; }   // forward within the keyframe interval
+  if (live && live.kf === i && final && live.final) return;
   const want = i; simFetch = want;
-  getSimFrame(want).then(f => { if (simFetch === want && simRes) { drawSimFrame(f, want === fr.length - 1); simFrameShown = want; } });
+  getSimFrame(want).then(f => {
+    if (simFetch !== want || !simRes) return;
+    liveReset(f, want, final); simFrameShown = want;
+    if (!final) liveStampTo(k, frac || 0);
+  });
+}
+// ---- live height map + mesh (zmap mode)
+let live = null;                                      // {kf, upto, zhi, zlo, grid, geoTop, geoLow, wall, final, touched}
+function liveReset(f, kf, final) {
+  const g = f.grid, { nx, ny, x0, y0, res, zmin, zmax } = g, span = zmax - zmin, N = nx * ny;
+  const unq = (Q, low) => { const a = new Float32Array(N); for (let n = 0; n < N; n++) a[n] = Q[n] === 65535 ? (low ? Infinity : -Infinity) : zmin + Q[n] / 65534 * span; return a; };
+  const zhi = unq(f.zhi, false), zlo = f.zlo ? unq(f.zlo, true) : null;
+  // the stock's empty cells (outside its footprint) stay empty: top -inf, bottom +inf
+  for (const m of [simMesh, simLow]) if (m) { camGroup.remove(m); m.traverse(o => o.geometry && o.geometry.dispose()); }
+  simMesh = simLow = null;
+  live = { kf, upto: f.upto, zhi, zlo, grid: g, final, lastK: f.upto, lastF: 0 };
+  const colTop = new Float32Array(N * 3), colLow = zlo ? new Float32Array(N * 3) : null;
+  const base = renderedMode ? new THREE.Color(0xaeb3b9) : new THREE.Color(0xc9b48a), red = new THREE.Color(0xff3b3b), amber = new THREE.Color(0xffb020);
+  for (let n = 0; n < N; n++) {
+    let c = base;
+    if (final && f.gouge && bitAt(f.gouge, n)) c = red; else if (final && f.left && bitAt(f.left, n)) c = amber;
+    colTop[n * 3] = c.r; colTop[n * 3 + 1] = c.g; colTop[n * 3 + 2] = c.b;
+    if (colLow) { colLow[n * 3] = c.r; colLow[n * 3 + 1] = c.g; colLow[n * 3 + 2] = c.b; }
+  }
+  const surf = (Z, col, low) => {
+    const pos = new Float32Array(N * 3);
+    for (let n = 0; n < N; n++) { pos[n * 3] = x0 + (n % nx) * res; pos[n * 3 + 1] = y0 + Math.floor(n / nx) * res; pos[n * 3 + 2] = isFinite(Z[n]) ? Z[n] : zmin; }
+    const idx = [];
+    for (let iy = 0; iy < ny - 1; iy++) for (let ix = 0; ix < nx - 1; ix++) {
+      const a = iy * nx + ix, b = a + 1, c2 = a + nx, d = c2 + 1;
+      if (!isFinite(Z[a]) || !isFinite(Z[b]) || !isFinite(Z[c2]) || !isFinite(Z[d])) continue;
+      if (low) idx.push(a, c2, b, b, c2, d); else idx.push(a, b, c2, b, d, c2);
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3)); geo.setAttribute('color', new THREE.BufferAttribute(col, 3)); geo.setIndex(idx);
+    return { geo, idx };
+  };
+  const top = surf(zhi, colTop, false);
+  simMesh = new THREE.Mesh(top.geo, stockMaterial()); simMesh.renderOrder = 2; simMesh.castShadow = simMesh.receiveShadow = true; camGroup.add(simMesh);
+  if (zlo) { simLow = new THREE.Mesh(surf(zlo, colLow, true).geo, stockMaterial()); simLow.renderOrder = 2; simLow.castShadow = simLow.receiveShadow = true; camGroup.add(simLow); }
+  // walls along the open edges of the top surface (edges used by exactly one triangle); their z follows the live maps
+  const once = new Map(), t = top.idx;
+  for (let i = 0; i < t.length; i += 3) for (let e = 0; e < 3; e++) {
+    const u = t[i + e], v = t[i + (e + 1) % 3], key = u < v ? u * N + v : v * N + u;
+    if (once.has(key)) once.set(key, null); else once.set(key, [u, v]);
+  }
+  const wp = [], wc = [], wref = [];                   // wref: [cell, isTop] per wall vertex
+  for (const uv of once.values()) {
+    if (!uv) continue;
+    const [u, v] = uv, P = n => [x0 + (n % nx) * res, y0 + Math.floor(n / nx) * res];
+    const [ux, uy] = P(u), [vx, vy] = P(v);
+    const verts = [[u, 1], [u, 0], [v, 0], [u, 1], [v, 0], [v, 1]];
+    for (const [n, isTop] of verts) { const [x, y] = n === u ? [ux, uy] : [vx, vy]; wp.push(x, y, 0); wref.push(n, isTop); wc.push(colTop[n * 3] * 0.9, colTop[n * 3 + 1] * 0.9, colTop[n * 3 + 2] * 0.9); }
+  }
+  if (wp.length) {
+    const wg = new THREE.BufferGeometry();
+    wg.setAttribute('position', new THREE.Float32BufferAttribute(wp, 3)); wg.setAttribute('color', new THREE.Float32BufferAttribute(wc, 3));
+    const wall = new THREE.Mesh(wg, stockMaterial()); wall.castShadow = wall.receiveShadow = true; simMesh.add(wall);
+    live.wall = wall; live.wref = wref;
+  }
+  liveRefresh();
+}
+function stockMaterial() {
+  const m = renderedMode
+    ? new THREE.MeshPhysicalMaterial({ vertexColors: true, metalness: 0.92, roughness: 0.42, flatShading: true, side: THREE.DoubleSide, envMapIntensity: 0.9, clearcoat: 0.0 })
+    : new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.7, metalness: 0.08, flatShading: true, side: THREE.DoubleSide });
+  m.clippingPlanes = material.clippingPlanes; return m;
+}
+function liveRefresh() {                              // push the live maps into the mesh positions
+  if (!live || !simMesh) return;
+  const { zmin } = live.grid, N = live.zhi.length;
+  const pa = simMesh.geometry.attributes.position, arr = pa.array;
+  for (let n = 0; n < N; n++) arr[n * 3 + 2] = isFinite(live.zhi[n]) ? live.zhi[n] : zmin;
+  pa.needsUpdate = true; simMesh.geometry.computeBoundingSphere();
+  if (simLow && live.zlo) { const pl = simLow.geometry.attributes.position, al = pl.array; for (let n = 0; n < N; n++) al[n * 3 + 2] = isFinite(live.zlo[n]) ? live.zlo[n] : zmin; pl.needsUpdate = true; }
+  if (live.wall) {
+    const pw = live.wall.geometry.attributes.position, aw = pw.array, ref = live.wref;
+    for (let i = 0; i < ref.length / 2; i++) { const n = ref[i * 2], isTop = ref[i * 2 + 1]; aw[i * 3 + 2] = isTop ? (isFinite(live.zhi[n]) ? live.zhi[n] : zmin) : (live.zlo ? (isFinite(live.zlo[n]) ? live.zlo[n] : zmin) : zmin); }
+    pw.needsUpdate = true;
+  }
+}
+function toolProfile(t, d) {                          // height of the cutting surface above the tip at radius d
+  const r = t.diameter / 2;
+  if (t.type === 'ball') return r - Math.sqrt(Math.max(r * r - d * d, 0));
+  if ((t.type === 'vbit' || t.type === 'chamfer' || t.type === 'drill') && t.angle) return d / Math.tan(t.angle / 2 * Math.PI / 180);
+  return 0;
+}
+function liveStampSegment(ax, ay, az, bx, by, bz, t, side) {
+  const { nx, ny, x0, y0, res } = live.grid, r = t.diameter / 2, kk = Math.ceil(r / res) + 1;
+  const len = Math.hypot(bx - ax, by - ay, bz - az), nS = Math.max(1, Math.min(4000, Math.ceil(len / res)));
+  const Z = side > 0 ? live.zhi : live.zlo; if (!Z) return;
+  for (let sIdx = 0; sIdx <= nS; sIdx++) {
+    const u = sIdx / nS, px = ax + (bx - ax) * u, py = ay + (by - ay) * u, pz = az + (bz - az) * u;
+    const cx = Math.floor((px - x0) / res), cy = Math.floor((py - y0) / res);
+    for (let oy = -kk; oy <= kk; oy++) {
+      const iy = cy + oy; if (iy < 0 || iy >= ny) continue;
+      const yy = y0 + iy * res - py;
+      for (let ox = -kk; ox <= kk; ox++) {
+        const ix = cx + ox; if (ix < 0 || ix >= nx) continue;
+        const xx = x0 + ix * res - px, d = Math.hypot(xx, yy);
+        if (d >= r - 1e-4) continue;
+        const n = iy * nx + ix, v = side > 0 ? pz + toolProfile(t, d) : pz - toolProfile(t, d);
+        if (side > 0) { if (v < Z[n]) Z[n] = v; } else { if (v > Z[n]) Z[n] = v; }
+      }
+    }
+  }
+}
+function liveStampTo(k, f) {                          // stamp moves live.upto .. k (and the fraction f of move k)
+  if (!live || !sim.total) return;
+  const t0 = performance.now();
+  const stampMove = (gi, frac) => {
+    const [oi, mi] = sim.index[gi], c = camOps[oi], mv = c.op.moves[mi], st = program.setups ? program.setups[c.op.setup || 0] : null;
+    const ax = st && st.tool_axis ? st.tool_axis[2] : 1, side = ax > 0.999 ? 1 : (ax < -0.999 ? -1 : 0);
+    if (!side) return;
+    const [oip, mip] = gi > 0 ? sim.index[gi - 1] : sim.index[gi]; const pv = camOps[oip].op.moves[mip];
+    const ex = pv[1] + (mv[1] - pv[1]) * frac, ey = pv[2] + (mv[2] - pv[2]) * frac, ez = pv[3] + (mv[3] - pv[3]) * frac;
+    liveStampSegment(pv[1], pv[2], pv[3], ex, ey, ez, c.op.tool, side);
+  };
+  // whole moves from the last stamped index up to k, then the partial move k
+  if (live.lastK < k || (live.lastK === k && live.lastF > f)) {
+    if (live.lastK === k && live.lastF > f) { /* backwards within a move: leave the floor as is (material does not grow back) */ }
+    for (let gi = live.lastK; gi < k; gi++) { if (gi === live.lastK && live.lastF > 0) stampMove(gi, 1); else stampMove(gi, 1); if (performance.now() - t0 > 40) { live.lastK = gi + 1; live.lastF = 0; liveRefresh(); return; } }
+    live.lastK = k; live.lastF = 0;
+  }
+  if (k < sim.total && f > live.lastF) { stampMove(k, f); live.lastF = f; }
+  liveRefresh();
 }
 function bitAt(bits, idx) { return (bits[idx >> 3] >> (7 - (idx & 7))) & 1; }
 
+// ------------------------------------------------------------------ rendered simulation (CAM ▸ Rendered): the stock machined in front of you
+var renderedMode = false, renderedSaved = null, followTool = false, simTip = null, hudTool = null, hudToolAt = 0, machineInfo = null;
+const hudEl = document.getElementById('simhud');
+function stockLookDefaults() { return { color: 0xd3d6da }; }
+async function setRendered(on) {
+  if (on && !program) { addMsg('system', 'Build a CAM program first: Rendered plays the simulation on the machined stock.'); return; }
+  renderedMode = on;
+  if (on) {
+    renderedSaved = { renderOn, renderBg, showTp, showStock, edges: showEdges };
+    showTp = false; showStock = true; showEdges = false; renderBg = 'dark';
+    if (!renderOn) await setRender(true); else applyRenderBg();
+    if (stockObj) stockObj.visible = false; if (originObj) originObj.visible = false;
+    for (const c of camOps) { c.cut.visible = c.rapid.visible = false; }
+    if (!simRes && program) { try { const btn = document.getElementById('sim-run'); if (btn && !btn.disabled) btn.click(); } catch (e) {} }
+    followTool = true; hudEl.style.display = ''; document.getElementById('viewer').classList.add('rendered');
+    if (!machineInfo || machineInfo.name !== program.machine) fetch('/api/cam/machine_model?info=1').then(r => r.json()).then(r => { if (r.machine) machineInfo = { name: program.machine, nose: r.machine.nose, stickout: r.machine.stickout }; }).catch(() => {});
+    if (live) { for (const m of [simMesh, simLow]) if (m) { m.material = stockMaterial(); m.traverse(o => { if (o !== m && o.material) o.material = stockMaterial(); }); } }
+  } else {
+    const sv = renderedSaved || {}; followTool = false; hudEl.style.display = 'none'; document.getElementById('viewer').classList.remove('rendered');
+    showTp = sv.showTp ?? true; showStock = sv.showStock ?? true; showEdges = sv.edges ?? true; renderBg = sv.renderBg || 'studio';
+    if (!sv.renderOn && renderOn) await setRender(false); else applyRenderBg();
+    applyCamVisibility(); if (simRes && stockObj) stockObj.visible = false;
+    if (live) { for (const m of [simMesh, simLow]) if (m) { m.material = stockMaterial(); m.traverse(o => { if (o !== m && o.material) o.material = stockMaterial(); }); } }
+  }
+  applyVisibility(); applyCamVisibility(); syncRibbon(); syncMachineUi();
+  if (program && sim) renderSim();
+}
+function hudUpdate(k, f) {
+  if (!renderedMode) return;
+  const tl = hudEl.querySelector('.hud-tl'), tr = hudEl.querySelector('.hud-tr'), bl = hudEl.querySelector('.hud-bl'), br = hudEl.querySelector('.hud-br');
+  tl.textContent = `AGENTICCAD · ${(program && program.machine) || ''}`.toUpperCase();
+  tr.textContent = 'RENDERED SIMULATION';
+  br.textContent = `${sim.speed}× ${sim.playing ? 'accelerated' : 'paused'} · ${fmtT(sim.clock)} / ${fmtT(sim.T)}`;
+  if (k < sim.total && sim.index[k]) {
+    const [oi] = sim.index[k], c = camOps[oi], t = c.op.tool;
+    const st = program.setups ? program.setups[c.op.setup || 0] : null;
+    let cap = c.op.name;
+    if (hudTool !== t.number) { hudTool = t.number; hudToolAt = performance.now(); }
+    if (performance.now() - hudToolAt < 1800) cap = `Tool change · T${t.number} ${t.name}`;
+    else if (st && (program.setups.length > 1 || st.rotary)) cap = `${st.name} · ${cap}`;
+    bl.textContent = cap;
+  } else bl.textContent = k >= sim.total ? 'Complete' : 'Ready';
+}
+function tickRendered() {                             // follow the tool; spin it while cutting
+  if (!renderedMode) return;
+  if (toolObj && sim.playing) toolObj.rotation.z += 0.55;
+  if (followTool && simTip && sim.playing) {
+    const cur = controls.target.clone(), next = cur.clone().lerp(simTip, 0.12), delta = next.clone().sub(cur);
+    controls.target.copy(next); camera.position.add(delta);
+  }
+}
+function holderMesh(t) {                              // tool with flutes + the machine's holder stack (chrome), hanging from the nose levels
+  const grp = new THREE.Group(), r = t.diameter / 2, fl = Math.min(+t.flute_length || 10, 40), stick = (machineInfo && machineInfo.stickout) || fl + 6;
+  const fluteMat = new THREE.MeshPhysicalMaterial({ color: 0x6f7378, metalness: 0.95, roughness: 0.28, map: fluteTexture(), envMapIntensity: 1.2 });
+  const shankMat = new THREE.MeshPhysicalMaterial({ color: 0x9a9fa5, metalness: 0.95, roughness: 0.3, envMapIntensity: 1.2 });
+  const chrome = new THREE.MeshPhysicalMaterial({ color: 0xcfd3d7, metalness: 1.0, roughness: 0.16, envMapIntensity: 1.4 });
+  const dark = new THREE.MeshPhysicalMaterial({ color: 0x3a3d42, metalness: 0.6, roughness: 0.5 });
+  const flutes = new THREE.Mesh(new THREE.CylinderGeometry(r, t.type === 'vbit' ? r * 0.05 : r * 0.98, fl, 32).rotateX(Math.PI / 2).translate(0, 0, fl / 2), fluteMat);
+  const shank = new THREE.Mesh(new THREE.CylinderGeometry(r, r, Math.max(stick - fl, 0.5), 32).rotateX(Math.PI / 2).translate(0, 0, fl + Math.max(stick - fl, 0.5) / 2), shankMat);
+  grp.add(flutes, shank);
+  let z = stick;
+  for (const lvl of ((machineInfo && machineInfo.nose) || [{ name: 'collet nut', r: Math.max(r + 4, 9.5), h: 20 }, { name: 'spindle', r: 26, h: 80 }])) {
+    const h = Math.min(lvl.h, 120), m = /nut|collet/i.test(lvl.name) ? chrome : (/head|body|column/i.test(lvl.name) ? dark : chrome);
+    const c = new THREE.Mesh(new THREE.CylinderGeometry(lvl.r, lvl.r, h, 48).rotateX(Math.PI / 2).translate(0, 0, z + h / 2), m); c.castShadow = true; grp.add(c); z += h;
+  }
+  grp.traverse(o => { if (o.material) o.material.clippingPlanes = material.clippingPlanes; });
+  return grp;
+}
+let _fluteTex = null;
+function fluteTexture() {                             // two helical light stripes on dark carbide
+  if (_fluteTex) return _fluteTex;
+  const cv = document.createElement('canvas'); cv.width = 128; cv.height = 128; const ctx = cv.getContext('2d');
+  ctx.fillStyle = '#5a5e63'; ctx.fillRect(0, 0, 128, 128); ctx.strokeStyle = '#b9bdc2'; ctx.lineWidth = 14;
+  for (const off of [0, 64]) { ctx.beginPath(); ctx.moveTo(off - 64, 128); ctx.lineTo(off + 64, 0); ctx.stroke(); ctx.beginPath(); ctx.moveTo(off + 64, 128); ctx.lineTo(off + 192, 0); ctx.stroke(); }
+  _fluteTex = new THREE.CanvasTexture(cv); _fluteTex.wrapS = _fluteTex.wrapT = THREE.RepeatWrapping; _fluteTex.repeat.set(2, 1); return _fluteTex;
+}
+document.getElementById('sim-rendered').onclick = () => setRendered(!renderedMode);
 // ------------------------------------------------------------------ machine model (ribbon ▸ CAM ▸ Machine)
 // The program's machine around the stock, from /api/cam/machine_model: parts ride on kinematic nodes (head nodes move
 // with the tool, table nodes carry the work the opposite way), the stage (model, stock, toolpaths, simulation) rides on
@@ -1804,8 +2027,8 @@ function drawSimFrame(f, final) {
   const mat = () => new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.75, metalness: 0.05, side: THREE.DoubleSide });
   const base = new THREE.Color(0xc9b48a), red = new THREE.Color(0xff3b3b), amber = new THREE.Color(0xffb020);
   const g = f.grid;
-  if (f.mode === 'zmap') {
-    // top (and, for two-sided programs, bottom) height fields plus walls along the open edges so the stock reads solid
+  if (f.mode === 'zmap') { liveReset(f, simFrameShown, final); return;
+    // (kept for reference) top and bottom height fields plus walls
     const { nx, ny, x0, y0, res, zmin, zmax } = g, span = zmax - zmin, N = nx * ny;
     const zOf = (Q, n) => Q[n] === 65535 ? zmin : zmin + Q[n] / 65534 * span;
     const col = new Float32Array(N * 3);
@@ -3632,6 +3855,7 @@ const ICO = {
   doors: '<path d="M4 4h16v16H4z"/><path d="M12 4v16"/><path d="M9 12h.01M15 12h.01"/>',
   simulate: '<path d="M4 18h16"/><path d="M6 18V9l4 3 4-6 4 4v8"/>',
   play: '<path d="M7 4l12 8-12 8z"/>',
+  rendered: '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 15l5-5 4 4 3-3 6 6"/><circle cx="16" cy="9" r="1.5"/>',
   machine: '<path d="M3 20h18"/><path d="M5 20v-9h14v9"/><path d="M7 11V5h4v6"/><path d="M9 5V3"/><path d="M12 15h5"/><path d="M9 11v1.5"/>',
   interference: '<circle cx="9" cy="12" r="6"/><circle cx="15" cy="12" r="6"/><path d="M12 7.2a6 6 0 0 1 0 9.6a6 6 0 0 1 0-9.6Z" fill="currentColor" stroke="none" opacity=".55"/>',
 };
@@ -3659,6 +3883,7 @@ const TOOLS = {
   doors:    { group: 'cam-machine', label: 'Doors',  key: '', hint: 'Open or close the machine\'s doors / canopy (animated). Needs the machine shown.', picks: 'none' },
   simulate: { group: 'cam-sim', label: 'Simulate', key: '', hint: 'Run the material-removal simulation of the visible operations (also checks machine collisions).', picks: 'none' },
   play:     { group: 'cam-sim', label: 'Play',     key: '', hint: 'Play / pause the program on the machine at the speed set in the CAM tab.', picks: 'none' },
+  rendered: { group: 'cam-sim', label: 'Rendered', key: '', hint: 'Rendered simulation: metallic stock machined in front of you, chrome holder, camera following the tool, step captions.', picks: 'none' },
   render:   { group: 'output', label: 'Render',    key: 'E', hint: 'Studio render on / off: materials, studio lighting and soft shadows. Appearances, images and video in ▶ Animate.', picks: 'none' },
   drawings: { group: 'output', label: 'Drawings',  key: 'D', hint: 'Shop drawings (SVG + DXF) with the material and sheet from ⚙ Settings.', picks: 'none' },
   machine:  { group: 'cam-machine', label: 'Machine',   key: 'A', hint: 'Show the CAM program\'s machine around the stock and play the simulation on it: head, table and 4th axis move as they would; parts the simulator saw collide flash red.', picks: 'none' },
@@ -3714,6 +3939,7 @@ function activateTool(k) {
   if (k === 'doors') { if (machineOn) setDoors(!machineDoorTarget); else addMsg('system', 'Show the machine first (CAM ▸ Machine) to open its doors.'); return; }
   if (k === 'simulate') { if (program) document.getElementById('sim-run').click(); else addMsg('system', 'Build a CAM program first.'); return; }
   if (k === 'play') { if (program) document.getElementById('sim-play').click(); else addMsg('system', 'Build a CAM program first.'); return; }
+  if (k === 'rendered') { setRendered(!renderedMode); return; }
   if (k === 'slice') { runSlice(); return; }
   tool && tool.kind === k ? endTool() : startTool(k);
 }
@@ -3726,7 +3952,7 @@ function showTip(b, t) {
 }
 function hideTip() { tipEl.classList.remove('on'); }
 function syncRibbon() {
-  document.querySelectorAll('#ribbon .rb').forEach(b => b.classList.toggle('active', (tool && tool.kind === b.dataset.tool) || (b.dataset.tool === 'sketch' && !!sk) || (b.dataset.tool === 'measure' && measuring) || (b.dataset.tool === 'render' && renderOn) || (b.dataset.tool === 'machine' && machineOn) || (b.dataset.tool === 'doors' && !!machineDoorTarget) || (b.dataset.tool === 'play' && sim.playing)));
+  document.querySelectorAll('#ribbon .rb').forEach(b => b.classList.toggle('active', (tool && tool.kind === b.dataset.tool) || (b.dataset.tool === 'sketch' && !!sk) || (b.dataset.tool === 'measure' && measuring) || (b.dataset.tool === 'render' && renderOn) || (b.dataset.tool === 'machine' && machineOn) || (b.dataset.tool === 'doors' && !!machineDoorTarget) || (b.dataset.tool === 'play' && sim.playing) || (b.dataset.tool === 'rendered' && renderedMode)));
 }
 function startTool(kind) {
   if (measuring) setMeasuring(false); if (sk) endSketch();
