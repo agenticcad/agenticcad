@@ -5,6 +5,19 @@ features, patch bumps fix things. The version shown in the UI header comes from 
 
 ## [Unreleased]
 
+## [0.36.1] — 2026-10-13
+
+### Fixed
+- **Striped pocket walls and a flash of the finished part during playback.** Forward playback reloaded a server
+  keyframe every time it crossed one, which replaced the exactly stamped voxel walls with walls rebuilt from the
+  height map (striped at its cell size) and emptied the stock for a moment while the field was rebuilt; while a
+  keyframe was in flight, every animation frame requested it again. Playback now keeps stamping forward without
+  reloads, a seek backwards restamps from the untouched stock in the worker (exact walls; a keyframe only for very
+  long programs), the previous stock stays on screen until the new one is meshed, keyframe requests are shared, and
+  the end of the program tints gouges and material left without a rebuild. Walls that do come from a keyframe use a
+  smoother lateral distance.
+
+
 ## [0.36.0] — 2026-10-13
 
 ### Changed

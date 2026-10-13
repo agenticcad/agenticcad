@@ -16,7 +16,10 @@ self.onmessage = (e) => {
   const d = e.data;
   if (d.type === 'reset') reset(d);
   else if (d.type === 'stamp') { if (!G || d.gen !== G.gen) return; for (const s of d.segs) stamp(s); flush(); }
-  else if (d.type === 'color') { if (!G || d.gen !== G.gen) return; G.colors = d.colors; for (let c = 0; c < G.ncx * G.ncy * G.ncz; c++) G.dirty.add(c); flush(); }
+  else if (d.type === 'color') {                       // recolour (and, with gouge/left maps, mark the final frame's tints)
+    if (!G || d.gen !== G.gen) return; G.colors = d.colors; if (d.final !== undefined) { G.final = !!d.final; G.gouge = d.gouge || null; G.left = d.left || null; }
+    for (let c = 0; c < G.ncx * G.ncy * G.ncz; c++) G.dirty.add(c); flush();
+  }
 };
 
 function reset(d) {
@@ -47,7 +50,7 @@ function reset(d) {
         let top = -Infinity, bot = Infinity;
         if (inside && isFinite(zhi[n])) { top = zhi[n]; bot = zlo ? zlo[n] : g.zmin; if (!(top > bot)) { top = -Infinity; bot = Infinity; } }
         wx[nw] = jx; wy[nw] = jy; wt[nw] = top; wb[nw] = bot;
-        wd[nw] = Math.max(Math.abs(g.x0 + jx * g.res - x), Math.abs(g.y0 + jy * g.res - y)) - g.res * 0.5;   // distance to the cell's edge
+        wd[nw] = Math.hypot(g.x0 + jx * g.res - x, g.y0 + jy * g.res - y) - g.res * 0.75;   // distance to the cell as a disc (overlapping discs: smooth walls, no square staircase)
         if (top > bot) any = true; nw++;
       }
       if (!any) continue;
@@ -73,7 +76,8 @@ function reset(d) {
   const ncx = Math.ceil((nx - 1) / CS), ncy = Math.ceil((ny - 1) / CS), ncz = Math.ceil((nz - 1) / CS);
   G = { gen: d.gen, h, x0, y0, z0, nx, ny, nz, m, ncx, ncy, ncz, dirty: new Set(), srv: g, gouge: d.gouge || null, left: d.left || null, final: !!d.final, colors: d.colors };
   for (let c = 0; c < ncx * ncy * ncz; c++) G.dirty.add(c);
-  G.resetMs = Date.now() - t0; flush();
+  G.resetMs = Date.now() - t0;
+  if (!d.quiet) flush();                                 // quiet: stamps follow at once, mesh after them (no flash of the uncut stock)
 }
 
 function profile(type, r, angle, d) {                 // height of the cutting surface above the tip at radius d

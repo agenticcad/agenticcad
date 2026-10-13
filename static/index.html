@@ -1606,7 +1606,7 @@ function ghostPart(on) {                       // see the simulated stock throug
   material.transparent = on; material.opacity = on ? 0.18 : 1; material.depthWrite = !on; material.needsUpdate = true;
 }
 function clearSim() {
-  ghostPart(false); live = null;
+  ghostPart(false); live = null; voxDropOld();
   for (const m of [simMesh, simLow]) if (m) { camGroup.remove(m); m.traverse(o => o.geometry && o.geometry.dispose()); }
   simMesh = simLow = null; simRes = null; simFrameShown = -1; simCache.clear();
   document.getElementById('cam-simres').style.display = 'none';
@@ -1634,12 +1634,17 @@ function startSim(payload) {
   ghostPart(true);
   showSimAt(simK().k);
 }
-async function getSimFrame(i) {
-  if (simCache.has(i)) return simCache.get(i);
-  const f = await fetch('/api/cam/sim/frame/' + i).then(r => r.json());
-  const out = { upto: f.upto, mode: f.mode, grid: f.grid };
-  for (const [k, v] of Object.entries(f.data)) out[k] = (k === 'gouge' || k === 'left') ? new Uint8Array(await inflateB64(v)) : new Uint16Array(await inflateB64(v));
-  simCache.set(i, out); return out;
+const simInflight = new Map();                         // keyframe fetches in progress (one request per frame, however often playback asks)
+function getSimFrame(i) {
+  if (simCache.has(i)) return Promise.resolve(simCache.get(i));
+  if (simInflight.has(i)) return simInflight.get(i);
+  const pr = (async () => {
+    const f = await fetch('/api/cam/sim/frame/' + i).then(r => r.json());
+    const out = { upto: f.upto, mode: f.mode, grid: f.grid };
+    for (const [k, v] of Object.entries(f.data)) out[k] = (k === 'gouge' || k === 'left') ? new Uint8Array(await inflateB64(v)) : new Uint16Array(await inflateB64(v));
+    simCache.set(i, out); simInflight.delete(i); return out;
+  })();
+  simInflight.set(i, pr); return pr;
 }
 function showSimAt(k, frac) {
   if (!simRes) return;
@@ -1653,26 +1658,42 @@ function showSimAt(k, frac) {
     return;
   }
   const final = k >= sim.total;
-  if (live && live.kf === i && !final && k >= live.upto) { liveStampTo(k, frac || 0); return; }   // forward within the keyframe interval
-  if (live && live.kf === i && final && live.final) return;
-  const want = i; simFetch = want;
+  const useVox = viewerPrefs.voxel && typeof Worker !== 'undefined';
+  // forward: keep stamping the live stock (its walls are exact). The voxel worker restamps up to VOX_RESTAMP moves off-thread,
+  // the height map only within the next keyframe interval; keyframes are for seeks backwards or far ahead
+  const canStamp = live && k >= live.lastK && (live.vox ? k - live.lastK <= VOX_RESTAMP : i <= live.kf + 1);
+  if (canStamp && !final) { liveStampTo(k, frac || 0); return; }
+  if (live && final && live.final) return;
+  if (canStamp && final && live.vox) {                   // the end: stamp the rest, then tint gouges / material left from the final frame
+    liveStampTo(sim.total, 0); live.final = true; live.kf = i; simFrameShown = i;
+    const gen = live.gen;
+    getSimFrame(i).then(f => { if (live && live.vox && live.gen === gen && vox) vox.worker.postMessage({ type: 'color', gen, colors: stockColors(), final: true, gouge: f.gouge || null, left: f.left || null }); });
+    return;
+  }
+  // voxel: a seek backwards restamps from the untouched stock (frame 0, exact walls) unless that is a very long way
+  const want = (useVox && k <= VOX_RESTAMP) ? 0 : i; simFetch = want;
   getSimFrame(want).then(f => {
     if (simFetch !== want || !simRes) return;
-    liveReset(f, want, final); simFrameShown = want;
+    if (live && live.kf === want && k >= live.lastK && (live.vox ? k - live.lastK <= VOX_RESTAMP : !final)) { showSimAt(k, frac); return; }   // a reset landed while this fetch ran
+    const voxFinal = final && useVox;
+    liveReset(f, want, final && !voxFinal, k > f.upto || voxFinal); simFrameShown = want;
+    if (voxFinal && live && live.vox) { showSimAt(k, frac); return; }   // re-enter: stamps to the end and fetches the tints
     if (!final) liveStampTo(k, frac || 0);
   });
 }
+const VOX_RESTAMP = 20000;                            // moves the voxel worker restamps rather than loading a keyframe
 // ---- live height map + mesh (zmap mode)
 let live = null;                                      // {kf, upto, zhi, zlo, grid, geoTop, geoLow, wall, final, touched}
-function liveReset(f, kf, final) {
+function liveReset(f, kf, final, quiet = false) {
   const g = f.grid, { nx, ny, x0, y0, res, zmin, zmax } = g, span = zmax - zmin, N = nx * ny;
   const unq = (Q, low) => { const a = new Float32Array(N); for (let n = 0; n < N; n++) a[n] = Q[n] === 65535 ? (low ? Infinity : -Infinity) : zmin + Q[n] / 65534 * span; return a; };
   const zhi = unq(f.zhi, false), zlo = f.zlo ? unq(f.zlo, true) : null;
   // the stock's empty cells (outside its footprint) stay empty: top -inf, bottom +inf
-  for (const m of [simMesh, simLow]) if (m) { camGroup.remove(m); m.traverse(o => o.geometry && o.geometry.dispose()); }
-  simMesh = simLow = null; if (vox) vox.chunks.clear();
+  const prev = { mesh: simMesh, low: simLow, vox: !!(live && live.vox) };
   live = { kf, upto: f.upto, zhi, zlo, grid: g, final, lastK: f.upto, lastF: 0 };
-  if (viewerPrefs.voxel && typeof Worker !== 'undefined') { if (voxReset(f, final)) return; }
+  if (viewerPrefs.voxel && typeof Worker !== 'undefined' && voxReset(f, final, prev, quiet)) return;
+  for (const m of [prev.mesh, prev.low]) if (m) { camGroup.remove(m); m.traverse(o => o.geometry && o.geometry.dispose()); }
+  simMesh = simLow = null; if (vox) { vox.chunks.clear(); voxDropOld(); }
   const colTop = new Float32Array(N * 3), colLow = zlo ? new Float32Array(N * 3) : null;
   const base = renderedMode ? new THREE.Color(0xaeb3b9) : new THREE.Color(0xc9b48a), red = new THREE.Color(0xff3b3b), amber = new THREE.Color(0xffb020);
   for (let n = 0; n < N; n++) {
@@ -1738,21 +1759,25 @@ function voxWorker() {
   w.onerror = e => { addMsg('system', 'Voxel stock failed (' + (e.message || 'worker error') + '); using the height map.'); viewerPrefs.voxel = false; voxStop(); if (simRes) { live = null; simFrameShown = -1; showSimAt(simK().k); } };
   return w;
 }
-function voxStop() { if (!vox) return; try { vox.worker.terminate(); } catch (e) {} vox = null; }
-function voxReset(f, final) {
+function voxStop() { if (!vox) return; voxDropOld(); try { vox.worker.terminate(); } catch (e) {} vox = null; }
+function voxDropOld() { if (vox && vox.old) { for (const m of vox.old) { camGroup.remove(m); m.traverse(o => o.geometry && o.geometry.dispose()); } vox.old = null; } }
+function voxReset(f, final, prev, quiet = false) {
   const w = voxWorker(); if (!w) return false;
   const g = live.grid, sz = Math.max(g.zmax - g.zmin, 1);
   let cols = 0; for (let n = 0; n < live.zhi.length; n++) if (isFinite(live.zhi[n])) cols++;
   const h = Math.min(2.0, Math.max(0.12, Math.cbrt(Math.max(cols, 1) * g.res * g.res * sz / 2.5e6)));   // ~2.5M voxels of stock at most
   vox.stats = { resetMs: 0, meshMs: 0, voxels: 0 };
-  live.vox = true; live.h = h; live.gen = ++voxGen; vox.chunks.clear(); vox.pending = [];
-  simMesh = new THREE.Group(); simMesh.renderOrder = 2; camGroup.add(simMesh);
-  w.postMessage({ type: 'reset', gen: live.gen, h, grid: g, zhi: live.zhi, zlo: live.zlo, gouge: final && f.gouge ? f.gouge : null, left: final && f.left ? f.left : null, final, colors: stockColors() });
+  live.vox = true; live.h = h; live.gen = ++voxGen; vox.chunks.clear(); vox.pending = []; vox.resets = (vox.resets || 0) + 1;
+  // the previous stock stays on screen until the first chunks of the new field arrive (no flash of an empty vise)
+  voxDropOld(); vox.old = [prev && prev.mesh, prev && prev.low].filter(Boolean);
+  simMesh = new THREE.Group(); simMesh.renderOrder = 2; camGroup.add(simMesh); simLow = null;
+  w.postMessage({ type: 'reset', gen: live.gen, h, grid: g, zhi: live.zhi, zlo: live.zlo, gouge: final && f.gouge ? f.gouge : null, left: final && f.left ? f.left : null, final, colors: stockColors(), quiet: !!quiet });
   return true;
 }
 function voxOnMesh(d) {
   if (!vox || !live || !live.vox || d.gen !== live.gen || !simMesh) return;
   if (vox.stats) { vox.stats.resetMs += d.resetMs || 0; vox.stats.meshMs += d.ms || 0; vox.stats.voxels = d.voxels; }
+  voxDropOld();
   for (const c of d.chunks) {
     let mesh = vox.chunks.get(c.id);
     if (!c.idx.length) { if (mesh) { simMesh.remove(mesh); mesh.geometry.dispose(); vox.chunks.delete(c.id); } continue; }
@@ -1765,7 +1790,7 @@ function voxOnMesh(d) {
 }
 function voxFlush() { if (vox && live && live.vox && vox.pending.length) { vox.worker.postMessage({ type: 'stamp', gen: live.gen, segs: vox.pending }); vox.pending = []; } }
 function voxRecolor() { if (vox && live && live.vox) vox.worker.postMessage({ type: 'color', gen: live.gen, colors: stockColors() }); }
-window.addEventListener('load', () => { if (window.agenticcad) window.agenticcad.voxel = (o) => { if (o && typeof o.on === 'boolean') { viewerPrefs.voxel = o.on; if (simRes) { live = null; simFrameShown = -1; showSimAt(simK().k); } } return { on: !!(live && live.vox), h: live && live.h ? +live.h.toFixed(3) : null, stats: vox && vox.stats, chunks: vox ? vox.chunks.size : 0, tris: vox ? [...vox.chunks.values()].reduce((a, m) => a + m.geometry.index.count / 3, 0) : 0 }; }; });
+window.addEventListener('load', () => { if (window.agenticcad) window.agenticcad.voxel = (o) => { if (o && typeof o.on === 'boolean') { viewerPrefs.voxel = o.on; if (simRes) { live = null; simFrameShown = -1; showSimAt(simK().k); } } return { on: !!(live && live.vox), resets: vox ? vox.resets || 0 : 0, kf: live ? live.kf : null, lastK: live ? live.lastK : null, final: !!(live && live.final), h: live && live.h ? +live.h.toFixed(3) : null, stats: vox && vox.stats, chunks: vox ? vox.chunks.size : 0, tris: vox ? [...vox.chunks.values()].reduce((a, m) => a + m.geometry.index.count / 3, 0) : 0 }; }; });
 function liveRefresh() {                              // push the live maps into the mesh positions
   if (!live || !simMesh) return;
   if (live.vox) { voxFlush(); return; }
