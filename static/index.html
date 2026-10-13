@@ -1834,6 +1834,7 @@ function bitAt(bits, idx) { return (bits[idx >> 3] >> (7 - (idx & 7))) & 1; }
 var renderedMode = false, renderedSaved = null, followTool = false, simTip = null, hudTool = null, hudToolAt = 0, machineInfo = null;
 // depth of field (Settings ▸ General ▸ Rendered simulation): an EffectComposer with a bokeh pass focused on the tool
 var viewerPrefs = { dof: true, voxel: true }, composer = null, bokeh = null, dofFrames = [], dofDisabledSlow = false;
+const DOF_MAXBLUR = 0.006, _dofV = new THREE.Vector3();   // max blur radius as a fraction of the frame
 fetch('/api/settings').then(r => r.json()).then(r => { if (r && r.settings) { if (typeof r.settings.dof === 'boolean') viewerPrefs.dof = r.settings.dof; if (r.settings.sim_stock) viewerPrefs.voxel = r.settings.sim_stock === 'voxel'; } }).catch(() => {});
 async function ensureComposer() {
   if (composer) return composer;
@@ -1842,7 +1843,7 @@ async function ensureComposer() {
   // half-float MSAA target + OutputPass so tone mapping / sRGB match the plain renderer
   composer = new EffectComposer(renderer, new THREE.WebGLRenderTarget(viewerEl.clientWidth, viewerEl.clientHeight, { type: THREE.HalfFloatType, samples: 4 }));
   composer.addPass(new RenderPass(scene, camera));
-  bokeh = new BokehPass(scene, camera, { focus: 100, aperture: 0.00025, maxblur: 0.012 });
+  bokeh = new BokehPass(scene, camera, { focus: 100, aperture: 0.0001, maxblur: DOF_MAXBLUR });
   composer.addPass(bokeh); composer.addPass(new OutputPass());
   composer.setPixelRatio(renderer.getPixelRatio()); composer.setSize(viewerEl.clientWidth, viewerEl.clientHeight);
   return composer;
@@ -1851,8 +1852,11 @@ function dofActive() { return renderedMode && viewerPrefs.dof && !dofDisabledSlo
 window.addEventListener('load', () => { if (window.agenticcad) window.agenticcad.dof = (o) => { if (o && typeof o.dof === 'boolean') { viewerPrefs.dof = o.dof; dofDisabledSlow = false; dofFrames = []; if (o.dof && renderedMode && !composer) ensureComposer().catch(() => {}); } return { pref: viewerPrefs.dof, composer: !!composer, active: dofActive(), slow: dofDisabledSlow, focus: bokeh ? +bokeh.uniforms.focus.value.toFixed(1) : null, avgMs: dofFrames.length ? +(dofFrames.reduce((a, b) => a + b, 0) / dofFrames.length).toFixed(1) : null }; }; });
 function renderFrame() {
   if (dofActive()) {
-    const focusAt = simTip || controls.target;
-    bokeh.uniforms.focus.value = camera.position.distanceTo(focusAt);
+    // focus on the tool tip; the blur grows with depth *relative* to the focus distance (the shader's aperture is per
+    // world unit and the scene is in mm, so a fixed aperture blurred the part itself): full blur at 1.5× the focus
+    // distance behind, or at the camera in front; the part around the cut stays crisp
+    const focusAt = simTip || controls.target, v = _dofV.copy(focusAt).applyMatrix4(camera.matrixWorldInverse), focus = Math.max(1, -v.z);
+    bokeh.uniforms.focus.value = focus; bokeh.uniforms.aperture.value = DOF_MAXBLUR / (focus * 1.5); bokeh.uniforms.maxblur.value = DOF_MAXBLUR;
     const t0 = performance.now(); composer.render(); const dt = performance.now() - t0;
     dofFrames.push(dt); if (dofFrames.length > 90) dofFrames.shift();
     if (dofFrames.length === 90 && dofFrames.reduce((a, b) => a + b, 0) / 90 > 45) { dofDisabledSlow = true; addMsg('system', 'Depth of field switched off: this GPU takes too long per frame with it (Settings ▸ General to force it).'); }

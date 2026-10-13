@@ -5,6 +5,16 @@ features, patch bumps fix things. The version shown in the UI header comes from 
 
 ## [Unreleased]
 
+## [0.35.2] — 2026-10-13
+
+### Fixed
+- **Depth of field blurred the part.** The bokeh pass takes its aperture per world unit and the scene is in
+  millimetres, so anything beyond about 50 mm from the focus plane was at full blur, which was most of the part. The
+  blur now grows with depth relative to the focus distance (full blur at 1.5× the distance behind the cut, or at the
+  camera in front) with a smaller maximum, so the part around the cut stays crisp and only the far machine and the
+  near fixture soften.
+
+
 ## [0.35.1] — 2026-10-13
 
 ### Changed
