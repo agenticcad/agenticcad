@@ -123,7 +123,7 @@ def test_two_setups_get_their_own_wcs_and_a_pause(machines, plate):
     assert [s["wcs"] for s in pay["setups"]] == ["G54", "G55"] and [o["setup"] for o in pay["ops"]] == [0, 0, 0, 1, 1]
     # bottom-side moves come back in model coordinates: the counterbore cuts up from z = 0 to its 3 mm floor
     cb = [m[3] for m in pay["ops"][3]["moves"] if m[0] != 0]
-    assert max(cb) == pytest.approx(3.0, abs=1e-6) and min(cb) > 0
+    assert max(cb) == pytest.approx(3.0, abs=1e-6) and min(cb) >= -0.5 - 1e-6   # entry ramp starts just below the part
 
 
 def test_makera_post_dialect(machines, plate):
@@ -374,6 +374,46 @@ result = {"P": plate}
     # every peck of a hole happens before the next hole; the merged hole goes to the full depth (through: + breakthrough)
     plunges = [mv for mv in op.moves if mv[0] == cam.PLUNGE and abs(mv[1] - 30) < 0.1]
     assert len(plunges) >= 4 and min(p[3] for p in plunges) < 0.0
+
+
+def _descents(moves):
+    """Descent angle (degrees) of every feed move that goes down."""
+    out, prev = [], None
+    for mv in moves:
+        if prev is not None and mv[0] == cam.FEED and prev[3] - mv[3] > 1e-6:
+            dxy = math.hypot(mv[1] - prev[1], mv[2] - prev[2])
+            out.append(math.degrees(math.atan2(prev[3] - mv[3], dxy)) if dxy > 1e-9 else 90.0)
+        prev = mv
+    return out
+
+
+def test_pocket_and_contour_ramp_in_instead_of_plunging(machines, plate):
+    st = cam.Setup(machines["Makera Z1"], cam.Stock.from_model(plate, margin=3, top=1))
+    t = flat(); top = st.stock.top
+    op = cam.pocket(st, t, cam.circle(0, 0, 11), z_top=top - 1, z_bottom=top - 7, stepdown=2.0)
+    # no plunge ends below the op's top: every entry ramps down along a ring at the ramp angle (a helix on a small ring)
+    assert all(mv[3] >= top - 1 + 0.5 - 1e-6 for mv in op.moves if mv[0] == cam.PLUNGE)
+    assert op.params["ramp"] == cam.RAMP_DEG and max(_descents(op.moves)) <= cam.RAMP_DEG + 0.2
+    assert min(mv[3] for mv in op.moves) == pytest.approx(top - 7)
+    # the helical ramps post as G2/G3 arcs, so the program stays short
+    g = cam.Program(st, [op]).gcode().splitlines()
+    assert sum(l.startswith(("G2 ", "G3 ")) for l in g) >= 6 and len(g) < 120
+    # ramp=0 keeps the straight plunge
+    op0 = cam.pocket(st, t, cam.circle(0, 0, 11), z_top=top - 1, z_bottom=top - 7, stepdown=2.0, ramp=0)
+    assert any(mv[3] < top - 1 for mv in op0.moves if mv[0] == cam.PLUNGE)
+    # contour: one entry per ring, the passes run on without retracting, nothing descends steeper than the ramp
+    c = cam.contour(st, t, cam.rect(-30, -20, 30, 20), z_top=top - 1, z_bottom=top - 7, stepdown=2.0)
+    assert all(mv[3] >= top - 1 + 0.5 - 1e-6 for mv in c.moves if mv[0] == cam.PLUNGE)
+    assert sum(1 for mv in c.moves if mv[0] == cam.RAPID and mv[3] >= st.safe_z - 1e-6) <= 2
+    assert max(_descents(c.moves)) <= cam.RAMP_DEG + 0.2 and c.params["passes"] == 3
+
+
+def test_face_plunges_clear_of_the_stock(machines, plate):
+    st = cam.Setup(machines["Makera Z1"], cam.Stock.from_model(plate, margin=3, top=1))
+    t = flat(); s = st.stock; r = t.diameter / 2
+    op = cam.face(st, t, z_top=s.top, z_bottom=s.top - 1)
+    plunges = [mv for mv in op.moves if mv[0] == cam.PLUNGE]
+    assert plunges and all(mv[1] <= s.xmin - r + 1e-6 or mv[1] >= s.xmax + r - 1e-6 for mv in plunges)
 
 
 def test_pocket_finishes_each_region_before_the_next(machines, plate):

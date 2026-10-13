@@ -45,7 +45,8 @@ def test_post_emits_arcs_only_for_circular_runs(cam_setup):
     g = prog.gcode()
     assert _count(g, "G2", "G3") >= 2 and _count(g, "G1") < 10       # a circle is a few arcs, not 250 lines
     square = cam.Program(setup, [cam.contour(setup, tools[1], cam.rect(-10, -10, 10, 10), z_top=4, z_bottom=2, side="on", lead=0)]).gcode()
-    assert _count(square, "G2", "G3") == 0 and _count(square, "G1") <= 8
+    sq = cam.contour(setup, tools[1], cam.rect(-10, -10, 10, 10), z_top=4, z_bottom=2, side="on", lead=0)
+    assert _count(square, "G2", "G3") == 0 and _count(square, "G1") <= 4 + 8 * sq.params["passes"]   # per pass: a ramp along the edges + one lap
 
 
 def test_post_header_units_wcs_and_tool_changes(bracket, cam_setup):

@@ -238,8 +238,8 @@ hs = holes(part, dmax=8)                                    # Hole(x, y, diamete
 program = Program(setup, name="bracket")
 program.add(face(setup, t_flat, z_top=stock.top, z_bottom=4.0))                 # surface stock down to the part top
 program.add(drill(setup, t_drill, [h for h in hs if h.diameter <= 3.5], peck="auto"))
-program.add(pocket(setup, tools[2], circle(0, 0, 6), z_top=4, z_bottom=-4.5, name="Bore"))
-program.add(contour(setup, t_flat, section(part, 0.0), z_top=4, z_bottom=-4.5, side="outside", tabs=4, tab_height=3))
+program.add(pocket(setup, tools[2], circle(0, 0, 6), z_top=4, z_bottom=-4.5, name="Bore"))   # entries ramp in at 3° along a ring (a helix); ramp=0 plunges
+program.add(contour(setup, t_flat, section(part, 0.0), z_top=4, z_bottom=-4.5, side="outside", tabs=4, tab_height=3))   # each pass ramps down along the profile, no retract between passes
 program.add(parallel3d(setup, tools["6 mm ball endmill"], shape=part, z_bottom=4, region=rect(-15,-15,15,15), stepover=0.15))
 ```
 program.add(adaptive(setup, t_flat, stock_minus(setup, part, 0.0, expand=t_flat.diameter), z_top=24, z_bottom=-4, stepover=0.15))  # HSM roughing:

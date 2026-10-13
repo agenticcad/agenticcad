@@ -679,6 +679,7 @@ def _levels(z_top: float, z_bottom: float, stepdown: float) -> list[float]:
 # =============================================================================
 # Operations
 # =============================================================================
+RAMP_DEG = 3.0                      # default entry ramp angle along the path (0 = straight plunge)
 COLORS = {"face": "#7fd1ff", "contour": "#4ea1ff", "pocket": "#4cd37a", "drill": "#ffd166", "parallel3d": "#c58cff", "engrave": "#ff9f7a", "adaptive": "#ff9f43", "rest": "#8ef0d0"}
 
 
@@ -691,8 +692,9 @@ def face(setup: Setup, tool: Tool, z_top: float | None = None, z_bottom: float |
     z_bottom = z_top - (stepdown or tool.stepdown) if z_bottom is None else z_bottom
     so = (stepover or tool.stepover) * tool.diameter
     polys = _polys(region) or [setup.stock.rect()]
-    reg = unary_union(polys).buffer(tool.radius * 0.9)   # let the tool run past the edges
+    reg = unary_union(polys).buffer(tool.radius * 0.9, join_style=2)   # let the tool run past the edges (square corners: full-width rows)
     minx, miny, maxx, maxy = reg.bounds
+    ext = tool.radius * 0.1 + 1.0                        # rows start and end with the tool clear of the stock: plunges in air
     op.params = dict(z_top=z_top, z_bottom=z_bottom, stepover=so)
     for z in _levels(z_top, z_bottom, stepdown or tool.stepdown):
         y = miny
@@ -707,6 +709,10 @@ def face(setup: Setup, tool: Tool, z_top: float | None = None, z_bottom: float |
                 c = list(s.coords)
                 if direction < 0:
                     c = c[::-1]
+                (ax, ay), (bx, by) = c[0], c[-1]
+                ln = math.hypot(bx - ax, by - ay) or 1.0
+                ux, uy = (bx - ax) / ln, (by - ay) / ln
+                c = [(ax - ux * ext, ay - uy * ext)] + c[1:-1] + [(bx + ux * ext, by + uy * ext)]
                 if first or pb.pos is None or pb.pos[2] > z + 1e-6:
                     pb.rapid_xy(*c[0]); pb.plunge_to(z); first = False
                 else:
@@ -723,11 +729,12 @@ def face(setup: Setup, tool: Tool, z_top: float | None = None, z_bottom: float |
 def contour(setup: Setup, tool: Tool, polys, z_top: float, z_bottom: float, side: str = "outside",
             stepdown: float | None = None, tabs: int = 0, tab_height: float = 3.0, tab_width: float = 8.0,
             climb: bool = True, stock_to_leave: float = 0.0, lead: float | None = None,
-            name: str = "Contour") -> Op:
+            ramp: float = RAMP_DEG, name: str = "Contour") -> Op:
     """Profile around polygons. side: 'outside' (tool outside material: outer rings AND holes),
     'inside' (tool inside, e.g. finishing a pocket wall), 'on' (centre on the line).
     lead: radius of the tangential arc lead-in/out (default tool radius outside, half inside, 0 for 'on';
-    pass 0 to disable)."""
+    pass 0 to disable). ramp: entry angle in degrees — each pass descends along the profile instead of plunging
+    (0 = plunge); passes run on without retracting between them."""
     op = Op(name, "contour", tool, color=COLORS["contour"])
     if lead is None:
         lead = tool.radius if side == "outside" else (tool.radius / 2 if side == "inside" else 0.0)
@@ -760,31 +767,42 @@ def contour(setup: Setup, tool: Tool, polys, z_top: float, z_bottom: float, side
         rings = [r[::-1] for r in rings]
     levels = _levels(z_top, z_bottom, stepdown or tool.stepdown)
     tab_top = z_bottom + tab_height
-    op.params = dict(z_top=z_top, z_bottom=z_bottom, side=side, tabs=tabs, passes=len(levels), lead=lead)
+    op.params = dict(z_top=z_top, z_bottom=z_bottom, side=side, tabs=tabs, passes=len(levels), lead=lead, ramp=ramp)
     for ring in rings:
         ring = _start_on_straight(ring)
         dense = _densify(ring + [ring[0]], 0.5)
-        # distance along ring for tab placement
-        cum = [0.0]
-        for a, b in zip(dense, dense[1:]):
-            cum.append(cum[-1] + math.dist(a, b))
-        total = cum[-1]
+        total = sum(math.dist(a, b) for a, b in zip(dense, dense[1:]))
         tab_centres = [total * (i + 0.5) / tabs for i in range(tabs)] if tabs > 0 else []
         lead_in, lead_out = _lead_arcs(dense, lead, climb) if lead > 0 else ([], [])
+        path = dense[:-1]                                   # closed ring for the lap/ramp walker
+        # one entry per ring: lead-in just above the stock, then every pass ramps down along the profile from where
+        # the previous pass ended and runs a full lap (tabs lift the tool at any depth below the tab top)
+        z_air = z_top + 0.5                                 # entry starts just above where this op cuts (material above is already gone)
+        start = lead_in[0] if lead_in else dense[0]
+        pb.rapid_xy(*start); pb.plunge_to(z_air)
+        for x, y in lead_in[1:]:
+            pb.feed_to(x, y, z_air)
+        s_at = 0.0
         for z in levels:
             use_tabs = tabs > 0 and z < tab_top - 1e-9
-            z0 = max(z, tab_top) if use_tabs and _in_tab(0.0, tab_centres, tab_width, total) else z
-            start = lead_in[0] if lead_in else dense[0]
-            pb.rapid_xy(*start); pb.plunge_to(z0)
-            for x, y in lead_in[1:]:
-                pb.feed_to(x, y, z0)
-            for (x, y), s in zip(dense[1:], cum[1:]):
-                zz = z
-                if use_tabs and _in_tab(s, tab_centres, tab_width, total):
-                    zz = max(z, tab_top)
-                pb.feed_to(x, y, zz, pb.plunge if zz > pb.pos[2] + 1e-9 or zz < pb.pos[2] - 1e-9 else None)
-            for x, y in lead_out:
-                pb.feed_to(x, y, pb.pos[2])
+            zmod = (lambda s, zz: max(zz, tab_top) if _in_tab(s, tab_centres, tab_width, total) else zz) if use_tabs else None
+            s_at = _lap_ramp(pb, path, z, ramp, s_at, zmod)
+        # with a lead-out: back to the start point at depth (the remainder of a lap) so the arc leaves from where it was built
+        if s_at > 1e-6 and lead_out:
+            use_tabs = tabs > 0 and levels[-1] < tab_top - 1e-9
+            zmod = (lambda s, zz: max(zz, tab_top) if _in_tab(s, tab_centres, tab_width, total) else zz) if use_tabs else None
+            zc = pb.pos[2]
+            n = len(path); segl = [math.dist(path[i], path[(i + 1) % n]) for i in range(n)]
+            acc = 0.0; i = 0
+            while i < n and acc + segl[i] <= s_at + 1e-9:
+                acc += segl[i]; i += 1
+            s = s_at
+            for j in range(i + 1, n + 1):
+                s = sum(segl[:j]); x, y = path[j % n]
+                zz = levels[-1] if zmod is None else zmod(s % total, levels[-1])
+                pb.feed_to(x, y, zz, pb.plunge if abs(zz - pb.pos[2]) > 1e-9 else None)
+        for x, y in lead_out:
+            pb.feed_to(x, y, pb.pos[2])
         pb.retract()
     pb.retract()
     return op
@@ -832,6 +850,70 @@ def _lead_arcs(dense, r: float, climb: bool):
     return lead_in, lead_out
 
 
+def _lap_ramp(pb: PathBuilder, ring: list[tuple[float, float]], z: float, ramp: float, s0: float = 0.0,
+              zmod=None, lap: bool = True) -> float:
+    """Entry along the path instead of a plunge. The tool is on the closed `ring` at arc length `s0` (its current z);
+    it descends to `z` along the ring at `ramp` degrees (going round again if the ring is shorter than the ramp)
+    and then, with `lap`, cuts one full lap at `z` so the sloped ramp floor is cleared. Returns the arc length (mod
+    the ring length) where the tool ends. zmod(s, z) may lift points (tabs). ramp <= 0: plunge where the tool is."""
+    n = len(ring)
+    seg = [math.dist(ring[i], ring[(i + 1) % n]) for i in range(n)]
+    total = sum(seg)
+    z_from = pb.pos[2]
+    depth = max(0.0, z_from - z)
+    if ramp <= 0 and depth > 0:
+        pb.plunge_to(z); z_from, depth = z, 0.0
+    L = depth / math.tan(math.radians(ramp)) if depth > 0 else 0.0
+    end = s0 + L + (total if lap else 0.0)
+    if end <= s0 + 1e-9 or total <= 1e-9:
+        return s0 % total if total > 1e-9 else 0.0
+    step = 0.5 if (L > 0 or zmod is not None) else total + 1.0     # sample finely only where z varies
+    # walk the ring from s0 to end, emitting every vertex crossing, every `step` while z varies, and the ramp end
+    i = 0; s_vert = 0.0
+    while i < n and s_vert + seg[i] <= s0 + 1e-9:                   # segment containing s0
+        s_vert += seg[i]; i += 1
+    i %= n
+    s = s0
+    def point(i_seg, s_local):
+        a, b = ring[i_seg], ring[(i_seg + 1) % n]
+        t = s_local / seg[i_seg] if seg[i_seg] > 1e-12 else 0.0
+        return a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t
+    def emit(s_at, i_seg, s_local):
+        x, y = point(i_seg, s_local)
+        zz = z_from - depth * min(1.0, (s_at - s0) / L) if L > 0 else z
+        if zmod is not None:
+            zz = zmod(s_at % total, zz)
+        ramping = L > 0 and s_at <= s0 + L + 1e-9                  # the ramp (to its end point) runs at the plunge feed
+        pb.feed_to(x, y, zz, pb.plunge if ramping else None)
+    def corner(i_seg):                                                # does the path turn at the end of segment i?
+        a, b, c = ring[i_seg], ring[(i_seg + 1) % n], ring[(i_seg + 2) % n]
+        ux, uy, vx, vy = b[0] - a[0], b[1] - a[1], c[0] - b[0], c[1] - b[1]
+        lu, lv = math.hypot(ux, uy), math.hypot(vx, vy)
+        if lu < 1e-12 or lv < 1e-12:
+            return False
+        return (ux * vx + uy * vy) / (lu * lv) < math.cos(math.radians(8))
+    s_last = s0
+    while s < end - 1e-9:
+        seg_end = s_vert + seg[i]                                     # arc length at the end of segment i
+        nxt = min(seg_end, end)
+        ramping = L > 0 and s < s0 + L - 1e-9
+        if ramping and s0 + L < nxt - 1e-9:
+            nxt = s0 + L                                              # stop exactly at the ramp end
+        if ramping or zmod is not None:
+            while s + step < nxt - 1e-9:
+                s += step; emit(s, i, s - s_vert); s_last = s
+        s = nxt
+        at_vertex = abs(s - seg_end) < 1e-9
+        # while ramping, fine vertices of a smooth curve are skipped (sampled by `step` instead); corners always emitted
+        if not (ramping and at_vertex and s - s_last < step * 0.5 and not corner(i)) or s >= end - 1e-9 or abs(s - (s0 + L)) < 1e-9:
+            emit(s, i, s - s_vert); s_last = s
+        if at_vertex:
+            s_vert = seg_end; i = (i + 1) % n
+            if i == 0:
+                s_vert -= total; s -= total; end -= total; s0 -= total; s_last -= total   # wrap: keep arc lengths small
+    return s % total
+
+
 def _in_tab(s: float, centres: list[float], width: float, total: float) -> bool:
     for c in centres:
         d = abs(s - c)
@@ -843,10 +925,11 @@ def _in_tab(s: float, centres: list[float], width: float, total: float) -> bool:
 
 def pocket(setup: Setup, tool: Tool, polys, z_top: float, z_bottom: float, stepdown: float | None = None,
            stepover: float | None = None, finish: bool = True, climb: bool = True, rest_from: Tool | None = None,
-           stock_to_leave: float = 0.0, name: str = "Pocket") -> Op:
+           stock_to_leave: float = 0.0, ramp: float = RAMP_DEG, name: str = "Pocket") -> Op:
     """Clear closed regions (holes in the polygons are islands) with concentric inward passes,
     innermost first, wall pass last. rest_from=<bigger tool>: only machine what that tool left.
-    stock_to_leave: radial allowance left on the walls for a finishing contour."""
+    stock_to_leave: radial allowance left on the walls for a finishing contour. ramp: entry angle in degrees —
+    the tool ramps down along the innermost ring (a helix on a small ring) instead of plunging (0 = plunge)."""
     op = Op(name, "pocket" if rest_from is None else "rest", tool, color=COLORS["pocket" if rest_from is None else "rest"])
     pb = PathBuilder(setup, tool, op)
     src = _polys(polys)
@@ -882,35 +965,47 @@ def pocket(setup: Setup, tool: Tool, polys, z_top: float, z_bottom: float, stepd
     # separate regions (two pockets) are finished one after the other through all depths — not one level across all of
     # them — and visited nearest-neighbour; within a region the next level is plunged where the tool already is
     regions = _nn_order(_polys(region), lambda R: (R.centroid.x, R.centroid.y), pb.pos[:2] if pb.pos else None)
-    op.params = dict(z_top=z_top, z_bottom=z_bottom, stepover=so, passes=len(levels), rings=len(shells), regions=len(regions))
+    op.params = dict(z_top=z_top, z_bottom=z_bottom, stepover=so, passes=len(levels), rings=len(shells), regions=len(regions), ramp=ramp)
+    z_air = z_top + 0.5                                     # entry starts just above where this op cuts
     for R in regions:
         shells_R = [[q for q in ps if R.covers(q.representative_point())] for ps in shells]
         shells_R = [ps for ps in shells_R if ps]
         if not shells_R:
             continue
-        inner_ok = R.buffer(-tool.radius + 1e-6)   # where the tool centre may travel at depth inside this region
-        first = True
-        for z in levels:
-            for ps in reversed(shells_R):        # innermost first
-                for q in ps:
-                    q = orient(q, 1.0)
-                    rings = [_ring_coords(q.exterior, False)] + [_ring_coords(h, True) for h in q.interiors]
-                    if not climb:
-                        rings = [r[::-1] for r in rings]
-                    for ring in rings:
-                        start = ring[0]
-                        if first or pb.pos is None or not inner_ok.covers(LineString([pb.pos[:2], start])):
-                            pb.rapid_xy(*start); pb.plunge_to(z); first = False
-                        else:
-                            if pb.pos[2] > z + 1e-6:
-                                pb.plunge_to(z)                      # next level: straight down where the tool is (cleared floor)
-                            pb.feed_to(start[0], start[1], z)
-                        for x, y in ring[1:]:
-                            pb.feed_to(x, y, z)
-                        pb.feed_to(start[0], start[1], z)
+        _rings_ramped(pb, R, shells_R, tool, levels, climb, ramp, z_air)
         pb.retract()
     pb.retract()
     return op
+
+
+def _rings_ramped(pb: PathBuilder, R, shells_R, tool: Tool, levels, climb: bool, ramp: float, z_air: float):
+    """Cut the concentric rings of one region innermost-first at every level. Entries ramp down along the ring
+    being cut (from the previous level's floor, or from just above the stock on the first level); links between
+    rings at one level are feeds through cleared material, links that would cross the wall retract."""
+    inner_ok = R.buffer(-tool.radius + 1e-6)       # where the tool centre may travel at depth inside this region
+    floor = z_air                                   # z the region is cleared to so far
+    first = True
+    rings_all = []                                  # innermost first
+    for ps in reversed(shells_R):
+        for q in ps:
+            q = orient(q, 1.0)
+            rings = [_ring_coords(q.exterior, False)] + [_ring_coords(h, True) for h in q.interiors]
+            rings_all += [r[::-1] for r in rings] if not climb else rings
+    # the entry ramps along the innermost ring that is long enough (a helix of about half the tool diameter or more);
+    # a shorter innermost ring would make the ramp a wobbling plunge — those rings follow once the tool is at depth
+    min_len = max(tool.diameter * 1.5, 2.0)
+    lens = [sum(math.dist(r[k], r[(k + 1) % len(r)]) for k in range(len(r))) for r in rings_all]
+    ei = next((k for k, ln in enumerate(lens) if ln >= min_len), max(range(len(lens)), key=lambda k: lens[k]) if lens else 0)
+    order = [rings_all[ei]] + rings_all[:ei] + rings_all[ei + 1:]
+    for z in levels:
+        for ring in order:
+            start = ring[0]
+            if first or pb.pos is None or not inner_ok.covers(LineString([pb.pos[:2], start])):
+                pb.rapid_xy(*start); pb.plunge_to(floor); first = False      # down through air to the cleared floor
+            else:
+                pb.feed_to(start[0], start[1], pb.pos[2])
+            _lap_ramp(pb, ring, z, ramp, 0.0)
+        floor = z
 
 
 def rest_region(polys, prev_tool: Tool, tool: Tool, overlap: float | None = None) -> MultiPolygon:
@@ -1156,25 +1251,9 @@ def _concentric_full_depth(pb: PathBuilder, P: Polygon, tool: Tool, so: float, l
             break
         shells.append(ps)
         d += so
-    inner_ok = P.buffer(-tool.radius + 1e-6)
-    for z in levels:
-        first = True
-        for ps in reversed(shells):
-            for q in ps:
-                q = orient(q, 1.0)
-                rings = [_ring_coords(q.exterior, False)] + [_ring_coords(h, True) for h in q.interiors]
-                if not climb:
-                    rings = [r[::-1] for r in rings]
-                for ring in rings:
-                    start = ring[0]
-                    if first or pb.pos is None or pb.pos[2] > z + 1e-6 or not inner_ok.covers(LineString([pb.pos[:2], start])):
-                        pb.rapid_xy(*start); pb.plunge_to(z); first = False
-                    else:
-                        pb.feed_to(start[0], start[1], z)
-                    for x, y in ring[1:]:
-                        pb.feed_to(x, y, z)
-                    pb.feed_to(start[0], start[1], z)
-        pb.retract()
+    z_air = (levels[0] + (levels[0] - levels[1] if len(levels) > 1 else 1.0) if levels else pb.setup.stock.top) + 0.5   # just above the first level's top
+    _rings_ramped(pb, P, shells, tool, levels, climb, RAMP_DEG, z_air)
+    pb.retract()
 
 
 def drill(setup: Setup, tool: Tool, points, z_top: float | None = None, z_bottom: float | None = None,
@@ -1780,8 +1859,43 @@ def _merge_collinear(pts, tol):
     return out
 
 
+def _z_linear(pts3, tol):
+    """Is z linear in the distance along these XYZ points (a flat arc, or a helix / ramp)?"""
+    s = [0.0]
+    for a, b in zip(pts3, pts3[1:]):
+        s.append(s[-1] + math.dist(a[:2], b[:2]))
+    if s[-1] < 1e-12:
+        return False
+    z0, z1 = pts3[0][2], pts3[-1][2]
+    return all(abs(p[2] - (z0 + (z1 - z0) * si / s[-1])) <= tol for p, si in zip(pts3, s))
+
+
+def _merge_collinear3(pts, tol):
+    """Drop interior XYZ points that lie on the straight line between their neighbours (ramps stay one line)."""
+    if len(pts) < 3:
+        return pts
+    out = [pts[0]]
+    anchor = pts[0]
+    for k in range(1, len(pts) - 1):
+        a, b, c = anchor, pts[k], pts[k + 1]
+        v = (c[0] - a[0], c[1] - a[1], c[2] - a[2])
+        ln = math.sqrt(v[0] ** 2 + v[1] ** 2 + v[2] ** 2)
+        if ln < 1e-12:
+            continue
+        w = (b[0] - a[0], b[1] - a[1], b[2] - a[2])
+        cr = (w[1] * v[2] - w[2] * v[1], w[2] * v[0] - w[0] * v[2], w[0] * v[1] - w[1] * v[0])
+        dev = math.sqrt(cr[0] ** 2 + cr[1] ** 2 + cr[2] ** 2) / ln
+        along = (w[0] * v[0] + w[1] * v[1] + w[2] * v[2]) / ln
+        if dev <= tol and 0 <= along <= ln:
+            continue
+        out.append(b); anchor = b
+    out.append(pts[-1])
+    return out
+
+
 def _with_arcs(moves, tol):
-    """Yield moves, replacing runs of coplanar feed moves that lie on a circle with ('arc', x, y, z, f, cx, cy, cw)."""
+    """Yield moves, replacing runs of feed moves that lie on a circle — flat, or helical with z linear along the
+    arc (ramp entries) — with ('arc', x, y, z, f, cx, cy, cw); straight stretches are merged into single lines."""
     if tol is None:
         for m in moves:
             yield tuple(m)
@@ -1792,12 +1906,12 @@ def _with_arcs(moves, tol):
         m = moves[i]
         if m[0] == RAPID or i == 0:
             yield tuple(m); i += 1; continue
-        # candidate run: feed moves at constant z and feed, starting from the previous position
-        z, f = m[3], m[4]
+        # candidate run: feed moves at one feed rate, starting from the previous position
+        f = m[4]
         j = i
-        while j < n and moves[j][0] != RAPID and abs(moves[j][3] - z) < 1e-9 and moves[j][4] == f:
+        while j < n and moves[j][0] != RAPID and moves[j][4] == f:
             j += 1
-        run = [(moves[i - 1][1], moves[i - 1][2])] + [(mv[1], mv[2]) for mv in moves[i:j]]
+        run = [(moves[i - 1][1], moves[i - 1][2], moves[i - 1][3])] + [(mv[1], mv[2], mv[3]) for mv in moves[i:j]]
         # greedy arcs on the RAW run first (collinear merging would coarsen fine arc chords past the
         # sagitta test); straight leftovers are merged afterwards
         items: list[tuple] = []
@@ -1806,33 +1920,33 @@ def _with_arcs(moves, tol):
             best = None
             e = k + 3
             while e <= len(run):
-                res = _arc_ok(run[k:e], tol)
-                if res is None:
+                res = _arc_ok([q[:2] for q in run[k:e]], tol)
+                if res is None or not _z_linear(run[k:e], tol):
                     break
                 best = (e, res)
                 e += 1
             if best is not None:
                 e, (cx, cy, cw) = best
-                x, y = run[e - 1]
+                x, y, z = run[e - 1]
                 items.append(("arc", x, y, z, f, cx, cy, cw))
                 k = e - 1
             else:
-                x, y = run[k + 1]
+                x, y, z = run[k + 1]
                 items.append((FEED, x, y, z, f))
                 k += 1
-        # merge straight stretches
-        start_xy = run[0]
-        pending: list[tuple[float, float]] = []
+        # merge straight stretches (in 3D, so a straight ramp is one line)
+        start = run[0]
+        pending: list[tuple[float, float, float]] = []
         for it in items:
             if it[0] == FEED:
-                pending.append((it[1], it[2]))
+                pending.append((it[1], it[2], it[3]))
                 continue
-            for x, y in _merge_collinear([start_xy] + pending, tol * 0.5)[1:] if pending else []:
+            for x, y, z in _merge_collinear3([start] + pending, tol * 0.5)[1:] if pending else []:
                 yield (FEED, x, y, z, f)
             pending = []
             yield it
-            start_xy = (it[1], it[2])
-        for x, y in _merge_collinear([start_xy] + pending, tol * 0.5)[1:] if pending else []:
+            start = (it[1], it[2], it[3])
+        for x, y, z in _merge_collinear3([start] + pending, tol * 0.5)[1:] if pending else []:
             yield (FEED, x, y, z, f)
         i = j
 

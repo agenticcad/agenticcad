@@ -228,6 +228,9 @@ Agent-native, like the CAD side: a second script per design, `cam.py`, written b
   real time at the programmed feed and the machine's rapid rate, the tool moves continuously, ⏮ / ⏭ jump between
   operations, the operations list shows setup headers and the operation being run (▶ plays from any of them), and on
   the Machine view a flipped setup turns the work over on the table.
+- **Entries**: pocket and contour passes ramp into the material at 3° (`ramp=`, 0 to plunge) — pockets along the
+  innermost ring that is long enough (a helix on a small ring), contours along the profile with one entry per ring
+  and no retract between passes — and face passes plunge clear of the stock; helical ramps post as G2/G3 arcs.
 - **Simulation**: `simulate_cam` (agent) or **Simulate** in the CAM bar runs a material-removal simulation of all
   visible ops or one: a two-sided height map for top/bottom setups, a radial map for 4th-axis setups. The viewer
   shows the stock being cut in step with the slider, with gouges in red and material left in amber on the last

@@ -5,6 +5,23 @@ features, patch bumps fix things. The version shown in the UI header comes from 
 
 ## [Unreleased]
 
+## [0.36.0] — 2026-10-13
+
+### Changed
+- **Toolpaths ramp into the material instead of plunging.** Pocket passes descend along the innermost ring that is
+  long enough to ramp on (a helix on a small ring) at 3° (`ramp=`, 0 to plunge), from the previous level's floor; the
+  rings inside it follow at depth. Contour passes get one entry per ring: the lead-in just above the stock, then
+  every pass ramps down along the profile from where the previous pass ended and runs a full lap, with no retract
+  between passes; tabs still lift the tool. Face passes start and end with the tool clear of the stock, so their
+  plunges are in air. Adaptive already entered on a helix.
+- **Helical arcs in the G-code.** Ramps on circular paths post as G2/G3 with Z (every supported controller
+  interpolates helices), and straight ramps merge into single lines, so programs stay as short as before.
+
+### Fixed
+- The holder and fixture collision checks reported the first contact in each batch of moves rather than the deepest,
+  which understated a collision that grows along a ramp. They now keep the deepest contact.
+
+
 ## [0.35.2] — 2026-10-13
 
 ### Fixed

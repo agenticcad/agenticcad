@@ -645,6 +645,7 @@ def _collide_z(hits, zhi, P, I, done, tool, mm, res, x0, y0, op_name, stock, pla
         coarse = _pool_max(zhi, c)
         step = max(1, int((r / 2) / (res / 2)))                        # sample spacing ≤ r/2 (samples are res/2 apart)
         rc = int(math.ceil(r / res))
+        worst = None                                                   # the deepest hit of this level in this piece
         for k in range(0, len(P), step):
             x, y, z = P[k]
             zb = z + zb_off
@@ -663,9 +664,11 @@ def _collide_z(hits, zhi, P, I, done, tool, mm, res, x0, y0, op_name, stock, pla
             mask = (d2 <= r * r) & (d2 > tool.radius * tool.radius) & (sub > zb + 0.02) & np.isfinite(sub)
             if mask.any():
                 depth = float((sub[mask] - zb).max())
-                hits.append({"op": op_name, "move": int(I[k]), "pos": [round(float(x), 2), round(float(y), 2), round(float(z), 2)],
-                             "part": name, "what": "stock", "depth": round(depth, 2)})
-                break                                                  # one hit per level per piece is enough to report
+                if worst is None or depth > worst["depth"]:            # one hit per level per piece: the deepest (ramps enter gradually)
+                    worst = {"op": op_name, "move": int(I[k]), "pos": [round(float(x), 2), round(float(y), 2), round(float(z), 2)],
+                             "part": name, "what": "stock", "depth": round(depth, 2)}
+        if worst is not None:
+            hits.append(worst)
     # the tool tip through the spoilboard into the table
     zmin = float(P[:, 2].min())
     if zmin < table_z - spoil - 0.02:
@@ -747,6 +750,7 @@ def _collide_fixture(hits, fix_hi, P, K, I, tool, mm, res, x0, y0, op_name, fixt
         coarse = _pool_max(fix_hi, c)
         step = max(1, int(r / res))
         rc = int(math.ceil(r / res))
+        worst = None                                                   # the deepest hit of this level in this piece
         for k in range(0, len(P), step):
             x, y, z = P[k]; zb = z + zb_off
             ix, iy = int(round((x - x0) / res)), int(round((y - y0) / res))
@@ -760,7 +764,10 @@ def _collide_fixture(hits, fix_hi, P, K, I, tool, mm, res, x0, y0, op_name, fixt
             d2 = ((xx - (x - x0) / res) ** 2 + (yy - (y - y0) / res) ** 2) * res * res
             mask = (d2 <= r * r) & (sub > zb + 0.02) & np.isfinite(sub)
             if mask.any():
-                hits.append({"op": op_name, "move": int(I[k]), "pos": [round(float(x), 2), round(float(y), 2), round(float(z), 2)],
-                             "part": name, "what": f"fixture ({fixture_name})", "depth": round(float((sub[mask] - zb).max()), 2),
-                             "rapid": bool(K[k] == 0) if hasattr(K, "__len__") else False})
-                break
+                depth = round(float((sub[mask] - zb).max()), 2)
+                if worst is None or depth > worst["depth"]:
+                    worst = {"op": op_name, "move": int(I[k]), "pos": [round(float(x), 2), round(float(y), 2), round(float(z), 2)],
+                             "part": name, "what": f"fixture ({fixture_name})", "depth": depth,
+                             "rapid": bool(K[k] == 0) if hasattr(K, "__len__") else False}
+        if worst is not None:
+            hits.append(worst)
