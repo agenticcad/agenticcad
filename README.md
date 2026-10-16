@@ -270,7 +270,9 @@ Agent-native, like the CAD side: a second script per design, `cam.py`, written b
   fixtures can be on the table at once (`fixtures=[{"name", "at", "rot", "params"}]` or the CAM tab's Fixtures
   panel: pick, move, turn, add, remove); every one is drawn and collision-checked, and overlaps are warned about. The
   Makera Z1 low-profile vise is modelled from Makera's dimensions (226 × 103 mm, jaws along X to 130 mm, thin stock
-  on 20 mm ledges) and bolts to the bed with the spoilboard removed.
+  on 20 mm ledges) and bolts to the bed with the spoilboard removed. The Z1's spindle head comes from Makera's own
+  simplified CAD, and a machine's nose stack can describe an off-centre head as boxes about the spindle axis, so the
+  collision check sees it where it really is.
 - Not yet: drilling cycles (GRBL has none), thread milling, side-setup simulation.
 
 ## 3D printing (external slicer)

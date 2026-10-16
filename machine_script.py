@@ -16,6 +16,8 @@ A script runs in the design-script namespace (build123d, `import_step`, maths) p
         any build123d shape in the machine frame (X right, Y back, Z up, origin = table top centre);
         collision=True for geometry the tool/holder must not hit (table, chuck, tailstock, head, walls).
     machine(home=(x, y, nose_z), travel=(x, y, z), clearance=mm, nose=[{name, r, h}...], table={x, y, t, ...},
+            (a level that is not round about the spindle — an off-centre head — is {name, box: [x0, x1, y0, y1], h} in
+             the machine's X / Y about the spindle axis, or boxes: [[...], [...]] for a union, e.g. a head + a probe on its side)
             rotary=None | {axis_y, axis_z, chuck_face_x, chuck_r, tail_x, tail_r, max_diameter, max_length},
             spoilboard=0, stickout=None, sources={number: "verified|reference|estimated: where"}, notes="", key=None)
     helpers: box(x, y, z, at=(cx, cy, cz), zmin=None), cyl_z(r, h, at=(x, y), zmin), cyl_x(r, length, y, z, xmin),
@@ -37,6 +39,32 @@ ROOT = Path(__file__).parent
 BUILTIN_DIR = ROOT / "machine_scripts"
 AXES = (None, "x", "y", "z", "a")
 MODES = ("head", "table")
+
+
+def normalize_level(lvl: dict, i: int = 0) -> dict:
+    """One level of the holder / nose stack: {name, r, h} round about the spindle axis, or {name, box, h} where box =
+    [x0, x1, y0, y1] is the level's footprint relative to the spindle axis in the machine's X / Y (a head that sits
+    off-centre, e.g. mostly in front of the spindle). A box level also gets r = its farthest corner from the axis."""
+    name = str(lvl.get("name", f"level {i + 1}"))
+    h = float(lvl["h"])
+    raw = lvl.get("boxes") if lvl.get("boxes") is not None else ([lvl["box"]] if lvl.get("box") is not None else None)
+    if raw is not None:                                    # one box, or several (their union: a head with a probe on its side)
+        boxes = []
+        for bx in raw:
+            x0, x1, y0, y1 = (float(v) for v in bx)
+            if not (x0 < x1 and y0 < y1):
+                raise MachineScriptError(f"machine(): nose level {name!r}: a box is [x0, x1, y0, y1] with x0 < x1 and y0 < y1")
+            boxes.append([x0, x1, y0, y1])
+        if not boxes:
+            raise MachineScriptError(f"machine(): nose level {name!r}: boxes is empty")
+        r = max((x * x + y * y) ** 0.5 for b in boxes for x in b[:2] for y in b[2:])
+        out = {"name": name, "r": round(r, 3), "h": h, "boxes": boxes,
+               "box": [min(b[0] for b in boxes), max(b[1] for b in boxes), min(b[2] for b in boxes), max(b[3] for b in boxes)]}
+    else:
+        out = {"name": name, "r": float(lvl["r"]), "h": h}
+    if out["r"] <= 0 or h <= 0:
+        raise MachineScriptError(f"machine(): nose level {name!r} needs r > 0 (or a box) and h > 0")
+    return out
 
 
 class MachineScriptError(Exception):
@@ -180,11 +208,12 @@ def _assemble(machine, nodes, parts, meta) -> mm.MachineModel:
     nose = []
     for i, lvl in enumerate(meta["nose"]):
         try:
-            nose.append({"name": str(lvl.get("name", f"level {i + 1}")), "r": float(lvl["r"]), "h": float(lvl["h"])})
+            nose.append(normalize_level(lvl, i))
+        except MachineScriptError:
+            raise
         except Exception:
-            raise MachineScriptError("machine(): nose is a list of {name, r, h} from the nose bottom upwards") from None
-        if nose[-1]["r"] <= 0 or nose[-1]["h"] <= 0:
-            raise MachineScriptError(f"machine(): nose level {nose[-1]['name']!r} needs r > 0 and h > 0")
+            raise MachineScriptError("machine(): nose is a list of {name, r, h} (or {name, box: [x0, x1, y0, y1], h} for a head "
+                                     "that is not round about the spindle) from the nose bottom upwards") from None
     if not nose:
         raise MachineScriptError("machine(): nose needs at least one level (the collet nut or nose)")
     table = dict(meta["table"])

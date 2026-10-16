@@ -340,7 +340,8 @@ user opens the doors in the viewer — give every machine with a cover or doors 
 material, collision=False) with any build123d shape (helpers box(x, y, z, at=(cx, cy, cz), zmin=), cyl_z(r, h, at=(x, y),
 zmin=), cyl_x(r, length, y, z, xmin), cyl_y(r, length, x, z, ymin), shell(outer, inner, at=, zmin=, inner_zmin=,
 opening=('front', w, h)), import_step('vendor.step') from workspace/imports); machine(home=(spindle x, y, nose-bottom z
-at Z top), travel=(x, y, z), clearance=nose height above the table at Z top, nose=[{name, r, h}, ...] from the nose
+at Z top), travel=(x, y, z), clearance=nose height above the table at Z top, nose=[{name, r, h}, ...] (or {name, box: [x0, x1, y0, y1], h} about the spindle axis for a head that is not
+centred on the spindle, boxes=[...] for a union) from the nose
 bottom upwards (collet nut, nose, collar, head), table={'x', 'y', 't'}, rotary=None or {axis_y, axis_z, chuck_face_x,
 chuck_r, tail_x, tail_r, max_diameter, max_length}, spoilboard=mm, stickout=None, sources={'what': 'verified|reference|
 estimated: where from'}, notes=''). Materials: cast, paint_light, paint_white, paint_dark, paint_blue, ground_steel,

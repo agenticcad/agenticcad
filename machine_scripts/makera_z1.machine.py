@@ -1,8 +1,8 @@
 # Makera Z1 (+ 4th axis) — detailed machine model.
 # Frame: X right, Y back, Z up, origin = centre of the bed top (spoilboard top) with the bed at machine zero (forward).
 # Verified: makera.com (work area 200×200×100, gantry clearance 115, 4th axis Ø80×150), Makera Z1-MDF-v2.1 bed file
-# (206×206×6, 36 counterbored M5 holes). Reference: Carvera Community simplified Z1 model (spindle nose Ø16×20,
-# head 65×70×190, enclosure 355×435×449, chuck Ø52). Case styling (plinth / canopy / diagonal split) from Makera's
+# (206×206×6, 36 counterbored M5 holes), Makera's simplified Z1 model (MakeraInc/CarveraProfiles: spindle axis, Ø16×20 nose,
+# 65×70 head 52 mm in front of the axis, motor cap, X carriage; enclosure 355×435×449, chuck Ø52). Case styling (plinth / canopy / diagonal split) from Makera's
 # product photos; its proportions are ESTIMATED. Rods, carriages, chains, tool-length sensor size, LED, feet: estimated.
 
 node("base")
@@ -75,38 +75,60 @@ part("bridge beam", "bridge", box(344, 56, 12, at=(0, 208, 0), zmin=318), "paint
 part("X motor", "bridge", box(42, 40, 42, at=(137, 256, 0), zmin=214), "paint_dark")
 part("X cable chain", "bridge", drag_chain((-160, 197, 330), 150, 28), "rubber")
 
-# ------------------------------------------------------------------ head: X carriage (moves in X)
-hx, hy, nose_z = -108.0, 101.0, 116.0          # home: spindle axis x=-108, y=+101, nose bottom 116 above the bed (verified)
-xc = box(90, 20, 176, at=(hx, 156, 0), zmin=140)
-xc = fillet(xc.edges().filter_by(Axis.Z), 3)
+# ------------------------------------------------------------------ head (VERIFIED: Makera's own simplified Z1 model,
+# MakeraInc/CarveraProfiles ▸ Machine_Design_Files ▸ Makera-Z1_Simplified_4Axis.step, mapped to this frame): spindle
+# axis x −107.8, y +101.0; Ø16 nose from 116.3 (nose bottom at Z home) to 136.3; head cover 65 wide (centred on the
+# axis) × 70 deep — 52 in front of the axis, 18 behind — from 136.3 to 286.3, front-bottom chamfered 16 back × 19 up,
+# R5 front edges; the motor cap on top is a cone Ø64 → Ø48.7 from 286.3 to 326.3 centred 16 mm in front of the axis;
+# the X carriage block behind it is 83 × 48 from 136.3 to 332.3.
+hx, hy, nose_z = -107.8, 101.0, 116.3          # home: spindle axis and nose bottom above the spoilboard (verified)
+y_front, y_back = hy - 52.0, hy + 18.0
+z_hb, z_ht = nose_z + 20.0, nose_z + 170.0     # head cover bottom / top
+
+xc = box(83, 48, 196, at=(hx, y_back + 24.0, 0), zmin=z_hb)            # X carriage (moves in X only)
 for z in (170, 300):
     for x0 in (hx - 38, hx + 8):
-        xc = xc + (cyl_x(11, 30, rod_y, z, x0) - cyl_x(6.2, 32, rod_y, z, x0 - 1))
-for sx in (-1, 1):
-    xc = xc + box(8, 4, 170, at=(hx + sx * 22, 146, 0), zmin=145)       # Z linear rails on the carriage front (y 144..148)
-part("X carriage", "head", xc, "paint_white", collision=True)
-part("Z motor", "head", box(28, 28, 28, at=(hx, 160, 0), zmin=316), "paint_dark")
+        xc = xc + (cyl_x(11, 30, rod_y, z, x0) - cyl_x(6.2, 32, rod_y, z, x0 - 1))       # bearing blocks on the X rods
+part("X carriage", "head", xc, "alu", collision=True)
 
-# ------------------------------------------------------------------ Z carriage + brushless spindle (moves in Z)
-# 65×70×190 head envelope (reference): exposed spindle motor 136..180 + white head cover 180..326
-hc = box(65, 70, 146, at=(hx, 109, 0), zmin=180)
-hc = fillet(hc.edges().filter_by(Axis.Z), 10)
-part("Z carriage", "spindle", hc, "paint_white", collision=True)
-part("head badge", "spindle", box(40, 1, 60, at=(hx, 73.5, 0), zmin=250), "paint_dark")
-sm = cyl_z(22, 44, at=(hx, hy), zmin=nose_z + 20)
-for z in range(140, 178, 5):
-    sm = sm - (cyl_z(23, 2, at=(hx, hy), zmin=z) - cyl_z(20.5, 2.2, at=(hx, hy), zmin=z - 0.1))   # cooling fins
-part("spindle motor", "spindle", sm, "anodised", collision=True)
-# spindle nose Ø16×20 envelope (reference): nose 124..136 + collet nut 116..124
-part("spindle nose", "spindle", cyl_z(8, 12, at=(hx, hy), zmin=nose_z + 8), "stainless", collision=True)
-cn = (cyl_z(8, 8, at=(hx, hy), zmin=nose_z) & box(14, 30, 10, at=(hx, hy, 0), zmin=nose_z - 1))
-cn = cn - cyl_z(1.6, 3, at=(hx, hy), zmin=nose_z - 0.5) - (cyl_z(8.5, 0.8, at=(hx, hy), zmin=nose_z + 4) - cyl_z(7.4, 1, at=(hx, hy), zmin=nose_z + 3.9))
-part("collet nut", "spindle", cn, "steel", collision=True)
-# magnetic dust shoe (removable; not in the nose collision stack)
-ds = cyl_z(30, 10, at=(hx, hy), zmin=nose_z + 20) - cyl_z(23, 12, at=(hx, hy), zmin=nose_z + 19)
-ds = ds + (cyl_x(7, 18, hy, nose_z + 27, hx + 27) - cyl_x(5, 20, hy, nose_z + 27, hx + 26))
-part("dust shoe", "spindle", ds, "acrylic")
-part("dust shoe brush", "spindle", cyl_z(30, 16, at=(hx, hy), zmin=nose_z + 4) - cyl_z(26, 18, at=(hx, hy), zmin=nose_z + 3), "rubber")
+# head cover (moves in Z): the box with its front-bottom chamfer, R5 on the front edges
+hc = box(65, 70, z_ht - z_hb, at=(hx, (y_front + y_back) / 2, 0), zmin=z_hb)
+wedge = extrude(Plane.YZ.offset(hx - 40) * Polygon((y_front - 1, z_hb - 1), (y_front + 16.0, z_hb - 1), (y_front + 16.0, z_hb),
+                                                    (y_front, z_hb + 19.0), (y_front - 1, z_hb + 19.0), align=None), amount=80)
+hc = hc - wedge
+try:
+    front = hc.edges().filter_by(lambda e: max(v.Y for v in e.vertices()) < y_front + 16.5 and min(v.Z for v in e.vertices()) < z_ht - 1)
+    hc = fillet(front, 5.0)
+except Exception:
+    pass                                                                 # sharp edges if OCCT can't blend the corner
+part("head cover", "spindle", hc, "paint_light", collision=True)
+# status LED strip (centre of the front face) and the vertical MAKERA lettering on its left (Makera's model / photos)
+part("status LED", "spindle", box(5.5, 0.8, 72, at=(hx, y_front - 0.1, 0), zmin=z_hb + 21), "led_blue", collision=False)
+try:                                                    # MAKERA, read top-to-bottom, on the front face's left (Makera's model, photo)
+    txt = Text("MAKERA", font_size=8.6, align=(Align.MIN, Align.CENTER))           # ~6 mm tall, stretched to Makera's 45.5 mm
+    bb = txt.bounding_box(); txt = scale(txt, by=(45.5 / max(bb.max.X - bb.min.X, 1e-6), 1, 1))
+    lettering = extrude(Plane(origin=(hx - 19.5, y_front + 0.01, z_hb + 139.1), x_dir=(0, 0, -1), z_dir=(0, -1, 0)) * txt, amount=0.35)
+    part("head lettering", "spindle", lettering, "lettering", collision=False)
+except Exception:
+    pass
+# finned motor cap on top: a cone Ø64 → Ø48.7 with vertical fins (cap centred 16 mm in front of the axis)
+cy_cap = hy - 15.94
+cap = Pos(hx, cy_cap, z_ht) * Cone(32.0, 24.35, 40.0, align=(Align.CENTER, Align.CENTER, Align.MIN))
+for k in range(28):
+    a = 360.0 * k / 28
+    cap = cap - Pos(hx, cy_cap, z_ht + 4) * Rot(0, 0, a) * Pos(30.0, 0, 0) * Box(7.0, 1.6, 40.0, align=(Align.CENTER, Align.CENTER, Align.MIN))
+part("motor cap", "spindle", cap, "anodised", collision=True)
+# tool-change lever (front, Makera's photos; not in Makera's model, estimated, well above any cut)
+lev = Pos(hx - 12, y_front - 4, z_hb + 95) * Rot(0, 40, 0) * Cylinder(3.0, 44, align=(Align.CENTER, Align.CENTER, Align.MIN))
+lev = lev + Pos(hx - 12 + 44 * 0.643, y_front - 4, z_hb + 95 + 44 * 0.766) * Sphere(5.0)
+part("tool-change lever", "spindle", lev, "ground_steel", collision=False)
+# wired probe stored in its holder on the right side of the head (photos: down to ~12 mm above the head bottom; estimated)
+part("wired probe holder", "spindle", box(19, 22, 108, at=(hx + 42.0, y_front + 11, 0), zmin=z_hb + 12), "acrylic", collision=True)
+part("wired probe", "spindle", cyl_z(4.5, 60, at=(hx + 42.0, y_front + 11), zmin=z_hb + 14) + cyl_z(1.0, 4, at=(hx + 42.0, y_front + 11), zmin=z_hb + 10),
+     "paint_dark", collision=True)
+# spindle nose Ø16 × 20 (Makera's model) with its collet ring
+part("spindle nose", "spindle", cyl_z(8, 14, at=(hx, hy), zmin=nose_z + 6) - cyl_z(2.2, 16, at=(hx, hy), zmin=nose_z), "stainless", collision=True)
+part("collet ring", "spindle", cyl_z(6.5, 6, at=(hx, hy), zmin=nose_z) - cyl_z(1.8, 8, at=(hx, hy), zmin=nose_z - 1), "steel", collision=True)
 
 # ------------------------------------------------------------------ case (from Makera's photos)
 # One rounded shell 355×435×449 (reference), split three ways:
@@ -229,19 +251,31 @@ if fourth:
     part("tailstock handwheel", "bed", cyl_x(4, 6, ay, az, 128) + cyl_x(14, 6, ay, az, 134) + cyl_x(3, 10, ay, az + 9, 140), "alu")
     rotary = {"axis_y": ay, "axis_z": az, "chuck_face_x": -45.0, "chuck_r": 26.0, "tail_x": 80.0, "tail_r": 7.5, "max_diameter": 80, "max_length": 150}
 
+# what moves with the tool, from the nose bottom up, in the machine's X / Y about the spindle axis: the Ø16 nose, then the
+# head cover — its front steps out along the chamfer (taken at each slab's widest) — with the stored wired probe on its
+# right from 12 mm up, then the motor cap
+_hd = [-32.5, 32.5]
 machine(key="z1_4axis" if fourth else "z1", home=(hx, hy, nose_z), travel=(200, 200, 100), clearance=nose_z,
-        nose=[{"name": "collet / nose", "r": 8.0, "h": 20.0}, {"name": "head", "r": 36.0, "h": 190.0}],
+        nose=[{"name": "collet / nose", "r": 8.0, "h": 20.0},
+              {"name": "head", "box": _hd + [-41.4, 18.0], "h": 6.3},
+              {"name": "head", "box": _hd + [-46.8, 18.0], "h": 5.7},
+              {"name": "head + wired probe", "boxes": [_hd + [-52.0, 18.0], [32.5, 51.5, -52.0, -30.0]], "h": 138.0},
+              {"name": "motor cap", "box": [-32.0, 32.0, -47.94, 16.06], "h": 40.0}],
         table={"x": 206, "y": 206, "t": mdf_t + alu_t, "holes": holes, "hole_d": 5.5}, rotary=rotary, spoilboard=mdf_t,
         sources={"work area": "verified: makera.com 200×200×100", "gantry clearance": "verified: makera.com 115 mm",
                  "bed 206×206 and hole grid": "verified: Makera Z1-MDF-v2.1 (official bed file)",
-                 "spindle nose Ø16×20": "reference: community simplified model — measure yours",
-                 "head 65×70×190": "reference: community simplified model", "enclosure 355×435×449": "reference: community simplified model",
+                 "spindle axis, Ø16×20 nose, head 65×70 (52 in front of the axis / 18 behind) from 136.3 to 286.3, front chamfer, motor cap, X carriage block":
+                     "verified: Makera's simplified Z1 model (MakeraInc/CarveraProfiles Machine_Design_Files)",
+                 "quick-change lever, fan cooling (no dust shoe), status LED on the head": "verified: Makera Z1 quick start (wiki.makera.com/en/Z1/QuickStart)",
+                 "wired probe holder on the head's right side": "estimated: Makera product photo — measure yours",
+                 "tool-change lever, LED strip size, lettering": "estimated: Makera product photos (not in the collision stack)",
+                 "enclosure 355×435×449": "reference: Makera's simplified Z1 model",
                  "case styling (plinth, canopy, diagonal split, lettering)": "reference: Makera product photos",
                  "plinth height 89, diagonal 40→355 mm back, edge radii 32/12, rim 12": "estimated: scaled from Makera product photos",
                  "4th axis chuck Ø52, axis 45 above bed, tailstock Ø14": "reference: community simplified model; Ø80×150 verified: makera.com",
                  "rods, carriages, bridge uprights, motors, cable chains": "estimated: from photos, representative only",
                  "tool-length sensor at the rear-right corner of the bed": "reference: reviews (fauxhammer); position (88, 88) and size estimated — measure yours",
-                 "canopy hinges, LED bar, power button, vents, feet, dust shoe": "estimated: from photos (dust shoe Ø60 not in the nose collision stack)"},
+                 "canopy hinges, LED bar, power button, vents, feet": "estimated: from photos"},
         notes="Moving bed in Y under a fixed rear bridge; the head moves X along the bridge and Z. Machine zero: head back-left, bed forward. "
               "Case: dark plinth, one smoked-acrylic canopy (front + roof + side triangles) hinged at the rear of its roof, shown closed; "
               "light grey side panels behind the diagonal. Detail parts beyond the verified/reference numbers are estimated.")

@@ -2032,8 +2032,11 @@ function holderMesh(t) {                              // tool with flutes + the 
   grp.add(flutes, shank);
   let z = stick;
   for (const lvl of ((machineInfo && machineInfo.nose) || [{ name: 'collet nut', r: Math.max(r + 4, 9.5), h: 20 }, { name: 'spindle', r: 26, h: 80 }])) {
-    const h = Math.min(lvl.h, 120), m = /nut|collet/i.test(lvl.name) ? chrome : (/head|body|column/i.test(lvl.name) ? dark : chrome);
-    const c = new THREE.Mesh(new THREE.CylinderGeometry(lvl.r, lvl.r, h, 48).rotateX(Math.PI / 2).translate(0, 0, z + h / 2), m); c.castShadow = true; grp.add(c); z += h;
+    const h = Math.min(lvl.h, 120), m = /nut|collet/i.test(lvl.name) ? chrome : (/head|body|column|cap/i.test(lvl.name) ? dark : chrome);
+    if (lvl.boxes || lvl.box) {                       // an off-centre head: its footprint boxes about the spindle axis
+      for (const b of (lvl.boxes || [lvl.box])) { const c = new THREE.Mesh(new THREE.BoxGeometry(b[1] - b[0], b[3] - b[2], h).translate((b[0] + b[1]) / 2, (b[2] + b[3]) / 2, z + h / 2), m); c.castShadow = true; grp.add(c); }
+    } else { const c = new THREE.Mesh(new THREE.CylinderGeometry(lvl.r, lvl.r, h, 48).rotateX(Math.PI / 2).translate(0, 0, z + h / 2), m); c.castShadow = true; grp.add(c); }
+    z += h;
   }
   grp.traverse(o => { if (o.material) o.material.clippingPlanes = material.clippingPlanes; });
   return grp;
@@ -2060,6 +2063,7 @@ const AXIS_V = { x: new THREE.Vector3(1, 0, 0), y: new THREE.Vector3(0, 1, 0), z
 function machineMat(m) {
   const mat = new THREE.MeshPhysicalMaterial({ color: new THREE.Color(m.color || '#888888'), metalness: m.metalness ?? 0.3, roughness: m.roughness ?? 0.6, side: THREE.DoubleSide,
     transparent: m.opacity != null, opacity: m.opacity ?? 1, depthWrite: m.opacity == null, clearcoat: (m.metalness ?? 0) < 0.5 ? 0.25 : 0, clearcoatRoughness: 0.3, envMapIntensity: 0.9 });
+  if (m.emissive) { mat.emissive = new THREE.Color(m.emissive); mat.emissiveIntensity = m.emissive_intensity ?? 1; }   // status LEDs
   mat.clippingPlanes = material.clippingPlanes; return mat;
 }
 function stageHome() { scene.add(stageGroup); stageGroup.position.set(0, 0, 0); stageGroup.quaternion.identity(); }
@@ -4752,7 +4756,7 @@ function libraryEditor(mPane, tPane) {
         <div>Table</div><div>${d.table.x} × ${d.table.y} mm${d.spoilboard ? ` · spoilboard ${d.spoilboard} mm (cuts into it are allowed)` : ''}</div>
         <div>Travel</div><div>${d.travel.join(' × ')} mm · nose ${d.clearance} mm above the table at Z top</div>
         <div>Home</div><div>spindle at (${d.home[0]}, ${d.home[1]}) from the table centre</div>
-        <div>Above the tool</div><div>${d.nose.map(l => `${esc(l.name)} Ø${(2 * l.r).toFixed(1)} × ${l.h}`).join(' → ')}${d.stickout ? ` · stickout ${d.stickout} mm` : ' · stickout = flute length + 6'}</div>
+        <div>Above the tool</div><div>${d.nose.map(l => (l.boxes || l.box) ? `${esc(l.name)} ${(l.boxes || [l.box]).map(b => `${(b[1] - b[0]).toFixed(1)} × ${(b[3] - b[2]).toFixed(1)}`).join(' + ')} (off the axis) × ${l.h}` : `${esc(l.name)} Ø${(2 * l.r).toFixed(1)} × ${l.h}`).join(' → ')}${d.stickout ? ` · stickout ${d.stickout} mm` : ' · stickout = flute length + 6'}</div>
         ${d.rotary ? `<div>4th axis</div><div>axis ${d.rotary.axis_z} mm above the bed · chuck Ø${2 * d.rotary.chuck_r} · up to Ø${d.rotary.max_diameter} × ${d.rotary.max_length}</div>` : ''}
       </div>
       <div class="muted" style="margin:8px 0 3px">Where the numbers come from</div>

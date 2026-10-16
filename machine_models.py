@@ -60,7 +60,7 @@ class MachineModel:
     home: tuple[float, float, float]           # spindle axis X, Y and nose-bottom Z at machine zero (frame above)
     travel: tuple[float, float, float]
     clearance: float                           # nose bottom above the table at Z top (gantry clearance)
-    nose: list[dict[str, Any]]                 # holder/nose profile from the nose bottom upwards: [{name, r, h, kind}]
+    nose: list[dict[str, Any]]                 # holder/nose profile from the nose bottom upwards: [{name, r, h}] or [{name, box, r, h}]
     table: dict[str, Any]                      # {x, y, t (thickness), ...} table surface extents, centred on the origin
     rotary: dict[str, Any] | None = None       # {axis_y, axis_z, chuck_face_x, chuck_r, tail_x, ...} if a 4th axis is modelled
     sources: dict[str, str] = field(default_factory=dict)
@@ -96,6 +96,8 @@ MATERIALS = {
     "panel": {"color": "#e6e8eb", "metalness": 0.1, "roughness": 0.5, "opacity": 0.42},      # enclosure sheet metal, ghosted so the work stays visible
     "rubber": {"color": "#1e1f22", "metalness": 0.0, "roughness": 0.95},
     "carbide": {"color": "#b4b8bd", "metalness": 0.9, "roughness": 0.35},
+    "led_blue": {"color": "#4f8dff", "metalness": 0.0, "roughness": 0.3, "emissive": "#3a7bff", "emissive_intensity": 2.2},   # status lights
+    "lettering": {"color": "#8d9298", "metalness": 0.2, "roughness": 0.5},
 }
 
 
@@ -169,7 +171,8 @@ def model_for(machine, workspace: Path | None = None) -> MachineModel:
     ov = getattr(machine, "model", None) or {}
     if ov:
         if ov.get("nose"):
-            mm.nose = [{"name": str(l.get("name", f"level {i + 1}")), "r": float(l["r"]), "h": float(l["h"])} for i, l in enumerate(ov["nose"]) if "r" in l and "h" in l] or mm.nose
+            import machine_script as _ms
+            mm.nose = [_ms.normalize_level(l, i) for i, l in enumerate(ov["nose"]) if ("r" in l or "box" in l or "boxes" in l) and "h" in l] or mm.nose
             mm.sources["nose profile"] = "user: edited in Settings ▸ Machines ▸ Model"
         for k in ("spoilboard", "clearance", "stickout"):
             if ov.get(k) is not None:

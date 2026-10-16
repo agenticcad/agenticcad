@@ -5,6 +5,30 @@ features, patch bumps fix things. The version shown in the UI header comes from 
 
 ## [Unreleased]
 
+## [0.38.0] — 2026-10-17
+
+### Changed
+- **The Makera Z1 spindle head is modelled from Makera's own CAD.** It was a guess with an exposed finned motor at
+  the bottom and a magnetic dust shoe the Z1 doesn't have. It is now Makera's simplified Z1 model
+  (MakeraInc/CarveraProfiles), mapped into the machine frame and checked solid against solid (99.2 % volume overlap):
+  the Ø16 × 20 nose, the 65 × 70 head cover running from the top of the nose to 286 mm, sitting 52 mm in front of the
+  spindle axis and 18 mm behind it with its chamfered front-bottom edge, the finned motor cap on top, and the X carriage
+  block behind it. From Makera's quick start: the quick-change lever, the status LED and fan cooling instead of a dust
+  shoe. The wired probe stored on the head's right side is included from Makera's photo (estimated size).
+- **Heads that aren't round are checked as they are.** A machine's holder / nose stack can now describe a level as a
+  box (or several) about the spindle axis — `{"name": "head", "box": [x0, x1, y0, y1], "h": ...}` — so the collision
+  check sees the Z1's head 52 mm in front of the tool and only 18 mm behind it. It used to be a Ø72 circle, which
+  missed 16 mm of head in front and invented 18 mm behind. The 4th-axis chuck and tailstock checks use the head's real
+  X extents too.
+
+### Fixed
+- **The Z1 vise sits where Makera's pins put it.** The measured Z1 aluminium-bed hole pattern (cinetronixlabs, checked
+  against Makera's bed file) has the two Ø4 locating-pin holes at x ±95.5 mm and M5 holes that match the vise's
+  mounting holes (103.5 mm and 67 mm apart): the vise is centred in X and fills the front half of the bed (centre
+  y −51.5), not 10 mm behind the centre as estimated from the install drawing. Makera's "17.5 mm" label is the left
+  end to the locating pins (17.5 + 191 + 17.5 = 226).
+
+
 ## [0.37.0] — 2026-10-17
 
 ### Added

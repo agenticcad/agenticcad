@@ -44,15 +44,15 @@ def test_every_default_machine_has_a_valid_model(machines):
 
 def test_payload_shapes_and_home_geometry(machines):
     z1 = mm.makera_z1(False)
-    assert z1.home[2] == z1.clearance == 116 and z1.spoilboard == 6 and len(z1.table["holes"]) == 36
+    assert z1.home[2] == z1.clearance == 116.3 and z1.spoilboard == 6 and len(z1.table["holes"]) == 36      # Makera's model
     pay = mm.mesh_payload(z1, "draft")
     assert pay["machine"]["key"] == "z1" and len(pay["parts"]) == len(z1.parts) and not pay["warnings"]
     for p in pay["parts"]:
         assert len(p["positions"]) % 3 == 0 and len(p["indices"]) % 3 == 0 and max(p["indices"]) * 3 < len(p["positions"])
-    # the nose stack (collet nut + spindle nose) sits exactly at the home position: its bottom at clearance height
-    stack = [p for p in z1.parts if p.name in ("spindle nose", "collet nut")]
+    # the nose stack (collet ring + spindle nose) sits exactly at the home position: its bottom at clearance height
+    stack = [p for p in z1.parts if p.name in ("spindle nose", "collet ring")]
     bbs = [p.shape.bounding_box() for p in stack]
-    assert min(bb.min.Z for bb in bbs) == pytest.approx(116, abs=1e-6)
+    assert min(bb.min.Z for bb in bbs) == pytest.approx(116.3, abs=1e-6)
     assert all(bb.center().X == pytest.approx(z1.home[0], abs=0.5) and bb.center().Y == pytest.approx(z1.home[1], abs=0.5) for bb in bbs)
     haas = mm.haas_vmc("Haas VF-2")
     tb = next(p for p in haas.parts if p.name == "table").shape.bounding_box()
@@ -62,7 +62,7 @@ def test_payload_shapes_and_home_geometry(machines):
     m2 = cam.Machine(**{**m.__dict__, "model": {"nose": [{"name": "my nut", "r": 10, "h": 15}], "stickout": 22, "spoilboard": 5}})
     o = mm.model_for(m2)
     assert o.nose[0]["r"] == 10 and o.stickout == 22 and o.spoilboard == 5 and "user" in o.sources["nose profile"]
-    assert cam_sim.holder_levels(o, flat())[1] == ("my nut", 10.0, 22.0, 15.0)
+    assert cam_sim.holder_levels(o, flat())[1] == ("my nut", 10.0, 22.0, 15.0, None)
 
 
 def test_simulation_reports_holder_and_table_collisions(machines, plate):
@@ -131,3 +131,25 @@ def test_machine_model_api(client):
     mach["model"] = {"stickout": 25}
     assert client.post("/api/cam/machine", json={"machine": mach}).status_code == 200
     assert client.get("/api/cam/machine_model?name=Generic%203018&info=1").json()["machine"]["stickout"] == 25
+
+
+def test_z1_head_is_checked_as_its_real_off_centre_box(machines):
+    """Makera's Z1 head is 65 wide × 70 deep, 52 mm in front of the spindle axis and 18 behind: a wall 25 mm in front of
+    the tool is under the head, one 25 mm behind is clear (a round Ø72 head would hit both)."""
+    import numpy as np
+    mdl = mm.model_for(machines["Makera Z1"], workspace=False)
+    assert [l["name"] for l in mdl.nose][:2] == ["collet / nose", "head"] and mdl.nose[0]["r"] == 8.0 and mdl.home == (-107.8, 101.0, 116.3)
+    head = next(l for l in mdl.nose if l["name"].startswith("head + "))
+    assert head["boxes"][0] == [-32.5, 32.5, -52.0, 18.0]
+    tool = flat()                                       # 14 mm flutes: nose 20 above the tip, head bottom 40 above it
+    res, x0, y0 = 0.5, -60.0, -60.0
+    def hits_with_wall(ya, yb):
+        zhi = np.full((241, 241), -np.inf)
+        zhi[int((ya - y0) / res):int((yb - y0) / res), :] = 60.0      # a wall across X, 60 tall, between y = ya and yb
+        out = []
+        P = np.array([[0.0, 0.0, 15.0]]); I = np.array([0])
+        cam_sim._collide_z(out, zhi, P, I, 0, tool, mdl, res, x0, y0, "op", cam.Stock(-50, 50, -60, 60, 0, 60), {})
+        return {h["part"] for h in out}
+    assert any(n.startswith("head") for n in hits_with_wall(-35.0, -25.0))      # 25 mm in front: under the head
+    assert not any(n.startswith("head") for n in hits_with_wall(25.0, 35.0))    # 25 mm behind: the head ends 18 behind the axis
+    assert not hits_with_wall(56.0, 60.0)                                       # far behind: nothing

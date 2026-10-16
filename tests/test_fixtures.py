@@ -43,7 +43,7 @@ def test_builtin_fixtures_build_and_seat_the_stock():
     # (thinner than the 22.6 mm jaws) sits on the jaw ledges 20 mm above the 12.6 mm rails
     lo, hi = vise.bbox()
     assert hi[0] - lo[0] == pytest.approx(226) and hi[1] - lo[1] == pytest.approx(103) and hi[2] == pytest.approx(12.6 + 22.6)
-    assert vise.clamp_axis == "x" and vise.replaces_spoilboard and vise.home == (0.0, 10.0)
+    assert vise.clamp_axis == "x" and vise.replaces_spoilboard and vise.home == (0.0, -51.5)          # on the bed's pins
     assert vise.height == pytest.approx(12.6 + 20.0) and vise.max_opening == pytest.approx(136)
     assert not any(p.name.startswith("parallel") for p in vise.parts)
     rails = fl.model_for("Makera low-profile vise", {"seat": "rails"}, STOCK)
@@ -87,7 +87,7 @@ def test_setup_with_fixture_and_jaw_strike(machines, plate):
     st = cam.Setup(m, stock, name="Top", fixture="Makera low-profile vise")
     fp = st.fixture_payload()
     assert fp["name"] == "Makera low-profile vise" and fp["height"] == st.fixture_height() == pytest.approx(32.6) and fp["clamp_axis"] == "x"
-    assert fp["at"] == [0.0, 10.0] and fp["replaces_spoilboard"] and fp["extra"] == []          # its usual place on the Z1 bed
+    assert fp["at"] == [0.0, -51.5] and fp["replaces_spoilboard"] and fp["extra"] == []         # its place on the Z1 bed's pins
     p = cam.Program(st)
     p.add(cam.face(st, flat(), z_top=st.stock.top, z_bottom=12))
     p.add(cam.pocket(st, flat(), cam.rect(-15, -10, 15, 10), z_top=12, z_bottom=8))
@@ -116,17 +116,17 @@ def test_several_fixtures_on_the_table(machines, plate):
     m = machines["Makera Z1"]
     stock = cam.Stock.from_model(plate, margin=3, top=1)
     st = cam.Setup(m, stock, name="Top", fixture="Makera low-profile vise",
-                   fixtures=[{"name": "Tooling plate", "at": (0, -75), "rot": 90, "params": {"size": [60, 40], "thickness": 10}}])
+                   fixtures=[{"name": "Tooling plate", "at": (0, 60), "rot": 90, "params": {"size": [60, 40], "thickness": 10}}])
     lay = st.fixture_layout()
     assert [f["name"] for f in lay] == ["Makera low-profile vise", "Tooling plate"] and lay[0]["holds"] and not lay[1]["holds"]
-    # all fixtures stand on one plane: the plate's frame is as far below the stock as the vise's, 85 mm in front of the vise
+    # all fixtures stand on one plane: the plate's frame is as far below the stock as the vise's, 111.5 mm behind the vise
     assert lay[1]["origin_model"][2] == pytest.approx(lay[0]["origin_model"][2])
-    assert lay[1]["origin_model"][1] - lay[0]["origin_model"][1] == pytest.approx(-85)
+    assert lay[1]["origin_model"][1] - lay[0]["origin_model"][1] == pytest.approx(111.5)
     pay = st.fixture_payload()
     assert [e["name"] for e in pay["extra"]] == ["Tooling plate"] and pay["extra"][0]["rot"] == 90 and pay["replaces_spoilboard"]
     assert st.fixture_warnings() == []
     # moved onto the vise: the overlap is reported
-    bad = cam.Setup(m, stock, name="Top", fixture="Makera low-profile vise", fixtures=[{"name": "Tooling plate", "at": (60, 10)}])
+    bad = cam.Setup(m, stock, name="Top", fixture="Makera low-profile vise", fixtures=[{"name": "Tooling plate", "at": (60, -40)}])
     assert any("overlap" in w for w in bad.fixture_warnings())
     # the simulator checks the tool against every fixture and names the one it hit
     p = cam.Program(st)

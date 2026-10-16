@@ -133,4 +133,5 @@ def test_builtins_have_doors_where_the_machine_has_them(tmp_path):
     doors = {n: [x.door for x in mm.model_for(lib[n], tmp_path).nodes if x.door] for n in ("Makera Z1", "Carvera Air", "Haas VF-4", "Haas VF-2", "Generic 3018")}
     assert doors["Makera Z1"] == ["hinge"] and doors["Carvera Air"] == ["hinge"] and doors["Haas VF-4"] == ["slide", "slide"] and doors["Haas VF-2"] == ["slide", "slide"] and doors["Generic 3018"] == []
     z1 = mm.model_for(lib["Makera Z1"], tmp_path)
-    assert any(p.name == "tool length sensor" and p.node == "bed" for p in z1.parts) and not any("probe" in p.name or "rail" in p.name for p in z1.parts)
+    assert any(p.name == "tool length sensor" and p.node == "bed" for p in z1.parts) and not any(("probe" in p.name or "rail" in p.name) and p.node == "bed" for p in z1.parts)
+    assert any(p.name == "wired probe" and p.node == "spindle" for p in z1.parts) and not any("dust shoe" in p.name for p in z1.parts)   # Makera: probe on the head, fan instead of a shoe

@@ -604,19 +604,35 @@ def _collision_stats(hits: list[dict]) -> dict:
             "all": sorted(hits, key=lambda h: -h["depth"])[:400]}
 
 
-def holder_levels(machine_model, tool: cam.Tool) -> list[tuple[str, float, float, float]]:
-    """(name, radius, bottom above the tool tip, height) for everything above the flutes: the tool shank, then the
-    machine's nose profile (collet nut, nose, collar, head)."""
+def holder_levels(machine_model, tool: cam.Tool) -> list[tuple]:
+    """(name, radius, bottom above the tool tip, height, box) for everything above the flutes: the tool shank, then the
+    machine's nose profile (collet nut, nose, collar, head). box = (x0, x1, y0, y1) about the spindle axis for a level
+    that is not round (an off-centre head), else None; radius is then its farthest corner."""
     stick = tool_stickout(tool)
     ov = getattr(machine_model, "stickout", None)
     if ov:
         stick = max(float(ov), float(tool.flute_length))
-    levels = [("tool shank", tool.radius, float(tool.flute_length), max(stick - float(tool.flute_length), 0.0))]
+    levels = [("tool shank", tool.radius, float(tool.flute_length), max(stick - float(tool.flute_length), 0.0), None)]
     z = stick
     for lvl in machine_model.nose:
-        levels.append((lvl["name"], float(lvl["r"]), z, float(lvl["h"])))
+        bxs = lvl.get("boxes") or ([lvl["box"]] if lvl.get("box") else None)
+        box = tuple(tuple(float(v) for v in b) for b in bxs) if bxs else None
+        levels.append((lvl["name"], float(lvl["r"]), z, float(lvl["h"]), box))
         z += float(lvl["h"])
     return levels
+
+
+def _level_mask(xx, yy, x, y, x0, y0, res, r, tool_r, box):
+    """Cells (index grids xx, yy) under a holder level centred on the tool at (x, y): within r of the axis (outside the
+    flutes' own radius), or inside its box about the axis."""
+    dx = (xx - (x - x0) / res) * res; dy = (yy - (y - y0) / res) * res
+    if box is not None:                                   # a tuple of boxes (x0, x1, y0, y1): their union
+        m = np.zeros(dx.shape, dtype=bool)
+        for b in box:
+            m |= (dx >= b[0]) & (dx <= b[1]) & (dy >= b[2]) & (dy <= b[3])
+        return m
+    d2 = dx * dx + dy * dy
+    return (d2 <= r * r) & (d2 > tool_r * tool_r)
 
 
 def _pool_max(zhi: np.ndarray, c: int) -> np.ndarray:
@@ -637,7 +653,7 @@ def _collide_z(hits, zhi, P, I, done, tool, mm, res, x0, y0, op_name, stock, pla
     base = stock.zmin - float(placement.get("fixture", 0.0))         # the plane the stock (or its fixture) stands on
     spoil = 0.0 if placement.get("replaces_spoilboard") else float(mm.spoilboard)
     table_z = base
-    for name, r, zb_off, h in levels:
+    for name, r, zb_off, h, box in levels:
         if r <= tool.radius + 1e-6 and name == "tool shank":
             continue                                                   # the flutes clear their own radius
         c = max(1, int(r / (2 * res)))                                 # coarse cells ~ r/2
@@ -659,8 +675,7 @@ def _collide_z(hits, zhi, P, I, done, tool, mm, res, x0, y0, op_name, stock, pla
             xa, xb = max(0, ix - rc), min(nx - 1, ix + rc); ya, yb = max(0, iy - rc), min(ny - 1, iy + rc)
             sub = zhi[ya:yb + 1, xa:xb + 1]
             yy, xx = np.mgrid[ya:yb + 1, xa:xb + 1]
-            d2 = ((xx - (x - x0) / res) ** 2 + (yy - (y - y0) / res) ** 2) * res * res
-            mask = (d2 <= r * r) & (d2 > tool.radius * tool.radius) & (sub > zb + 0.02) & np.isfinite(sub)
+            mask = _level_mask(xx, yy, x, y, x0, y0, res, r, tool.radius, box) & (sub > zb + 0.02) & np.isfinite(sub)
             if mask.any():
                 depth = float((sub[mask] - zb).max())
                 if worst is None or depth > worst["depth"]:            # one hit per level per piece: the deepest (ramps enter gradually)
@@ -695,17 +710,18 @@ def _collide_rotary(out, program, sel, mm, placement):
             continue
         levels = holder_levels(mm, op.tool)
         P = st.to_model(np.array([m[1:4] for m in op.moves], dtype=float))
-        for name, r, zb_off, h in levels:
+        for name, r, zb_off, h, box in levels:
+            lo_x, hi_x = (min(b[0] for b in box), max(b[1] for b in box)) if box else (-r, r)
             if name == "tool shank":
                 continue
             # chuck: a disc of radius chuck_r on the axis; the level is a cylinder of radius r from zb up h along the tool axis
-            near = P[:, 0] - r < chuck_face_model + dx
+            near = P[:, 0] + lo_x < chuck_face_model + dx
             if near.any():
-                k = int(np.argmax(near)); hits.append({"op": op.name, "move": k, "pos": [round(float(v), 2) for v in P[k]], "part": name, "what": "chuck", "depth": round(float(chuck_face_model + dx - (P[k, 0] - r)), 2)})
+                k = int(np.argmax(near)); hits.append({"op": op.name, "move": k, "pos": [round(float(v), 2) for v in P[k]], "part": name, "what": "chuck", "depth": round(float(chuck_face_model + dx - (P[k, 0] + lo_x)), 2)})
                 break
-            near = P[:, 0] + r > tail_model + dx
+            near = P[:, 0] + hi_x > tail_model + dx
             if near.any():
-                k = int(np.argmax(near)); hits.append({"op": op.name, "move": k, "pos": [round(float(v), 2) for v in P[k]], "part": name, "what": "tailstock", "depth": round(float((P[k, 0] + r) - (tail_model + dx)), 2)})
+                k = int(np.argmax(near)); hits.append({"op": op.name, "move": k, "pos": [round(float(v), 2) for v in P[k]], "part": name, "what": "tailstock", "depth": round(float((P[k, 0] + hi_x) - (tail_model + dx)), 2)})
                 break
     out.stats["collisions"] = _collision_stats(hits)
     out.stats["machine"] = {"key": mm.key, "name": mm.name, "placement": placement}
@@ -755,9 +771,9 @@ def _collide_fixture(hits, fix, P, K, I, tool, mm, sample_res, op_name):
     if len(P) == 0:
         return
     fix_hi, res, x0, y0 = fix["top"], fix["res"], fix["x0"], fix["y0"]
-    levels = [("tool", float(tool.radius), 0.0, float(tool.flute_length))] + (holder_levels(mm, tool) if mm is not None else [])
+    levels = [("tool", float(tool.radius), 0.0, float(tool.flute_length), None)] + (holder_levels(mm, tool) if mm is not None else [])
     ny, nx = fix_hi.shape
-    for name, r, zb_off, h in levels:
+    for name, r, zb_off, h, box in levels:
         c = max(1, int(r / (2 * res)))
         coarse = _pool_max(fix_hi, c)
         step = max(1, int(r / sample_res))
@@ -773,8 +789,7 @@ def _collide_fixture(hits, fix, P, K, I, tool, mm, sample_res, op_name):
             xa, xb = max(0, ix - rc), min(nx - 1, ix + rc); ya, yb = max(0, iy - rc), min(ny - 1, iy + rc)
             sub = fix_hi[ya:yb + 1, xa:xb + 1]
             yy, xx = np.mgrid[ya:yb + 1, xa:xb + 1]
-            d2 = ((xx - (x - x0) / res) ** 2 + (yy - (y - y0) / res) ** 2) * res * res
-            mask = (d2 <= r * r) & (sub > zb + 0.02) & np.isfinite(sub)
+            mask = _level_mask(xx, yy, x, y, x0, y0, res, r, 0.0, box) & (sub > zb + 0.02) & np.isfinite(sub)
             if mask.any():
                 dd = np.where(mask, sub - zb, -np.inf); j = int(np.argmax(dd))
                 depth = round(float(dd.flat[j]), 2)
