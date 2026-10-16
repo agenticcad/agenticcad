@@ -9,16 +9,20 @@ Fixture frame: X right, Y back, Z up, origin = where the fixture sits on the tab
 table top). A script runs in the design-script namespace plus:
 
     part(name, shape, material="steel", collision=True)       a build123d shape in the fixture frame
-    fixture(name, work_origin=(x, y, z), clamp_axis="y"|None, max_opening=mm, mount={...}, sources={...}, notes="")
+    fixture(name, work_origin=(x, y, z), clamp_axis="y"|None, max_opening=mm, mount={...}, sources={...}, notes="",
+            replaces_spoilboard=False, home=None)
         work_origin: where the STOCK's bottom-centre sits when it is held (e.g. the jaw floor between the jaws)
         clamp_axis: "y" when the jaws close along Y (the stock's Y size sets the opening), "x", or None (plates, clamps)
+        replaces_spoilboard: the fixture bolts to the bed with the spoilboard removed (its z = 0 is the bed under the board)
+        home: (x, y) where it usually sits on the table, from the table centre (the default placement)
     params: dict of this fixture's parameters — `opening` (jaw gap, defaults to the stock size along clamp_axis),
             plus whatever the script documents (jaw_h, parallel, size, ...); `stock`: {"x", "y", "z"} of the stock or None
     helpers: box, cyl_z, cyl_x, cyl_y (as in machine scripts), IN = 25.4, MATERIALS
 
-The CAM Setup takes `fixture="name"` (+ fixture_at, fixture_rot, fixture_params); the simulator treats the fixture's
-collision parts as uncuttable (any contact by the tool or holder is a collision) and the viewer shows them on the
-machine with the stock seated in them.
+The CAM Setup takes `fixture="name"` (+ fixture_at, fixture_rot, fixture_params) for the fixture that holds the stock and
+`fixtures=[{"name", "at", "rot", "params"}, ...]` for more fixtures on the table at the same time (a second vise, clamps,
+a plate), each placed and turned on its own; the simulator treats every fixture's collision parts as uncuttable (any
+contact by the tool or holder is a collision) and the viewer shows them on the machine with the stock seated.
 """
 from __future__ import annotations
 
@@ -72,6 +76,8 @@ class FixtureModel:
     sources: dict[str, str] = field(default_factory=dict)
     notes: str = ""
     warnings: list[str] = field(default_factory=list)
+    replaces_spoilboard: bool = False
+    home: tuple[float, float] | None = None
 
     @property
     def height(self) -> float:
@@ -89,7 +95,8 @@ class FixtureModel:
         lo, hi = self.bbox()
         return {"key": self.key, "name": self.name, "work_origin": list(self.work_origin), "clamp_axis": self.clamp_axis,
                 "max_opening": self.max_opening, "mount": self.mount, "params": self.params, "sources": self.sources, "notes": self.notes,
-                "warnings": list(self.warnings), "bbox": [lo, hi], "height": self.height}
+                "warnings": list(self.warnings), "bbox": [lo, hi], "height": self.height,
+                "replaces_spoilboard": self.replaces_spoilboard, "home": list(self.home) if self.home else None}
 
 
 def slug(name: str) -> str:
@@ -164,6 +171,8 @@ def run(code: str, params: dict[str, Any] | None = None, stock: dict[str, float]
         exec(compile(code, filename, "exec"), ns)
     except FixtureScriptError:
         raise
+    except ValueError as e:                                # a script's own "can't hold that" message: pass it on as written
+        raise FixtureScriptError(str(e)) from e
     except Exception as e:  # noqa: BLE001
         raise FixtureScriptError(f"{type(e).__name__}: {e}") from e
     finally:
@@ -180,6 +189,11 @@ def run(code: str, params: dict[str, Any] | None = None, stock: dict[str, float]
     ca = meta.get("clamp_axis")
     if ca not in (None, "x", "y"):
         raise FixtureScriptError("fixture(): clamp_axis is 'x', 'y' or None")
+    home = meta.get("home")
+    if home is not None:
+        home = tuple(float(v) for v in home)
+        if len(home) != 2:
+            raise FixtureScriptError("fixture(): home is an (x, y) pair, from the table centre")
     warnings = []
     for p in parts:
         try:
@@ -192,7 +206,7 @@ def run(code: str, params: dict[str, Any] | None = None, stock: dict[str, float]
     model = FixtureModel(str(meta.get("key") or slug(meta["name"])), str(meta["name"]), parts, wo, ca,
                          float(meta["max_opening"]) if meta.get("max_opening") is not None else None,
                          dict(meta.get("mount") or {}), params, {str(k): str(v) for k, v in (meta.get("sources") or {}).items()},
-                         str(meta.get("notes") or ""), warnings)
+                         str(meta.get("notes") or ""), warnings, bool(meta.get("replaces_spoilboard")), home)
     return model
 
 
@@ -257,3 +271,30 @@ def transform_to_model(shape, rot_deg: float, stock_bc: tuple[float, float, floa
     from build123d import Pos, Rot
     wx, wy, wz = work_origin
     return Pos(*stock_bc) * Rot(0, 0, rot_deg) * Pos(-wx, -wy, -wz) * shape
+
+
+def _rz(rot_deg: float, x: float, y: float) -> tuple[float, float]:
+    a = math.radians(rot_deg)
+    return math.cos(a) * x - math.sin(a) * y, math.sin(a) * x + math.cos(a) * y
+
+
+def stock_on_table(holder: FixtureModel | None, at: tuple[float, float], rot: float) -> tuple[float, float, float]:
+    """Where the stock's bottom-centre sits in the table frame (x, y from the table centre; z above the plane the fixtures
+    stand on): the holding fixture's work origin, placed at `at` and turned by `rot`; (0, 0, 0) on the bare table."""
+    if holder is None:
+        return (0.0, 0.0, 0.0)
+    wx, wy = _rz(rot, holder.work_origin[0], holder.work_origin[1])
+    return (float(at[0]) + wx, float(at[1]) + wy, float(holder.work_origin[2]))
+
+
+def frame_in_model(at: tuple[float, float], stock_bc_model: tuple[float, float, float], stock_table: tuple[float, float, float]):
+    """Model coordinates of a fixture frame's origin placed at `at` on the table, given where the stock sits in the model
+    and on the table (every fixture stands on the same plane)."""
+    return (stock_bc_model[0] + float(at[0]) - stock_table[0], stock_bc_model[1] + float(at[1]) - stock_table[1],
+            stock_bc_model[2] - stock_table[2])
+
+
+def placed_shape(shape, rot_deg: float, origin_model: tuple[float, float, float]):
+    """A fixture-frame shape turned by rot about its frame origin and moved so that origin lands at origin_model."""
+    from build123d import Pos, Rot
+    return Pos(*origin_model) * Rot(0, 0, rot_deg) * shape

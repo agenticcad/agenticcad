@@ -266,7 +266,11 @@ Agent-native, like the CAD side: a second script per design, `cam.py`, written b
   collision. Built-ins: Makera low-profile vise, Carvera Air vise, 4" screwless vise, 6" Kurt-style vise, tooling
   plate, step clamps. Fixtures are scripts (`fixture_scripts/`, `workspace/fixtures/<slug>.fixture.py`) like machine
   models: `part(...)` + `fixture(name, work_origin, clamp_axis, ...)`, editable in **Code tab ▸ fixture.py**, listed in
-  **Settings ▸ Fixtures**, picked per setup in the CAM tab, and written by the agent with `build_fixture`.
+  **Settings ▸ Fixtures**, picked per setup in the CAM tab, and written by the agent with `build_fixture`. Several
+  fixtures can be on the table at once (`fixtures=[{"name", "at", "rot", "params"}]` or the CAM tab's Fixtures
+  panel: pick, move, turn, add, remove); every one is drawn and collision-checked, and overlaps are warned about. The
+  Makera Z1 low-profile vise is modelled from Makera's dimensions (226 × 103 mm, jaws along X to 130 mm, thin stock
+  on 20 mm ledges) and bolts to the bed with the spoilboard removed.
 - Not yet: drilling cycles (GRBL has none), thread milling, side-setup simulation.
 
 ## 3D printing (external slicer)

@@ -216,26 +216,42 @@ class Setup:
     a: float = 0.0
     wcs: str | None = None                  # G54..G59; Program assigns one per setup when None
     # how the work is held: a fixture by name (fixture_lib: vises, clamps, plates), where it sits on the table
-    # (fixture_at = (x, y) from the table centre, fixture_rot degrees about Z) and its parameters (opening, parallel, ...).
-    # The stock's bottom-centre sits at the fixture's work origin; None = stock centred on the bare table/spoilboard.
+    # (fixture_at = (x, y) from the table centre, default: the fixture's usual place; fixture_rot degrees about Z) and its
+    # parameters (opening, seat, ...). The stock's bottom-centre sits at the fixture's work origin; None = stock centred on
+    # the bare table/spoilboard. `fixtures` = more fixtures on the table at the same time, each placed and turned on its own:
+    # [{"name": "Step clamps", "at": (x, y), "rot": deg, "params": {...}}, ...] — the simulator checks the tool against all.
     fixture: str | None = None
-    fixture_at: tuple[float, float] = (0.0, 0.0)
+    fixture_at: tuple[float, float] | None = None
     fixture_rot: float = 0.0
     fixture_params: dict | None = None
+    fixtures: list | None = None
 
     def __post_init__(self):
         self.model_stock = self.stock
         fx = _FIXTURES["table"].get(self.name)        # fixtures({...}) line in cam.py (the CAM tab's picker) wins over the script
         if fx is not None:
             self.fixture = fx.get("name", self.fixture) or None
-            self.fixture_at = tuple(fx.get("at", self.fixture_at))
-            self.fixture_rot = float(fx.get("rot", self.fixture_rot))
-            self.fixture_params = fx.get("params", self.fixture_params)
+            self.fixture_at = tuple(fx["at"]) if fx.get("at") is not None else (None if "name" in fx else self.fixture_at)
+            self.fixture_rot = float(fx.get("rot", 0.0 if "name" in fx else self.fixture_rot))
+            self.fixture_params = fx.get("params", None if "name" in fx else self.fixture_params)
+            if "extra" in fx:
+                self.fixtures = list(fx.get("extra") or [])
         self._fixture_model = None
-        if self.fixture and self.rotary:
+        self._extra_models = None
+        if (self.fixture or self.fixtures) and self.rotary:
             raise CamError("a fixture can't be combined with a rotary setup (the chuck holds the work)")
+        for i, e in enumerate(self.fixtures or []):
+            if not isinstance(e, dict) or not e.get("name"):
+                raise CamError(f"fixtures[{i}]: each extra fixture is a dict with a name (and at=(x, y), rot, params)")
         if self.fixture:
             self.fixture_model()                        # validate now: unknown fixture / bad params fail at setup time
+            if self.fixture_at is None:
+                self.fixture_at = tuple(self._fixture_model.home) if self._fixture_model.home else (0.0, 0.0)
+        if self.fixture_at is None:
+            self.fixture_at = (0.0, 0.0)
+        self.fixture_at = (float(self.fixture_at[0]), float(self.fixture_at[1]))
+        if self.fixtures:
+            self.extra_fixture_models()
         if self.rotary:
             if self.machine.rotary is None:
                 raise CamError(f"{self.machine.name} has no 4th axis defined (machine.rotary); can't make a rotary setup")
@@ -276,26 +292,130 @@ class Setup:
             return None
         if self._fixture_model is None:
             import fixture_lib
-            ms = self.model_stock
-            stock = {"x": ms.xmax - ms.xmin, "y": ms.ymax - ms.ymin, "z": ms.zmax - ms.zmin}
+            stock = self._stock_in_fixture_frame(self.fixture_rot)
             try:
                 self._fixture_model = fixture_lib.model_for(self.fixture, self.fixture_params or {}, stock)
             except fixture_lib.FixtureScriptError as e:
                 raise CamError(f"fixture {self.fixture!r}: {e}") from e
         return self._fixture_model
 
+    def _stock_in_fixture_frame(self, rot: float) -> dict:
+        """The stock's size as a fixture turned by `rot` degrees sees it (its X is the fixture's X): a vise turned 90° grips
+        the stock's model-Y faces, so its opening defaults to the stock's Y size."""
+        ms = self.model_stock
+        sx, sy = ms.xmax - ms.xmin, ms.ymax - ms.ymin
+        a = math.radians(rot or 0.0); c, s_ = abs(math.cos(a)), abs(math.sin(a))
+        return {"x": round(c * sx + s_ * sy, 6), "y": round(s_ * sx + c * sy, 6), "z": ms.zmax - ms.zmin}
+
+    def extra_fixture_models(self) -> list[dict]:
+        """The other fixtures on the table: [{name, at, rot, params, model}] (models built with this setup's stock size,
+        which vises use as their default opening)."""
+        if self._extra_models is None:
+            import fixture_lib
+            out = []
+            for i, e in enumerate(self.fixtures or []):
+                try:
+                    m = fixture_lib.model_for(e["name"], dict(e.get("params") or {}), self._stock_in_fixture_frame(float(e.get("rot") or 0.0)))
+                except fixture_lib.FixtureScriptError as ex:
+                    raise CamError(f"fixtures[{i}] {e['name']!r}: {ex}") from ex
+                at = e.get("at")
+                at = tuple(at) if at is not None else (tuple(m.home) if m.home else (0.0, 0.0))
+                out.append({"name": m.name, "at": (float(at[0]), float(at[1])), "rot": float(e.get("rot") or 0.0),
+                            "params": dict(e.get("params") or {}), "model": m})
+            self._extra_models = out
+        return self._extra_models
+
+    def fixture_layout(self) -> list[dict]:
+        """Every fixture on the table, the holding one first: [{name, holds, at, rot, params, model, origin_model}] where
+        origin_model is the fixture frame's origin in MODEL coordinates (all fixtures stand on one plane: the table, or
+        the bed when one of them replaces the spoilboard)."""
+        import fixture_lib
+        holder = self.fixture_model()
+        ms = self.model_stock
+        bc = ((ms.xmin + ms.xmax) / 2, (ms.ymin + ms.ymax) / 2, ms.zmin)
+        st_t = fixture_lib.stock_on_table(holder, self.fixture_at, self.fixture_rot)
+        out = []
+        if holder is not None:
+            out.append({"name": holder.name, "holds": True, "at": self.fixture_at, "rot": float(self.fixture_rot),
+                        "params": holder.params, "model": holder, "origin_model": fixture_lib.frame_in_model(self.fixture_at, bc, st_t)})
+        for e in self.extra_fixture_models():
+            out.append({**e, "holds": False, "origin_model": fixture_lib.frame_in_model(e["at"], bc, st_t)})
+        return out
+
+    def replaces_spoilboard(self) -> bool:
+        """A fixture here bolts to the bed with the spoilboard removed (then every fixture stands on the bed)."""
+        return any(f["model"].replaces_spoilboard for f in self.fixture_layout())
+
     def fixture_height(self) -> float:
-        """How far the stock bottom sits above the table (0 on the bare table)."""
+        """How far the stock bottom sits above the plane the fixtures stand on (0 on the bare table)."""
         fm = self.fixture_model()
         return float(fm.height) if fm is not None else 0.0
 
     def fixture_payload(self) -> dict | None:
-        fm = self.fixture_model()
-        if fm is None:
+        """The holding fixture (None on the bare table) plus `extra`: every other fixture on the table."""
+        lay = self.fixture_layout() if (self.fixture or self.fixtures) else []
+        if not lay:
             return None
-        return {"name": fm.name, "at": [float(self.fixture_at[0]), float(self.fixture_at[1])], "rot": float(self.fixture_rot),
-                "params": fm.params, "work_origin": list(fm.work_origin), "height": fm.height, "clamp_axis": fm.clamp_axis,
-                "max_opening": fm.max_opening}
+        rs = any(f["model"].replaces_spoilboard for f in lay)
+
+        def one(f):
+            m = f["model"]
+            lo, hi = m.bbox()
+            return {"name": m.name, "at": [float(f["at"][0]), float(f["at"][1])], "rot": float(f["rot"]), "params": m.params,
+                    "work_origin": list(m.work_origin), "height": m.height, "top": float(hi[2]), "clamp_axis": m.clamp_axis,
+                    "size": [round(float(hi[0] - lo[0]), 2), round(float(hi[1] - lo[1]), 2)],
+                    "max_opening": m.max_opening, "replaces_spoilboard": m.replaces_spoilboard,
+                    "origin_model": [float(v) for v in f["origin_model"]]}
+        holder = next((f for f in lay if f["holds"]), None)
+        base = one(holder) if holder else {"name": None, "at": [0.0, 0.0], "rot": 0.0, "params": {}, "work_origin": [0.0, 0.0, 0.0],
+                                            "height": 0.0, "clamp_axis": None, "max_opening": None, "replaces_spoilboard": False,
+                                            "origin_model": None}
+        base["extra"] = [one(f) for f in lay if not f["holds"]]
+        base["replaces_spoilboard"] = rs
+        return base
+
+    def fixture_collision_shapes(self) -> list[tuple]:
+        """[(shape, fixture name)] of every fixture's collision parts in MODEL coordinates (top setups)."""
+        import fixture_lib
+        out = []
+        for f in self.fixture_layout():
+            for p in f["model"].parts:
+                if p.collision:
+                    out.append((fixture_lib.placed_shape(p.shape, f["rot"], f["origin_model"]), f["name"]))
+        return out
+
+    def fixture_warnings(self) -> list[str]:
+        """Fixtures that overlap the stock or each other, or that are made for another machine."""
+        lay = self.fixture_layout() if (self.fixture or self.fixtures) else []
+        if not lay:
+            return []
+        w = []
+        for f in lay:
+            mach = (f["model"].mount or {}).get("machines")
+            if mach and not any(self.machine.name.startswith(x) for x in mach):
+                w.append(f"fixture '{f['name']}' is made for {', '.join(mach)}, not {self.machine.name}")
+        boxes = []                                           # per fixture: model-space bounding boxes of its collision parts
+        import fixture_lib
+        for f in lay:
+            bb = []
+            for p in f["model"].parts:
+                if p.collision:
+                    b = fixture_lib.placed_shape(p.shape, f["rot"], f["origin_model"]).bounding_box()
+                    bb.append((b.min.X, b.min.Y, b.min.Z, b.max.X, b.max.Y, b.max.Z))
+            boxes.append(bb)
+        ms = self.model_stock
+        sb = (ms.xmin, ms.ymin, ms.zmin, ms.xmax, ms.ymax, ms.zmax)
+
+        def overlap(a, b, eps=0.05):
+            return all(min(a[k + 3], b[k + 3]) - max(a[k], b[k]) > eps for k in range(3))
+        for f, bb in zip(lay, boxes):
+            if not f["holds"] and any(overlap(b, sb) for b in bb):
+                w.append(f"fixture '{f['name']}' at {tuple(round(v, 1) for v in f['at'])} overlaps the stock: move it")
+        for i in range(len(lay)):
+            for j in range(i + 1, len(lay)):
+                if any(overlap(a, b) for a in boxes[i] for b in boxes[j]):
+                    w.append(f"fixtures '{lay[i]['name']}' and '{lay[j]['name']}' overlap on the table: move one")
+        return w
 
     # ---- transforms (model -> setup frame)
     def _R(self) -> np.ndarray:
@@ -1683,7 +1803,13 @@ class Program:
                     if hi - lo > m.travel.get(axis, 1e9) + 1e-6:
                         w.append(f"{tag}{axis.upper()} extent {hi - lo:.1f} mm exceeds machine travel {m.travel[axis]} mm")
                 if not st.rotary and z0 < st.stock.bottom - 1e-6:
-                    w.append(f"{tag}toolpath goes {st.stock.bottom - z0:.2f} mm below the stock bottom (into the spoilboard?)")
+                    w.append(f"{tag}toolpath goes {st.stock.bottom - z0:.2f} mm below the stock bottom "
+                             + ("(a through-cut: the simulation checks it against the fixture)" if st.fixture else "(into the spoilboard?)"))
+            if not st.rotary and st.orient == "top":
+                try:
+                    w += [tag + x for x in st.fixture_warnings()]
+                except Exception:  # noqa: BLE001 - a fixture check never stops the program check
+                    pass
             if st.machine is not m and st.machine.name != m.name:
                 w.append(f"{tag}set up for {st.machine.name} but the program runs on {m.name} (one machine per program)")
             if st.rotary:
@@ -2301,9 +2427,10 @@ _FIXTURES: dict = {"table": {}}
 
 
 def fixtures(table: dict | None = None) -> None:
-    """Per-setup fixture choices, keyed by setup name: {"Top": {"name": "Makera low-profile vise", "at": [0, 0], "rot": 0,
-    "params": {"opening": 40}}}. Written by the CAM tab's fixture picker; put it before the setups. A setup named here uses
-    this fixture instead of the one in its Setup(...) call ("name": null = bare table)."""
+    """Per-setup fixture choices, keyed by setup name: {"Top": {"name": "Makera low-profile vise", "at": [0, 10], "rot": 0,
+    "params": {"seat": "ledge"}, "extra": [{"name": "Step clamps", "at": [80, 0], "rot": 90}]}}. Written by the CAM tab's
+    fixture panel; put it before the setups. A setup named here uses these fixtures instead of the ones in its Setup(...)
+    call ("name": null = the stock on the bare table; "extra" = more fixtures on the table, each placed and turned)."""
     for k, v in (table or {}).items():
         if not isinstance(v, dict):
             raise CamError(f"fixtures: '{k}' must map to a dict with name / at / rot / params")

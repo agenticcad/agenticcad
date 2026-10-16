@@ -305,16 +305,23 @@ the CAM tab live in one line at the top of cam.py, `overrides({"Pocket": {"feed"
 fraction of Ø): always keep that line when you rewrite the script, and keep op names stable so it still matches. After build_cam, use `screenshot`
 to look at the toolpaths (they are drawn over the model; rapids red, cuts coloured per op).
 `export_gcode` writes the .nc file. `save_machine` / `save_tool` edit the libraries (JSON dicts; see cam_context).
-Fixtures (how the work is held): Setup(..., fixture="<name>", fixture_at=(x, y) from the table centre, fixture_rot=deg,
-fixture_params={...}) seats the stock in a vise / on clamps / on a plate; the stock's bottom-centre sits at the fixture's
-work origin, thin stock is raised on parallels automatically, and the simulation reports any tool or holder contact
-with the fixture as a collision ("hits the fixture"). Built-ins: "Makera low-profile vise" (Z1), "Carvera Air vise",
+Fixtures (how the work is held): Setup(..., fixture="<name>", fixture_at=(x, y) from the table centre (default: the
+fixture's usual place), fixture_rot=deg, fixture_params={...}) seats the stock in a vise / on clamps / on a plate; the
+stock's bottom-centre sits at the fixture's work origin, and the simulation reports any tool or holder contact with any
+fixture as a collision ("hits the fixture"). More fixtures can be on the table at once, each placed and turned:
+Setup(..., fixtures=[{"name": "Step clamps", "at": (x, y), "rot": deg, "params": {...}}, ...]) — e.g. a second vise
+or clamps beside the work; program.check() warns when fixtures overlap the stock or each other. The Makera Z1
+low-profile vise (Makera's dimensions: 226 × 103 mm, jaws close along X, fixed jaw at −X, max opening 130 mm) bolts to
+the bed with the MDF removed; thin stock sits on the jaw ledges 20 mm above the rails (params seat='ledge'), stock
+thicker than the 22.6 mm jaws on the rails (seat='rails'); turn long stock with fixture_rot=90 if it won't fit.
+Built-ins: "Makera low-profile vise" (Z1), "Carvera Air vise",
 '4" screwless vise', '6" Kurt-style vise' (Haas), "Tooling plate" (params size/thickness/pitch), "Step clamps" (bars
 overhanging the stock's ±X edges). When the user names a fixture, use it; otherwise RECOMMEND one (the machine's own
 vise for small parts, step clamps or a plate for large/thin stock), use it, and say so in one line — the user can
 change it from the CAM tab (it lands in a `fixtures({...})` line in cam.py: keep that line when you rewrite the script;
-the CAM tab's choice wins over Setup(fixture=...)). Jaws grip the stock's ±Y faces: keep outside contours, facing
-overruns and probing clear of them, or expect fixture collisions in simulate_cam. New fixtures: `get_fixture_code`
+the CAM tab's choice wins over Setup(fixture=...)). Jaws grip the stock's faces along the fixture's clamp axis (±X for
+the Z1 vise, ±Y for most others): keep outside contours, facing overruns and probing clear of them, or expect fixture
+collisions in simulate_cam. New fixtures: `get_fixture_code`
 for a starting point, `build_fixture(code)`: part(name, shape, material, collision=True) in the fixture frame (X right,
 Y back, Z up, origin at the footprint centre on the table) and fixture(name, work_origin=(x, y, z) where the stock's
 bottom-centre sits, clamp_axis='y'|'x'|None, max_opening, mount={...}, sources={...}, notes); `params` (opening,
@@ -717,10 +724,16 @@ class CadAgent:
         if spec is None:
             table.pop(setup, None)
         else:
-            entry = {"name": spec.get("name") or None}
-            if spec.get("at"): entry["at"] = [float(spec["at"][0]), float(spec["at"][1])]
-            if spec.get("rot"): entry["rot"] = float(spec["rot"])
-            if spec.get("params"): entry["params"] = dict(spec["params"])
+            def clean(f):
+                e = {"name": f.get("name") or None}
+                if f.get("at") is not None: e["at"] = [round(float(f["at"][0]), 2), round(float(f["at"][1]), 2)]
+                if f.get("rot"): e["rot"] = round(float(f["rot"]), 2) % 360
+                if f.get("params"): e["params"] = dict(f["params"])
+                return e
+            entry = clean(spec)
+            extra = [clean(f) for f in (spec.get("extra") or []) if f.get("name")]
+            if extra or "extra" in spec:
+                entry["extra"] = extra
             table[setup] = entry
         code = _write_fixtures(self.cam_code, table, span)
         prog = await self.set_cam_code(code, source="user")

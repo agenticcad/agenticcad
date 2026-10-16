@@ -207,6 +207,15 @@
   .cam-sec h4 { margin:0 0 6px; font-size:12px; text-transform:uppercase; letter-spacing:.4px; color:var(--muted); display:flex; align-items:center; gap:8px; }
   .cam-sec h4 .btn { margin-left:auto; }
   .btn.small { padding:2px 7px; font-size:11px; }
+  #cam-fixtures { display:flex; flex-direction:column; gap:6px; }
+  .fx-card { border:1px solid var(--border, #2a3038); border-radius:7px; padding:6px 7px; display:flex; flex-direction:column; gap:5px; }
+  .fx-top { display:flex; align-items:center; gap:4px; }
+  .fx-tag { flex:1; font-size:10.5px; letter-spacing:.04em; text-transform:uppercase; color:var(--muted); }
+  .fx-card select.fx-name { padding:3px 5px; width:100%; }
+  .fx-pos { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  .fx-lbl { display:flex; align-items:center; gap:3px; font-size:11px; color:var(--muted); }
+  .fx-lbl input { width:54px; padding:2px 4px; }
+  #fx-add { align-self:flex-start; }
   .muted { color:var(--muted); font-size:11px; font-weight:400; }
   .kv { display:grid; grid-template-columns:110px 1fr; gap:2px 8px; font-size:12px; } .kv div:nth-child(odd) { color:var(--muted); }
   .oprow { display:flex; align-items:center; gap:8px; padding:4px 2px; border-bottom:1px solid var(--line); font-size:12px; }
@@ -1025,7 +1034,7 @@ async function renderScreenshot(spec) {
   }
 }
 
-window.agenticcad = { renderScreenshot, get model() { return model; }, get machine() { return { on: machineOn, rig: machineRig, set: setMachine, pose: poseRig, stage: stageGroup, preview: machinePreview, doors: setDoors, get door() { return machineDoor; } }; }, get sketch() { return sk; }, get extDefs() { return extDefs; }, get extPanels() { return extPanels; }, scene, camera, renderer, send: (o) => send(o), THREE, get stockObj() { return stockObj; }, get simMesh() { return simMesh; } };
+window.agenticcad = { renderScreenshot, get model() { return model; }, get machine() { return { on: machineOn, rig: machineRig, set: setMachine, pose: poseRig, stage: stageGroup, preview: machinePreview, doors: setDoors, get door() { return machineDoor; } }; }, get sketch() { return sk; }, get extDefs() { return extDefs; }, get extPanels() { return extPanels; }, scene, camera, renderer, send: (o) => send(o), THREE, get stockObj() { return stockObj; }, get simMesh() { return simMesh; }, get program() { return program; }, controls };
 
 // toolbar
 document.getElementById('fit').onclick = () => fitCamera();
@@ -1322,30 +1331,80 @@ function loadProgram(p) {
   originObj.add(od); originObj.position.set(...p.origin); camGroup.add(originObj);
   applyCamVisibility(); renderCamTab(); setupSim(); syncMachineUi(); loadFixture(p);
 }
-// the top setup's fixture, placed so the stock's bottom-centre sits at its work origin: model = bc + Rz(rot) · (p − work_origin)
+// every fixture of the top setup — the one holding the stock and any others on the table — each in its own group placed
+// at its frame origin in model coordinates (origin_model from the server) and turned by its rot about Z
+function fixtureList(fx) { return fx ? [...(fx.name ? [{ ...fx, holds: true }] : []), ...(fx.extra || []).map(e => ({ ...e, holds: false }))] : []; }
 async function loadFixture(p) {
-  const st = p && p.setups && p.setups[0], fx = st && st.fixture; if (!fx) return;
-  const stock = p.stock, size = { x: stock.xmax - stock.xmin, y: stock.ymax - stock.ymin, z: stock.zmax - stock.zmin };
+  const st = p && p.setups && p.setups[0], fx = st && st.fixture;
   const seq = ++fixtureLoading;
-  let r;
-  try { r = await fetch(`/api/cam/fixture_model?quality=normal&name=${encodeURIComponent(fx.name)}&params=${encodeURIComponent(JSON.stringify(fx.params || {}))}&stock=${encodeURIComponent(JSON.stringify(size))}`).then(r => r.json()); }
+  if (fixtureObj) { camGroup.remove(fixtureObj); fixtureObj.traverse(o => o.geometry && o.geometry.dispose()); fixtureObj = null; }
+  const list = fixtureList(fx).filter(f => f.origin_model); if (!list.length) return;
+  const stock = p.stock, size = { x: stock.xmax - stock.xmin, y: stock.ymax - stock.ymin, z: stock.zmax - stock.zmin };
+  let models;
+  try { models = await Promise.all(list.map(f => fetch(`/api/cam/fixture_model?quality=normal&name=${encodeURIComponent(f.name)}&params=${encodeURIComponent(JSON.stringify(f.params || {}))}&stock=${encodeURIComponent(JSON.stringify(size))}`).then(r => r.json()))); }
   catch (e) { return; }
-  if (seq !== fixtureLoading || program !== p || r.error) { if (r && r.error) addMsg('error', 'Fixture: ' + r.error); return; }
-  if (fixtureObj) { camGroup.remove(fixtureObj); fixtureObj.traverse(o => o.geometry && o.geometry.dispose()); }
-  const g = new THREE.Group(); g.name = 'fixture';
-  for (const part of r.parts) {
-    const geo = new THREE.BufferGeometry(); const pos = new Float32Array(part.positions);
-    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3)); geo.setIndex(part.indices);
-    if (part.normals && part.normals.length === pos.length) geo.setAttribute('normal', new THREE.BufferAttribute(new Float32Array(part.normals), 3)); else geo.computeVertexNormals();
-    const mesh = new THREE.Mesh(geo, machineMat(r.materials[part.material] || r.materials.steel || {})); mesh.userData.fixturePart = part.name; mesh.castShadow = mesh.receiveShadow = true;
-    const segs = []; for (const pl of (part.edges || [])) for (let k = 0; k + 5 < pl.length; k += 3) segs.push(pl[k], pl[k+1], pl[k+2], pl[k+3], pl[k+4], pl[k+5]);
-    g.add(mesh, new THREE.LineSegments(new THREE.BufferGeometry().setAttribute('position', new THREE.Float32BufferAttribute(segs, 3)), machineEdgeMat));
-  }
-  const wo = fx.work_origin || [0, 0, 0];
-  const inner = new THREE.Group(); inner.position.set(-wo[0], -wo[1], -wo[2]); inner.add(...g.children.splice(0));
-  g.add(inner); g.rotation.z = (fx.rot || 0) * Math.PI / 180;
-  g.position.set((stock.xmin + stock.xmax) / 2, (stock.ymin + stock.ymax) / 2, stock.zmin);
-  g.visible = showStock; fixtureObj = g; camGroup.add(g);
+  if (seq !== fixtureLoading || program !== p) return;
+  const all = new THREE.Group(); all.name = 'fixtures';
+  list.forEach((f, k) => {
+    const r = models[k]; if (!r || r.error) { if (r && r.error) addMsg('error', `Fixture ${f.name}: ${r.error}`); return; }
+    const g = new THREE.Group(); g.name = 'fixture:' + f.name; g.userData.fixtureName = f.name; g.userData.holds = f.holds;
+    for (const part of r.parts) {
+      const geo = new THREE.BufferGeometry(); const pos = new Float32Array(part.positions);
+      geo.setAttribute('position', new THREE.BufferAttribute(pos, 3)); geo.setIndex(part.indices);
+      if (part.normals && part.normals.length === pos.length) geo.setAttribute('normal', new THREE.BufferAttribute(new Float32Array(part.normals), 3)); else geo.computeVertexNormals();
+      const mat = machineMat(r.materials[part.material] || r.materials.steel || {});
+      const mesh = new THREE.Mesh(geo, mat); mesh.userData.fixturePart = part.name; mesh.userData.mat = mat; mesh.castShadow = mesh.receiveShadow = true;
+      const segs = []; for (const pl of (part.edges || [])) for (let q = 0; q + 5 < pl.length; q += 3) segs.push(pl[q], pl[q+1], pl[q+2], pl[q+3], pl[q+4], pl[q+5]);
+      g.add(mesh, new THREE.LineSegments(new THREE.BufferGeometry().setAttribute('position', new THREE.Float32BufferAttribute(segs, 3)), machineEdgeMat));
+    }
+    g.position.set(...f.origin_model); g.rotation.z = (f.rot || 0) * Math.PI / 180;
+    all.add(g);
+  });
+  all.visible = showStock; fixtureObj = all; camGroup.add(all);
+  if (machineRig && machineOn) placeRig();
+}
+function flashFixtures(hits) {                     // the fixture a collision hit turns red at that move, like machine parts
+  if (!fixtureObj) return;
+  const names = new Set(hits.filter(h => /^fixture \(/.test(h.what)).map(h => h.what.slice(9, -1)));
+  fixtureObj.traverse(o => { if (o.isMesh && o.userData.mat) { let g = o.parent; while (g && !g.userData.fixtureName) g = g.parent; o.material = g && names.has(g.userData.fixtureName) ? machineHitMat : o.userData.mat; } });
+}
+// ---- CAM tab ▸ Setup ▸ Fixtures: the fixture holding the stock (or the bare table) and any others on the table at the
+// same time, each placed (X / Y from the table centre, mm) and turned (degrees); every change rewrites cam.py's
+// fixtures({...}) line through the agent and rebuilds
+function fixtureSpecFromProgram() {
+  const fx = program.setups[0].fixture;
+  const one = f => ({ name: f.name, at: [+(+f.at[0]).toFixed(2), +(+f.at[1]).toFixed(2)], rot: +f.rot || 0, params: f.params || {} });
+  return { ...(fx && fx.name ? one(fx) : { name: null }), extra: fx ? (fx.extra || []).map(one) : [] };
+}
+function sendFixtureSpec(spec) { send({ type: 'set_fixture', setup: program.setups[0].name, fixture: spec }); }
+function renderFixturePanel() {
+  const el = document.getElementById('cam-fixtures'); if (!el || !program) return;
+  const fx = program.setups[0].fixture, spec = fixtureSpecFromProgram(), names = (library.fixtures || []);
+  const opts = (sel, bare) => (bare ? '<option value="">bare table / spoilboard</option>' : '') + names.map(f => `<option value="${f.name.replace(/"/g, '&quot;')}" ${sel === f.name ? 'selected' : ''}>${f.name.replace(/</g, '&lt;')}${f.user ? ' ·' : ''}</option>`).join('');
+  const num = (v, k, i, title) => `<label class="fx-lbl" title="${title}">${k === 'rot' ? '⟳' : k.toUpperCase()}<input class="fx-num" data-i="${i}" data-k="${k}" type="number" step="${k === 'rot' ? 15 : 1}" value="${(+v).toFixed(k === 'rot' ? 0 : 1).replace(/\.0$/, '')}">${k === 'rot' ? '°' : ''}</label>`;
+  const card = (f, i) => {
+    const holds = i < 0, at = f.at || [0, 0];
+    return `<div class="fx-card">
+      <div class="fx-top"><span class="fx-tag">${holds ? 'holds the stock' : 'also on the table'}</span>
+        ${f.name ? `<button class="btn small fx-turn" data-i="${i}" title="Turn 90°">↻ 90°</button>` : ''}${holds ? '' : `<button class="btn small fx-del" data-i="${i}" title="Take it off the table">✕</button>`}</div>
+      <select class="btn fx-name" data-i="${i}">${opts(f.name, holds)}</select>
+      ${f.name ? `<div class="fx-pos">${num(at[0], 'x', i, 'X from the table centre, mm')}${num(at[1], 'y', i, 'Y from the table centre, mm')}${num(f.rot || 0, 'rot', i, 'Turned about Z, degrees')}</div>` : ''}
+      ${holds && fx && fx.name ? `<div class="muted" style="font-size:11px;line-height:1.35">stock ${fx.height.toFixed(1)} mm above the ${fx.replaces_spoilboard ? 'bed (spoilboard removed)' : 'table'}${fx.clamp_axis ? ` · jaws close along ${fx.clamp_axis.toUpperCase()}` : ''}${fx.max_opening ? ` · opens to ${(+fx.max_opening).toFixed(0)} mm` : ''}</div>` : ''}</div>`;
+  };
+  el.innerHTML = card(spec, -1) + spec.extra.map((f, i) => card(f, i)).join('')
+    + `<button class="btn small" id="fx-add" title="Put another fixture on the table (a second vise, clamps, a plate): its parts are checked for collisions too">+ Add fixture</button>`;
+  const get = i => i < 0 ? spec : spec.extra[i];
+  el.querySelectorAll('.fx-name').forEach(s => s.onchange = e => { const i = +s.dataset.i, f = get(i); const was = f.name; f.name = e.target.value || null; if (f.name !== was) { f.params = {}; if (i < 0) delete f.at; } sendFixtureSpec(spec); });
+  el.querySelectorAll('.fx-num').forEach(inp => inp.onchange = () => { const f = get(+inp.dataset.i), k = inp.dataset.k, v = +inp.value; if (!isFinite(v)) return; f.at = f.at || [0, 0]; if (k === 'x') f.at[0] = v; else if (k === 'y') f.at[1] = v; else f.rot = ((v % 360) + 360) % 360; sendFixtureSpec(spec); });
+  el.querySelectorAll('.fx-turn').forEach(b => b.onclick = () => { const f = get(+b.dataset.i); f.rot = ((+f.rot || 0) + 90) % 360; sendFixtureSpec(spec); });
+  el.querySelectorAll('.fx-del').forEach(b => b.onclick = () => { spec.extra.splice(+b.dataset.i, 1); sendFixtureSpec(spec); });
+  document.getElementById('fx-add').onclick = () => {
+    const first = names.find(f => f.name !== spec.name) || names[0]; if (!first) return;
+    // in front of the holding fixture (or the stock), clear of it: move it from there; overlaps are reported as warnings
+    const st = program.stock, hb = fx && fx.name && fx.size ? fx.size : [st.xmax - st.xmin, st.ymax - st.ymin];
+    const base = spec.name ? spec.at || [0, 0] : [0, 0];
+    spec.extra.push({ name: first.name, at: [+(+base[0]).toFixed(0), +(+base[1] - hb[1] / 2 - 45 - 25 * spec.extra.length).toFixed(0)], rot: 0, params: {} }); sendFixtureSpec(spec);
+  };
 }
 function applyCamVisibility() {
   for (const c of camOps) { c.cut.visible = c.rapid.visible = showTp && c.visible; }
@@ -1367,12 +1426,11 @@ function renderCamTab() {
       <div>Stock</div><div>${(st.xmax - st.xmin).toFixed(1)} × ${(st.ymax - st.ymin).toFixed(1)} × ${(st.zmax - st.zmin).toFixed(1)} mm · top z ${st.zmax.toFixed(2)}</div>
       <div>WCS origin</div><div>model (${o.map(v => v.toFixed(2)).join(', ')})</div>
       <div>Safe Z</div><div>${program.safe_z.toFixed(2)} (model) · ${(program.safe_z - o[2]).toFixed(2)} (WCS)</div>
-      <div>Fixture</div><div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap"><select id="cam-fixture-pick" class="btn" style="padding:2px 6px;max-width:220px"><option value="">bare table / spoilboard</option>${(library.fixtures || []).map(f => `<option value="${f.name.replace(/"/g, '&quot;')}" ${(program.setups[0].fixture || {}).name === f.name ? 'selected' : ''}>${f.name.replace(/</g, '&lt;')}${f.user ? ' ·' : ''}</option>`).join('')}</select>${program.setups[0].fixture ? `<span class="muted">stock ${program.setups[0].fixture.height.toFixed(1)} mm above the table${program.setups[0].fixture.params && program.setups[0].fixture.params.parallel ? ' · parallels ' + program.setups[0].fixture.params.parallel : ''}</span>` : ''}</div>
+      <div>Fixtures</div><div id="cam-fixtures"></div>
       <div>Est. time</div><div>${program.time.toFixed(1)} min</div></div>`
       + ((program.setups || []).length > 1 || (program.setups || []).some(x => x.rotary) ? '<div class="kv" style="margin-top:6px">' + program.setups.map((x, i) =>
         `<div>${x.name}</div><div>${x.wcs} · ${x.rotary ? `4th axis · A ${x.a}°` : 'orient ' + x.orient} · ${program.ops.filter(o => (o.setup || 0) === i).length} ops</div>`).join('') + '</div>' : '');
-    const fxPick = document.getElementById('cam-fixture-pick');
-    if (fxPick) fxPick.onchange = e => send({ type: 'set_fixture', setup: program.setups[0].name, fixture: e.target.value ? { name: e.target.value } : { name: null } });
+    renderFixturePanel();
     const ops = document.getElementById('cam-ops-body'); ops.innerHTML = '';
     let lastSetup = -1;
     program.ops.forEach((op, i) => {
@@ -2055,11 +2113,16 @@ function placeRig() {   // the machine origin (table top centre) in model coordi
   if (rs && d.rotary) o.set(st.xmin - d.rotary.chuck_face_x - 5, rs.axis[0] - d.rotary.axis_y, rs.axis[1] - d.rotary.axis_z);
   else {
     const fx = (program.setups || [])[0] && program.setups[0].fixture;
-    if (fx) {                                                   // machine origin = stock bottom-centre − (fixture_at + Rz(rot)·work_origin)
+    if (fx && fx.name) {                                        // machine origin = stock bottom-centre − (fixture_at + Rz(rot)·work_origin)
       const a = (fx.rot || 0) * Math.PI / 180, wo = fx.work_origin || [0, 0, 0], at = fx.at || [0, 0];
       const wx = Math.cos(a) * wo[0] - Math.sin(a) * wo[1], wy = Math.sin(a) * wo[0] + Math.cos(a) * wo[1];
       o.set((st.xmin + st.xmax) / 2 - at[0] - wx, (st.ymin + st.ymax) / 2 - at[1] - wy, st.zmin - wo[2]);
     } else o.set((st.xmin + st.xmax) / 2, (st.ymin + st.ymax) / 2, st.zmin);
+    // a fixture that bolts to the bed with the spoilboard removed (the Makera Z1 vise): the fixtures stand on the bed,
+    // which is the spoilboard's thickness below the machine origin, and the spoilboard is not drawn
+    const rs = !!(fx && fx.replaces_spoilboard);
+    if (rs) o.z += +(d.spoilboard || 0);
+    for (const pt of machineRig.parts) if (/spoilboard/i.test(pt.name)) { pt.mesh.visible = pt.lines.visible = !rs; }
   }
   machineRig.root.position.copy(o);
 }
@@ -2144,6 +2207,7 @@ function flashMachine(hits) {
       || ((what.has('table') || what.has('bed under the spoilboard')) && p.collision && onStock && !/chuck|tail|rail|housing|jaws/.test(p.name));
     p.mesh.material = hit ? machineHitMat : p.mat;
   }
+  flashFixtures(hits);
 }
 async function setMachine(on, name) {
   if (name) machinePreview = name;

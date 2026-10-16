@@ -39,9 +39,23 @@ def test_builtin_fixtures_build_and_seat_the_stock():
         pay = fl.mesh_payload(m, "draft")
         assert len(pay["parts"]) == len(m.parts) and not pay["warnings"]
     vise = fl.model_for("Makera low-profile vise", {}, STOCK)
-    assert vise.clamp_axis == "y" and vise.height == pytest.approx(12 + (20 - 13 + 2))      # thin stock on an auto parallel
-    assert any(p.name.startswith("parallel") for p in vise.parts)
-    assert fl.model_for("Makera low-profile vise", {"parallel": 0}, STOCK).height == 12       # explicit: no parallel
+    # Makera's dimensions: 226 × 103 footprint, jaws close along X, bolted to the bed with the MDF removed; 13 mm stock
+    # (thinner than the 22.6 mm jaws) sits on the jaw ledges 20 mm above the 12.6 mm rails
+    lo, hi = vise.bbox()
+    assert hi[0] - lo[0] == pytest.approx(226) and hi[1] - lo[1] == pytest.approx(103) and hi[2] == pytest.approx(12.6 + 22.6)
+    assert vise.clamp_axis == "x" and vise.replaces_spoilboard and vise.home == (0.0, 10.0)
+    assert vise.height == pytest.approx(12.6 + 20.0) and vise.max_opening == pytest.approx(136)
+    assert not any(p.name.startswith("parallel") for p in vise.parts)
+    rails = fl.model_for("Makera low-profile vise", {"seat": "rails"}, STOCK)
+    assert rails.height == pytest.approx(12.6) and rails.max_opening == pytest.approx(130)
+    assert fl.model_for("Makera low-profile vise", {}, {"x": 66, "y": 46, "z": 30}).height == pytest.approx(12.6)    # tall stock: rails
+    # the jaws grip the stock: on the ledges the rebate walls sit at the stock's X faces (stock centred between them)
+    jaws = {p.name: p.shape.bounding_box() for p in vise.parts if p.name in ("fixed jaw", "moving jaw")}
+    assert jaws["moving jaw"].min.X - jaws["fixed jaw"].max.X == pytest.approx(66 - 6)
+    assert (jaws["fixed jaw"].max.X + jaws["moving jaw"].min.X) / 2 == pytest.approx(vise.work_origin[0])
+    with pytest.raises(fl.FixtureScriptError, match="opens to 136 mm"):
+        fl.model_for("Makera low-profile vise", {}, {"x": 140, "y": 40, "z": 8})
+    assert fl.model_for("Makera low-profile vise", {"base_h": 13.0}, STOCK).height == pytest.approx(33.0)   # caliper override
     assert fl.model_for('6" Kurt-style vise', {"parallel": 20}, STOCK).height == pytest.approx(63)
     assert "Stock sits" in fl.summary(vise) or "work origin" in fl.summary(vise)
     with pytest.raises(fl.FixtureScriptError, match="no fixture named"):
@@ -72,13 +86,14 @@ def test_setup_with_fixture_and_jaw_strike(machines, plate):
     stock = cam.Stock.from_model(plate, margin=3, top=1)
     st = cam.Setup(m, stock, name="Top", fixture="Makera low-profile vise")
     fp = st.fixture_payload()
-    assert fp["name"] == "Makera low-profile vise" and fp["height"] == st.fixture_height() == pytest.approx(21) and fp["clamp_axis"] == "y"
+    assert fp["name"] == "Makera low-profile vise" and fp["height"] == st.fixture_height() == pytest.approx(32.6) and fp["clamp_axis"] == "x"
+    assert fp["at"] == [0.0, 10.0] and fp["replaces_spoilboard"] and fp["extra"] == []          # its usual place on the Z1 bed
     p = cam.Program(st)
     p.add(cam.face(st, flat(), z_top=st.stock.top, z_bottom=12))
     p.add(cam.pocket(st, flat(), cam.rect(-15, -10, 15, 10), z_top=12, z_bottom=8))
     r = cam_sim.simulate(p, part=plate)
     assert r.stats["collisions"]["count"] == 0 and r.stats["fixture"]["name"] == "Makera low-profile vise"
-    assert p.to_payload()["setups"][0]["fixture"]["height"] == pytest.approx(21)
+    assert p.to_payload()["setups"][0]["fixture"]["height"] == pytest.approx(32.6)
     deep = cam.Program(st)
     deep.add(cam.contour(st, flat(), cam.section(plate.shape, 6), z_top=12, z_bottom=-2, side="outside", name="Outline"))
     r2 = cam_sim.simulate(deep, part=plate)
@@ -95,6 +110,53 @@ def test_setup_with_fixture_and_jaw_strike(machines, plate):
         cam.Setup(m, stock, fixture="Nope")
     with pytest.raises(cam.CamError, match="rotary"):
         cam.Setup(machines["Makera Z1 + 4th axis"], cam.Stock.cylinder(32, 62, x0=-1), rotary=True, fixture="Tooling plate")
+
+
+def test_several_fixtures_on_the_table(machines, plate):
+    m = machines["Makera Z1"]
+    stock = cam.Stock.from_model(plate, margin=3, top=1)
+    st = cam.Setup(m, stock, name="Top", fixture="Makera low-profile vise",
+                   fixtures=[{"name": "Tooling plate", "at": (0, -75), "rot": 90, "params": {"size": [60, 40], "thickness": 10}}])
+    lay = st.fixture_layout()
+    assert [f["name"] for f in lay] == ["Makera low-profile vise", "Tooling plate"] and lay[0]["holds"] and not lay[1]["holds"]
+    # all fixtures stand on one plane: the plate's frame is as far below the stock as the vise's, 85 mm in front of the vise
+    assert lay[1]["origin_model"][2] == pytest.approx(lay[0]["origin_model"][2])
+    assert lay[1]["origin_model"][1] - lay[0]["origin_model"][1] == pytest.approx(-85)
+    pay = st.fixture_payload()
+    assert [e["name"] for e in pay["extra"]] == ["Tooling plate"] and pay["extra"][0]["rot"] == 90 and pay["replaces_spoilboard"]
+    assert st.fixture_warnings() == []
+    # moved onto the vise: the overlap is reported
+    bad = cam.Setup(m, stock, name="Top", fixture="Makera low-profile vise", fixtures=[{"name": "Tooling plate", "at": (60, 10)}])
+    assert any("overlap" in w for w in bad.fixture_warnings())
+    # the simulator checks the tool against every fixture and names the one it hit
+    p = cam.Program(st)
+    ox, oy, oz = lay[1]["origin_model"]                 # the plate's top is 10 mm above its frame origin
+    p.add(cam.contour(st, flat(), cam.rect(ox - 10, oy - 10, ox + 10, oy + 10), z_top=oz + 12, z_bottom=oz + 8, side="on", lead=0, ramp=0, name="Reach"))
+    r = cam_sim.simulate(p, part=plate)
+    assert {h["what"] for h in r.stats["collisions"]["hits"]} >= {"fixture (Tooling plate)"}
+    assert [e["name"] for e in r.stats["fixture"]["extra"]] == ["Tooling plate"]
+    # extra fixtures need a name; a Z1 vise on another machine is flagged
+    with pytest.raises(cam.CamError, match="each extra fixture"):
+        cam.Setup(m, stock, fixtures=[{"at": (0, 0)}])
+    air = cam.Setup(machines["Carvera Air"], stock, name="Top", fixture="Makera low-profile vise")
+    assert any("made for Makera Z1" in w for w in air.fixture_warnings())
+    # the fixtures({...}) line carries the extra fixtures too
+    cam.reset_overrides(); cam.fixtures({"Top": {"name": None, "extra": [{"name": "Step clamps", "at": [0, 0], "rot": 0}]}})
+    st2 = cam.Setup(m, stock, name="Top", fixture="Makera low-profile vise")
+    assert st2.fixture is None and [f["name"] for f in st2.fixture_layout()] == ["Step clamps"]
+    cam.reset_overrides()
+
+
+def test_table_check_uses_the_bed_under_a_removed_spoilboard(machines, plate):
+    m = machines["Makera Z1"]
+    stock = cam.Stock.from_model(plate, margin=3, top=1)
+    st = cam.Setup(m, stock, name="Top", fixture="Makera low-profile vise")
+    p = cam.Program(st)            # 40 mm below the stock bottom: through the ledge gap and the 12.6 mm extrusion, into the bed
+    p.add(cam.drill(st, cam.Tool(5, "3 mm drill", "drill", 3.0, 2, 60, rpm=8000, feed=300, plunge=150, stepdown=3.0, stepover=1.0, angle=118),
+                    [(0, 0)], z_top=st.stock.top, z_bottom=st.stock.bottom - 40))
+    r = cam_sim.simulate(p, part=plate)
+    hits = r.stats["collisions"]["hits"]
+    assert any(h["what"] == "table" and h["depth"] == pytest.approx(40 - 32.6, abs=0.3) for h in hits)
 
 
 def test_fixture_api_and_ws(client):
@@ -117,6 +179,11 @@ def test_fixture_api_and_ws(client):
         ws.send_json({"type": "set_fixture", "setup": "Top", "fixture": {"name": "Makera low-profile vise"}})
         m = wait_for(ws, "cam")
         assert m["program"]["setups"][0]["fixture"]["name"] == "Makera low-profile vise" and "fixtures({" in m["code"]
+        ws.send_json({"type": "set_fixture", "setup": "Top", "fixture": {"name": "Makera low-profile vise", "at": [0, 10],
+                      "extra": [{"name": "Tooling plate", "at": [0, -80], "rot": 90}]}})
+        m = wait_for(ws, "cam")
+        fx = m["program"]["setups"][0]["fixture"]
+        assert [e["name"] for e in fx["extra"]] == ["Tooling plate"] and fx["extra"][0]["rot"] == 90 and "'extra'" in m["code"]
         ws.send_json({"type": "set_fixture", "setup": "Top", "fixture": None})
         m = wait_for(ws, "cam")
         assert m["program"]["setups"][0]["fixture"] is None and "fixtures({" not in m["code"]

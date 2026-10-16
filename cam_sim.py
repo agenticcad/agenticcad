@@ -162,13 +162,9 @@ def _sim_zmap(program, sel, part, resolution, frames, tol, machine_model=None, p
     zmin = min(b.zmin for b in st_boxes); zmax = max(b.zmax for b in st_boxes)
     area = (x1 - x0) * (y1 - y0)
     res = resolution or max(0.15, math.sqrt(area / 160_000.0))
-    # the fixture (vise / clamps / plate) of the top setup, in model coordinates: uncuttable, so the grid covers it too
+    # the fixtures (vises / clamps / plates) of the top setup, in model coordinates: uncuttable. They get their own height
+    # map (fix_grid), so a big vise or a second fixture across the table never coarsens the stock's grid.
     fix_shapes = _fixture_shapes(setups)
-    if fix_shapes:
-        for shp in fix_shapes:
-            bb = shp.bounding_box()
-            x0, x1 = min(x0, bb.min.X), max(x1, bb.max.X); y0, y1 = min(y0, bb.min.Y), max(y1, bb.max.Y)
-        res = max(res, math.sqrt((x1 - x0) * (y1 - y0) / 400_000.0))      # cap the grid at ~400k cells
     nx = int(math.ceil((x1 - x0) / res)) + 1
     ny = int(math.ceil((y1 - y0) / res)) + 1
     zhi = np.full((ny, nx), -np.inf); zlo = np.full((ny, nx), np.inf)
@@ -209,9 +205,11 @@ def _sim_zmap(program, sel, part, resolution, frames, tol, machine_model=None, p
         out.frames.append((upto, q))
 
     pmaps = _part_maps_z(part, res, x0, y0, nx, ny) if part is not None else None
-    fix_hi = _fixture_map(fix_shapes, res, x0, y0, nx, ny) if fix_shapes else None
+    fix = _fixture_map(fix_shapes, res) if fix_shapes else None
+    fix_hi = fix["top"] if fix else None
     if fix_shapes:
-        placement = {**placement, "fixture": placement.get("fixture", setups[0].fixture_height())}
+        placement = {**placement, "fixture": placement.get("fixture", setups[0].fixture_height()),
+                     "replaces_spoilboard": placement.get("replaces_spoilboard", setups[0].replaces_spoilboard())}
     gouged = np.zeros((ny, nx), dtype=bool)
     gouge_ops: list[str] = []
 
@@ -238,8 +236,8 @@ def _sim_zmap(program, sel, part, resolution, frames, tol, machine_model=None, p
             _stamp_z(zhi, zlo, P, K, I, tool, side, res, x0, y0, rapid_hits, op.name)
             if machine_model is not None and side == 1:
                 _collide_z(collisions, zhi, P, I, done, tool, machine_model, res, x0, y0, op.name, st_boxes[0], placement)
-            if fix_hi is not None and side == 1:
-                _collide_fixture(collisions, fix_hi, P, K, I, tool, machine_model, res, x0, y0, op.name, setups[0].fixture)
+            if fix is not None and side == 1:
+                _collide_fixture(collisions, fix, P, K, I, tool, machine_model, res, op.name)
             start = end
             if next_mark is not None and end_move_done(idx, end, done, next_mark):
                 snap(next_mark); mark_i += 1
@@ -636,8 +634,9 @@ def _collide_z(hits, zhi, P, I, done, tool, mm, res, x0, y0, op_name, stock, pla
         return
     levels = holder_levels(mm, tool)
     ny, nx = zhi.shape
-    spoil = float(mm.spoilboard) + float(placement.get("fixture", 0.0))
-    table_z = stock.zmin - float(placement.get("fixture", 0.0))      # table top in model Z (stock sits on it)
+    base = stock.zmin - float(placement.get("fixture", 0.0))         # the plane the stock (or its fixture) stands on
+    spoil = 0.0 if placement.get("replaces_spoilboard") else float(mm.spoilboard)
+    table_z = base
     for name, r, zb_off, h in levels:
         if r <= tool.radius + 1e-6 and name == "tool shank":
             continue                                                   # the flutes clear their own radius
@@ -716,39 +715,52 @@ def _collide_rotary(out, program, sel, mm, placement):
 
 # ----------------------------------------------------------------------------- fixtures (vise jaws, clamps, plates: uncuttable)
 def _fixture_shapes(setups):
-    """Collision shapes of the top setup's fixture in model coordinates (the stock's bottom-centre sits at the work origin)."""
+    """[(shape, fixture name)] of every fixture of the top setup (the holding one and any others on the table) in model
+    coordinates; flipped and rotary setups have none."""
     st = setups[0]
-    fm = st.fixture_model() if hasattr(st, "fixture_model") else None
-    if fm is None or st.orient != "top":
+    if not hasattr(st, "fixture_collision_shapes") or st.rotary or st.orient != "top" or not (st.fixture or st.fixtures):
         return []
-    import fixture_lib
-    ms = st.model_stock
-    bc = ((ms.xmin + ms.xmax) / 2, (ms.ymin + ms.ymax) / 2, ms.zmin)
-    return [fixture_lib.transform_to_model(p.shape, st.fixture_rot, bc, fm.work_origin) for p in fm.parts if p.collision]
+    return st.fixture_collision_shapes()
 
 
-def _fixture_map(shapes, res, x0, y0, nx, ny):
-    """Top-surface height of the fixture per cell (-inf where there is none)."""
+def _fixture_map(named_shapes, stock_res):
+    """Top-surface height of the fixtures on their own grid, with which fixture owns each cell:
+    {"top": (ny, nx) heights (-inf = none), "owner": (ny, nx) index into "names", "names", "res", "x0", "y0"}."""
     from build123d import Compound
-    top = np.full((ny, nx), -np.inf)
-    mesh = _part_mesh(Compound(shapes))
-    for bd in mesh["bodies"]:
-        P = np.array(bd["positions"], dtype=float).reshape(-1, 3)
-        I = np.array(bd["indices"], dtype=np.int64).reshape(-1, 3)
-        cam._raster_triangles(P, I, top, x0, y0, res)
-    return top
+    names = []
+    for _, n in named_shapes:
+        if n not in names:
+            names.append(n)
+    bbs = [s.bounding_box() for s, _ in named_shapes]
+    fx0, fx1 = min(b.min.X for b in bbs) - 1, max(b.max.X for b in bbs) + 1
+    fy0, fy1 = min(b.min.Y for b in bbs) - 1, max(b.max.Y for b in bbs) + 1
+    res = max(stock_res, 0.25, math.sqrt((fx1 - fx0) * (fy1 - fy0) / 600_000.0))     # ≤ ~600k cells
+    nx = int(math.ceil((fx1 - fx0) / res)) + 1; ny = int(math.ceil((fy1 - fy0) / res)) + 1
+    top = np.full((ny, nx), -np.inf); owner = np.zeros((ny, nx), dtype=np.int16)
+    for k, name in enumerate(names):
+        layer = np.full((ny, nx), -np.inf)
+        mesh = _part_mesh(Compound([s for s, n in named_shapes if n == name]))
+        for bd in mesh["bodies"]:
+            P = np.array(bd["positions"], dtype=float).reshape(-1, 3)
+            I = np.array(bd["indices"], dtype=np.int64).reshape(-1, 3)
+            cam._raster_triangles(P, I, layer, fx0, fy0, res)
+        win = layer > top
+        top[win] = layer[win]; owner[win] = k
+    return {"top": top, "owner": owner, "names": names, "res": res, "x0": fx0, "y0": fy0}
 
 
-def _collide_fixture(hits, fix_hi, P, K, I, tool, mm, res, x0, y0, op_name, fixture_name):
-    """The tool (flutes included) and the holder stack must stay clear of the fixture: any contact is a collision."""
+def _collide_fixture(hits, fix, P, K, I, tool, mm, sample_res, op_name):
+    """The tool (flutes included) and the holder stack must stay clear of every fixture: any contact is a collision.
+    `fix` is _fixture_map's grid; P are tool-tip samples sample_res / 2 apart."""
     if len(P) == 0:
         return
+    fix_hi, res, x0, y0 = fix["top"], fix["res"], fix["x0"], fix["y0"]
     levels = [("tool", float(tool.radius), 0.0, float(tool.flute_length))] + (holder_levels(mm, tool) if mm is not None else [])
     ny, nx = fix_hi.shape
     for name, r, zb_off, h in levels:
         c = max(1, int(r / (2 * res)))
         coarse = _pool_max(fix_hi, c)
-        step = max(1, int(r / res))
+        step = max(1, int(r / sample_res))
         rc = int(math.ceil(r / res))
         worst = None                                                   # the deepest hit of this level in this piece
         for k in range(0, len(P), step):
@@ -764,10 +776,12 @@ def _collide_fixture(hits, fix_hi, P, K, I, tool, mm, res, x0, y0, op_name, fixt
             d2 = ((xx - (x - x0) / res) ** 2 + (yy - (y - y0) / res) ** 2) * res * res
             mask = (d2 <= r * r) & (sub > zb + 0.02) & np.isfinite(sub)
             if mask.any():
-                depth = round(float((sub[mask] - zb).max()), 2)
+                dd = np.where(mask, sub - zb, -np.inf); j = int(np.argmax(dd))
+                depth = round(float(dd.flat[j]), 2)
+                who = fix["names"][int(fix["owner"][ya:yb + 1, xa:xb + 1].flat[j])]
                 if worst is None or depth > worst["depth"]:
                     worst = {"op": op_name, "move": int(I[k]), "pos": [round(float(x), 2), round(float(y), 2), round(float(z), 2)],
-                             "part": name, "what": f"fixture ({fixture_name})", "depth": depth,
+                             "part": name, "what": f"fixture ({who})", "depth": depth,
                              "rapid": bool(K[k] == 0) if hasattr(K, "__len__") else False}
         if worst is not None:
             hits.append(worst)

@@ -5,6 +5,36 @@ features, patch bumps fix things. The version shown in the UI header comes from 
 
 ## [Unreleased]
 
+## [0.37.0] — 2026-10-17
+
+### Added
+- **Several fixtures on the table at once.** Besides the fixture that holds the stock, a setup can have any number of
+  others, each placed (X / Y from the table centre) and turned on its own: `Setup(..., fixtures=[{"name": "Step
+  clamps", "at": (x, y), "rot": deg, "params": {...}}])`, or from the CAM tab's new Fixtures panel (pick, move, turn
+  90°, add, remove; each change lands in cam.py's `fixtures({...})` line). The viewer draws them all on the machine,
+  the simulator checks the tool and holder against every one and names the fixture it hit (which flashes red on the
+  machine), and the program check warns when a fixture overlaps the stock or another fixture, or is made for another
+  machine. Fixtures now get their own collision grid, so a big vise never coarsens the stock's simulation grid.
+
+### Changed
+- **The Makera Z1 low-profile vise is modelled from Makera's own dimensions.** It was an estimate that looked nothing
+  like the real one. Now: the 226 × 103 mm T-slot extrusion, the removable fixed-jaw block at −X, the moving jaw, its
+  body and the jaw carrier on the T-slots, screw 2 at the end, four counterbored M5 mounting holes at 105 / 208.5 mm,
+  jaws closing along X up to the labelled 130 mm, and the slotted soft jaws: thin stock sits on the jaw ledges 20 mm
+  above the rails (gripped by the rebate walls), stock taller than the 22.6 mm jaws on the rails (`seat='ledge'` /
+  `'rails'`, automatic by default). Labelled values come from Makera's dimensioned product photos and the Z1 vise
+  quick start; heights and block lengths are measured from those photos (±0.5 mm, taken at the upper end so the
+  collision check errs on the safe side) and can be overridden with caliper readings (`base_h`, `jaw_h`, `ledge`, ...).
+- **Fixtures that replace the spoilboard.** The Z1 vise bolts to the aluminium bed with the MDF removed, as Makera's
+  guide says: it stands 6 mm lower, the spoilboard is not drawn, and the table check uses the bed. A fixture can say
+  where it usually sits (`home`); the Z1 vise defaults to its place on the bed.
+- A fixture turned on the table now sees the stock in its own frame, so a vise turned 90° opens to the stock's Y size.
+
+### Fixed
+- The simulator's table check counted the fixture height twice, so a tool going into the bed under a fixture was
+  reported too late.
+
+
 ## [0.36.4] — 2026-10-14
 
 ### Fixed
