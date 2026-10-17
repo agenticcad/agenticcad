@@ -763,6 +763,9 @@ class MachineBody(BaseModel):
     x: float | None = None
     y: float | None = None
     feed: float | None = None
+    kind: str | None = None
+    depth: float | None = None
+    dia: float | None = None
 
 
 @app.get("/api/machine")
@@ -813,6 +816,11 @@ async def machine_post(body: MachineBody):
             res = await machine.set_origin_anchor()
         elif a == "auto_z_probe":                        # Makera's M495 X Y O0 F0 at work X,Y (default: here)
             res = await machine.auto_z_probe(body.x, body.y)
+        elif a == "lower_to":                            # Z down only, to z mm above work zero (a 3D-probe start)
+            res = await machine.lower_to(body.z if body.z is not None else float('nan'))
+        elif a == "probe_3d":                            # Makera's 3D-probe routine (M480.n) from where the head is
+            res = await machine.probe_3d(body.kind or "", body.x if body.x is not None else 20.0,
+                                         body.y if body.y is not None else 20.0, body.depth or 2.0, body.dia or 2.0)
         elif a == "goto_xy":
             res = await machine.goto_xy(body.x if body.x is not None else float('nan'), body.y if body.y is not None else float('nan'), body.feed or 300.0)
         elif a == "home":
@@ -875,7 +883,7 @@ _remote: dict[str, Any] = {"server": None, "task": None, "error": None}
 
 
 def _remote_cfg() -> dict:
-    cfg = {"enabled": False, "port": 8790, "token": ""}
+    cfg = {"enabled": False, "port": 8790, "token": "", "require_key": True}
     try:
         cfg.update(json.loads(REMOTE_FILE.read_text()))
     except (OSError, ValueError):
@@ -902,15 +910,19 @@ def _remote_status() -> dict:
     running = _remote["server"] is not None and _remote["task"] is not None and not _remote["task"].done()
     ip = _lan_ip()
     return {"enabled": cfg["enabled"], "port": cfg["port"], "running": running, "ip": ip, "error": _remote["error"],
-            "url": f"http://{ip}:{cfg['port']}/m?k={cfg['token']}"}
+            "require_key": cfg["require_key"],
+            "url": f"http://{ip}:{cfg['port']}/m" + (f"?k={cfg['token']}" if cfg["require_key"] else "")}
 
 
 phone = FastAPI()
 
 
 def _key_ok(request: Request) -> bool:
+    cfg = _remote_cfg()
+    if not cfg["require_key"]:
+        return True                                       # the user's choice: anyone on the network may use it
     k = request.headers.get("x-key") or request.query_params.get("k") or ""
-    return hmac.compare_digest(k.encode(), _remote_cfg()["token"].encode())
+    return hmac.compare_digest(k.encode(), cfg["token"].encode())
 
 
 @phone.middleware("http")
@@ -980,6 +992,7 @@ class RemoteBody(BaseModel):
     enabled: bool | None = None
     port: int | None = None
     new_link: bool = False
+    require_key: bool | None = None
 
 
 @app.get("/api/remote")
@@ -996,6 +1009,8 @@ async def remote_set(body: RemoteBody):
         cfg["port"] = body.port
     if body.new_link:
         cfg["token"] = secrets.token_urlsafe(18)          # old QR codes stop working
+    if body.require_key is not None:
+        cfg["require_key"] = body.require_key
     if body.enabled is not None:
         cfg["enabled"] = body.enabled
     REMOTE_FILE.write_text(json.dumps(cfg))

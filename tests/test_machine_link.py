@@ -303,3 +303,132 @@ def test_origin_anchor_and_makeras_auto_z_probe():
             await mc.disconnect(); await emu.stop()
     run(go())
 
+
+
+async def _at_top_over(mc, emu, x, y):
+    await mc.goto_xy(x, y, 600)
+    await _until(lambda: not mc.jog_busy, timeout=10)
+
+
+def test_3d_probe_outside_corner_with_makeras_m480():
+    async def go():
+        emu, mc, _ = await _setup()
+        try:
+            mc.profile.anchor1 = (-191.28, -194.45)
+            await mc.arm(True); await mc.home(); await _until(lambda: mc.homed)
+            _measured(mc, emu)
+            with pytest.raises(ml.Refused, match="3D probe \\(T9999\\)"):
+                mc.check_probe_3d("outside_back_right")              # T6 fitted
+            await mc.change_tool(9999)                               # the 3D probe is measured like any tool
+            await _until(lambda: mc.routine["stage"] == "awaiting", timeout=15)
+            assert "3D probe" in mc.routine["msg"]
+            await mc.confirm_tool_change()
+            await _until(lambda: mc.routine["stage"] in ("done", "failed"), timeout=30)
+            assert mc.routine["stage"] == "done" and emu.tool == 9999 and mc.tool_ok()
+            emu.wco[2] = -55.0                                       # work Z0 on the stock top (an earlier M495)
+            await mc.raise_z_top(); await _until(lambda: not mc.jog_busy, timeout=10)   # the change ends at Z -3
+            await _at_top_over(mc, emu, -96.28, -99.45)              # 5 mm in from the back-right corner
+            with pytest.raises(ml.Refused, match="unknown 3D probe"):
+                mc.check_probe_3d("outside_somewhere")
+            with pytest.raises(ml.Refused, match="2 .. 80"):
+                mc.check_probe_3d("outside_back_right", x=0)
+            emu.wco[2] = -10.0                                       # pretend work Z0 is just below the head
+            await asyncio.sleep(0.3)
+            with pytest.raises(ml.Refused, match="only lowers"):
+                await mc.lower_to(20)
+            emu.wco[2] = -55.0
+            await asyncio.sleep(0.3)
+            await mc.lower_to(5)
+            await _until(lambda: not mc.jog_busy, timeout=10)
+            await asyncio.sleep(0.3)
+            assert abs(emu.mpos[2] + 50.0) < 1e-3
+            n = len(emu.lines)
+            await mc.probe_3d("outside_back_right", 20, 20, 2, 2)
+            await _until(lambda: len(emu.lines) > n)
+            assert emu.lines[n:] == ["M480.2 X20 Y20 Z2 D2"]
+            await _until(lambda: mc.routine["stage"] in ("done", "failed"), timeout=30)
+            assert mc.routine["stage"] == "done", mc.routine
+            assert abs(emu.wco[0] + 91.28) < 0.02 and abs(emu.wco[1] + 94.45) < 0.02 and abs(emu.wco[2] + 55.0) < 1e-6
+            assert abs(mc.routine["origin"][0] + 91.28) < 0.02 and "+100.0" in mc.routine["msg"]
+            assert not emu.crashes
+        finally:
+            await mc.disconnect(); await emu.stop()
+    run(go())
+
+
+def test_3d_probe_centres_inside_corner_and_travel_check():
+    async def go():
+        emu, mc, _ = await _setup()
+        try:
+            await mc.arm(True); await mc.home(); await _until(lambda: mc.homed)
+            emu.tool = 9999
+            await asyncio.sleep(0.3)
+            _measured(mc, emu)
+            emu.wco[2] = -55.0
+            emu.pocket = (-150.0, -130.0, -150.0, -135.0, -60.0)     # 20 x 15 pocket, 5 deep, in the stock
+            # boss centre on the 100 mm stock would step out past the travel (and into the L-bracket): refused
+            await _at_top_over(mc, emu, -141.28, -144.45)
+            with pytest.raises(ml.Refused, match="outside"):
+                mc.check_probe_3d("boss_center", 60, 60)
+            # pocket centre: start inside the pocket, below its edge (work Z0 on the pocket floor, 2 mm above it)
+            await _at_top_over(mc, emu, -139.0, -143.0)
+            emu.wco[2] = -60.0
+            await asyncio.sleep(0.3)
+            await mc.lower_to(2); await _until(lambda: not mc.jog_busy, timeout=10)
+            await asyncio.sleep(0.3)
+            await mc.probe_3d("pocket_center", 15, 12)
+            await _until(lambda: mc.routine["stage"] in ("done", "failed"), timeout=30)
+            assert mc.routine["stage"] == "done", mc.routine
+            assert abs(emu.wco[0] + 140.0) < 0.02 and abs(emu.wco[1] + 142.5) < 0.02
+            assert abs(mc.routine["size"]["x"] - 20.0) < 0.03 and abs(mc.routine["size"]["y"] - 15.0) < 0.03
+            await mc.raise_z_top(); await _until(lambda: not mc.jog_busy, timeout=10)
+            # inside corner (the pocket's back-left): start over the top, just outside the corner
+            await _at_top_over(mc, emu, -155.0, -130.0)
+            emu.wco[2] = -55.0
+            await asyncio.sleep(0.3)
+            await mc.lower_to(5); await _until(lambda: not mc.jog_busy, timeout=10)
+            await asyncio.sleep(0.3)
+            await mc.probe_3d("inside_back_left", 10, 10, 2, 2)
+            await _until(lambda: mc.routine["stage"] in ("done", "failed"), timeout=30)
+            assert mc.routine["stage"] == "done", mc.routine
+            assert abs(emu.wco[0] + 150.0) < 0.02 and abs(emu.wco[1] + 135.0) < 0.02
+            await mc.raise_z_top(); await _until(lambda: not mc.jog_busy, timeout=10)
+            # boss centre on a small block
+            emu.pocket = None
+            emu.stock = (-120.0, -80.0, -120.0, -90.0)
+            emu.surface_z = lambda x, y: -55.0 if (-120.0 <= x <= -80.0 and -120.0 <= y <= -90.0) else -75.0
+            await _at_top_over(mc, emu, -101.0, -104.0)
+            await mc.lower_to(5); await _until(lambda: not mc.jog_busy, timeout=10)
+            await asyncio.sleep(0.3)
+            await mc.probe_3d("boss_center", 30, 25)
+            await _until(lambda: mc.routine["stage"] in ("done", "failed"), timeout=40)
+            assert mc.routine["stage"] == "done", mc.routine
+            assert abs(emu.wco[0] + 100.0) < 0.02 and abs(emu.wco[1] + 105.0) < 0.02
+            assert abs(mc.routine["size"]["x"] - 40.0) < 0.03 and abs(mc.routine["size"]["y"] - 30.0) < 0.03
+            assert not emu.crashes
+        finally:
+            await mc.disconnect(); await emu.stop()
+    run(go())
+
+
+def test_3d_probe_that_never_triggers_is_held():
+    async def go():
+        emu, mc, _ = await _setup()
+        try:
+            await mc.arm(True); await mc.home(); await _until(lambda: mc.homed)
+            emu.tool = 9999
+            await asyncio.sleep(0.3)
+            _measured(mc, emu)
+            emu.wco[2] = -55.0
+            await _at_top_over(mc, emu, -96.28, -99.45)
+            await mc.lower_to(5); await _until(lambda: not mc.jog_busy, timeout=10)
+            await asyncio.sleep(0.3)
+            emu.probe3d_fail, emu.speed = True, 1.0                  # real speed: 100 mm/min down, never touching
+            await mc.probe_3d("outside_back_right", 20, 20, 2, 2, max_drop=3)
+            await _until(lambda: mc.routine["stage"] in ("done", "failed"), timeout=10)
+            assert mc.routine["stage"] == "failed" and "nothing touched" in mc.routine["msg"], mc.routine
+            assert b"!" in emu.realtime and emu.state == "Hold"
+            assert emu.mpos[2] > -50.0 - 3.6                         # stopped about 3 mm down, not 108
+        finally:
+            await mc.disconnect(); await emu.stop()
+    run(go())

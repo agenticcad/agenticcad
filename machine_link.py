@@ -291,6 +291,8 @@ class Profile:
     anchor1: tuple = (-192.4, -194.3)      # machine XY of Anchor 1 (the L-bracket's inside corner); per machine
     setter_from_anchor: tuple = (181.0, 181.0)   # tool setter XY relative to Anchor 1 (ATCHandler: Z1 manual change)
     change_xy: tuple = (-11.6, -14.6)      # where the head waits for a manual tool change (coordinate.clearance_x/y)
+    probe3d_tool: int = 9999               # tool number of the add-on 3D probe: the firmware powers the probe port for
+                                           # T9999 after a change (ATCHandler M6 / M490.2); confirm against MakeraStudio
 
 
 def makera_live_config(path=None) -> dict:
@@ -319,6 +321,25 @@ JOG_MAX = {"xy": 10.0, "z_up": 10.0, "z_down": 1.0}          # mm per click
 GOTO_FEED_MAX = 600.0                                        # mm/min cap for go-to moves
 Z_TOP_BAND = 1.5                                             # go-to moves only while machine Z is within this of the top
 JOG_SCALE = {"xy": 0.5, "z_up": 0.5, "z_down": 0.25}         # fraction of the axis max rate ($J F)
+# Makera's 3D-probe routines (firmware ATCHandler M480.n, sent by MakeraStudio as `M480.n X<offset> Y<offset> Z<depth>
+# D<ball dia>`, defaults X20 Y20 Z2 D2). Corners are named as seen from the front of the machine (Y+ is the back).
+# sx, sy: the firmware's signed X/Y_distance for that subcode.
+#   outside corner (.1-.4): start ~5 mm above the stock, ~5 mm in from the corner. Touch Z twice (100 mm/min) and set
+#     Z0; back up to the start height, step out past the X edge by the offset, drop to Z = -depth (10 % speed), probe
+#     back in X (100 then 50), set X to the edge; the same for Y; up to the start height, then G0 to the new X0 Y0.
+#   inside corner (.5-.8): start above the top surface just outside the corner; touch Z twice, set Z0, move in by the
+#     offsets, drop to -depth, probe back to the two walls, set X/Y there; up, then G0 to X0 Y0.
+#   pocket centre (.9): start inside the pocket below its edge; probe both X walls, go to the middle, X0; then Y. No Z.
+#   boss centre (.10): start above the boss centre; touch Z, set Z0; step out each side by the offset (+5 mm on the
+#     far side), drop to -depth, probe in; X0 / Y0 at the middle. X or Y offset 0 skips that axis (centres only).
+PROBE3D = {
+    "outside_back_left": (1, 1, 1), "outside_back_right": (2, -1, 1), "outside_front_right": (3, -1, -1),
+    "outside_front_left": (4, 1, -1),
+    "inside_back_left": (5, 1, 1), "inside_back_right": (6, -1, 1), "inside_front_right": (7, -1, -1),
+    "inside_front_left": (8, 1, -1),
+    "pocket_center": (9, 1, 1), "boss_center": (10, 1, 1),
+}
+PROBE3D_MAX_DROP = 10.0                  # mm: hold if Z falls this far below the start before the probe touches anything
 ARM_IDLE_S = 300.0                                           # Control turns itself off after this long unused
 STALE_S = 2.0                                                # status older than this: treat the link as lost
 
@@ -463,7 +484,7 @@ class MachineControl:
                 "measured": self.measured, "tool_ok": self.tool_ok(), "routine": self.routine,
                 "log": [t for _, t in (self.link.log[-30:] if self.link else [])],
                 "limits": {"jog_max": JOG_MAX, "travel": self.profile.travel, "margin": self.profile.margin, "top": self.profile.top},
-                "profile": self.profile.name}
+                "profile": self.profile.name, "probe3d_tool": self.profile.probe3d_tool}
 
     def describe(self) -> str:
         """Plain-text status for the agent."""
@@ -650,9 +671,16 @@ class MachineControl:
                     h = st.get("halt") or {}
                     raise Refused(f"the machine alarmed during {kind}: {h.get('reason', 'halted')} ({h.get('advice', 'Unlock, then home')})")
                 if st.get("state") == "Tool" and r["stage"] == "running":
-                    r.update(stage="awaiting", msg=f"fit {'the probe' if r.get('tool') == 0 else 'T' + str(r.get('tool'))} with the lever, "
+                    what = {0: "the probe", self.profile.probe3d_tool: "the 3D probe"}.get(r.get("tool"), f"T{r.get('tool')}")
+                    r.update(stage="awaiting", msg=f"fit {what} with the lever, "
                              "then press the machine's front button (or Confirm here): the machine measures it on the setter")
                     await self._push()
+                g = r.get("guard")
+                if g and st.get("state") in ("Run", "Idle") and self.fresh():
+                    why = self._guard_breach(g, st["mpos"], since)
+                    if why:
+                        await self.link.realtime(b"!")
+                        raise Refused(f"{why}: feed hold sent, check the machine")
                 if self._routine_done(since) and st.get("state") == "Idle":
                     break
             else:
@@ -669,6 +697,8 @@ class MachineControl:
                 z = prbs[-1][0][2]
                 self.measured = {"tool": r["tool"], "touch_z": z, "offset": tl.get("offset"), "t": time.time()}
                 r.update(stage="done", msg=f"T{r['tool']} measured by the machine: setter touch at machine Z {z:.3f}, length offset {tl.get('offset')}")
+            elif kind == "3D probe":
+                r.update(stage="done", **self._probe3d_result(r, prbs, st))
             else:
                 z = prbs[-1][0][2]
                 r.update(stage="done", touch=prbs[-1][0], touches=[p_[0][2] for p_ in prbs], wpos=st.get("wpos"),
@@ -693,8 +723,8 @@ class MachineControl:
     async def change_tool(self, number: int) -> dict:
         """Makera's manual tool change (M6 Tn) - or M491 to re-measure when the number isn't changing. Either way the
         machine measures the tool on its setter (the rule: every tool, the probe included)."""
-        if not isinstance(number, int) or not (number == 0 or 1 <= number <= 99):
-            raise Refused("tool number: 0 (probe) or 1..99")
+        if not isinstance(number, int) or not (number in (0, self.profile.probe3d_tool) or 1 <= number <= 99):
+            raise Refused(f"tool number: 0 (probe), {self.profile.probe3d_tool} (3D probe) or 1..99")
         st = self._need(armed=True, idle=True, homed=True)
         current = (st.get("tool") or {}).get("number")
         self.measured = None
@@ -742,6 +772,142 @@ class MachineControl:
         await self.link.line(cmd)
         self._note(f"{cmd} sent (Makera's auto Z probe at machine X{mx:.2f} Y{my:.2f})")
         return self.payload()
+
+    async def lower_to(self, height: float, feed: float = 300.0) -> dict:
+        """Lower Z (only down, XY untouched) to `height` mm above work Z zero, e.g. the 5 mm a 3D-probe routine starts
+        from. Needs the fitted tool measured, so the work Z includes its length; never below the Z floor."""
+        if not isinstance(height, (int, float)) or height != height:
+            raise Refused("give a height above work zero")
+        st = self._need(armed=True, idle=True, homed=True)
+        self._need_tool_measured()
+        if self.jog_busy:
+            raise Refused("the previous move hasn't finished")
+        if not (self.z_floor - 1e-9 <= height <= 50.0):
+            raise Refused(f"height must be {self.z_floor:g} (the Z floor) .. 50 mm above work zero")
+        wz = (st.get("wpos") or [None] * 3)[2]
+        if wz is None:
+            raise Refused("no work position from the machine")
+        if wz <= height + 0.01:
+            raise Refused(f"the tool is already at {wz:.2f} mm above work zero: this only lowers")
+        mz = st["mpos"][2] - (wz - height)
+        if mz < -self.profile.travel["z"] + self.profile.margin:
+            raise Refused(f"that is machine Z {mz:.2f}, below the travel")
+        feed = min(max(feed, 1.0), 300.0)
+        self.last_action = time.time()
+        self.jog_busy = {"target": [st["mpos"][0], st["mpos"][1], mz], "t0": time.time(),
+                         "deadline": time.time() + (wz - height) / feed * 60.0 * 2 + 5.0}
+        await self.link.line(f"G53 G1 Z{mz:.3f} F{feed:g}")
+        self._note(f"lower to {height:g} mm above work zero (machine Z {mz:.2f}) at {feed:g} mm/min")
+        return self.payload()
+
+    def check_probe_3d(self, kind: str, x: float = 20.0, y: float = 20.0, depth: float = 2.0, dia: float = 2.0,
+                       max_drop: float = PROBE3D_MAX_DROP) -> dict:
+        """Validate a 3D-probe routine from where the head is now; returns the routine's info (command, guard box)."""
+        if kind not in PROBE3D:
+            raise Refused(f"unknown 3D probe routine {kind!r} (one of {', '.join(PROBE3D)})")
+        for v in (x, y, depth, dia, max_drop):
+            if not isinstance(v, (int, float)) or v != v:
+                raise Refused("3D probe settings must be numbers")
+        st = self._need(armed=True, idle=True, homed=True)
+        self._need_tool_measured()
+        if self.jog_busy:
+            raise Refused("the previous move hasn't finished")
+        tl = (st.get("tool") or {}).get("number")
+        if tl != self.profile.probe3d_tool:
+            raise Refused(f"the 3D probe routines need the 3D probe (T{self.profile.probe3d_tool}) fitted and measured: "
+                          f"the machine says T{tl}. Change tool → {self.profile.probe3d_tool}")
+        sub, sx, sy = PROBE3D[kind]
+        centre = sub >= 9
+        lo_off = 0.0 if centre else 2.0
+        if not (lo_off <= x <= 80 and lo_off <= y <= 80) or (centre and x == 0 and y == 0):
+            raise Refused("X/Y offsets: 2 .. 80 mm" + (" (0 skips that axis, not both)" if centre else ""))
+        if not (0.5 <= depth <= 10):
+            raise Refused("probing depth: 0.5 .. 10 mm below the touched surface")
+        if not (0.5 <= dia <= 10):
+            raise Refused("probe ball diameter: 0.5 .. 10 mm")
+        if not (2 <= max_drop <= 30):
+            raise Refused("Z search limit: 2 .. 30 mm")
+        mx, my, mz = st["mpos"]
+        xd, yd = sx * x, sy * y
+        if sub <= 4:                                     # out past the edge, then back in
+            xs, ys = (mx, mx - xd), (my, my + yd)
+        elif sub <= 8:                                   # in from the outside, then back to the walls
+            xs, ys = (mx, mx + xd), (my, my - yd)
+        elif sub == 9:                                   # both walls of a pocket from the middle
+            xs, ys = (mx - x, mx + x), (my - y, my + y)
+        else:                                            # both sides of a boss: out by the offset, the far side +5
+            xs, ys = (mx - x, mx + 2 * x + 5 if x else mx), (my - y, my + 2 * y + 5 if y else my)
+        pad = 1.5                                        # retracts and overtravel
+        box = (min(xs) - pad, max(xs) + pad, min(ys) - pad, max(ys) + pad)
+        for ax, lo_, hi_ in (("x", box[0], box[1]), ("y", box[2], box[3])):
+            lo, hi = -self.profile.travel[ax] + self.profile.margin, self.profile.top
+            if lo_ < lo - 1e-9 or hi_ > hi + 1e-9:
+                raise Refused(f"the routine would reach {ax.upper()} {lo_:.1f} .. {hi_:.1f} (machine), outside "
+                              f"{lo:.1f} .. {hi:.1f}: start further from the edge of the travel or use smaller offsets")
+        n_axes = (x > 0) + (y > 0) if centre else 2
+        expect = (0 if sub == 9 else 2) + n_axes * (4 if centre else 2)
+        cmd = f"M480.{sub} X{x:g} Y{y:g} Z{depth:g} D{dia:g}"
+        return {"command": cmd, "sub": sub, "label": kind.replace("_", " "), "start": [mx, my, mz], "dia": dia,
+                "expect_prbs": expect, "x_off": x, "y_off": y,
+                "guard": {"box": box, "start_z": mz, "max_drop": max_drop, "depth": depth, "z_probe": sub != 9}}
+
+    async def probe_3d(self, kind: str, x: float = 20.0, y: float = 20.0, depth: float = 2.0, dia: float = 2.0,
+                       max_drop: float = PROBE3D_MAX_DROP) -> dict:
+        """Makera's 3D-probe routine (M480.n) from where the head is now. The firmware moves, probes and overwrites the
+        work origin itself; we check before, then watch: the head must stay in the routine's area and Z may not drop
+        more than `max_drop` before the first touch (a probe that never triggers) - either sends a feed hold."""
+        info = self.check_probe_3d(kind, x, y, depth, dia, max_drop)
+        cmd = info.pop("command")
+        self.last_action = time.time()
+        self._start_routine("3D probe", cmd, 300.0, **info)
+        await self.link.line(cmd)
+        self._note(f"{cmd} sent (Makera's 3D probe, {info['label']}, from machine X{info['start'][0]:.2f} "
+                   f"Y{info['start'][1]:.2f} Z{info['start'][2]:.2f})")
+        return self.payload()
+
+    def _guard_breach(self, g: dict, mp: list, since: float) -> str | None:
+        x, y, z = mp
+        xlo, xhi, ylo, yhi = g["box"]
+        if not (xlo <= x <= xhi and ylo <= y <= yhi):
+            return f"the head left the routine's area (machine X{x:.2f} Y{y:.2f})"
+        prbs = self._prbs(since)
+        if not g["z_probe"]:
+            floor = g["start_z"] - 0.5
+        elif prbs:
+            floor = prbs[0][0][2] - g["depth"] - 0.5
+        else:
+            floor = g["start_z"] - g["max_drop"]
+        if z < floor:
+            return (f"Z went to {z:.2f} (machine), below {floor:.2f}"
+                    + (" with nothing touched: is the probe triggering?" if g["z_probe"] and not prbs else ""))
+        return None
+
+    def _probe3d_result(self, r: dict, prbs: list, st: dict) -> dict:
+        """What the firmware set, read back from the machine: work origin = MPos - WPos (Z includes the tool length)."""
+        if len(prbs) != r["expect_prbs"]:
+            raise Refused(f"the routine reported {len(prbs)} touches, not {r['expect_prbs']}: the work origin may be "
+                          "wrong, check it before cutting")
+        wco = [m - w for m, w in zip(st["mpos"], st["wpos"])]
+        out = {"origin": wco[:2], "touches": [p_[0] for p_ in prbs]}
+        sub = r["sub"]
+        msg = f"{r['label']}: work X0 Y0 now at machine X{wco[0]:.3f} Y{wco[1]:.3f}"
+        if sub != 9:
+            out["surface_z"] = prbs[0][0][2]
+            msg += f", Z0 on the surface (touched at machine Z {prbs[0][0][2]:.3f})"
+        if sub <= 8:
+            ax, ay = self.profile.anchor1
+            msg += f"; that is {wco[0] - ax:+.3f}, {wco[1] - ay:+.3f} from Anchor 1"
+        else:
+            sizes, k = {}, (0 if sub == 9 else 2)
+            for i, (ax_, off) in enumerate((("x", r["x_off"]), ("y", r["y_off"]))):
+                if off:
+                    a_, b_ = prbs[k + 1][0][i], prbs[k + 3][0][i]
+                    sizes[ax_] = abs(b_ - a_) + (r["dia"] if sub == 9 else -r["dia"])
+                    k += 4
+            out["size"] = sizes
+            msg += "; measured " + ", ".join(f"{a.upper()} {v:.3f} mm" for a, v in sizes.items())
+        out["msg"] = msg
+        return out
 
     async def home(self) -> dict:
         st = self._need(armed=True, idle=False)

@@ -5,6 +5,20 @@ features, patch bumps fix things. The version shown in the UI header comes from 
 
 ## [Unreleased]
 
+## [0.45.0] — 2026-10-17
+
+### Added
+- **Machine tab: 3D probe** (experimental, not yet run on a real machine), using Makera's own routines as MakeraStudio
+  sends them (`M480.n X Y Z D`): outside corners, inside corners, pocket / bore centre and boss centre. The machine
+  touches the top, steps out past the edges, probes back in and sets the work origin itself; the app checks before
+  (the 3D probe fitted and measured, homed, Control on, the routine's whole travel inside the limits) and watches while
+  it runs: a feed hold if the head leaves the routine's area or Z drops more than 10 mm without touching anything.
+  The result is reported (corner position from Anchor 1, or the measured width for centres). On the phone's Probe tab
+  too. The 3D probe uses tool number 9999.
+- **Lower to N mm above work Z0**: a slow, down-only Z move to a probing start height.
+- **Phone control without a key** (Settings ▸ Phone control ▸ Key, on by default): turned off, the phone page is a
+  plain link you can bookmark, with no QR rescans; anyone on the network can then use it, and the pane says so.
+
 ## [0.44.0] — 2026-10-17
 
 ### Added

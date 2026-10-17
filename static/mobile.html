@@ -68,6 +68,11 @@
   .sheet { position:fixed; left:0; right:0; bottom:0; z-index:9; padding:12px 14px calc(env(safe-area-inset-bottom) + 12px); background:rgba(24,27,33,.96); backdrop-filter:blur(10px); -webkit-backdrop-filter:blur(10px); border-top:1px solid var(--line); transform:translateY(110%); transition:transform .25s; }
   .sheet.show { transform:none; } .sheet .in { max-width:532px; margin:0 auto; } .sheet .m { font-size:14px; margin-bottom:10px; } .sheet .k { font-size:11px; letter-spacing:.08em; color:var(--warn); font-weight:800; margin-bottom:4px; }
   body.sheeted { padding-bottom:calc(env(safe-area-inset-bottom) + 150px); }
+  #p3kind, .pane input[type=number] { background:var(--card2); color:var(--text); border:1px solid var(--line); border-radius:10px;
+    font:inherit; font-size:16px; padding:10px 12px; -webkit-appearance:none; appearance:none; }
+  #p3kind { background-image:linear-gradient(45deg,transparent 50%,var(--muted) 50%),linear-gradient(135deg,var(--muted) 50%,transparent 50%);
+    background-position:calc(100% - 18px) 50%,calc(100% - 12px) 50%; background-size:6px 6px; background-repeat:no-repeat; padding-right:32px; }
+  .pane input[type=number] { width:72px !important; padding:8px 10px; margin-left:4px; }
 </style>
 </head>
 <body>
@@ -104,7 +109,7 @@
     <div class="kv"><span>Measured this session</span><span id="meas">–</span></div>
     <div class="ctl" style="margin-top:12px"><div class="t"><b>Change to</b><span>0 = the probe. Every tool is measured on the setter.</span></div>
       <div class="num"><button id="tminus">−</button><output id="tnum">0</output><button id="tplus">+</button></div></div>
-    <button class="btn primary" id="change" style="width:100%;margin-top:12px">Change tool</button>
+    <div class="row" style="margin-top:12px"><button class="btn" id="t3d">3D probe</button><button class="btn primary" id="change">Change tool</button></div>
     <div class="note" id="rt" style="display:none"></div>
     <button class="btn primary" id="confirm" style="width:100%;margin-top:10px;display:none">Confirm — same as the front button</button>
   </div>
@@ -115,6 +120,15 @@
     <button class="btn" id="laser" style="width:100%;margin-top:8px">Probe laser</button>
     <p class="muted small" style="margin:10px 2px 0">Auto Z probe runs the machine's own routine at the head's position and sets work Z zero on that surface. It needs the probe (T0) fitted and measured.</p>
     <div class="note" id="rt2" style="display:none"></div>
+    <div class="kv" style="margin-top:14px"><b>3D probe</b><span id="p3why"></span></div>
+    <select id="p3kind" style="width:100%;margin-top:6px">
+      <optgroup label="Outside corner (stock)"><option value="outside_back_left">Outside corner · back left</option><option value="outside_back_right" selected>Outside corner · back right</option><option value="outside_front_right">Outside corner · front right</option><option value="outside_front_left">Outside corner · front left</option></optgroup>
+      <optgroup label="Inside corner (pocket)"><option value="inside_back_left">Inside corner · back left</option><option value="inside_back_right">Inside corner · back right</option><option value="inside_front_right">Inside corner · front right</option><option value="inside_front_left">Inside corner · front left</option></optgroup>
+      <optgroup label="Centre"><option value="pocket_center">Pocket / bore centre</option><option value="boss_center">Boss centre</option></optgroup></select>
+    <div class="row" style="margin-top:8px"><label class="small muted">X <input type="number" id="p3x" value="20" min="0" max="80" inputmode="decimal" style="width:60px"></label><label class="small muted">Y <input type="number" id="p3y" value="20" min="0" max="80" inputmode="decimal" style="width:60px"></label><span class="small muted">mm</span></div>
+    <div class="row" style="margin-top:8px"><button class="btn" id="p3lower">Lower to 5 mm</button><button class="btn primary" id="p3run">Run 3D probe</button></div>
+    <p class="muted small" id="p3hint" style="margin:8px 2px 0"></p>
+    <p class="muted small" style="margin:4px 2px 0">Probes 2 mm below the touched top with a 2 mm ball (the machine's defaults).</p>
   </div>
 
   <div class="card pane" data-p="more">
@@ -169,10 +183,14 @@ function render(st) {
   $('home').disabled = !(conn && st.armed && st.fresh && ['Idle', 'Alarm'].includes(s.state) && !st.homing);
   $('raise').disabled = !ready;
   const tl = s.tool ? s.tool.number : null;
-  $('tool').textContent = tl == null ? '–' : (tl === 0 ? 'T0 · probe' : 'T' + tl) + (s.tool ? ` · length ${(+s.tool.offset).toFixed(3)}` : '');
+  $('tool').textContent = tl == null ? '–' : (tl === 0 ? 'T0 · probe' : tl === st.probe3d_tool ? `T${tl} · 3D probe` : 'T' + tl) + (s.tool ? ` · length ${(+s.tool.offset).toFixed(3)}` : '');
   $('meas').textContent = st.tool_ok ? 'yes ✓' : 'no';
+  const p3 = st.probe3d_tool, p3why = !ready ? '' : !st.tool_ok || tl !== p3 ? 'fit it first: Tool ▸ 3D probe' : '';
+  $('p3why').textContent = p3why; $('p3run').disabled = !ready || !!p3why; $('p3lower').disabled = !ready || !st.tool_ok || st.jogging;
+  $('p3hint').textContent = P3_HINT[$('p3kind').value.split('_')[0]];
+  $('t3d').disabled = !ready;
   $('change').disabled = !ready; $('origin').disabled = !ready; $('zprobe').disabled = !(ready && st.tool_ok && tl === 0);
-  [['rt', rt], ['rt2', rt && rt.kind === 'auto Z probe' ? rt : null]].forEach(([id, r]) => { const e = $(id); e.style.display = r ? '' : 'none'; if (r) { e.className = 'note ' + r.stage; e.textContent = r.msg; } });
+  [['rt', rt], ['rt2', rt && ['auto Z probe', '3D probe'].includes(rt.kind) ? rt : null]].forEach(([id, r]) => { const e = $(id); e.style.display = r ? '' : 'none'; if (r) { e.className = 'note ' + r.stage; e.textContent = r.msg; } });
   $('confirm').style.display = rt && rt.stage === 'awaiting' ? '' : 'none';
   const live = rt && ['running', 'awaiting'].includes(rt.stage);
   $('sheet').classList.toggle('show', !!live); document.body.classList.toggle('sheeted', !!live);
@@ -215,13 +233,26 @@ document.querySelectorAll('.tabs button').forEach(b => b.onclick = () => {
   document.querySelectorAll('.tabs button').forEach(x => x.classList.toggle('on', x === b));
   document.querySelectorAll('.pane').forEach(p => p.classList.toggle('on', p.dataset.p === b.dataset.p));
 });
-$('tminus').onclick = () => { tnum = Math.max(0, tnum - 1); $('tnum').textContent = tnum; };
+$('tminus').onclick = () => { tnum = tnum > 99 ? 99 : Math.max(0, tnum - 1); $('tnum').textContent = tnum; };
 $('tplus').onclick = () => { tnum = Math.min(99, tnum + 1); $('tnum').textContent = tnum; };
 $('change').onclick = () => api({ action: 'change_tool', z: tnum });
 $('confirm').onclick = () => api({ action: 'confirm_tool' });
 $('sheetok').onclick = () => api({ action: 'confirm_tool' });
 $('origin').onclick = () => api({ action: 'origin_anchor' });
 $('zprobe').onclick = () => api({ action: 'auto_z_probe' });
+const P3_HINT = {
+  outside: 'Start about 5 mm above the stock, 5 mm in from that corner. The corner becomes X0 Y0, the top Z0.',
+  inside: 'Start about 5 mm above the top, just outside the pocket corner. The corner becomes X0 Y0, the top Z0.',
+  pocket: 'Start in the pocket, near the middle, at least 2 mm below its edge. X/Y over half the width. Centre becomes X0 Y0.',
+  boss: 'Start about 5 mm above the middle of the boss. X/Y over half its width plus clearance. Centre becomes X0 Y0, top Z0.' };
+$('p3kind').onchange = () => ST && render(ST);
+$('t3d').onclick = () => { tnum = ST.probe3d_tool; $('tnum').textContent = tnum; };
+$('p3lower').onclick = () => api({ action: 'lower_to', z: 5 });
+$('p3run').onclick = () => {
+  const k = $('p3kind'), label = k.selectedOptions[0].textContent;
+  if (confirm(`Run Makera's 3D probe: ${label}? The machine moves and probes on its own and overwrites the work origin. Hand on the e-stop.`))
+    api({ action: 'probe_3d', kind: k.value, x: +$('p3x').value, y: +$('p3y').value });
+};
 $('laser').onclick = () => api({ action: 'switch', axis: 'probe_laser', on: !(ST.switches || {}).probe_laser });
 $('dust').onclick = () => api({ action: 'switch', axis: 'dust', on: !(ST.switches || {}).dust });
 $('light').onclick = () => api({ action: 'switch', axis: 'light', on: !(ST.switches || {}).light });

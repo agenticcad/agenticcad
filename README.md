@@ -292,6 +292,11 @@ position and limits; after: the firmware's `[PRB:]` results, the reported tool a
 - **Auto Z probe** = Makera's `M495 X Y O0 F0` at the head's position: probe on, touch (500 then 100 mm/min), work Z
   zero on that surface, probe off. Makera's routines switch the wired probe on and check it fired; probing without
   them is how a dead probe gets driven into the stock (it happened once in testing; the e-stop caught it).
+- **3D probe** (experimental) = Makera's `M480.n X Y Z D` from where the head is: outside corners (.1–.4: back left,
+  back right, front right, front left), inside corners (.5–.8), pocket / bore centre (.9) and boss centre (.10). The
+  firmware moves, probes and sets the work origin; the app requires the 3D probe (T9999) fitted and measured, checks
+  the routine's travel against the limits, and sends a feed hold if the head leaves that area or Z drops more than
+  10 mm before the first touch. **Lower to N mm above Z0** brings the probe to its start height (down only).
 - **Machine-specific values come from the machine's live config** (MakeraStudio's downloaded `ControllerConfig.txt`):
   this Z1's Anchor 1 was -191.28, -194.45 against the firmware default -192.4, -194.3.
 
@@ -311,11 +316,12 @@ Safety rules in `machine_link`:
 Hold / Resume / Unlock, Control, jog pad, tool change with a pinned Confirm bar while the machine waits, origin and
 auto Z probe, laser / dust / light. Turning it on starts a second listener on the local network (the desktop app stays
 on 127.0.0.1) that serves only that page and the machine endpoints, each call checked against a random key carried in
-the QR code's link; *New link* locks out old phones. The phone uses the same MachineControl, so every rule above
+the QR code's link; *New link* locks out old phones. The key can be turned off (anyone on the network can then use the
+page — your choice, and the pane says so). The phone uses the same MachineControl, so every rule above
 applies unchanged. Plain HTTP on the local network: turn it off when you don't need it.
 
-`tools/z1_emu.py` is a Z1 emulator (protocol, homing, jogs, hold/halt, the M6 / M491 / M495 routines with a tool
-setter and a stock surface, the camera) used by `tests/test_machine_link.py`; like the real firmware it does not stop
+`tools/z1_emu.py` is a Z1 emulator (protocol, homing, jogs, hold/halt, the M6 / M491 / M495 / M480 routines with a tool
+setter, a stock block and an optional pocket, the camera) used by `tests/test_machine_link.py`; like the real firmware it does not stop
 a jog past the end, so the tests prove the guard does.
 
 ## 3D printing (external slicer)

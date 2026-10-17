@@ -45,6 +45,10 @@ class Z1Emu:
         self._tool_wait = asyncio.Event()
         # the surface under the probe tip, machine Z: stock 100x100 at the anchor, MDF elsewhere
         self.surface_z = lambda x, y: -55.0 if (-191.28 <= x <= -91.28 and -194.45 <= y <= -94.45) else -75.0
+        self.stock = (-191.28, -91.28, -194.45, -94.45)  # the stock's XY box (machine), its top at surface_z
+        self.pocket: tuple | None = None                # optional (x0, x1, y0, y1, floor machine Z) cut into the stock
+        self.ball_r = 1.0                               # 3D probe ball radius (2 mm ruby)
+        self.probe3d_fail = False                       # True: the probe never triggers (tests the Z-drop guard)
         self.probe_start_delay = 0.8                    # s of 'Idle' before a G38.6 starts moving (as seen on a real Z1)
         self.clients = 0
         self._move: asyncio.Task | None = None
@@ -126,6 +130,144 @@ class Z1Emu:
         self.replies.append("Done ATC")
         self.state = "Idle"
 
+    # ---- 3D probe (M480.n): the firmware's sequences (ATCHandler fill_OutCorner/InCorner/InPocket/OutPocket_scripts)
+    def _in_pocket(self, x, y):
+        p_ = self.pocket
+        return bool(p_) and p_[0] <= x <= p_[1] and p_[2] <= y <= p_[3]
+
+    def _surface(self, x, y):
+        return self.pocket[4] if self._in_pocket(x, y) else self.surface_z(x, y)
+
+    def _solid(self, x, y, z):
+        x0, x1, y0, y1 = self.stock
+        if not (x0 <= x <= x1 and y0 <= y <= y1) or z >= self.surface_z(x, y):
+            return False
+        return not (self._in_pocket(x, y) and z > self.pocket[4])
+
+    async def _g38(self, axis, dist, rate):
+        """G38.2 along one axis (relative, as on the Z1): stop where the ball first meets material; no touch = alarm."""
+        i = "xyz".index(axis)
+        sgn = 1.0 if dist > 0 else -1.0
+        hit_at = None
+        for k in range(int(abs(dist) / 0.01) + 1):
+            q = list(self.mpos)
+            q[i] += sgn * k * 0.01
+            if self.probe3d_fail:
+                break
+            if axis == "z":
+                touch = q[2] <= self._surface(q[0], q[1])
+            else:
+                lead = list(q)
+                lead[i] += sgn * self.ball_r
+                touch = self._solid(*lead)
+            if touch:
+                hit_at = q
+                break
+        end = hit_at or [m + (dist if j == i else 0.0) for j, m in enumerate(self.mpos)]
+        await self._move_to(end, rate)
+        self.state = "Run"
+        self.replies.append(f"[PRB:{self.mpos[0]:.3f},{self.mpos[1]:.3f},{self.mpos[2]:.3f}:{int(hit_at is not None)}]")
+        if hit_at is None:
+            self.replies.append("ALARM: Probe fail")
+            self.halted = True
+            self.state = "Alarm"
+            raise asyncio.CancelledError
+        return list(self.mpos)
+
+    def _set_work(self, i, v):
+        self.wco[i] = self.mpos[i] - v                  # G10 L20 P0: the current position becomes v
+
+    async def _rel(self, i, d, rate=1500.0):
+        t = list(self.mpos)
+        t[i] += d
+        await self._move_to(t, rate)
+        self.state = "Run"
+
+    async def _probe3d(self, sub, X, Y, Z, D):
+        r = D / 2
+        mpos = list(self.mpos)
+        sx, sy = {1: (1, 1), 2: (-1, 1), 3: (-1, -1), 4: (1, -1), 5: (1, 1), 6: (-1, 1), 7: (-1, -1), 8: (1, -1)}.get(sub, (1, 1))
+        xd, yd = sx * X, sy * Y
+        try:
+            if sub != 9:                                # Z: touch twice, Z0 there
+                await self._g38("z", -108.0, 100.0)
+                self._set_work(2, 0.0)
+                await self._rel(2, 1.0)
+                await self._g38("z", -108.0, 100.0)
+                self._set_work(2, 0.0)
+                await self._go(z=mpos[2])
+            if sub <= 4:
+                await self._rel(0, -xd)
+                await self._go(z=self.wco[2] - Z, rate=150.0)
+                await self._g38("x", xd, 100.0)
+                await self._rel(0, -sx * 1.0)
+                await self._g38("x", xd, 50.0)
+                self._set_work(0, -sx * r)
+                await self._rel(0, -sx * 1.0)
+                await self._go(z=mpos[2])
+                await self._go(x=mpos[0])
+                await self._rel(1, yd)
+                await self._go(z=self.wco[2] - Z, rate=150.0)
+                await self._g38("y", -yd, 100.0)
+                await self._rel(1, sy * 1.0)
+                await self._g38("y", -yd, 50.0)
+                self._set_work(1, sy * r)
+                await self._rel(1, sy * 1.0)
+                await self._go(z=mpos[2])
+                await self._go(self.wco[0], self.wco[1])
+            elif sub <= 8:
+                await self._go(mpos[0] + xd, mpos[1] - yd)
+                await self._go(z=self.wco[2] - Z, rate=150.0)
+                start2 = list(self.mpos)
+                await self._g38("x", -xd, 100.0)
+                await self._rel(0, sx * 1.0)
+                await self._g38("x", -xd, 50.0)
+                self._set_work(0, sx * r)
+                await self._go(x=start2[0])
+                await self._g38("y", yd, 100.0)
+                await self._rel(1, -sy * 1.0)
+                await self._g38("y", yd, 50.0)
+                self._set_work(1, -sy * r)
+                await self._rel(1, -sy * 1.0)
+                await self._go(z=mpos[2])
+                await self._go(self.wco[0], self.wco[1])
+            else:
+                for i, d in ((0, X), (1, Y)):
+                    if not d:
+                        continue
+                    ax = "xy"[i]
+                    if sub == 9:
+                        await self._g38(ax, -d, 100.0)
+                        await self._rel(i, 1.0)
+                        left = await self._g38(ax, -d, 50.0)
+                        await self._rel(i, 1.0)
+                        await self._g38(ax, 2 * d, 100.0)
+                        await self._rel(i, -1.0)
+                        right = await self._g38(ax, d, 50.0)
+                    else:
+                        await self._rel(i, -d)
+                        await self._go(z=self.wco[2] - Z, rate=150.0)
+                        await self._g38(ax, d, 100.0)
+                        await self._rel(i, -1.0)
+                        left = await self._g38(ax, d, 50.0)
+                        await self._rel(i, -1.0)
+                        await self._go(z=mpos[2])
+                        await self._rel(i, 2 * d + 5)
+                        await self._go(z=self.wco[2] - Z, rate=150.0)
+                        await self._g38(ax, -2 * d, 100.0)
+                        await self._rel(i, 1.0)
+                        right = await self._g38(ax, -d, 50.0)
+                        await self._rel(i, 1.0)
+                        await self._go(z=mpos[2])
+                    tgt = [None, None]
+                    tgt[i] = left[i] - (left[i] - right[i]) / 2
+                    await self._go(*tgt)
+                    self._set_work(i, 0.0)
+        except asyncio.CancelledError:
+            return
+        self.replies.append("Done ATC")
+        self.state = "Idle"
+
     async def _home(self):
         for axes in ("z", "xy"):                        # home_z_first true: Z up first, then X and Y
             tgt = list(self.mpos)
@@ -196,6 +338,11 @@ class Z1Emu:
             return "ok"
         if u.startswith("M491"):
             self._start(self._routine(change_to=None), "Run")
+            return None
+        if u.startswith("M480."):
+            m = re.match(r"M480\.(\d+)", u)
+            w = dict((t[0].upper(), float(t[1:])) for t in s.split()[1:] if len(t) > 1)
+            self._start(self._probe3d(int(m.group(1)), w.get("X", 20.0), w.get("Y", 20.0), w.get("Z", 2.0), w.get("D", 2.0)), "Run")
             return None
         if u.startswith("M495"):
             w = dict((t[0].upper(), float(t[1:])) for t in s.split()[1:] if len(t) > 1)

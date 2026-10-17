@@ -27,3 +27,20 @@ def test_phone_listener_needs_the_key_and_exposes_only_the_machine(tmp_path, mon
     d = TestClient(server.app)
     st = d.post("/api/remote", json={"new_link": True}).json()
     assert old not in st["url"] and c.get("/m/api/machine", headers={"X-Key": old}).status_code == 401
+
+
+def test_key_can_be_turned_off_in_settings(tmp_path, monkeypatch):
+    monkeypatch.setenv("AGENTICCAD_WORKSPACE", str(tmp_path))
+    monkeypatch.setenv("AGENTICCAD_NO_AGENT", "1")
+    monkeypatch.setenv("AGENTICCAD_NO_REMOTE", "1")
+    import importlib
+    import server
+    importlib.reload(server)
+    c, d = TestClient(server.phone), TestClient(server.app)
+    assert server._remote_cfg()["require_key"] is True                     # on by default
+    st = d.post("/api/remote", json={"require_key": False}).json()
+    assert st["require_key"] is False and st["url"].endswith("/m")         # a plain link, nothing to rescan
+    assert c.get("/m/api/machine").status_code == 200
+    assert c.get("/api/settings").status_code == 404                       # still only the machine
+    d.post("/api/remote", json={"require_key": True})
+    assert c.get("/m/api/machine").status_code == 401
