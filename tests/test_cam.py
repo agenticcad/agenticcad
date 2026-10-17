@@ -160,14 +160,16 @@ def test_adaptive_slot_loops_and_slows_in_corners(cam_setup):
 
 def _adaptive_quality(op, P, r, z_cut):
     """Independent fine-grid replay of one level: feed length that is climb (material on the left of travel, CW
-    spindle), conventional, or in air, and the number of rapids below the stock top that would hit uncut material."""
+    spindle), conventional, or in air, the number of rapids below the stock top that would hit uncut material, and
+    the number of tool positions at the cut depth that reach into the part (outside P)."""
     res = 0.05
     minx, miny, maxx, maxy = P.bounds
     xs = np.arange(minx - r - 1, maxx + r + 1, res); ys = np.arange(miny - r - 1, maxy + r + 1, res)
     gx, gy = np.meshgrid(xs, ys)
     M = shapely.contains_xy(P, gx.ravel(), gy.ravel()).reshape(gy.shape)
     ang = np.arange(72) * math.pi / 36; ox, oy = np.cos(ang), np.sin(ang)
-    out = {"climb": 0.0, "conventional": 0.0, "air": 0.0, "rapid_hits": 0}
+    out = {"climb": 0.0, "conventional": 0.0, "air": 0.0, "rapid_hits": 0, "gouges": 0}
+    C = P.buffer(-r + 0.005)                     # tool centres that keep the cutter inside P (5 µm: polygon chords)
 
     def contact(x, y, rad):
         sx, sy = x + rad * ox, y + rad * oy
@@ -191,6 +193,8 @@ def _adaptive_quality(op, P, r, z_cut):
                     inm = contact(cx, cy, r - 0.03) & ((ox * hx + oy * hy) > -0.2)
                     left = (inm & ((-hy * ox + hx * oy) > 0)).sum(); right = (inm & ((-hy * ox + hx * oy) < 0)).sum()
                     out["air" if left + right == 0 else "climb" if left >= right else "conventional"] += L / n
+                if cz <= z_cut + 0.5 and not C.covers(shapely.Point(cx, cy)):
+                    out["gouges"] += 1
                 if cz <= z_cut + 1e-6:
                     M[(gx - cx) ** 2 + (gy - cy) ** 2 <= r * r] = False
         prev = m
@@ -205,10 +209,21 @@ def test_adaptive_pocket_with_island_climbs_and_links_cleanly(cam_setup):
     op = cam.adaptive(setup, tools[1], P, z_top=24, z_bottom=23, stepover=0.25)
     q = _adaptive_quality(op, P, tools[1].radius, 23.0)
     cut = q["climb"] + q["conventional"]
-    assert q["rapid_hits"] == 0, q
+    assert q["rapid_hits"] == 0 and q["gouges"] == 0, q
     assert q["conventional"] < 0.02 * cut, q             # the old linker: 60 % conventional
-    assert q["air"] < 0.6 * cut, q                       # stay-down links included; the old linker: 1.3 × the cut
+    assert q["air"] < 0.7 * cut, q                       # stay-down links included; the old linker: 1.3 × the cut
     assert op.params["retracts"] == 0, op.params
+
+
+def test_adaptive_links_never_cross_an_island(cam_setup):
+    """Links go through cleared ground inside the pocket: an island is not 'cleared' just because it is not pocket.
+    (The L-shaped island had over a hundred tool positions in it before links were confined to the pocket.)"""
+    setup, tools, _ = cam_setup
+    P = cam.rect(-20, -14, 20, 14).difference(cam.rect(-10, -2, 10, 2)).difference(cam.rect(-10, -2, -6, 10))
+    op = cam.adaptive(setup, tools[1], P, z_top=24, z_bottom=23, stepover=0.25)
+    q = _adaptive_quality(op, P, tools[1].radius, 23.0)
+    assert q["gouges"] == 0 and q["rapid_hits"] == 0, q
+    assert q["conventional"] < 0.02 * (q["climb"] + q["conventional"]), q
 
 
 def test_adaptive_rest_nothing_left_warns(cam_setup):

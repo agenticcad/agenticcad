@@ -392,7 +392,7 @@ def test_pocket_and_contour_ramp_in_instead_of_plunging(machines, plate):
     t = flat(); top = st.stock.top
     op = cam.pocket(st, t, cam.circle(0, 0, 11), z_top=top - 1, z_bottom=top - 7, stepdown=2.0)
     # no plunge ends below the op's top: every entry ramps down along a ring at the ramp angle (a helix on a small ring)
-    assert all(mv[3] >= top - 1 + 0.5 - 1e-6 for mv in op.moves if mv[0] == cam.PLUNGE)
+    assert all(mv[3] >= top - 1 + cam.ENTRY_GAP - 1e-6 for mv in op.moves if mv[0] == cam.PLUNGE)
     assert op.params["ramp"] == cam.RAMP_DEG and max(_descents(op.moves)) <= cam.RAMP_DEG + 0.2
     assert min(mv[3] for mv in op.moves) == pytest.approx(top - 7)
     # the helical ramps post as G2/G3 arcs, so the program stays short
@@ -403,7 +403,7 @@ def test_pocket_and_contour_ramp_in_instead_of_plunging(machines, plate):
     assert any(mv[3] < top - 1 for mv in op0.moves if mv[0] == cam.PLUNGE)
     # contour: one entry per ring, the passes run on without retracting, nothing descends steeper than the ramp
     c = cam.contour(st, t, cam.rect(-30, -20, 30, 20), z_top=top - 1, z_bottom=top - 7, stepdown=2.0)
-    assert all(mv[3] >= top - 1 + 0.5 - 1e-6 for mv in c.moves if mv[0] == cam.PLUNGE)
+    assert all(mv[3] >= top - 1 + cam.ENTRY_GAP - 1e-6 for mv in c.moves if mv[0] == cam.PLUNGE)
     assert sum(1 for mv in c.moves if mv[0] == cam.RAPID and mv[3] >= st.safe_z - 1e-6) <= 2
     assert max(_descents(c.moves)) <= cam.RAMP_DEG + 0.2 and c.params["passes"] == 3
 

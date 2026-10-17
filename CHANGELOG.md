@@ -5,6 +5,28 @@ features, patch bumps fix things. The version shown in the UI header comes from 
 
 ## [Unreleased]
 
+## [0.40.0] — 2026-10-17
+
+### Fixed
+- **Adaptive links can no longer cross an island.** Cleared ground for links was "everything outside the pocket
+  plus what has been cut", and an island is outside the pocket: once the ground all round it was cut, a stay-down
+  link or a low hop could run straight across it. Links are now confined to where the cutter may go in the pocket.
+  On an L-shaped island test, 109 tool positions reached into the island; now none.
+- **Adaptive finishes the area it is in before moving on.** It used to cut one ring of fronts all over the part,
+  then the next ring, hopping back and forth. When the nearest pass is more than a stay-down link away, it now first
+  looks at what the passes just cut have opened up where the cutter is. On a logo plaque's four roughing bands:
+  long cross-part links 7.1 → 3.5 m, lifts 298 → 202, 22.2 → 19.5 min; faster or equal on every test shape.
+- **Adaptive leaves no slivers standing at the walls.** Each level ends with a climb pass along the walls wherever
+  the crescents left scallops, and lifted rapids keep 0.02 mm clear of the walls.
+- **Pocket and contour entries no longer crawl through air.** They rapided to 1 mm above the original stock top and
+  fed down at the plunge rate, then started the ramp 0.5 mm above the material. They now rapid to 0.5 mm above
+  where the op cuts and start ramps (and adaptive helices) 0.05 mm above it; later adaptive levels helix from the
+  level above. The engraved text on the plaque: 16.4 → 5.8 min.
+- **Ramps and helices run at a sensible feed**: at most 60 % of the cutting feed, and never descending faster than
+  the plunge feed (they ran at the plunge feed, so a 3° ramp sank at 5 % of it).
+- **Time estimates count slow Z.** Rapids' vertical part is timed at the machine's Z limit (600 mm/min on the Z1,
+  half its XY rate), so estimates no longer flatter programs with many retracts.
+
 ## [0.39.0] — 2026-10-17
 
 ### Fixed

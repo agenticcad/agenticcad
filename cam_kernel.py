@@ -519,13 +519,17 @@ class Op:
         return cut, rapid
 
     def time_minutes(self, machine: Machine) -> float:
+        """Feed moves at their feed; rapids at the machine's rapid rate, their Z part no faster than its Z limit."""
         t = 0.0
         prev = None
+        zmax = min(machine.rapid, (machine.max_feed or {}).get("z", machine.rapid)) or machine.rapid
         for m in self.moves:
             if prev is not None:
                 d = self._seg(prev, m)
-                f = machine.rapid if m[0] == RAPID else max(m[4], 1.0)
-                t += d / f
+                if m[0] == RAPID:
+                    t += max(d / machine.rapid, abs(m[3] - prev[3]) / zmax)
+                else:
+                    t += d / max(m[4], 1.0)
             prev = m
         return t
 
@@ -566,13 +570,19 @@ class PathBuilder:
         self.retract()
         self._add(RAPID, x, y, self.setup.safe_z)
 
-    def plunge_to(self, z, rapid_to: float | None = None):
-        """Rapid down to just above `rapid_to` (or stock top), then plunge-feed to z."""
+    def plunge_to(self, z, rapid_to: float | None = None, gap: float = 1.0):
+        """Rapid down to `gap` mm above `rapid_to` (or the stock top), then plunge-feed to z."""
         x, y = self.pos[0], self.pos[1]
-        approach = (rapid_to if rapid_to is not None else self.setup.stock.top) + 1.0
+        approach = (rapid_to if rapid_to is not None else self.setup.stock.top) + gap
         if self.pos[2] > approach and z < approach:
             self._add(RAPID, x, y, approach)
         self._add(PLUNGE, x, y, z, self.plunge)
+
+    def ramp_feed(self, angle_deg: float) -> float:
+        """Feed for a ramp or helix descending at `angle_deg`: the descent rate never exceeds the plunge feed, and the
+        feed along the ramp (a slot, full width) is at most RAMP_FEED of the cutting feed."""
+        sa = math.sin(math.radians(max(angle_deg, 0.1)))
+        return max(self.plunge, min(self.feed * RAMP_FEED, self.plunge / sa))
 
     def feed_to(self, x, y, z=None, f: float | None = None):
         z = self.pos[2] if z is None else z
@@ -800,6 +810,8 @@ def _levels(z_top: float, z_bottom: float, stepdown: float) -> list[float]:
 # Operations
 # =============================================================================
 RAMP_DEG = 3.0                      # default entry ramp angle along the path (0 = straight plunge)
+RAMP_FEED = 0.6                     # ramps and helices run at up to this fraction of the cutting feed (see ramp_feed)
+ENTRY_GAP = 0.05                    # ramps / helices start this far above the material the op cuts (rapid to 0.5 above it)
 COLORS = {"face": "#7fd1ff", "contour": "#4ea1ff", "pocket": "#4cd37a", "drill": "#ffd166", "parallel3d": "#c58cff", "engrave": "#ff9f7a", "adaptive": "#ff9f43", "rest": "#8ef0d0"}
 
 
@@ -897,9 +909,9 @@ def contour(setup: Setup, tool: Tool, polys, z_top: float, z_bottom: float, side
         path = dense[:-1]                                   # closed ring for the lap/ramp walker
         # one entry per ring: lead-in just above the stock, then every pass ramps down along the profile from where
         # the previous pass ended and runs a full lap (tabs lift the tool at any depth below the tab top)
-        z_air = z_top + 0.5                                 # entry starts just above where this op cuts (material above is already gone)
+        z_air = z_top + ENTRY_GAP                           # entry starts just above where this op cuts (material above is already gone)
         start = lead_in[0] if lead_in else dense[0]
-        pb.rapid_xy(*start); pb.plunge_to(z_air)
+        pb.rapid_xy(*start); pb.plunge_to(z_air, rapid_to=z_top, gap=0.5)
         for x, y in lead_in[1:]:
             pb.feed_to(x, y, z_air)
         s_at = 0.0
@@ -1003,8 +1015,8 @@ def _lap_ramp(pb: PathBuilder, ring: list[tuple[float, float]], z: float, ramp: 
         zz = z_from - depth * min(1.0, (s_at - s0) / L) if L > 0 else z
         if zmod is not None:
             zz = zmod(s_at % total, zz)
-        ramping = L > 0 and s_at <= s0 + L + 1e-9                  # the ramp (to its end point) runs at the plunge feed
-        pb.feed_to(x, y, zz, pb.plunge if ramping else None)
+        ramping = L > 0 and s_at <= s0 + L + 1e-9                  # the ramp (to its end point) runs at the ramp feed
+        pb.feed_to(x, y, zz, pb.ramp_feed(ramp) if ramping else None)
     def corner(i_seg):                                                # does the path turn at the end of segment i?
         a, b, c = ring[i_seg], ring[(i_seg + 1) % n], ring[(i_seg + 2) % n]
         ux, uy, vx, vy = b[0] - a[0], b[1] - a[1], c[0] - b[0], c[1] - b[1]
@@ -1086,7 +1098,7 @@ def pocket(setup: Setup, tool: Tool, polys, z_top: float, z_bottom: float, stepd
     # them — and visited nearest-neighbour; within a region the next level is plunged where the tool already is
     regions = _nn_order(_polys(region), lambda R: (R.centroid.x, R.centroid.y), pb.pos[:2] if pb.pos else None)
     op.params = dict(z_top=z_top, z_bottom=z_bottom, stepover=so, passes=len(levels), rings=len(shells), regions=len(regions), ramp=ramp)
-    z_air = z_top + 0.5                                     # entry starts just above where this op cuts
+    z_air = z_top + ENTRY_GAP                               # entry starts just above where this op cuts
     for R in regions:
         shells_R = [[q for q in ps if R.covers(q.representative_point())] for ps in shells]
         shells_R = [ps for ps in shells_R if ps]
@@ -1121,7 +1133,7 @@ def _rings_ramped(pb: PathBuilder, R, shells_R, tool: Tool, levels, climb: bool,
         for ring in order:
             start = ring[0]
             if first or pb.pos is None or not inner_ok.covers(LineString([pb.pos[:2], start])):
-                pb.rapid_xy(*start); pb.plunge_to(floor); first = False      # down through air to the cleared floor
+                pb.rapid_xy(*start); pb.plunge_to(floor, rapid_to=floor, gap=0.5); first = False   # rapid to just above the cleared floor
             else:
                 pb.feed_to(start[0], start[1], pb.pos[2])
             _lap_ramp(pb, ring, z, ramp, 0.0)
@@ -1162,7 +1174,8 @@ def adaptive(setup: Setup, tool: Tool, polys, z_top: float, z_bottom: float, ste
     (≤ stay_down, default 4 × Ø) at feed with the cutter down, longer ones at rapid `hop` mm above the floor; only when
     no cleared route exists does the cutter lift `lift` mm above this band's top and rapid across inside the pocket
     (round islands), and a full retract is the last resort. Rapids never run or come down into standing material.
-    Leaves radial scallops of ≤ ae on the walls: follow with a contour finishing pass."""
+    Each level ends with a climb pass along the walls wherever the crescents left scallops there, so nothing in the
+    pocket stands above the level (stock_to_leave is kept); follow with a contour pass for a finished wall."""
     op = Op(name, "adaptive", tool, color=COLORS["adaptive"])
     pb = PathBuilder(setup, tool, op)
     src = _polys(polys)
@@ -1275,19 +1288,34 @@ def adaptive(setup: Setup, tool: Tool, polys, z_top: float, z_bottom: float, ste
     lifts = hops = 0
     # links at lift height run inside the allowed centre region C (the cutter stays inside the pocket, where nothing
     # stands above this band's top): straight if C covers the line, else round islands on a visibility graph of C
-    C_prep = prep(C.buffer(0.005, join_style=1))          # pass ends lie on C's boundary: include it (5 µm)
+    C_link = C.buffer(1e-3, join_style=1)                 # links: the cutter in cleared ground AND inside the pocket
+    C_prep = prep(C.buffer(0.005, join_style=1))
+    C_in = prep(C.buffer(-0.02, join_style=1))            # lifted rapids keep this clear of the walls          # pass ends lie on C's boundary: include it (5 µm)
     Cs = C.buffer(-0.05, join_style=1).simplify(0.03)      # detour corners just inside C
     nodes = [c for g in _polys(Cs) for ring in [g.exterior, *g.interiors] for c in list(ring.coords)[:-1]]
     nodes = [(x + 0.0, y + 0.0) for x, y in nodes]
 
+    def trav_ok(p_, q_, trim_p, trim_q):
+        """A lifted rapid from p_ to q_ inside the pocket, 0.02 mm clear of its walls (where uncut stock may stand
+        to the top) except the last 0.15 mm at an end that is a pass end on the wall (the cutter goes straight up
+        or down there)."""
+        if not C_prep.covers(LineString([p_, q_])):
+            return False
+        L = math.dist(p_, q_)
+        ta, tb = (0.15 if trim_p else 0.0), (0.15 if trim_q else 0.0)
+        if L - ta - tb <= 1e-9:
+            return True
+        ux, uy = (q_[0] - p_[0]) / L, (q_[1] - p_[1]) / L
+        return C_in.covers(LineString([(p_[0] + ux * ta, p_[1] + uy * ta), (q_[0] - ux * tb, q_[1] - uy * tb)]))
+
     def lifted_path(a, b):
-        if C_prep.covers(LineString([a, b])):
+        if trav_ok(a, b, True, True):
             return [b]
         import heapq
         pts = [a, b] + nodes
         if len(pts) > 600:
             return None
-        vis = lambda i, j: C_prep.covers(LineString([pts[i], pts[j]]))
+        vis = lambda i, j: trav_ok(pts[i], pts[j], i < 2, j < 2)
         dist = {0: 0.0}; prev_ = {}; pq = [(0.0, 0)]; seen = set()
         while pq:
             dcur, i = heapq.heappop(pq)
@@ -1392,24 +1420,28 @@ def adaptive(setup: Setup, tool: Tool, polys, z_top: float, z_bottom: float, ste
         pb.rapid_xy(target[0], target[1]); pb.plunge_to(z)
         return "retract"
 
+    z_prev = None
     for z in levels:
         if _time.time() - t_start > max_seconds:
             op.warnings.append(f"adaptive: time budget of {max_seconds:.0f}s exhausted; remaining levels skipped")
             break
         z_lift = min(max(z_top, z) + lift, setup.safe_z)
         # ---- helical entry
-        depth = z_top - z
+        z_h = (z_top if z_prev is None else z_prev) + ENTRY_GAP      # the bore above is already cut on later levels
+        depth = z_h - z
         n_turns = max(1, math.ceil(depth / min(1.0, tool.diameter * 0.15)))
         n_pts = 24 * n_turns
+        f_h = pb.ramp_feed(math.degrees(math.atan2(depth / n_turns, 2 * math.pi * hr)))
         pb.rapid_xy(ex + hr, ey)
-        pb.plunge_to(z_top + 0.5, rapid_to=z_top)
+        pb.plunge_to(z_h, rapid_to=z_h, gap=0.45)
         for i in range(1, n_pts + 1):
             a = sign * 2 * math.pi * i / 24
-            zz = z_top + 0.5 - (z_top + 0.5 - z) * i / n_pts
-            pb.feed_to(ex + hr * math.cos(a), ey + hr * math.sin(a), zz, pb.plunge)
+            zz = z_h - depth * i / n_pts
+            pb.feed_to(ex + hr * math.cos(a), ey + hr * math.sin(a), zz, f_h)
         K = K0.union(Point(ex, ey).buffer(hr + r, 48))
         pos = (pb.pos[0], pb.pos[1])
         Kc_prev = None
+        wall_done = False
         it = 0
         while it < 5000:
             it += 1
@@ -1432,7 +1464,12 @@ def adaptive(setup: Setup, tool: Tool, polys, z_top: float, z_bottom: float, ste
                 geoms = list(merged.geoms) if hasattr(merged, "geoms") else [merged]
                 segs = [g for g in geoms if g.geom_type == "LineString" and g.length > ae * 0.5]
             if not segs:
-                break
+                # fronts exhausted: one climb pass along the walls takes the scallops the crescents leave there
+                # (trimmed to where material is left), so nothing in the pocket stands above this level
+                if wall_done:
+                    break
+                wall_done = True
+                segs = [LineString(rg.coords) for g_ in _polys(C) for rg in [g_.exterior, *g_.interiors]]
             Kc_poly = K.buffer(-r + 1e-3, join_style=1)
             Kc = prep(Kc_poly)                                   # tool fully inside cleared ground
             Kc_prev = Kc_poly.buffer(-1e-3)
@@ -1444,12 +1481,22 @@ def adaptive(setup: Setup, tool: Tool, polys, z_top: float, z_bottom: float, ste
                 break
             Klive = K                                         # cleared ground including the passes cut so far
             last_pass = None
+            fresh = True
             while remaining:
-                # nearest pass start from the current position
-                k = min(range(len(remaining)), key=lambda i: (remaining[i][0][0] - pos[0]) ** 2 + (remaining[i][0][1] - pos[1]) ** 2)
+                # stay in the area: the nearest pass start if it is within a stay-down link; otherwise, before leaving,
+                # recompute the fronts (the passes just cut have opened new ones here) and take the pass nearest the
+                # cutter anywhere along it, so an area is finished before the cutter moves on
+                d_start = [math.dist(q[0], pos) for q in remaining]
+                k = min(range(len(remaining)), key=d_start.__getitem__)
+                if d_start[k] > stay_max:
+                    if not fresh:
+                        break
+                    pt_ = Point(pos)
+                    k = min(range(len(remaining)), key=lambda i: LineString(remaining[i]).distance(pt_))
+                fresh = False
                 dense = remaining.pop(k)
-                Kc_live = prep(Klive.buffer(-r + 0.02, join_style=1))
-                Kr_live = prep(Klive.buffer(-r + 0.005, join_style=1))
+                Kc_live = prep(Klive.buffer(-r + 0.02, join_style=1).intersection(C_link))
+                Kr_live = prep(Klive.buffer(-r + 0.005, join_style=1).intersection(C_link))
                 lead = lead_in(dense, Kc_live)
                 kind_ = link_to(pos, lead[0] if lead else dense[0], z, z_lift, Kc_live, Kr_live, last_pass)
                 if kind_ == "stay":
@@ -1478,6 +1525,7 @@ def adaptive(setup: Setup, tool: Tool, polys, z_top: float, z_bottom: float, ste
                 passes_total += 1
             K = Klive.simplify(0.01)
         pb.retract()
+        z_prev = z
         reachable = P.buffer(-r, join_style=1).buffer(r + 1e-6, join_style=1)     # what this tool can reach at all
         left = P.difference(K).intersection(reachable).area
         if material0 > 0 and left > 0.03 * material0:
@@ -1524,7 +1572,7 @@ def _concentric_full_depth(pb: PathBuilder, P: Polygon, tool: Tool, so: float, l
             break
         shells.append(ps)
         d += so
-    z_air = (levels[0] + (levels[0] - levels[1] if len(levels) > 1 else 1.0) if levels else pb.setup.stock.top) + 0.5   # just above the first level's top
+    z_air = (levels[0] + (levels[0] - levels[1] if len(levels) > 1 else 1.0) if levels else pb.setup.stock.top) + ENTRY_GAP   # just above the first level's top
     _rings_ramped(pb, P, shells, tool, levels, climb, RAMP_DEG, z_air)
     pb.retract()
 
