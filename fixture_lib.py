@@ -48,6 +48,8 @@ BUILTINS = {
     "kurt_vise_6in": '6" Kurt-style vise',
     "tooling_plate": "Tooling plate",
     "step_clamps": "Step clamps",
+    "makera_l_bracket": "Makera L-bracket",
+    "strap_clamp": "Strap clamp",
 }
 
 
@@ -116,11 +118,17 @@ def _script_name(code: str) -> str | None:
 def list_fixtures(workspace: Path | None = None) -> list[dict[str, Any]]:
     """Every fixture available: the built-ins (unless a user script replaces them) and the user's scripts."""
     ws = workspace or WORKSPACE
-    out: dict[str, dict[str, Any]] = {name: {"name": name, "key": key, "user": False} for key, name in BUILTINS.items()}
+    def home_of(code: str):                     # a fixed place on the table (fixture(..., home=(x, y))), read without running it
+        m = re.search(r"home\s*=\s*\(\s*(-?[\d.]+)\s*,\s*(-?[\d.]+)\s*\)", code)
+        return [float(m.group(1)), float(m.group(2))] if m else None
+    out: dict[str, dict[str, Any]] = {}
+    for key, name in BUILTINS.items():
+        out[name] = {"name": name, "key": key, "user": False, "home": home_of((BUILTIN_DIR / f"{key}.fixture.py").read_text())}
     if ws:
         for p in sorted((Path(ws) / "fixtures").glob("*.fixture.py")):
-            name = _script_name(p.read_text(errors="ignore")) or p.name[:-len(".fixture.py")]
-            out[name] = {"name": name, "key": p.name[:-len(".fixture.py")], "user": True}
+            code = p.read_text(errors="ignore")
+            name = _script_name(code) or p.name[:-len(".fixture.py")]
+            out[name] = {"name": name, "key": p.name[:-len(".fixture.py")], "user": True, "home": home_of(code)}
     return list(out.values())
 
 
@@ -280,9 +288,9 @@ def _rz(rot_deg: float, x: float, y: float) -> tuple[float, float]:
 
 def stock_on_table(holder: FixtureModel | None, at: tuple[float, float], rot: float) -> tuple[float, float, float]:
     """Where the stock's bottom-centre sits in the table frame (x, y from the table centre; z above the plane the fixtures
-    stand on): the holding fixture's work origin, placed at `at` and turned by `rot`; (0, 0, 0) on the bare table."""
-    if holder is None:
-        return (0.0, 0.0, 0.0)
+    stand on): the holding fixture's work origin, placed at `at` and turned by `rot`; on the bare table, `at` itself."""
+    if holder is None:                                        # bare stock: its bottom-centre sits at `at`
+        return (float(at[0]), float(at[1]), 0.0) if at is not None else (0.0, 0.0, 0.0)
     wx, wy = _rz(rot, holder.work_origin[0], holder.work_origin[1])
     return (float(at[0]) + wx, float(at[1]) + wy, float(holder.work_origin[2]))
 

@@ -5,6 +5,13 @@ features, patch bumps fix things. The version shown in the UI header comes from 
 
 ## [Unreleased]
 
+### Added
+- **Workholding that matches a real setup.** Bare stock can sit anywhere on the bed: its front-left corner is set in
+  bed millimetres (shown as machine X/Y too), with *Centre*, *Into the L-bracket* and *From machine* (reads the connected
+  machine's probed work origin and places the stock to match). New fixtures: **Makera L-bracket** (thin / thick, at its
+  dowel position from Makera's bed CAD; a stop, checked for tool collisions) and **Strap clamp** (strap, cap screw and
+  packing block on the stock edge, placed and turned like any fixture). Fixtures with a fixed home go there when picked.
+
 ### Changed
 - **CAM tab reorganised around setups.** A program header (machine, setups, operations, time, G-code download and
   preview, warnings folded away), then one card per setup holding its stock, work origin, safe height, workholding and

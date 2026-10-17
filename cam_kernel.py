@@ -405,7 +405,11 @@ class Setup:
     def fixture_payload(self) -> dict | None:
         """The holding fixture (None on the bare table) plus `extra`: every other fixture on the table."""
         lay = self.fixture_layout() if (self.fixture or self.fixtures) else []
+        bare_at = [float(self.fixture_at[0]), float(self.fixture_at[1])] if self.fixture_at else [0.0, 0.0]
         if not lay:
+            if any(bare_at):                                  # bare stock placed off the table centre
+                return {"name": None, "at": bare_at, "rot": 0.0, "params": {}, "work_origin": [0.0, 0.0, 0.0], "height": 0.0,
+                        "clamp_axis": None, "max_opening": None, "replaces_spoilboard": False, "origin_model": None, "extra": []}
             return None
         rs = any(f["model"].replaces_spoilboard for f in lay)
 
@@ -418,7 +422,7 @@ class Setup:
                     "max_opening": m.max_opening, "replaces_spoilboard": m.replaces_spoilboard,
                     "origin_model": [float(v) for v in f["origin_model"]]}
         holder = next((f for f in lay if f["holds"]), None)
-        base = one(holder) if holder else {"name": None, "at": [0.0, 0.0], "rot": 0.0, "params": {}, "work_origin": [0.0, 0.0, 0.0],
+        base = one(holder) if holder else {"name": None, "at": bare_at, "rot": 0.0, "params": {}, "work_origin": [0.0, 0.0, 0.0],
                                             "height": 0.0, "clamp_axis": None, "max_opening": None, "replaces_spoilboard": False,
                                             "origin_model": None}
         base["extra"] = [one(f) for f in lay if not f["holds"]]

@@ -291,6 +291,8 @@ class Profile:
     anchor1: tuple = (-192.4, -194.3)      # machine XY of Anchor 1 (the L-bracket's inside corner); per machine
     setter_from_anchor: tuple = (181.0, 181.0)   # tool setter XY relative to Anchor 1 (ATCHandler: Z1 manual change)
     change_xy: tuple = (-11.6, -14.6)      # where the head waits for a manual tool change (coordinate.clearance_x/y)
+    bed_anchor: tuple = (-88.0, -88.0)     # where Anchor 1 (the L-bracket's inside corner) is on the bed, from its centre
+                                           # (Makera Z1 bed CAD): machine XY - anchor1 + bed_anchor = bed XY
     probe3d_tool: int = 9999               # tool number of the add-on 3D probe, as MakeraStudio uses it (its tool codes:
                                            # T0 wired probe, T8888 3D Probe Rod, T9999 3D probe; the firmware powers the
                                            # probe port for T9999 after a change)
@@ -485,7 +487,8 @@ class MachineControl:
                 "measured": self.measured, "tool_ok": self.tool_ok(), "routine": self.routine,
                 "log": [t for _, t in (self.link.log[-30:] if self.link else [])],
                 "limits": {"jog_max": JOG_MAX, "travel": self.profile.travel, "margin": self.profile.margin, "top": self.profile.top},
-                "profile": self.profile.name, "probe3d_tool": self.profile.probe3d_tool}
+                "profile": self.profile.name, "probe3d_tool": self.profile.probe3d_tool,
+                "anchor1": list(self.profile.anchor1), "bed_anchor": list(self.profile.bed_anchor)}
 
     def describe(self) -> str:
         """Plain-text status for the agent."""

@@ -147,6 +147,36 @@ def test_several_fixtures_on_the_table(machines, plate):
     cam.reset_overrides()
 
 
+def test_bare_stock_against_the_l_bracket_with_strap_clamps(machines, plate):
+    """The Z1 test setup: a block pushed into the L-bracket (fixed by dowels) and held by strap clamps."""
+    m = machines["Makera Z1"]
+    stock = cam.Stock.block(101.42, 100.32, 10.0, center_xy=(5.0, -3.0), top=2.0)
+    at = (-88 + 101.42 / 2, -88 + 100.32 / 2)                       # front-left corner in the bracket's inside corner
+    cam.reset_overrides()
+    cam.fixtures({"Top": {"name": None, "at": list(at), "extra": [
+        {"name": "Makera L-bracket", "params": {"type": "thin"}},
+        {"name": "Strap clamp", "at": [at[0] + 101.42 / 2, at[1], ], "rot": 0}]}})
+    st = cam.Setup(m, stock, name="Top", origin="stock-top-left")
+    lay = st.fixture_layout()
+    br = next(f for f in lay if f["name"] == "Makera L-bracket")
+    assert br["at"] == (-88.0, -88.0)                                # its own dowel position, no "at" needed
+    assert br["origin_model"] == pytest.approx((stock.xmin, stock.ymin, stock.zmin), abs=1e-6)   # bracket corner = stock corner
+    pay = st.fixture_payload()
+    assert pay["name"] is None and pay["at"] == pytest.approx(list(at)) and [e["name"] for e in pay["extra"]] == ["Makera L-bracket", "Strap clamp"]
+    # a cut that runs past the stock's left face below the bracket top hits the bracket; one inside the stock doesn't
+    p = cam.Program(st)
+    p.add(cam.contour(st, flat(), cam.rect(stock.xmin - 3, stock.ymin + 20, stock.xmin + 10, stock.ymin + 40), z_top=stock.top,
+                      z_bottom=stock.zmin + 3, side="on", lead=0, ramp=0, name="Past the face"))
+    r = cam_sim.simulate(p, part=None)
+    assert any(h["what"] == "fixture (Makera L-bracket)" for h in r.stats["collisions"]["hits"])
+    ok = cam.Program(st)
+    ok.add(cam.contour(st, flat(), cam.rect(stock.xmin + 15, stock.ymin + 20, stock.xmin + 40, stock.ymin + 40), z_top=stock.top,
+                       z_bottom=stock.top - 3, side="on", lead=0, ramp=0, name="Inside"))
+    r2 = cam_sim.simulate(ok, part=None)
+    assert not any("L-bracket" in h["what"] for h in r2.stats["collisions"]["hits"])
+    cam.reset_overrides()
+
+
 def test_table_check_uses_the_bed_under_a_removed_spoilboard(machines, plate):
     m = machines["Makera Z1"]
     stock = cam.Stock.from_model(plate, margin=3, top=1)

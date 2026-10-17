@@ -216,6 +216,7 @@
   .fx-lbl { display:flex; align-items:center; gap:3px; font-size:11px; color:var(--muted); }
   .fx-lbl input { width:54px; padding:2px 4px; }
   .fx-add { align-self:flex-start; }
+  .fx-place { display:flex; flex-direction:column; gap:5px; } .fx-place .fx-lbl input { width:64px; }
   .muted { color:var(--muted); font-size:11px; font-weight:400; }
   .kv { display:grid; grid-template-columns:110px 1fr; gap:2px 8px; font-size:12px; } .kv div:nth-child(odd) { color:var(--muted); }
   .oprow { display:flex; align-items:center; gap:8px; padding:4px 2px; border-bottom:1px solid var(--line); font-size:12px; }
@@ -1417,7 +1418,7 @@ function clearCam() {
   if (fixtureObj) { camGroup.remove(fixtureObj); fixtureObj.traverse(o => o.geometry && o.geometry.dispose()); fixtureObj = null; }
 }
 function loadProgram(p) {
-  clearCam(); hideFixturePreview(); program = p;
+  clearCam(); hideFixturePreview(); program = p; for (const k of Object.keys(fxPending)) delete fxPending[k];
   const has = !!p;
   for (const id of ['cam-sep', 'tp-toggle', 'stock-toggle']) document.getElementById(id).style.display = has ? '' : 'none';
   if (!has) { renderCamTab(); return; }
@@ -1492,12 +1493,17 @@ function flashFixtures(hits) {                     // the fixture a collision hi
 // ---- CAM tab ▸ Setup ▸ Fixtures: the fixture holding the stock (or the bare table) and any others on the table at the
 // same time, each placed (X / Y from the table centre, mm) and turned (degrees); every change rewrites cam.py's
 // fixtures({...}) line through the agent and rebuilds
+const fxPending = {};                         // setup name -> the spec last sent (until the rebuilt program arrives), so quick edits stack
 function fixtureSpecFromProgram(si = 0) {
+  const pend = fxPending[program.setups[si].name]; if (pend) return JSON.parse(JSON.stringify(pend));
   const fx = program.setups[si].fixture;
   const one = f => ({ name: f.name, at: [+(+f.at[0]).toFixed(2), +(+f.at[1]).toFixed(2)], rot: +f.rot || 0, params: f.params || {} });
-  return { ...(fx && fx.name ? one(fx) : { name: null }), extra: fx ? (fx.extra || []).map(one) : [] };
+  return { ...(fx && fx.name ? one(fx) : { name: null, ...(fx && fx.at && (fx.at[0] || fx.at[1]) ? { at: [+(+fx.at[0]).toFixed(2), +(+fx.at[1]).toFixed(2)] } : {}) }),
+           extra: fx ? (fx.extra || []).map(one) : [] };
 }
-function sendFixtureSpec(spec, si = 0) { send({ type: 'set_fixture', setup: program.setups[si].name, fixture: spec }); }
+let fxMachineInfo = null;                     // anchor1 / bed_anchor (and the last status) from /api/machine, for bed ↔ machine XY
+fetch('/api/machine').then(r => r.json()).then(d => { fxMachineInfo = d; }).catch(() => {});
+function sendFixtureSpec(spec, si = 0) { fxPending[program.setups[si].name] = JSON.parse(JSON.stringify(spec)); send({ type: 'set_fixture', setup: program.setups[si].name, fixture: spec }); }
 function renderFixturePanel(el, si = 0) {
   if (!el || !program) return;
   const fx = program.setups[si].fixture, spec = fixtureSpecFromProgram(si), names = (library.fixtures || []);
@@ -1511,12 +1517,51 @@ function renderFixturePanel(el, si = 0) {
         ${f.name ? `<button class="btn small fx-turn" data-i="${i}" title="Turn 90°">↻ 90°</button>` : ''}${holds ? '' : `<button class="btn small fx-del" data-i="${i}" title="Take it off the table">✕</button>`}</div>
       <select class="btn fx-name" data-i="${i}">${opts(f.name, holds)}</select>
       ${f.name ? `<div class="fx-pos">${num(at[0], 'x', i, 'X from the table centre, mm')}${num(at[1], 'y', i, 'Y from the table centre, mm')}${num(f.rot || 0, 'rot', i, 'Turned about Z, degrees')}</div>` : ''}
-      ${holds && fx && fx.name ? `<div class="muted" style="font-size:11px;line-height:1.35">stock ${fx.height.toFixed(1)} mm above the ${fx.replaces_spoilboard ? 'bed (spoilboard removed)' : 'table'}${fx.clamp_axis ? ` · jaws close along ${fx.clamp_axis.toUpperCase()}` : ''}${fx.max_opening ? ` · opens to ${(+fx.max_opening).toFixed(0)} mm` : ''}</div>` : ''}</div>`;
+      ${holds && fx && fx.name ? `<div class="muted" style="font-size:11px;line-height:1.35">stock ${fx.height.toFixed(1)} mm above the ${fx.replaces_spoilboard ? 'bed (spoilboard removed)' : 'table'}${fx.clamp_axis ? ` · jaws close along ${fx.clamp_axis.toUpperCase()}` : ''}${fx.max_opening ? ` · opens to ${(+fx.max_opening).toFixed(0)} mm` : ''}</div>` : ''}
+      ${holds && !f.name ? barePlace() : ''}</div>`;
   };
+  // bare stock: where its front-left corner sits on the bed (from the bed centre); the stock's centre is what is stored
+  const sz = program.setups[si].size || [0, 0, 0], at0 = spec.at || [0, 0];
+  const corner = [at0[0] - sz[0] / 2, at0[1] - sz[1] / 2];
+  const mInfo = fxMachineInfo, hasBracket = spec.extra.some(f => /L-bracket/i.test(f.name));
+  const toMachine = c => mInfo && mInfo.anchor1 ? [c[0] - mInfo.bed_anchor[0] + mInfo.anchor1[0], c[1] - mInfo.bed_anchor[1] + mInfo.anchor1[1]] : null;
+  function barePlace() {
+    const mc = toMachine(corner);
+    return `<div class="fx-place"><div class="muted" style="font-size:11px">Front-left corner of the stock on the bed (mm from the bed centre)</div>
+      <div class="fx-pos"><label class="fx-lbl">X<input class="fx-corner" data-k="x" type="number" step="0.1" value="${+corner[0].toFixed(2)}"></label>
+        <label class="fx-lbl">Y<input class="fx-corner" data-k="y" type="number" step="0.1" value="${+corner[1].toFixed(2)}"></label>
+        ${mc ? `<span class="muted" style="font-size:11px">= machine X ${mc[0].toFixed(2)} Y ${mc[1].toFixed(2)}</span>` : ''}</div>
+      <div class="fx-pos"><button class="btn small fx-pl" data-p="centre" title="Stock centred on the bed">Centre</button>
+        <button class="btn small fx-pl" data-p="bracket" title="Front-left corner pushed into the Makera L-bracket (Anchor 1); adds the bracket">Into the L-bracket</button>
+        <button class="btn small fx-pl" data-p="machine" title="Place the stock where the connected machine's work origin (G54) says it is — e.g. after probing its corner">From machine</button></div>
+      <div class="muted fx-note" style="font-size:11px"></div></div>`;
+  }
   el.innerHTML = card(spec, -1) + spec.extra.map((f, i) => card(f, i)).join('')
     + `<button class="btn small fx-add" title="Put another fixture on the table (a second vise, clamps, a plate): its parts are checked for collisions too">+ Add fixture</button>`;
   const get = i => i < 0 ? spec : spec.extra[i];
-  el.querySelectorAll('.fx-name').forEach(s => s.onchange = e => { const i = +s.dataset.i, f = get(i); const was = f.name; f.name = e.target.value || null; if (f.name !== was) { f.params = {}; if (i < 0) delete f.at; } sendFixtureSpec_(spec); });
+  el.querySelectorAll('.fx-name').forEach(s => s.onchange = e => { const i = +s.dataset.i, f = get(i); const was = f.name; f.name = e.target.value || null; if (f.name !== was) { f.params = {}; const lf = names.find(x => x.name === f.name); if (i < 0 || (lf && lf.home)) { delete f.at; delete f.rot; } } sendFixtureSpec_(spec); });
+  const placeCorner = c => { spec.at = [+(c[0] + sz[0] / 2).toFixed(2), +(c[1] + sz[1] / 2).toFixed(2)]; sendFixtureSpec_(spec); };
+  el.querySelectorAll('.fx-corner').forEach(inp => inp.onchange = () => { const v = +inp.value; if (!isFinite(v)) return; const c = [...corner]; c[inp.dataset.k === 'x' ? 0 : 1] = v; placeCorner(c); });
+  el.querySelectorAll('.fx-pl').forEach(b => b.onclick = async () => {
+    const note = el.querySelector('.fx-note');
+    if (b.dataset.p === 'centre') { delete spec.at; sendFixtureSpec_(spec); return; }
+    if (b.dataset.p === 'bracket') {
+      const ba = (fxMachineInfo && fxMachineInfo.bed_anchor) || [-88, -88];
+      if (!hasBracket) spec.extra.push({ name: 'Makera L-bracket', params: { type: 'thin' } });
+      placeCorner(ba); return;
+    }
+    try {
+      const d = await fetch('/api/machine').then(r => r.json()); fxMachineInfo = d;
+      const s_ = d.status;
+      if (!d.connected || !s_ || !s_.mpos || !s_.wpos) { note.textContent = 'Connect the machine first (Machine tab): its work origin is read from it.'; return; }
+      const wo = [s_.mpos[0] - s_.wpos[0], s_.mpos[1] - s_.wpos[1]];                     // the machine's work origin (G54), machine XY
+      const ob = [wo[0] - d.anchor1[0] + d.bed_anchor[0], wo[1] - d.anchor1[1] + d.bed_anchor[1]];   // on the bed
+      const on = program.setups[si].origin_name || '';
+      const c = /left/.test(on) ? ob : /center|centre/.test(on) ? [ob[0] - sz[0] / 2, ob[1] - sz[1] / 2] : null;
+      if (!c) { note.textContent = `This setup's work origin (${on}) can't be matched to the machine's automatically.`; return; }
+      placeCorner(c);
+    } catch (e) { note.textContent = 'Could not read the machine: ' + e.message; }
+  });
   el.querySelectorAll('.fx-num').forEach(inp => inp.onchange = () => { const f = get(+inp.dataset.i), k = inp.dataset.k, v = +inp.value; if (!isFinite(v)) return; f.at = f.at || [0, 0]; if (k === 'x') f.at[0] = v; else if (k === 'y') f.at[1] = v; else f.rot = ((v % 360) + 360) % 360; sendFixtureSpec_(spec); });
   el.querySelectorAll('.fx-turn').forEach(b => b.onclick = () => { const f = get(+b.dataset.i); f.rot = ((+f.rot || 0) + 90) % 360; sendFixtureSpec_(spec); });
   el.querySelectorAll('.fx-del').forEach(b => b.onclick = () => { spec.extra.splice(+b.dataset.i, 1); sendFixtureSpec_(spec); });
@@ -1525,7 +1570,8 @@ function renderFixturePanel(el, si = 0) {
     // in front of the holding fixture (or the stock), clear of it: move it from there; overlaps are reported as warnings
     const st = program.stock, hb = fx && fx.name && fx.size ? fx.size : [st.xmax - st.xmin, st.ymax - st.ymin];
     const base = spec.name ? spec.at || [0, 0] : [0, 0];
-    spec.extra.push({ name: first.name, at: [+(+base[0]).toFixed(0), +(+base[1] - hb[1] / 2 - 45 - 25 * spec.extra.length).toFixed(0)], rot: 0, params: {} }); sendFixtureSpec_(spec);
+    const base2 = spec.name ? base : (spec.at || [0, 0]);
+    spec.extra.push({ name: first.name, at: [+(+base2[0]).toFixed(0), +(+base2[1] - hb[1] / 2 - 45 - 25 * spec.extra.length).toFixed(0)], rot: 0, params: {} }); sendFixtureSpec_(spec);
   };
 }
 function applyCamVisibility() {
@@ -2316,7 +2362,7 @@ function placeRig() {   // the machine origin (table top centre) in model coordi
       const a = (fx.rot || 0) * Math.PI / 180, wo = fx.work_origin || [0, 0, 0], at = fx.at || [0, 0];
       const wx = Math.cos(a) * wo[0] - Math.sin(a) * wo[1], wy = Math.sin(a) * wo[0] + Math.cos(a) * wo[1];
       o.set((st.xmin + st.xmax) / 2 - at[0] - wx, (st.ymin + st.ymax) / 2 - at[1] - wy, st.zmin - wo[2]);
-    } else o.set((st.xmin + st.xmax) / 2, (st.ymin + st.ymax) / 2, st.zmin);
+    } else { const at = (fx && fx.at) || [0, 0]; o.set((st.xmin + st.xmax) / 2 - at[0], (st.ymin + st.ymax) / 2 - at[1], st.zmin); }
     // a fixture that bolts to the bed with the spoilboard removed (the Makera Z1 vise): the fixtures stand on the bed,
     // which is the spoilboard's thickness below the machine origin, and the spoilboard is not drawn
     const rs = !!(fx && fx.replaces_spoilboard);
@@ -5103,7 +5149,7 @@ function connect() {
         if (m.source === 'user') addMsg('system', 'CAM program rebuilt from Code panel');
         if (m.source === 'agent' && m.program) addMsg('system', `CAM program built: ${m.program.ops.length} ops · ${m.program.time.toFixed(1)} min` + (m.program.warnings.length ? ` · ${m.program.warnings.length} warning(s), see CAM tab` : ''));
         break;
-      case 'cam_error': document.getElementById('codeerr').textContent = m.text; addMsg('error', 'CAM build failed — see Code tab'); break;
+      case 'cam_error': for (const k of Object.keys(fxPending)) delete fxPending[k]; document.getElementById('codeerr').textContent = m.text; addMsg('error', 'CAM build failed — see Code tab'); break;
       case 'cam_sim':
         if (program) { camOps.forEach((c, i) => { c.visible = m.ops.includes(i); }); applyCamVisibility(); renderCamTab(); setupSim(); startSim(m.sim); }
         break;
