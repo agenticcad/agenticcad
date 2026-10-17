@@ -83,6 +83,9 @@ def parse_frames(buf: bytearray):
 
 # ------------------------------------------------------------------ status
 STATES = ("Idle", "Run", "Hold", "Home", "Alarm", "Tool", "Pause", "Wait", "Sleep")
+# Commands never sent to a Z1 (firmware research 2026-10-17): bare M490 drives the Z motor's step pin through the ATC
+# clamp routine of a machine that has no ATC; M498.2 erases the EEPROM block holding tool lengths and G54.
+BLOCKED = re.compile(r"(?i)\bM490(?:\.0)?(?![.\d])|\bM498\.2\b")
 # Kernel.h HALT_REASON: why the machine is in Alarm (the status carries |H:n while halted). 1-15 clear with $X / M999,
 # 21-26 need a reset on the machine, 41 a power cycle.
 HALT_REASONS = {1: "manual stop", 2: "homing failed", 3: "probe failed", 4: "calibration failed", 5: "ATC homing failed",
@@ -93,6 +96,10 @@ HALT_REASONS = {1: "manual stop", 2: "homing failed", 3: "probe failed", 4: "cal
 
 
 def halt_advice(code: int | None) -> str:
+    if code == 13:
+        return "release the emergency stop (turn it clockwise), then press Unlock and home"
+    if code == 11:
+        return "close the cover, then press Unlock and home"
     if code is None or code < 21:
         return "press Unlock to clear it, then home"
     if code < 41:
@@ -226,6 +233,8 @@ class Z1Link:
         await self.send(T_REALTIME, ch)
 
     async def line(self, text: str) -> None:
+        if BLOCKED.search(text):
+            raise Refused(f"refused to send {text.strip()!r}: on the Z1 this command is unsafe (see BLOCKED)")
         self.log.append((time.time(), "> " + text))
         await self.send(T_LINE, (text.rstrip("\n") + "\n").encode())
 
@@ -282,9 +291,11 @@ class Profile:
 
 
 Z1 = Profile("Makera Z1", travel={"x": 200.0, "y": 200.0, "z": 100.0}, max_rate={"x": 1200.0, "y": 1200.0, "z": 600.0},
-             switches={"dust": ("M851", "M852"), "light": ("M821", "M822")})
+             switches={"dust": ("M851", "M852"), "light": ("M821", "M822"), "probe_laser": ("M831", "M832")})
 
 JOG_MAX = {"xy": 10.0, "z_up": 10.0, "z_down": 1.0}          # mm per click
+GOTO_FEED_MAX = 600.0                                        # mm/min cap for go-to moves
+Z_TOP_BAND = 1.5                                             # go-to moves only while machine Z is within this of the top
 JOG_SCALE = {"xy": 0.5, "z_up": 0.5, "z_down": 0.25}         # fraction of the axis max rate ($J F)
 ARM_IDLE_S = 300.0                                           # Control turns itself off after this long unused
 STALE_S = 2.0                                                # status older than this: treat the link as lost
@@ -419,6 +430,9 @@ class MachineControl:
         return {"connected": self.connected, "host": self.link.host if self.link else None, "fresh": self.fresh(),
                 "armed": self.armed, "homed": self.homed, "homing": self._homing, "jogging": self.jog_busy is not None,
                 "status": {k: v for k, v in st.items() if k != "raw"} if st else None, "raw": st.get("raw") if st else None,
+                # in Hold / Pause / Alarm the Z1 reports its last planned position, not where the head stopped (seen on a
+                # real Z1 2026-10-17: held at about -57,-58 while the status said -1,-1): show it as unreliable
+                "position_reliable": bool(st) and st.get("state") not in ("Hold", "Pause", "Alarm"),
                 "z_floor": self.z_floor, "switches": dict(self.switch_state), "events": self.events[-20:],
                 "log": [t for _, t in (self.link.log[-30:] if self.link else [])],
                 "limits": {"jog_max": JOG_MAX, "travel": self.profile.travel, "margin": self.profile.margin, "top": self.profile.top},
@@ -513,6 +527,37 @@ class MachineControl:
         self.jog_busy = {"target": target, "t0": time.time(), "deadline": time.time() + t_est * 3 + 3.0}
         await self.link.line(f"$J {axis.upper()}{dist:.3f} F{scale:g}")
         self._note(f"jog {axis.upper()}{dist:+g}")
+        return self.payload()
+
+    def check_goto_xy(self, x: float, y: float, feed: float) -> tuple[float, float, float]:
+        """Validate an absolute machine-coordinate XY move made with Z at the top of travel."""
+        for v in (x, y, feed):
+            if not isinstance(v, (int, float)) or v != v:
+                raise Refused("go-to needs numbers")
+        st = self._need(armed=True, idle=True, homed=True)
+        if self.jog_busy:
+            raise Refused("the previous move hasn't finished")
+        mz = st["mpos"][2]
+        if mz < self.profile.top - Z_TOP_BAND:
+            raise Refused(f"go-to moves XY only with Z at the top of travel (machine Z {mz:.2f}); raise Z first")
+        for ax, v in (("x", x), ("y", y)):
+            lo, hi = -self.profile.travel[ax] + self.profile.margin, self.profile.top
+            if not (lo - 1e-9 <= v <= hi + 1e-9):
+                raise Refused(f"{ax.upper()} {v:.2f} (machine) is outside {lo:.1f} .. {hi:.1f}")
+        if not (0 < feed <= GOTO_FEED_MAX):
+            raise Refused(f"go-to feed must be 0 .. {GOTO_FEED_MAX:g} mm/min")
+        return x, y, feed
+
+    async def goto_xy(self, x: float, y: float, feed: float = 300.0) -> dict:
+        """Move to machine X, Y (G53) at `feed`, Z untouched (it must already be at the top)."""
+        x, y, feed = self.check_goto_xy(x, y, feed)
+        st = self._status()
+        target = [x, y, st["mpos"][2]]
+        dist = ((x - st["mpos"][0]) ** 2 + (y - st["mpos"][1]) ** 2) ** 0.5
+        self.last_action = time.time()
+        self.jog_busy = {"target": target, "t0": time.time(), "deadline": time.time() + dist / feed * 60.0 * 2 + 5.0}
+        await self.link.line(f"G53 G1 X{x:.3f} Y{y:.3f} F{feed:g}")
+        self._note(f"go to machine X{x:.2f} Y{y:.2f} at {feed:g} mm/min")
         return self.payload()
 
     async def home(self) -> dict:

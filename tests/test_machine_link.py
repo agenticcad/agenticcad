@@ -189,3 +189,43 @@ def test_camera_relay_shares_one_stream():
             relay.set_host(None)
             await emu.stop()
     run(go())
+
+
+def test_goto_xy_needs_z_at_top_and_stays_in_the_box_and_laser_switch():
+    async def go():
+        emu, mc, _ = await _setup()
+        try:
+            await mc.arm(True); await mc.home(); await _until(lambda: mc.homed)
+            await mc.switch("probe_laser", True)
+            await _until(lambda: emu.switches["probe_laser"])
+            await mc.goto_xy(-191.28, -194.45, 300)          # the Z1's Anchor 1 (live config)
+            await _until(lambda: not mc.jog_busy, timeout=10)
+            assert abs(emu.mpos[0] + 191.28) < 1e-6 and abs(emu.mpos[1] + 194.45) < 1e-6 and emu.mpos[2] == -1.0
+            assert emu.lines[-1] == "G53 G1 X-191.280 Y-194.450 F300"
+            with pytest.raises(ml.Refused, match="outside"):
+                await mc.goto_xy(-205, -100, 300)              # past the far end of X
+            with pytest.raises(ml.Refused, match="feed"):
+                await mc.goto_xy(-100, -100, 5000)
+            emu.mpos[2] = -10.0                                  # Z no longer at the top
+            await asyncio.sleep(0.4)
+            with pytest.raises(ml.Refused, match="Z at the top"):
+                await mc.goto_xy(-100, -100, 300)
+            assert not emu.crashes
+        finally:
+            await mc.disconnect(); await emu.stop()
+    run(go())
+
+
+def test_unsafe_z1_commands_are_never_sent():
+    async def go():
+        emu, mc, _ = await _setup()
+        try:
+            for bad in ("M490", "M490.0", "m490", "M498.2"):
+                with pytest.raises(ml.Refused, match="unsafe"):
+                    await mc.link.line(bad)
+            for ok in ("M490.1", "M490.2", "M498.1", "M4900"):
+                assert not ml.BLOCKED.search(ok), ok
+            assert not any(l.upper().startswith(("M490", "M498.2")) for l in emu.lines)
+        finally:
+            await mc.disconnect(); await emu.stop()
+    run(go())

@@ -5200,8 +5200,10 @@ function mvRender(st) {
   if (!mvEl('mv-host').value && document.activeElement !== mvEl('mv-host')) mvEl('mv-host').value = conn ? st.host : ((st.saved && st.saved.host) || '');
   const f = v => (v == null ? '–' : (+v).toFixed(3));
   const w = s.wpos || [], m = s.mpos || [];
-  ['x', 'y', 'z'].forEach((a, i) => { mvEl('mv-w' + a).textContent = f(w[i]); mvEl('mv-m' + a).textContent = f(m[i]); });
-  mvEl('mv-tool').textContent = s.tool ? `T${s.tool.number} · length ${(+s.tool.offset).toFixed(3)}` : '';
+  const rel = st.position_reliable !== false;
+  ['x', 'y', 'z'].forEach((a, i) => { mvEl('mv-w' + a).textContent = rel ? f(w[i]) : '?'; mvEl('mv-m' + a).textContent = rel ? f(m[i]) : '?'; });
+  mvEl('mv-tool').textContent = '';
+  mvEl('mv-tool').textContent = !rel ? 'position unknown while ' + (s.state || '').toLowerCase() : (s.tool ? `T${s.tool.number} · length ${(+s.tool.offset).toFixed(3)}` : '');
   mvEl('mv-spindle').textContent = s.spindle ? `Spindle ${Math.round(s.spindle.rpm)} rpm` + (s.feed && s.feed.current ? ` · feed ${Math.round(s.feed.current)} mm/min` : '') : '';
   const arm = mvEl('mv-arm'); arm.checked = !!st.armed; arm.disabled = !conn; arm.closest('.mv-arm').classList.toggle('on', !!st.armed);
   mvEl('mv-halt').disabled = !conn; mvEl('mv-hold').disabled = !conn;

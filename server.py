@@ -752,6 +752,9 @@ class MachineBody(BaseModel):
     dist: float | None = None
     on: bool | None = None
     z: float | None = None
+    x: float | None = None
+    y: float | None = None
+    feed: float | None = None
 
 
 @app.get("/api/machine")
@@ -787,6 +790,8 @@ async def machine_post(body: MachineBody):
             res = await machine.arm(bool(body.on))
         elif a == "jog":
             res = await machine.jog(body.axis or "", body.dist if body.dist is not None else 0.0)
+        elif a == "goto_xy":
+            res = await machine.goto_xy(body.x if body.x is not None else float('nan'), body.y if body.y is not None else float('nan'), body.feed or 300.0)
         elif a == "home":
             res = await machine.home()
         elif a == "hold":

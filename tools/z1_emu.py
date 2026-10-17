@@ -34,7 +34,7 @@ class Z1Emu:
         self.wco = [-148.8, -125.4, -61.36]             # work offset: WPos = MPos - wco (as on the real Z1)
         self.state = "Idle"
         self.halted = False
-        self.switches = {"extendout": False, "light": True}
+        self.switches = {"extendout": False, "light": True, "probe_laser": False}
         self.lines: list[str] = []                      # every console line received
         self.realtime: list[bytes] = []
         self.crashes: list[str] = []
@@ -127,6 +127,14 @@ class Z1Emu:
             rate = min(self.MAX_RATE[a] for a in moving) * scale
             self._start(self._move_to([m + delta[a] for m, a in zip(self.mpos, "xyz")], rate))
             return None
+        if u.startswith("G53"):
+            words = dict((t[0].lower(), float(t[1:])) for t in s.split()[1:] if t[0].upper() in "XYZF" and len(t) > 1)
+            tgt = [words.get(a, m) for a, m in zip("xyz", self.mpos)]
+            self._start(self._move_to(tgt, words.get("f", 1000.0)))
+            return None
+        if u in ("M831", "M832"):
+            self.switches["probe_laser"] = u == "M831"
+            return "ok"
         if u in ("M851", "M852"):
             self.switches["extendout"] = u == "M851"
             return "ok"
