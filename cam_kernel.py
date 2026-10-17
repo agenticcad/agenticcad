@@ -7,6 +7,7 @@ The agent writes a CAM script (see agent.py CAM_PROMPT) that builds a `Program`.
 from __future__ import annotations
 
 import math
+import re
 from dataclasses import dataclass, field, asdict
 from typing import Any, Iterable
 
@@ -542,6 +543,9 @@ class Op:
     base_tool: Any = None                                     # the tool as the script passed it (before overrides)
     overrides: dict = field(default_factory=dict)             # applied per-op overrides {rpm, feed, plunge, stepdown, stepover}
     defaults: dict = field(default_factory=dict)              # what those values are without the overrides
+    cut_defaults: dict = field(default_factory=dict)          # the script's cut settings (CUT_FIELDS of this kind)
+    cut_overrides: dict = field(default_factory=dict)         # cut settings changed in the CAM tab
+    color_override: bool = False                              # the colour comes from the CAM tab
 
     @property
     def uses_a(self) -> bool:
@@ -1989,6 +1993,12 @@ class Program:
     def add(self, op: Op) -> Op:
         if op.setup is None:
             op.setup = self.setup
+        if not op.key:
+            op.key = op.name
+        c = (_OV["table"].get(op.key) or {}).get("color")
+        if isinstance(c, str) and not op.color_override:            # script-built ops: the colour is all the tab sets
+            op.color, op.color_override = c, True
+            _OV["used"].add(op.key)
         self.ops.append(op)
         return op
 
@@ -2132,7 +2142,11 @@ class Program:
             out_setups.append({"name": st.name, "wcs": st.wcs, "rotary": st.rotary, "a": st.a, "orient": st.orient if not st.rotary else None,
                                "axis": list(st.axis) if st.rotary else None, "origin": [float(v) for v in o],
                                "tool_axis": list(st.tool_axis_model), "stock": st.model_stock.to_dict(),
-                               "max_radius": getattr(st, "max_radius", None), "fixture": st.fixture_payload()})
+                               "max_radius": getattr(st, "max_radius", None), "fixture": st.fixture_payload(),
+                               "origin_name": st.origin if isinstance(st.origin, str) else "custom",
+                               "size": [round(float(st.stock.xmax - st.stock.xmin), 3), round(float(st.stock.ymax - st.stock.ymin), 3),
+                                        round(float(st.stock.zmax - st.stock.zmin), 3)],
+                               "safe_z_wcs": round(float(st.safe_z - st.origin_point()[2]), 3)})
         ops = []
         for op in self.ops:
             st = self.setup_of(op)
@@ -2152,6 +2166,9 @@ class Program:
                          for m, q in zip(op.moves, M)]
             ops.append({"name": op.name, "kind": op.kind, "color": op.color, "tool": asdict(op.tool), "setup": si,
                         "key": op.key, "overrides": op.overrides, "defaults": op.defaults,
+                        "cut": {"fields": {k: list(m) for k, m in CUT_FIELDS.get(op.kind, {}).items() if k in op.cut_defaults},
+                                "values": op.cut_defaults, "overrides": op.cut_overrides},
+                        "color_override": op.color_override,
                         "base_tool": asdict(op.base_tool) if op.base_tool is not None else None,
                         "moves": moves, "time": round(op.time_minutes(self.machine), 2), "params": op.params, "uses_a": op.uses_a})
         return {
@@ -2655,8 +2672,27 @@ from cam_rotary import radial_map, rotary_finish, rotary_rough, rotary_wrap  # n
 # ---------------------------------------------------------------- per-operation overrides
 # The CAM tab writes one line at the top of cam.py:  overrides({"Pocket": {"feed": 500}, "Face": {"rpm": 11000}})
 # Every operation created afterwards looks itself up by key (its name, "#2", "#3"… for repeats) and runs with those
-# tool values instead of the tool's (or the script's explicit stepdown/stepover). Everything else comes from the tool.
+# values instead of the script's: tool values (rpm, feed, plunge, stepdown, stepover), cut settings (CUT_FIELDS, by
+# operation kind: depths, sides, tabs, stock to leave, ...) and the display colour ("color": "#rrggbb", any operation,
+# script-built ones too). Everything else comes from the tool and the script.
 OVERRIDE_FIELDS = ("rpm", "feed", "plunge", "stepdown", "stepover")
+# cut settings the CAM tab may change, per operation kind: field -> (label, unit, type, choices or None)
+_Z = {"z_top": ("Top Z", "mm", "num", None), "z_bottom": ("Bottom Z", "mm", "num", None)}
+_LEAVE = {"stock_to_leave": ("Stock to leave", "mm", "num", None)}
+_CLIMB = {"climb": ("Climb milling", "", "bool", None)}
+CUT_FIELDS = {
+    "face": {**_Z, "angle": ("Pass angle", "°", "num", None)},
+    "contour": {**_Z, "side": ("Side", "", "choice", ["outside", "inside", "on"]), **_LEAVE, "tabs": ("Tabs", "", "int", None),
+                "tab_height": ("Tab height", "mm", "num", None), "tab_width": ("Tab width", "mm", "num", None), **_CLIMB,
+                "lead": ("Lead-in radius", "mm", "num", None), "ramp": ("Ramp angle", "°", "num", None)},
+    "pocket": {**_Z, **_LEAVE, "finish": ("Finishing pass", "", "bool", None), **_CLIMB, "ramp": ("Ramp angle", "°", "num", None)},
+    "adaptive": {**_Z, **_LEAVE, **_CLIMB, "helix_diameter": ("Helix diameter", "mm", "num", None),
+                 "stay_down": ("Stay down between areas", "", "bool", None), "lift": ("Lift for linking", "mm", "num", None),
+                 "hop": ("Hop height", "mm", "num", None), "chip_thinning": ("Chip-thinning feed", "", "bool", None)},
+    "drill": {**_Z, "peck": ("Peck depth", "mm", "num", None), "retract": ("Retract", "mm", "num", None)},
+    "parallel3d": {**_Z, "angle": ("Pass angle", "°", "num", None), "resolution": ("Resolution", "mm", "num", None)},
+}
+COLOR_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
 OP_FIELDS = {"face": OVERRIDE_FIELDS, "pocket": OVERRIDE_FIELDS, "adaptive": OVERRIDE_FIELDS,
              "contour": ("rpm", "feed", "plunge", "stepdown"), "drill": ("rpm", "plunge"),
              "parallel3d": ("rpm", "feed", "plunge", "stepover"), "rotary_rough": OVERRIDE_FIELDS,
@@ -2669,16 +2705,29 @@ def overrides(table: dict | None = None) -> None:
     {"Pocket": {"rpm": 11000, "feed": 600, "plunge": 150, "stepdown": 0.8, "stepover": 0.3}} (stepover = fraction of Ø).
     Written by the CAM tab; put it before the operations. Values not given come from the tool / the script."""
     bad = []
+    cut_all = {f_: m for d in CUT_FIELDS.values() for f_, m in d.items()}
     for k, v in (table or {}).items():
         if not isinstance(v, dict):
-            raise CamError(f"overrides: '{k}' must map to a dict of {OVERRIDE_FIELDS}")
+            raise CamError(f"overrides: '{k}' must map to a dict of {OVERRIDE_FIELDS}, cut settings or color")
         for f_, x in v.items():
-            if f_ not in OVERRIDE_FIELDS:
+            if f_ == "color":
+                if not isinstance(x, str) or not COLOR_RE.match(x):
+                    raise CamError(f"overrides: {k}.color = {x!r} (use '#rrggbb')")
+            elif f_ in OVERRIDE_FIELDS:
+                if isinstance(x, bool) or not isinstance(x, (int, float)) or x <= 0 or (f_ == "stepover" and x > 1):
+                    raise CamError(f"overrides: {k}.{f_} = {x!r} (must be > 0{'; stepover is a fraction of Ø ≤ 1' if f_ == 'stepover' else ''})")
+            elif f_ in cut_all:
+                _, _, typ, choices = cut_all[f_]
+                ok = (isinstance(x, bool) if typ == "bool" else x in choices if typ == "choice"
+                      else isinstance(x, int) and not isinstance(x, bool) and x >= 0 if typ == "int"
+                      else isinstance(x, (int, float)) and not isinstance(x, bool))
+                if not ok:
+                    raise CamError(f"overrides: {k}.{f_} = {x!r} is not a valid {cut_all[f_][0].lower()}"
+                                   + (f" (one of {choices})" if choices else ""))
+            else:
                 bad.append(f"{k}.{f_}")
-            elif not isinstance(x, (int, float)) or x <= 0 or (f_ == "stepover" and x > 1):
-                raise CamError(f"overrides: {k}.{f_} = {x!r} (must be > 0{'; stepover is a fraction of Ø ≤ 1' if f_ == 'stepover' else ''})")
     if bad:
-        raise CamError(f"overrides: unknown field(s) {bad}; use {OVERRIDE_FIELDS}")
+        raise CamError(f"overrides: unknown field(s) {bad}; use {OVERRIDE_FIELDS}, cut settings ({sorted(cut_all)}) or color")
     _OV["table"] = {k: dict(v) for k, v in (table or {}).items()}
 
 
@@ -2700,6 +2749,16 @@ def fixtures(table: dict | None = None) -> None:
         if not isinstance(v, dict):
             raise CamError(f"fixtures: '{k}' must map to a dict with name / at / rot / params")
     _FIXTURES["table"] = dict(table or {})
+
+
+def _plain(v):
+    """A cut setting as the CAM tab shows it (numpy scalars -> float; anything else non-scalar -> None)."""
+    if isinstance(v, bool) or v is None or isinstance(v, str):
+        return v
+    try:
+        return round(float(v), 4)
+    except (TypeError, ValueError):
+        return None
 
 
 def unused_overrides() -> list[str]:
@@ -2737,7 +2796,10 @@ def _overridable(fn, kind: str):
         tool = b.arguments["tool"]
         fields = OP_FIELDS.get(kind, OVERRIDE_FIELDS)
         defaults = _op_defaults(kind, tool, b.arguments)
-        ov = {k: float(v) for k, v in (_OV["table"].get(key) or {}).items() if k in fields}
+        entry = _OV["table"].get(key) or {}
+        ov = {k: float(v) for k, v in entry.items() if k in fields}
+        cut_meta = CUT_FIELDS.get(kind, {})
+        cut_ov = {k: v for k, v in entry.items() if k in cut_meta and k in sig.parameters}
         if key in _OV["table"]:
             _OV["used"].add(key)
         if ov:
@@ -2745,12 +2807,20 @@ def _overridable(fn, kind: str):
             for k in ("stepdown", "stepover"):
                 if k in ov and k in sig.parameters:
                     b.arguments[k] = ov[k]
+        cut_script = {k: b.arguments.get(k, sig.parameters[k].default) for k in cut_meta if k in sig.parameters}
+        for k, v in cut_ov.items():
+            b.arguments[k] = v
         _OV["depth"] += 1
         try:
             op = fn(*b.args, **b.kwargs)
         finally:
             _OV["depth"] -= 1
         op.key, op.base_tool, op.overrides, op.defaults = key, tool, ov, defaults
+        op.cut_defaults = {k: (None if v is inspect.Parameter.empty else _plain(v)) for k, v in cut_script.items()}
+        op.cut_overrides = dict(cut_ov)
+        if isinstance(entry.get("color"), str):
+            op.color = entry["color"]
+            op.color_override = True
         return op
     wrapper.__wrapped_op__ = True
     return wrapper

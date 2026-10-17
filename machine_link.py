@@ -291,8 +291,9 @@ class Profile:
     anchor1: tuple = (-192.4, -194.3)      # machine XY of Anchor 1 (the L-bracket's inside corner); per machine
     setter_from_anchor: tuple = (181.0, 181.0)   # tool setter XY relative to Anchor 1 (ATCHandler: Z1 manual change)
     change_xy: tuple = (-11.6, -14.6)      # where the head waits for a manual tool change (coordinate.clearance_x/y)
-    probe3d_tool: int = 9999               # tool number of the add-on 3D probe: the firmware powers the probe port for
-                                           # T9999 after a change (ATCHandler M6 / M490.2); confirm against MakeraStudio
+    probe3d_tool: int = 9999               # tool number of the add-on 3D probe, as MakeraStudio uses it (its tool codes:
+                                           # T0 wired probe, T8888 3D Probe Rod, T9999 3D probe; the firmware powers the
+                                           # probe port for T9999 after a change)
 
 
 def makera_live_config(path=None) -> dict:

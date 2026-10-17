@@ -215,7 +215,7 @@
   .fx-pos { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
   .fx-lbl { display:flex; align-items:center; gap:3px; font-size:11px; color:var(--muted); }
   .fx-lbl input { width:54px; padding:2px 4px; }
-  #fx-add { align-self:flex-start; }
+  .fx-add { align-self:flex-start; }
   .muted { color:var(--muted); font-size:11px; font-weight:400; }
   .kv { display:grid; grid-template-columns:110px 1fr; gap:2px 8px; font-size:12px; } .kv div:nth-child(odd) { color:var(--muted); }
   .oprow { display:flex; align-items:center; gap:8px; padding:4px 2px; border-bottom:1px solid var(--line); font-size:12px; }
@@ -235,8 +235,42 @@
   .librow .btn { padding:1px 6px; font-size:11px; }
   #cam-warn { color:#ffd166; font-size:11px; margin-top:6px; white-space:pre-wrap; }
   #gcode-pre { background:#0f1216; padding:8px; border-radius:6px; font:11px/1.4 ui-monospace,Menlo,monospace; max-height:240px; overflow:auto; margin:8px 0 0; white-space:pre; }
-  #cam-sim { display:flex; align-items:center; gap:8px; padding:8px 12px; border-top:1px solid var(--line); }
-  #cam-sim input { flex:1; }
+  #cam-dock { border-top:1px solid var(--line); background:var(--panel); }
+  #cam-sim { display:flex; align-items:center; gap:6px; padding:8px 12px 2px; }
+  #cam-sim input[type=range] { flex:1; min-width:60px; }
+  #cam-sim .dock-sep { width:1px; height:20px; background:var(--line); margin:0 2px; }
+  #cam-sim select { padding:4px 6px; }
+  #sim-infobar { padding:2px 12px 7px; font-size:11.5px; }
+  #cam-simres { padding:8px 12px 4px; border-bottom:1px solid var(--line); font-size:12px; }
+  #cam-simres .sr-head { display:flex; align-items:center; gap:8px; } #cam-simres .sr-head .muted { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  #cam-simres-body { white-space:pre-wrap; max-height:180px; overflow:auto; margin-top:6px; font-size:11.5px; }
+  .cam-mrow { display:flex; align-items:center; gap:6px; margin-bottom:10px; }
+  .cam-mrow select { padding:4px 6px; flex:1; min-width:0; } .cam-mrow .btn { white-space:nowrap; } .cam-lbl { font-size:11px; text-transform:uppercase; letter-spacing:.4px; color:var(--muted); }
+  .cam-prog .cp-top { display:flex; align-items:flex-start; gap:8px; } .cam-prog .cp-title { flex:1; min-width:0; }
+  .cam-prog .cp-title b { font-size:13.5px; } .cam-prog .cp-title .muted { font-size:11.5px; margin-top:2px; }
+  .cam-prog .cp-row { display:flex; align-items:center; gap:6px; margin-top:8px; }
+  #cam-warn details { margin-top:8px; font-size:11.5px; color:#ffd166; } #cam-warn summary { cursor:pointer; }
+  #cam-warn details div { white-space:pre-wrap; margin:3px 0 0 14px; color:#e8c25c; }
+  .setup-card { padding:0; overflow:hidden; }
+  .su-head { display:flex; align-items:center; gap:8px; padding:8px 10px; cursor:pointer; background:var(--panel2); font-size:12.5px; }
+  .su-head .car { color:var(--muted); width:10px; } .su-head .su-title { font-weight:600; } .su-head .su-wcs { font-size:10.5px; color:var(--accent2); border:1px solid rgba(78,161,255,.45); border-radius:8px; padding:0 6px; }
+  .su-head .meta { margin-left:auto; color:var(--muted); font-size:11px; white-space:nowrap; }
+  .su-head .jump { opacity:.55; padding:0 2px; } .su-head .jump:hover { opacity:1; color:var(--accent2); }
+  .su-body { padding:8px 10px 6px; }
+  .su-kv { grid-template-columns:92px 1fr; gap:4px 8px; }
+  .su-opsh { margin:10px 0 2px; font-size:11px; text-transform:uppercase; letter-spacing:.4px; color:var(--muted); display:flex; gap:6px; align-items:center; }
+  .su-opsh .muted { text-transform:none; letter-spacing:0; }
+  .oprow label.sw { position:relative; width:12px; height:12px; border-radius:3px; flex:none; cursor:pointer; box-shadow:0 0 0 1px rgba(255,255,255,.18); }
+  .oprow label.sw input { position:absolute; inset:0; opacity:0; width:100%; height:100%; cursor:pointer; padding:0; border:0; }
+  .op-tabs { display:flex; gap:2px; border-bottom:1px solid var(--line); margin:2px 0 8px; }
+  .op-tabs button { background:none; border:0; color:var(--muted); font:inherit; font-size:11.5px; padding:4px 9px; cursor:pointer; border-bottom:2px solid transparent; margin-bottom:-1px; }
+  .op-tabs button.on { color:var(--text); border-bottom-color:var(--accent2); }
+  .op-tabs button .dot { display:inline-block; width:5px; height:5px; border-radius:50%; background:var(--accent); margin-left:4px; vertical-align:middle; }
+  .ovgrid select { width:100%; box-sizing:border-box; background:var(--bg); color:var(--text); border:1px solid var(--line); border-radius:6px; padding:4px 6px; font:inherit; }
+  .ovgrid select.ov { border-color:var(--accent); color:var(--accent); }
+  .ovgrid.cut { grid-template-columns:118px 1fr 34px; }
+  .op-disp { display:flex; flex-direction:column; gap:8px; }
+  .op-disp .row input[type=color] { width:36px; height:24px; padding:0; border:1px solid var(--line); border-radius:5px; background:none; }
   .modal textarea, #modal textarea { width:100%; min-height:260px; background:#0f1216; color:var(--text); border:1px solid var(--line); border-radius:6px; font:12px/1.4 ui-monospace,Menlo,monospace; padding:8px; }
   .prow { display:flex; align-items:center; gap:8px; padding:3px 0; font-size:12px; }
   .prow label { flex:1; font-family:ui-monospace,Menlo,monospace; color:#9cdcfe; } .prow .c { color:var(--muted); font-size:11px; flex:1.2; }
@@ -629,32 +663,34 @@
     </div>
     <div class="pane" id="pane-cam">
       <div id="cam-body">
-        <div class="cam-sec" id="cam-machine"><h4>Machine view</h4>
-          <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap"><select id="cam-machine-pick" class="btn" style="padding:4px 6px;max-width:230px" title="Which machine to show"></select>
-            <button class="btn small" id="cam-machine-show" title="Show the machine around the design (A)">Show machine</button>
-            <button class="btn small" id="cam-machine-doors" title="Open or close the machine's doors / canopy" disabled>Open doors</button></div>
-          <div class="muted" style="font-size:11.5px;margin-top:4px">The design sits on the machine's bed; with a CAM program the simulation plays on the program's machine and collisions flash red.</div></div>
+        <div class="cam-mrow" id="cam-machine" title="The design sits on the machine's bed; with a CAM program the simulation plays on the program's machine and collisions flash red.">
+          <span class="cam-lbl">Machine view</span><select id="cam-machine-pick" class="btn" title="Which machine to show"></select>
+          <button class="btn small" id="cam-machine-show" title="Show the machine around the design (A)">Show machine</button>
+          <button class="btn small" id="cam-machine-doors" title="Open or close the machine's doors / canopy" disabled>Open doors</button></div>
         <div id="cam-empty" class="cam-sec" style="color:var(--muted)">No CAM program yet. Ask the agent, e.g. <i>"Make a CAM program for the Generic 3018: face the stock, drill the holes, pocket the bore and cut the outline with 4 tabs."</i> The agent writes <code>cam.py</code> (see the Code tab) against your machine and tool libraries. <div style="margin-top:8px"><button class="btn small" data-open-libs="machines">Machines &amp; tools…</button></div></div>
-        <div class="cam-sec" id="cam-setup" style="display:none"><h4>Setup <button class="btn small" data-open-libs="machines" title="Settings ▸ Machines / Tools">Machines &amp; tools…</button></h4><div id="cam-setup-body"></div></div>
-        <div class="cam-sec" id="cam-playback" style="display:none"><h4>Playback <span class="muted" style="text-transform:none;letter-spacing:0;font-weight:400">speed, × real time</span></h4>
-          <div id="sim-speed-seg" style="display:flex;gap:4px;flex-wrap:wrap" title="Playback speed: 1× runs the program at the machine's feed and rapid rates"></div>
-          <div class="muted" id="sim-speed-note" style="font-size:11.5px;margin-top:5px"></div></div>
-        <div class="cam-sec" id="cam-simres" style="display:none"><h4>Simulation <button class="btn small" id="sim-clear">Hide</button></h4><div id="cam-simres-body" style="white-space:pre-wrap"></div></div>
-        <div class="cam-sec" id="cam-ops" style="display:none"><h4>Operations <span class="muted" style="text-transform:none;letter-spacing:0;font-weight:400">click an operation for its tool settings</span></h4><div id="cam-ops-body"></div><div id="cam-warn"></div></div>
-        <div class="cam-sec" id="cam-gcode" style="display:none"><h4>G-code <span class="muted" id="cam-gcode-meta"></span></h4>
-          <div class="row"><button class="btn primary" id="gcode-dl">⬇ Download .nc</button><button class="btn" id="gcode-preview">Preview</button></div>
-          <pre id="gcode-pre" style="display:none"></pre></div>
+        <div class="cam-sec cam-prog" id="cam-prog" style="display:none">
+          <div class="cp-top"><div class="cp-title"><b id="cp-name"></b><div class="muted" id="cp-meta"></div></div>
+            <button class="btn small" data-open-libs="machines" title="Settings ▸ Machines / Tools">Machines &amp; tools…</button></div>
+          <div class="cp-row"><button class="btn small primary" id="gcode-dl" title="Download the program for the machine">⬇ G-code</button><button class="btn small" id="gcode-preview">Preview</button><span class="muted" id="cam-gcode-meta"></span></div>
+          <div id="cam-warn"></div>
+          <pre id="gcode-pre" style="display:none"></pre>
+        </div>
+        <div id="cam-setups"></div>
       </div>
-      <div id="cam-sim" style="display:none">
-        <button class="btn" id="sim-run" title="Simulate material removal for the visible operations">Simulate</button>
-        <button class="btn" id="sim-rendered" title="Rendered simulation: metallic stock, chrome holder, camera following the tool">Rendered</button>
-        <button class="btn" id="sim-back" title="Jump to the previous operation">⏮</button>
-        <button class="btn" id="sim-play" title="Play / pause">▶</button>
-        <button class="btn" id="sim-fwd" title="Jump to the next operation">⏭</button>
-        <input type="range" id="sim-range" min="0" max="1000" value="1000" step="1" title="Program time">
-        <select id="sim-speed" class="btn" title="Playback speed (× real time)" style="margin-left:auto"><option value="0.25">¼×</option><option value="0.5">½×</option><option value="1" selected>1×</option><option value="2">2×</option><option value="5">5×</option><option value="10">10×</option><option value="25">25×</option><option value="100">100×</option></select>
+      <div id="cam-dock" style="display:none">
+        <div id="cam-simres" style="display:none"><div class="sr-head"><b>Simulation</b><span class="muted" id="sr-sum"></span><button class="btn small" id="sr-more">Details</button><button class="btn small" id="sim-clear" title="Hide the simulated stock">Hide</button></div><div id="cam-simres-body" style="display:none"></div></div>
+        <div id="cam-sim">
+          <button class="btn" id="sim-run" title="Simulate material removal for the shown operations">Simulate</button>
+          <button class="btn" id="sim-rendered" title="Rendered simulation: metallic stock, chrome holder, camera following the tool">Rendered</button>
+          <span class="dock-sep"></span>
+          <button class="btn" id="sim-back" title="Jump to the previous operation">⏮</button>
+          <button class="btn" id="sim-play" title="Play / pause">▶</button>
+          <button class="btn" id="sim-fwd" title="Jump to the next operation">⏭</button>
+          <input type="range" id="sim-range" min="0" max="1000" value="1000" step="1" title="Program time">
+          <select id="sim-speed" class="btn" title="Playback speed: 1× runs the program at the machine's feed and rapid rates"><option value="0.25">¼×</option><option value="0.5">½×</option><option value="1" selected>1×</option><option value="2">2×</option><option value="5">5×</option><option value="10">10×</option><option value="25">25×</option><option value="100">100×</option></select>
+        </div>
+        <div id="sim-infobar"><span id="sim-info" class="muted">—</span></div>
       </div>
-      <div id="sim-infobar" style="display:none;padding:4px 10px 6px;font-size:11.5px"><span id="sim-info" class="muted">—</span></div>
     </div>
     <div class="pane" id="pane-code">
       <textarea id="code" spellcheck="false"></textarea>
@@ -1397,7 +1433,7 @@ function loadProgram(p) {
     const cut = new THREE.LineSegments(cg, camMatCut(op.color)); const rapid = new THREE.LineSegments(rg, rapidMat); rapid.computeLineDistances();
     cut.renderOrder = rapid.renderOrder = 5;
     camGroup.add(cut, rapid);
-    camOps.push({ op, cut, rapid, visible: true, cutCounts, rapidCounts });
+    camOps.push({ op, cut, rapid, visible: !opHidden.has(op.key), cutCounts, rapidCounts });
   }
   const st = p.stock, sx = st.xmax - st.xmin, sy = st.ymax - st.ymin, sz = st.zmax - st.zmin;
   stockObj = new THREE.Group();
@@ -1456,15 +1492,16 @@ function flashFixtures(hits) {                     // the fixture a collision hi
 // ---- CAM tab ▸ Setup ▸ Fixtures: the fixture holding the stock (or the bare table) and any others on the table at the
 // same time, each placed (X / Y from the table centre, mm) and turned (degrees); every change rewrites cam.py's
 // fixtures({...}) line through the agent and rebuilds
-function fixtureSpecFromProgram() {
-  const fx = program.setups[0].fixture;
+function fixtureSpecFromProgram(si = 0) {
+  const fx = program.setups[si].fixture;
   const one = f => ({ name: f.name, at: [+(+f.at[0]).toFixed(2), +(+f.at[1]).toFixed(2)], rot: +f.rot || 0, params: f.params || {} });
   return { ...(fx && fx.name ? one(fx) : { name: null }), extra: fx ? (fx.extra || []).map(one) : [] };
 }
-function sendFixtureSpec(spec) { send({ type: 'set_fixture', setup: program.setups[0].name, fixture: spec }); }
-function renderFixturePanel() {
-  const el = document.getElementById('cam-fixtures'); if (!el || !program) return;
-  const fx = program.setups[0].fixture, spec = fixtureSpecFromProgram(), names = (library.fixtures || []);
+function sendFixtureSpec(spec, si = 0) { send({ type: 'set_fixture', setup: program.setups[si].name, fixture: spec }); }
+function renderFixturePanel(el, si = 0) {
+  if (!el || !program) return;
+  const fx = program.setups[si].fixture, spec = fixtureSpecFromProgram(si), names = (library.fixtures || []);
+  const sendFixtureSpec_ = sp => sendFixtureSpec(sp, si);
   const opts = (sel, bare) => (bare ? '<option value="">bare table / spoilboard</option>' : '') + names.map(f => `<option value="${f.name.replace(/"/g, '&quot;')}" ${sel === f.name ? 'selected' : ''}>${f.name.replace(/</g, '&lt;')}${f.user ? ' ·' : ''}</option>`).join('');
   const num = (v, k, i, title) => `<label class="fx-lbl" title="${title}">${k === 'rot' ? '⟳' : k.toUpperCase()}<input class="fx-num" data-i="${i}" data-k="${k}" type="number" step="${k === 'rot' ? 15 : 1}" value="${(+v).toFixed(k === 'rot' ? 0 : 1).replace(/\.0$/, '')}">${k === 'rot' ? '°' : ''}</label>`;
   const card = (f, i) => {
@@ -1477,18 +1514,18 @@ function renderFixturePanel() {
       ${holds && fx && fx.name ? `<div class="muted" style="font-size:11px;line-height:1.35">stock ${fx.height.toFixed(1)} mm above the ${fx.replaces_spoilboard ? 'bed (spoilboard removed)' : 'table'}${fx.clamp_axis ? ` · jaws close along ${fx.clamp_axis.toUpperCase()}` : ''}${fx.max_opening ? ` · opens to ${(+fx.max_opening).toFixed(0)} mm` : ''}</div>` : ''}</div>`;
   };
   el.innerHTML = card(spec, -1) + spec.extra.map((f, i) => card(f, i)).join('')
-    + `<button class="btn small" id="fx-add" title="Put another fixture on the table (a second vise, clamps, a plate): its parts are checked for collisions too">+ Add fixture</button>`;
+    + `<button class="btn small fx-add" title="Put another fixture on the table (a second vise, clamps, a plate): its parts are checked for collisions too">+ Add fixture</button>`;
   const get = i => i < 0 ? spec : spec.extra[i];
-  el.querySelectorAll('.fx-name').forEach(s => s.onchange = e => { const i = +s.dataset.i, f = get(i); const was = f.name; f.name = e.target.value || null; if (f.name !== was) { f.params = {}; if (i < 0) delete f.at; } sendFixtureSpec(spec); });
-  el.querySelectorAll('.fx-num').forEach(inp => inp.onchange = () => { const f = get(+inp.dataset.i), k = inp.dataset.k, v = +inp.value; if (!isFinite(v)) return; f.at = f.at || [0, 0]; if (k === 'x') f.at[0] = v; else if (k === 'y') f.at[1] = v; else f.rot = ((v % 360) + 360) % 360; sendFixtureSpec(spec); });
-  el.querySelectorAll('.fx-turn').forEach(b => b.onclick = () => { const f = get(+b.dataset.i); f.rot = ((+f.rot || 0) + 90) % 360; sendFixtureSpec(spec); });
-  el.querySelectorAll('.fx-del').forEach(b => b.onclick = () => { spec.extra.splice(+b.dataset.i, 1); sendFixtureSpec(spec); });
-  document.getElementById('fx-add').onclick = () => {
+  el.querySelectorAll('.fx-name').forEach(s => s.onchange = e => { const i = +s.dataset.i, f = get(i); const was = f.name; f.name = e.target.value || null; if (f.name !== was) { f.params = {}; if (i < 0) delete f.at; } sendFixtureSpec_(spec); });
+  el.querySelectorAll('.fx-num').forEach(inp => inp.onchange = () => { const f = get(+inp.dataset.i), k = inp.dataset.k, v = +inp.value; if (!isFinite(v)) return; f.at = f.at || [0, 0]; if (k === 'x') f.at[0] = v; else if (k === 'y') f.at[1] = v; else f.rot = ((v % 360) + 360) % 360; sendFixtureSpec_(spec); });
+  el.querySelectorAll('.fx-turn').forEach(b => b.onclick = () => { const f = get(+b.dataset.i); f.rot = ((+f.rot || 0) + 90) % 360; sendFixtureSpec_(spec); });
+  el.querySelectorAll('.fx-del').forEach(b => b.onclick = () => { spec.extra.splice(+b.dataset.i, 1); sendFixtureSpec_(spec); });
+  el.querySelector('.fx-add').onclick = () => {
     const first = names.find(f => f.name !== spec.name) || names[0]; if (!first) return;
     // in front of the holding fixture (or the stock), clear of it: move it from there; overlaps are reported as warnings
     const st = program.stock, hb = fx && fx.name && fx.size ? fx.size : [st.xmax - st.xmin, st.ymax - st.ymin];
     const base = spec.name ? spec.at || [0, 0] : [0, 0];
-    spec.extra.push({ name: first.name, at: [+(+base[0]).toFixed(0), +(+base[1] - hb[1] / 2 - 45 - 25 * spec.extra.length).toFixed(0)], rot: 0, params: {} }); sendFixtureSpec(spec);
+    spec.extra.push({ name: first.name, at: [+(+base[0]).toFixed(0), +(+base[1] - hb[1] / 2 - 45 - 25 * spec.extra.length).toFixed(0)], rot: 0, params: {} }); sendFixtureSpec_(spec);
   };
 }
 function applyCamVisibility() {
@@ -1498,39 +1535,53 @@ function applyCamVisibility() {
 document.getElementById('tp-toggle').onclick = e => { showTp = !showTp; e.currentTarget.classList.toggle('active', showTp); applyCamVisibility(); };
 document.getElementById('stock-toggle').onclick = e => { showStock = !showStock; e.currentTarget.classList.toggle('active', showStock); applyCamVisibility(); };
 
+const setupClosed = new Set(), opHidden = new Set(), opTab = {}, opDraft = {};
+const ORIGIN_TEXT = { 'stock-top-left': 'front-left corner, top of the stock', 'stock-top-center': 'centre, top of the stock',
+  'stock-bottom-left': 'front-left corner, bottom of the stock', 'stock-bottom-center': 'centre, bottom of the stock',
+  'rotary-axis-left': 'left end, on the 4th-axis centreline', custom: 'a point set in the script' };
+const fmtMin = m => m >= 60 ? `${Math.floor(m / 60)} h ${Math.round(m % 60)} min` : `${m.toFixed(1)} min`;
 function renderCamTab() {
   const has = !!program;
   document.getElementById('cam-empty').style.display = has ? 'none' : '';
-  for (const id of ['cam-setup', 'cam-playback', 'cam-ops', 'cam-gcode']) document.getElementById(id).style.display = has ? '' : 'none';
-  if (has) renderSpeedUi();
-  document.getElementById('cam-sim').style.display = has ? '' : 'none'; document.getElementById('sim-infobar').style.display = has ? '' : 'none';
-  if (has) {
-    const st = program.stock, o = program.origin;
-    document.getElementById('cam-setup-body').innerHTML = `<div class="kv">
-      <div>Machine</div><div>${program.machine}</div>
-      <div>Stock</div><div>${(st.xmax - st.xmin).toFixed(1)} × ${(st.ymax - st.ymin).toFixed(1)} × ${(st.zmax - st.zmin).toFixed(1)} mm · top z ${st.zmax.toFixed(2)}</div>
-      <div>WCS origin</div><div>model (${o.map(v => v.toFixed(2)).join(', ')})</div>
-      <div>Safe Z</div><div>${program.safe_z.toFixed(2)} (model) · ${(program.safe_z - o[2]).toFixed(2)} (WCS)</div>
-      <div>Fixtures</div><div id="cam-fixtures"></div>
-      <div>Est. time</div><div>${program.time.toFixed(1)} min</div></div>`
-      + ((program.setups || []).length > 1 || (program.setups || []).some(x => x.rotary) ? '<div class="kv" style="margin-top:6px">' + program.setups.map((x, i) =>
-        `<div>${x.name}</div><div>${x.wcs} · ${x.rotary ? `4th axis · A ${x.a}°` : 'orient ' + x.orient} · ${program.ops.filter(o => (o.setup || 0) === i).length} ops</div>`).join('') + '</div>' : '');
-    renderFixturePanel();
-    const ops = document.getElementById('cam-ops-body'); ops.innerHTML = '';
-    let lastSetup = -1;
-    program.ops.forEach((op, i) => {
-      const si = op.setup || 0, stp = (program.setups || [])[si];
-      if (stp && (program.setups.length > 1 || stp.rotary) && si !== lastSetup) {
-        lastSetup = si;
-        const h = document.createElement('div'); h.className = 'oprow setuphead';
-        h.innerHTML = `<span>Setup ${stp.name} · ${stp.wcs} · ${stp.rotary ? '4th axis' : 'orient ' + stp.orient}</span><span class="jump" title="Play from this setup">▶</span>`;
-        h.querySelector('.jump').onclick = () => { if (sim.opStart[i] >= 0) simSeek(sim.t[sim.opStart[i]], sim.playing); };
-        ops.appendChild(h);
-      }
+  document.getElementById('cam-prog').style.display = has ? '' : 'none';
+  document.getElementById('cam-dock').style.display = has ? '' : 'none';
+  const box = document.getElementById('cam-setups'); box.innerHTML = '';
+  if (!has) return;
+  renderSpeedUi();
+  const setups = program.setups || [];
+  document.getElementById('cp-name').textContent = program.name;
+  document.getElementById('cp-meta').textContent = `${program.machine} · ${setups.length} setup${setups.length === 1 ? '' : 's'} · ${program.ops.length} operations · ${fmtMin(program.time)}`;
+  const warns = program.warnings || [];
+  document.getElementById('cam-warn').innerHTML = warns.length ? `<details><summary>⚠ ${warns.length} warning${warns.length === 1 ? '' : 's'}</summary>${warns.map(w => `<div>${esc(w)}</div>`).join('')}</details>` : '';
+  document.getElementById('cam-gcode-meta').textContent = lastGcodeLines ? `${lastGcodeLines} lines` : '';
+  setups.forEach((stp, si) => {
+    const mine = program.ops.map((op, i) => [op, i]).filter(([op]) => (op.setup || 0) === si);
+    const closed = setupClosed.has(stp.name), t = mine.reduce((a, [op]) => a + op.time, 0);
+    const card = document.createElement('div'); card.className = 'cam-sec setup-card';
+    const sz = stp.size || [0, 0, 0];
+    card.innerHTML = `<div class="su-head"><span class="car">${closed ? '▸' : '▾'}</span><span class="su-title">Setup ${si + 1} · ${esc(stp.name)}</span><span class="su-wcs" title="Work coordinate system on the machine">${esc(stp.wcs || '')}</span>
+        <span class="meta">${mine.length} op${mine.length === 1 ? '' : 's'} · ${fmtMin(t)}</span><span class="jump" title="Play from this setup">▶</span></div>`
+      + (closed ? '' : `<div class="su-body"><div class="kv su-kv">
+        <div>Stock</div><div>${stp.rotary ? `Ø${(2 * (stp.max_radius || 0)).toFixed(1)} × ${sz[0].toFixed(1)}` : `${sz[0].toFixed(2)} × ${sz[1].toFixed(2)} × ${sz[2].toFixed(2)}`} mm</div>
+        <div>Machined from</div><div>${stp.rotary ? `4th axis · A ${stp.a}°` : esc(stp.orient || 'top')}</div>
+        <div>Work origin</div><div>${esc(ORIGIN_TEXT[stp.origin_name] || stp.origin_name)}</div>
+        <div>Safe height</div><div>${(+stp.safe_z_wcs).toFixed(1)} mm above the origin</div>
+        <div>Workholding</div><div class="su-fx"></div></div>
+        <div class="su-opsh">Operations <span class="muted">· tick to show and simulate · click one for its settings</span></div><div class="su-ops"></div></div>`);
+    card.querySelector('.su-head').onclick = e => { if (e.target.closest('.jump')) return; closed ? setupClosed.delete(stp.name) : setupClosed.add(stp.name); renderCamTab(); };
+    card.querySelector('.su-head .jump').onclick = () => { const i0 = mine.length ? mine[0][1] : -1; if (i0 >= 0 && sim.opStart[i0] >= 0) simSeek(sim.t[sim.opStart[i0]], sim.playing); };
+    box.appendChild(card);
+    if (closed) return;
+    renderFixturePanel(card.querySelector('.su-fx'), si);
+    const ops = card.querySelector('.su-ops');
+    for (const [op, i] of mine) {
       const r = document.createElement('div'); r.className = 'oprow'; r.dataset.op = i;
-      const nov = Object.keys(op.overrides || {}).length, open = opOpen.has(op.key);
-      r.innerHTML = `<input type="checkbox" ${camOps[i]?.visible ? 'checked' : ''}><span class="car">${op.key ? (open ? '▾' : '▸') : ''}</span><span class="sw" style="background:${op.color}"></span><span class="nm">${i + 1}. ${op.name} <span class="muted">${op.kind}</span>${nov ? `<span class="ovb" title="${Object.entries(op.overrides).map(([k, v]) => k + ' ' + v).join(', ')}">override</span>` : ''}</span><span class="meta">T${op.tool.number} Ø${op.tool.diameter} · ${op.time.toFixed(1)} min</span>`;
-      r.querySelector('input').onchange = e => { camOps[i].visible = e.target.checked; applyCamVisibility(); if (simRes) clearSim(); setupSim(); };
+      const nov = Object.keys(opOverrideSet(op)).length, open = opOpen.has(op.key);
+      r.innerHTML = `<input type="checkbox" ${camOps[i]?.visible ? 'checked' : ''} title="Show and simulate this operation"><span class="car">${op.key ? (open ? '▾' : '▸') : ''}</span>`
+        + `<label class="sw" style="background:${op.color}" title="Colour — click to change"><input type="color" value="${op.color}"></label>`
+        + `<span class="nm">${i + 1}. ${esc(op.name)} <span class="muted">${op.kind}</span>${nov ? `<span class="ovb" title="${esc(Object.entries(opOverrideSet(op)).map(([k, v]) => k + ' ' + v).join(', '))}">edited</span>` : ''}</span><span class="meta">T${op.tool.number} Ø${op.tool.diameter} · ${op.time.toFixed(1)} min</span>`;
+      r.querySelector('input[type=checkbox]').onchange = e => { camOps[i].visible = e.target.checked; e.target.checked ? opHidden.delete(op.key) : opHidden.add(op.key); applyCamVisibility(); if (simRes) clearSim(); setupSim(); };
+      r.querySelector('label.sw input').onchange = e => applyOpOverrides(op, { color: e.target.value });
       r.title = Object.entries(op.params || {}).map(([k, v]) => `${k}=${Array.isArray(v) ? v.join('×') : (typeof v === 'number' ? +v.toFixed(3) : v)}`).join('  ');
       if (op.key) for (const q of r.querySelectorAll('.nm, .car')) q.onclick = () => { opOpen.has(op.key) ? opOpen.delete(op.key) : opOpen.add(op.key); renderCamTab(); };
       const j = document.createElement('span'); j.className = 'jump'; j.textContent = '▶'; j.title = 'Play from this operation';
@@ -1538,10 +1589,18 @@ function renderCamTab() {
       r.appendChild(j);
       ops.appendChild(r);
       if (open) ops.appendChild(opEditor(op));
-    });
-    document.getElementById('cam-warn').textContent = (program.warnings || []).map(w => '⚠ ' + w).join('\n');
-    document.getElementById('cam-gcode-meta').textContent = lastGcodeLines ? `${lastGcodeLines} lines` : '';
-  }
+    }
+  });
+}
+// one operation's overrides, all kinds together (tool values, cut settings, colour), as cam.py's overrides({...}) holds them
+function opOverrideSet(op) {
+  return { ...(op.overrides || {}), ...((op.cut || {}).overrides || {}), ...(op.color_override ? { color: op.color } : {}) };
+}
+function applyOpOverrides(op, patch) {
+  const v = { ...opOverrideSet(op), ...patch };
+  for (const k of Object.keys(v)) if (v[k] === null || v[k] === undefined || v[k] === '') delete v[k];
+  delete opDraft[op.key];
+  send({ type: 'set_override', key: op.key, values: v });
 }
 async function editJson(title, obj, save) {
   const d = document.createElement('div'); d.innerHTML = `<textarea spellcheck="false"></textarea><div class="muted" id="json-err"></div>`;
@@ -1558,38 +1617,86 @@ fetch('/api/cam/materials').then(r => r.json()).then(r => { camMaterials = r.mat
 const ovShow = (k, v) => k === 'stepover' ? +(v * 100).toFixed(2) : +(+v).toFixed(3);
 const ovRead = (k, v) => k === 'stepover' ? v / 100 : v;
 function opEditor(op) {
+  // edits are kept in a draft per operation until Apply (or Reset), so switching tabs never loses them
   const el = document.createElement('div'); el.className = 'opedit';
-  const t = op.base_tool || op.tool, def = op.defaults || {}, ov = op.overrides || {};
+  const t = op.base_tool || op.tool, def = op.defaults || {}, cut = op.cut || { fields: {}, values: {}, overrides: {} };
+  const d = opDraft[op.key] || (opDraft[op.key] = { tool: { ...(op.overrides || {}) }, cut: { ...cut.overrides }, color: op.color_override ? op.color : null });
+  const tabs = [...(Object.keys(def).length ? [['tool', 'Tool & feeds']] : []), ...(Object.keys(cut.fields).length ? [['cut', 'Cut']] : []), ['display', 'Display']];
+  let cur = opTab[op.key] || tabs[0][0]; if (!tabs.some(x => x[0] === cur)) cur = tabs[0][0];
   const lib = library.tools.find(x => x.number === t.number && x.name === t.name);
-  el.innerHTML = `<div class="ophd">T${t.number} ${t.name} · ${t.type} Ø${t.diameter} · ${t.flutes} fl${lib ? '' : ' · <i>set in the script</i>'} — blank fields use the tool's values (shown greyed)</div>
-    <div class="ovgrid">${Object.keys(def).map(k => `<label>${OV_META[k][0]}</label><input type="number" step="any" min="0" data-k="${k}" placeholder="${ovShow(k, def[k])}" value="${k in ov ? ovShow(k, ov[k]) : ''}" class="${k in ov ? 'ov' : ''}"><span class="muted">${OV_META[k][1]}</span>`).join('')}</div>
-    <div class="row"><span class="muted">Calculator</span><select data-mat>${camMaterials.map(m => `<option>${m}</option>`).join('')}</select><button class="btn small" data-a="calc" title="feeds & speeds for this tool in the material on ${program.machine}">Fill</button>
-      <span style="flex:1"></span><button class="btn small" data-a="reset" ${Object.keys(ov).length ? '' : 'disabled'} title="remove this operation's overrides">Reset</button><button class="btn small primary" data-a="apply">Apply</button></div>
-    <div class="muted" data-note style="margin-top:4px;white-space:pre-wrap"></div>`;
-  const inputs = [...el.querySelectorAll('input[data-k]')], note = el.querySelector('[data-note]');
-  const mark = i => i.classList.toggle('ov', i.value !== '' && Math.abs(ovRead(i.dataset.k, +i.value) - def[i.dataset.k]) > 1e-9);
-  inputs.forEach(i => { i.oninput = () => mark(i); i.onkeydown = e => { if (e.key === 'Enter') el.querySelector('[data-a=apply]').click(); }; });
-  if (camMaterials.includes('aluminium')) el.querySelector('[data-mat]').value = 'aluminium';
-  el.querySelector('[data-a=apply]').onclick = () => {
-    const values = {};
-    for (const i of inputs) {
-      if (i.value === '') continue;
-      const v = ovRead(i.dataset.k, +i.value);
-      if (!(v > 0) || (i.dataset.k === 'stepover' && v > 1)) { note.textContent = `${OV_META[i.dataset.k][0]}: enter a positive number${i.dataset.k === 'stepover' ? ' up to 100%' : ''}`; i.focus(); return; }
-      if (Math.abs(v - def[i.dataset.k]) > 1e-9) values[i.dataset.k] = v;
-    }
-    note.textContent = 'rebuilding…'; send({ type: 'set_override', key: op.key, values });
+  const fmtV = v => v === null || v === undefined ? 'auto' : typeof v === 'boolean' ? (v ? 'yes' : 'no') : typeof v === 'number' ? String(+v.toFixed(3)) : String(v);
+  const draft = () => ({ ...d.tool, ...d.cut, ...(d.color ? { color: d.color } : {}) });
+  const isChanged = () => JSON.stringify(Object.entries(draft()).sort()) !== JSON.stringify(Object.entries(opOverrideSet(op)).sort());
+  const pane = () => {
+    if (cur === 'tool') return `<div class="ophd">T${t.number} ${esc(t.name)} · ${t.type} Ø${t.diameter} · ${t.flutes} fl${lib ? '' : ' · <i>set in the script</i>'} — blank uses the tool's value (greyed)</div>
+      <div class="ovgrid">${Object.keys(def).map(k => `<label>${OV_META[k][0]}</label><input type="number" step="any" min="0" data-g="tool" data-k="${k}" placeholder="${ovShow(k, def[k])}" value="${k in d.tool ? ovShow(k, d.tool[k]) : ''}" class="${k in d.tool ? 'ov' : ''}"><span class="muted">${OV_META[k][1]}</span>`).join('')}</div>
+      <div class="row"><span class="muted">Calculator</span><select data-mat>${camMaterials.map(m => `<option>${m}</option>`).join('')}</select><button class="btn small" data-a="calc" title="feeds & speeds for this tool in the material on ${esc(program.machine)}">Fill</button></div>`;
+    if (cur === 'cut') return `<div class="ophd">The script's values are greyed; change one to override it for this operation (Z in the setup's frame).</div>
+      <div class="ovgrid cut">${Object.entries(cut.fields).map(([k, [label, unit, typ, choices]]) => {
+        const sv = cut.values[k], has = k in d.cut, v = d.cut[k];
+        if (typ === 'bool' || typ === 'choice') {
+          const opts = typ === 'bool' ? [[true, 'yes'], [false, 'no']] : choices.map(c => [c, c]);
+          return `<label>${label}</label><select data-g="cut" data-k="${k}" data-typ="${typ}" class="${has ? 'ov' : ''}"><option value="">script: ${fmtV(sv)}</option>${opts.map(([ov, lab]) => `<option value="${ov}" ${has && v === ov ? 'selected' : ''}>${lab}</option>`).join('')}</select><span class="muted">${unit}</span>`;
+        }
+        return `<label>${label}</label><input type="number" step="${typ === 'int' ? 1 : 'any'}" data-g="cut" data-k="${k}" data-typ="${typ}" placeholder="${fmtV(sv)}" value="${has ? v : ''}" class="${has ? 'ov' : ''}"><span class="muted">${unit}</span>`;
+      }).join('')}</div>`;
+    return `<div class="op-disp"><div class="row"><span class="muted" style="width:118px">Colour</span><input type="color" data-g="color" value="${d.color || op.color}"><button class="btn small" data-a="color-reset" ${d.color ? '' : 'disabled'}>Script colour</button></div>
+      <label class="row" style="gap:6px"><input type="checkbox" data-g="show" ${camOps[program.ops.indexOf(op)]?.visible ? 'checked' : ''}> Show in the viewer and the simulation</label></div>`;
   };
-  el.querySelector('[data-a=reset]').onclick = () => { note.textContent = 'rebuilding…'; send({ type: 'set_override', key: op.key, values: null }); };
-  el.querySelector('[data-a=calc]').onclick = async () => {
-    const mat = el.querySelector('[data-mat]').value, so = el.querySelector('input[data-k=stepover]');
-    const ae = so && so.value !== '' ? ovRead('stepover', +so.value) : (def.stepover || 0.4);
-    try {
-      const f = await api('/api/cam/feeds', { tool: t, material: mat, machine: program.machine, aggressiveness: 0.5, radial_engagement: Math.min(1, ae) });
-      for (const i of inputs) if (f[i.dataset.k] != null && i.dataset.k !== 'stepover') { i.value = ovShow(i.dataset.k, f[i.dataset.k]); mark(i); }
-      note.textContent = `${mat}: vc ${f.vc} m/min, chip load ${f.chipload} mm/tooth — press Apply to use these` + ((f.notes || []).length ? '\n' + f.notes.map(n => '· ' + n).join('\n') : '');
-    } catch (e) { note.textContent = e.message; }
+  const refreshButtons = () => {
+    el.querySelector('[data-a=apply]').disabled = !isChanged();
+    el.querySelector('[data-a=reset]').disabled = !(Object.keys(opOverrideSet(op)).length || isChanged());
+    const n = { tool: Object.keys(d.tool).length, cut: Object.keys(d.cut).length, display: d.color ? 1 : 0 };
+    el.querySelectorAll('.op-tabs button').forEach(b => { const dot = b.querySelector('.dot'); if (n[b.dataset.t] && !dot) b.insertAdjacentHTML('beforeend', '<span class="dot"></span>'); if (!n[b.dataset.t] && dot) dot.remove(); });
   };
+  const draw = () => {
+    el.innerHTML = `<div class="op-tabs">${tabs.map(([k, l]) => `<button data-t="${k}" class="${k === cur ? 'on' : ''}">${l}</button>`).join('')}</div>${pane()}
+      <div class="row" style="margin-top:6px"><span class="muted" data-note style="flex:1;white-space:pre-wrap"></span>
+        <button class="btn small" data-a="reset" title="back to the script's values for everything in this operation">Reset all</button>
+        <button class="btn small primary" data-a="apply">Apply</button></div>`;
+    wire(); refreshButtons();
+  };
+  const wire = () => {
+    const note = el.querySelector('[data-note]');
+    el.querySelectorAll('.op-tabs button').forEach(b => b.onclick = () => { cur = opTab[op.key] = b.dataset.t; draw(); });
+    el.querySelectorAll('[data-g=tool]').forEach(i => {
+      i.oninput = () => { const k = i.dataset.k; if (i.value === '') delete d.tool[k]; else d.tool[k] = ovRead(k, +i.value); i.classList.toggle('ov', k in d.tool); refreshButtons(); };
+      i.onkeydown = e => { if (e.key === 'Enter') el.querySelector('[data-a=apply]').click(); };
+    });
+    el.querySelectorAll('[data-g=cut]').forEach(i => {
+      i[i.tagName === 'SELECT' ? 'onchange' : 'oninput'] = () => {
+        const k = i.dataset.k, typ = i.dataset.typ;
+        if (i.value === '') delete d.cut[k];
+        else d.cut[k] = typ === 'bool' ? i.value === 'true' : typ === 'choice' ? i.value : typ === 'int' ? Math.round(+i.value) : +i.value;
+        i.classList.toggle('ov', k in d.cut); refreshButtons();
+      };
+      if (i.tagName === 'INPUT') i.onkeydown = e => { if (e.key === 'Enter') el.querySelector('[data-a=apply]').click(); };
+    });
+    const col = el.querySelector('[data-g=color]'); if (col) col.oninput = () => { d.color = col.value; el.querySelector('[data-a=color-reset]').disabled = false; refreshButtons(); };
+    const cr = el.querySelector('[data-a=color-reset]'); if (cr) cr.onclick = () => { d.color = null; draw(); };
+    const sh = el.querySelector('[data-g=show]');
+    if (sh) sh.onchange = () => { const i = program.ops.indexOf(op); camOps[i].visible = sh.checked; sh.checked ? opHidden.delete(op.key) : opHidden.add(op.key); applyCamVisibility(); if (simRes) clearSim(); setupSim(); renderCamTab(); };
+    const mat = el.querySelector('[data-mat]'); if (mat && camMaterials.includes('aluminium')) mat.value = 'aluminium';
+    el.querySelector('[data-a=apply]').onclick = () => {
+      for (const [k, v] of Object.entries(d.tool)) if (!(v > 0) || (k === 'stepover' && v > 1)) { note.textContent = `${OV_META[k][0]}: enter a positive number${k === 'stepover' ? ' up to 100%' : ''}`; return; }
+      for (const [k, v] of Object.entries(d.cut)) if (typeof v === 'number' && !isFinite(v)) { note.textContent = `${cut.fields[k][0]}: enter a number`; return; }
+      note.textContent = 'rebuilding…';
+      send({ type: 'set_override', key: op.key, values: draft() });
+      delete opDraft[op.key];
+    };
+    el.querySelector('[data-a=reset]').onclick = () => { note.textContent = 'rebuilding…'; delete opDraft[op.key]; send({ type: 'set_override', key: op.key, values: null }); };
+    const calc = el.querySelector('[data-a=calc]');
+    if (calc) calc.onclick = async () => {
+      const m = el.querySelector('[data-mat]').value, ae = d.tool.stepover || def.stepover || 0.4;
+      try {
+        const f = await api('/api/cam/feeds', { tool: t, material: m, machine: program.machine, aggressiveness: 0.5, radial_engagement: Math.min(1, ae) });
+        for (const k of Object.keys(def)) if (f[k] != null && k !== 'stepover') d.tool[k] = f[k];
+        draw(); el.querySelector('[data-mat]').value = m;
+        el.querySelector('[data-note]').textContent = `${m}: vc ${f.vc} m/min, chip load ${f.chipload} mm/tooth — press Apply to use these` + ((f.notes || []).length ? '\n' + f.notes.map(n => '· ' + n).join('\n') : '');
+      } catch (e) { note.textContent = e.message; }
+    };
+  };
+  draw();
   return el;
 }
 document.addEventListener('click', e => { const b = e.target.closest('[data-open-libs]'); if (b) openSettings(b.dataset.openLibs); });
@@ -1699,7 +1806,7 @@ function applySimAt(k, f) {
   hudUpdate(k, f);
 }
 function markCurrentOp(oi) {
-  document.querySelectorAll('#cam-ops-body .oprow[data-op]').forEach(r => r.classList.toggle('cur', +r.dataset.op === oi));
+  document.querySelectorAll('#cam-setups .oprow[data-op]').forEach(r => r.classList.toggle('cur', +r.dataset.op === oi));
 }
 // flipped (bottom) setups on the machine: the work is turned over on the table, so the stage rotates 180° about X through the stock centre
 function stageFlip(on) {
@@ -1756,6 +1863,7 @@ function clearSim() {
   if (stockObj) stockObj.visible = showStock;
 }
 document.getElementById('sim-clear').onclick = () => clearSim();
+document.getElementById('sr-more').onclick = () => { const b = document.getElementById('cam-simres-body'), open = b.style.display === 'none'; b.style.display = open ? '' : 'none'; document.getElementById('sr-more').textContent = open ? 'Less' : 'Details'; };
 document.getElementById('sim-run').onclick = async () => {
   if (!program) return;
   const btn = document.getElementById('sim-run');
@@ -1771,6 +1879,8 @@ document.getElementById('sim-run').onclick = async () => {
 function startSim(payload) {
   clearSim(); simRes = payload;
   const el = document.getElementById('cam-simres'); el.style.display = '';
+  const bad = payload.summary.split('\n').filter(l => /^(GOUGES|RAPIDS|COLLISIONS)/.test(l));
+  document.getElementById('sr-sum').innerHTML = bad.length ? `<span style="color:var(--err)">${esc(bad[0])}</span>` : esc(payload.summary.split('\n')[0] || '');
   document.getElementById('cam-simres-body').innerHTML = payload.summary.split('\n').map(l =>
     `<div style="${/^(GOUGES|RAPIDS|COLLISIONS)/.test(l) ? 'color:var(--red,#ff6b6b);font-weight:600' : ''}">${l.replace(/&/g, '&amp;').replace(/</g, '&lt;')}</div>`).join('');
   if (stockObj) stockObj.visible = false;

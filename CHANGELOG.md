@@ -5,6 +5,17 @@ features, patch bumps fix things. The version shown in the UI header comes from 
 
 ## [Unreleased]
 
+### Changed
+- **CAM tab reorganised around setups.** A program header (machine, setups, operations, time, G-code download and
+  preview, warnings folded away), then one card per setup holding its stock, work origin, safe height, workholding and
+  its own operations. The machine view is one row at the top; all simulation controls (Simulate, Rendered, the
+  transport, the time scrubber and the playback speed) and the simulation results are in one dock at the bottom.
+- **Operation settings in tabs:** *Tool & feeds* (as before), *Cut* (depths, side, tabs, stock to leave, climb, ramp,
+  helix, peck, pass angle... per operation type, the script's values greyed) and *Display* (colour, shown or hidden).
+  Click a colour swatch to recolour an operation. All of it is saved in cam.py's `overrides({...})` line, so the
+  script stays the source; edits survive tab switches until Apply or Reset, and hidden operations stay hidden across
+  rebuilds.
+
 ## [0.45.0] — 2026-10-17
 
 ### Added

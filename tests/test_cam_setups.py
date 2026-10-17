@@ -375,6 +375,29 @@ def test_override_fields_per_kind_and_nested_ops(machines, shaft):
     cam.reset_overrides()
 
 
+def test_cut_and_colour_overrides(machines, plate):
+    st = cam.Setup(machines["Makera Z1"], cam.Stock.from_model(plate, margin=3, top=1))
+    t = flat()
+    cam.reset_overrides()
+    cam.overrides({"Outline": {"tabs": 2, "side": "inside", "z_bottom": 10.5, "color": "#123456"},
+                   "Mine": {"color": "#abcdef"}})
+    p = cam.Program(st)
+    c = p.add(cam.contour(st, t, cam.rect(-10, -5, 10, 5), z_top=12, z_bottom=10, tabs=4, name="Outline"))
+    mine = p.add(cam.Op("Mine", "contour", t, moves=[[0, 0, 0, 15, 0]], key="Mine"))      # script-built op: colour only
+    assert c.color == "#123456" and c.cut_overrides == {"tabs": 2, "side": "inside", "z_bottom": 10.5}
+    assert c.cut_defaults["tabs"] == 4 and c.cut_defaults["side"] == "outside" and c.cut_defaults["z_bottom"] == 10
+    assert c.params.get("tabs", 2) == 2 and min(m[3] for m in c.moves) == pytest.approx(10.5, abs=1e-6)
+    assert mine.color == "#abcdef" and mine.color_override and cam.unused_overrides() == []
+    pay = p.to_payload()["ops"][0]
+    assert pay["cut"]["fields"]["side"][3] == ["outside", "inside", "on"] and pay["cut"]["overrides"]["tabs"] == 2
+    assert pay["color"] == "#123456" and pay["color_override"]
+    with pytest.raises(cam.CamError, match="rrggbb"):
+        cam.overrides({"Outline": {"color": "red"}})
+    with pytest.raises(cam.CamError, match="one of"):
+        cam.overrides({"Outline": {"side": "left"}})
+    cam.reset_overrides()
+
+
 def test_machine_stepdown_cap_in_feeds(machines):
     t = flat()
     z1 = machines["Makera Z1"]

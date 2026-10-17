@@ -462,10 +462,12 @@ def _write_fixtures(code: str, table: dict, span: tuple[int, int] | None) -> str
 
 
 def _write_overrides(code: str, table: dict, span: tuple[int, int] | None) -> str:
-    def num(v: float):
-        return int(v) if float(v).is_integer() else round(float(v), 4)
-    body = ", ".join(f"{k!r}: {{" + ", ".join(f"{f!r}: {num(v)}" for f, v in vals.items()) + "}" for k, vals in table.items())
-    line = f"overrides({{{body}}})  # per-operation tool overrides (CAM tab)" if table else None
+    def val(v):
+        if isinstance(v, (bool, str)) or v is None:
+            return repr(v)
+        return repr(int(v)) if float(v).is_integer() else repr(round(float(v), 4))
+    body = ", ".join(f"{k!r}: {{" + ", ".join(f"{f!r}: {val(v)}" for f, v in vals.items()) + "}" for k, vals in table.items())
+    line = f"overrides({{{body}}})  # per-operation overrides (CAM tab)" if table else None
     lines = code.splitlines()
     if span:
         a, b = span
@@ -770,21 +772,37 @@ class CadAgent:
         return model, text
 
     async def set_op_override(self, key: str, values: dict | None) -> cam.Program | None:
-        """CAM tab: set (or with empty/None values, clear) the tool overrides of one operation by rewriting the
-        `overrides({...})` line of cam.py, then rebuild."""
+        """CAM tab: set (or with empty/None values, clear) one operation's overrides (tool values, cut settings, colour)
+        by rewriting the `overrides({...})` line of cam.py, then rebuild."""
         if not self.cam_code.strip():
             raise cam.CamError("no CAM script")
         table, span = _find_overrides(self.cam_code)
-        vals = {k: float(v) for k, v in (values or {}).items() if v not in (None, "") and k in cam.OVERRIDE_FIELDS}
+        cut_all = {f_: m for d in cam.CUT_FIELDS.values() for f_, m in d.items()}
+        vals = {}
+        for k, v in (values or {}).items():
+            if v in (None, ""):
+                continue
+            if k in cam.OVERRIDE_FIELDS:
+                vals[k] = float(v)
+            elif k == "color":
+                vals[k] = str(v)
+            elif k in cut_all:
+                typ = cut_all[k][2]
+                vals[k] = bool(v) if typ == "bool" else int(v) if typ == "int" else str(v) if typ == "choice" else float(v)
+        saved = dict(cam._OV["table"])
+        try:
+            cam.overrides({key: vals})                      # validate before touching cam.py
+        finally:
+            cam._OV["table"] = saved
         if vals:
             table[key] = vals
         else:
             table.pop(key, None)
         code = _write_overrides(self.cam_code, table, span)
         prog = await self.set_cam_code(code, source="user")
-        what = ", ".join(f"{k}={v:g}" for k, v in vals.items()) if vals else "cleared (tool defaults)"
+        what = ", ".join(f"{k}={v:g}" if isinstance(v, float) else f"{k}={v!r}" for k, v in vals.items()) if vals else "cleared (script defaults)"
         self.notes.append(f"The user set per-operation overrides in the CAM tab for '{key}': {what}. They live in the "
-                          "`overrides({...})` line of cam.py; keep that line when you rewrite the script.")
+                          "`overrides({...})` line of cam.py (tool values, cut settings, colour); keep that line when you rewrite the script.")
         return prog
 
     async def simulate(self, ops: list[int] | None = None, resolution: float | None = None):

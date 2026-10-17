@@ -406,3 +406,10 @@ async def test_set_op_override_rewrites_script_and_rebuilds(ag):
     await ag.set_cam_code('overrides({\n    "Face": {"feed": 300},\n})\n' + CAM_FACE)
     await ag.set_op_override("Face", {"feed": 350})
     assert ag.cam_code.count("overrides(") == 1 and ag.program.ops[0].tool.feed == 350
+    # colour and cut settings go in the same line; a bad value is refused before cam.py changes
+    prog = await ag.set_op_override("Face", {"feed": 350, "color": "#ff0000", "z_bottom": prog.ops[0].cut_defaults["z_bottom"] + 0.5, "angle": 90})
+    assert "'color': '#ff0000'" in ag.cam_code and prog.ops[0].color == "#ff0000" and prog.ops[0].cut_overrides["angle"] == 90
+    before = ag.cam_code
+    with pytest.raises(cam.CamError, match="rrggbb"):
+        await ag.set_op_override("Face", {"color": "blue"})
+    assert ag.cam_code == before
