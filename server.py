@@ -800,20 +800,16 @@ async def machine_post(body: MachineBody):
         elif a == "goto_setter":
             sx, sy = machine.setter_xy
             res = await machine.goto_xy(sx, sy, body.feed or 300.0)
-        elif a == "measure_setter":
-            res = await machine.measure_on_setter(body.z or 90.0, body.feed or 100.0)
-        elif a == "change_tool":
-            res = await machine.change_tool(int(body.z) if body.z is not None else -99)
-        elif a == "confirm_tool":
-            res = await machine.confirm_tool_change()
-        elif a == "cancel_tool":
-            res = await machine.cancel_tool_change()
-        elif a == "store_tool":
-            res = await machine.store_tool(int(body.z) if body.z is not None else -99)
-        elif a == "touch_again":
-            res = await machine.touch_again()
         elif a == "raise_z":
             res = await machine.raise_z_top(body.feed or 300.0)
+        elif a == "change_tool":                         # Makera's M6 Tn (or M491 to re-measure the same tool)
+            res = await machine.change_tool(int(body.z) if body.z is not None else -99)
+        elif a == "confirm_tool":                        # Makera's continue (M490.2), same as the front button
+            res = await machine.confirm_tool_change()
+        elif a == "origin_anchor":                       # G10 L2 P0 X Y at Anchor 1 (MakeraStudio's command)
+            res = await machine.set_origin_anchor()
+        elif a == "auto_z_probe":                        # Makera's M495 X Y O0 F0 at work X,Y (default: here)
+            res = await machine.auto_z_probe(body.x, body.y)
         elif a == "goto_xy":
             res = await machine.goto_xy(body.x if body.x is not None else float('nan'), body.y if body.y is not None else float('nan'), body.feed or 300.0)
         elif a == "home":

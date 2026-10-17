@@ -522,9 +522,11 @@
           <div class="muted mv-small" id="mv-spindle"></div></div>
         <div class="mv-card"><div class="mv-h">Tool <span class="muted" id="mv-tool-state"></span></div>
           <div class="mv-row"><span class="mv-small muted">Change to</span><input type="number" id="mv-tc-num" min="0" max="99" step="1" value="0" style="width:56px" title="0 = the probe">
-            <button class="btn" id="mv-tc-start" title="Raise Z, park at the tool-change position, wait for you to swap, then measure the tool on the setter (every tool, the probe included)">Change tool…</button></div>
+            <button class="btn" id="mv-tc-start" title="Makera's tool change (M6 Tn): Z up, park, wait for you, then the machine measures the tool on its setter. Same number again: re-measure (M491). Every tool, the probe included.">Change tool…</button></div>
+          <div class="mv-row"><button class="btn" id="mv-origin" title="Work X/Y origin = Anchor 1, the L-bracket's inside corner (G10 L2 P0, as MakeraStudio does). Z is not touched.">Origin = Anchor 1</button>
+            <button class="btn" id="mv-zprobe" title="Makera's auto Z probe (M495) at the head's current X/Y: probe on, touch, set work Z zero there, probe off. Needs the probe (T0) fitted and measured.">Auto Z probe here</button></div>
           <div id="mv-tc-box" class="mv-tc" style="display:none"><div id="mv-tc-msg"></div>
-            <div class="mv-row"><button class="btn primary" id="mv-tc-confirm">Confirm: measure it</button><button class="btn" id="mv-tc-cancel">Cancel</button></div></div></div>
+            <div class="mv-row"><button class="btn primary" id="mv-tc-confirm">Confirm (same as the front button)</button><span class="muted mv-small" id="mv-tc-hint"></span></div></div></div>
         <div class="mv-card"><div class="mv-h">Jog <span class="muted" id="mv-jog-why"></span></div>
           <div class="mv-row"><button class="btn" id="mv-home" title="Home all axes (Z goes up first). Needed once per session before jogging.">⌂ Home</button>
             <span class="muted mv-small">Step</span><div class="mv-steps" id="mv-steps"><button data-s="0.1">0.1</button><button data-s="1" class="on">1</button><button data-s="10">10</button></div><span class="muted mv-small">mm</span></div>
@@ -5218,12 +5220,14 @@ function mvRender(st) {
   mvEl('mv-unlock').disabled = !(conn && s.state === 'Alarm');
   const canHome = conn && st.armed && st.fresh && (s.state === 'Idle' || s.state === 'Alarm') && !st.homing;
   mvEl('mv-home').disabled = !canHome;
-  const tl = s.tool ? s.tool.number : null, tc = st.tool_change;
+  const tl = s.tool ? s.tool.number : null, tc = st.routine;
   mvEl('mv-tool-state').textContent = !conn ? '' : `machine has T${tl}` + (st.tool_ok ? ' · measured ✓' : ' · not measured');
-  mvEl('mv-tc-start').disabled = !(conn && st.armed && st.homed && s.state === 'Idle') || (tc && ['moving', 'awaiting', 'measuring'].includes(tc.stage));
+  const busy = tc && ['running', 'awaiting'].includes(tc.stage), ready = conn && st.armed && st.homed && s.state === 'Idle' && !busy;
+  mvEl('mv-tc-start').disabled = !ready; mvEl('mv-origin').disabled = !ready; mvEl('mv-zprobe').disabled = !(ready && st.tool_ok && tl === 0);
   const box = mvEl('mv-tc-box'); box.style.display = tc ? '' : 'none';
-  if (tc) { box.className = 'mv-tc ' + tc.stage; mvEl('mv-tc-msg').textContent = `T${tc.tool}: ${tc.msg}`;
-    mvEl('mv-tc-confirm').style.display = tc.stage === 'awaiting' ? '' : 'none'; mvEl('mv-tc-cancel').textContent = ['done', 'failed'].includes(tc.stage) ? 'Close' : 'Cancel'; }
+  if (tc) { box.className = 'mv-tc ' + tc.stage; mvEl('mv-tc-msg').textContent = `${tc.kind} (${tc.command}): ${tc.msg}`;
+    mvEl('mv-tc-confirm').style.display = tc.stage === 'awaiting' ? '' : 'none';
+    mvEl('mv-tc-hint').textContent = busy ? 'to abort: STOP' : ''; }
   const why = !conn ? 'connect first' : s.state === 'Alarm' ? (s.halt ? s.halt.advice : 'press Unlock') : !st.armed ? 'turn Control on' : !st.homed ? 'home first' : !st.tool_ok ? 'measure the tool first (Change tool)' : s.state !== 'Idle' ? `machine is ${s.state}` : st.jogging ? 'moving…' : '';
   mvEl('mv-jog-why').textContent = why;
   document.querySelectorAll('#machine-view [data-j]').forEach(x => x.disabled = !!why);
@@ -5261,7 +5265,8 @@ function mvRender(st) {
   mvEl('mv-zfloor').onchange = e => mvPost({ action: 'z_floor', z: +e.target.value });
   mvEl('mv-tc-start').onclick = () => mvPost({ action: 'change_tool', z: Math.round(+mvEl('mv-tc-num').value) });
   mvEl('mv-tc-confirm').onclick = () => mvPost({ action: 'confirm_tool' });
-  mvEl('mv-tc-cancel').onclick = () => mvPost({ action: 'cancel_tool' });
+  mvEl('mv-origin').onclick = () => mvPost({ action: 'origin_anchor' });
+  mvEl('mv-zprobe').onclick = () => mvPost({ action: 'auto_z_probe' });
   mvEl('mv-dust').onchange = e => mvPost({ action: 'switch', axis: 'dust', on: e.target.checked });
   mvEl('mv-light').onchange = e => mvPost({ action: 'switch', axis: 'light', on: e.target.checked });
   mvEl('mv-cam-on').onchange = e => { MV.camOn = e.target.checked; mvCamera(); };

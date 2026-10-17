@@ -240,61 +240,65 @@ def test_unsafe_z1_commands_are_never_sent():
     run(go())
 
 
-def test_measure_on_setter_touches_twice_and_refuses_when_unsafe():
+def test_change_tool_uses_makeras_m6_and_only_then_allows_motion():
     async def go():
         emu, mc, _ = await _setup()
         try:
-            mc.profile.anchor1 = (-191.28, -194.45)
-            await mc.arm(True); await mc.home(); await _until(lambda: mc.homed); _measured(mc, emu)
-            with pytest.raises(ml.Refused, match="not over the tool setter"):
-                await mc.measure_on_setter()
-            sx, sy = mc.setter_xy
-            assert (round(sx, 2), round(sy, 2)) == (-10.28, -13.45)
-            await mc.goto_xy(sx, sy, 600); await _until(lambda: not mc.jog_busy)
-            res = await mc.measure_on_setter(max_travel=90, feed=200)
-            t = res["setter_touch"]
-            assert abs(t["first"][2] - emu.setter_z) < 1e-3 and abs(t["second"][2] - emu.setter_z) < 1e-3
-            assert not any(l.upper().startswith("G91") for l in emu.lines)       # no relative mode left behind
-            res = await mc.store_tool(0)
-            assert res["stored"]["tool"] == 0 and emu.tool == 0 and emu.lines[-2:] == ["M493.1", "M493.2 T0"]
-            await mc.raise_z_top(600); await _until(lambda: not mc.jog_busy, timeout=15)
-            assert emu.mpos[2] == -1.0                               # the top: machine Z -1 (home back-off)
-            # a setter that is out of reach: the probe stops at the travel limit, the machine alarms, Control goes off
-            emu.setter_z = -95.0
-            with pytest.raises(ml.Refused, match="did not trigger"):
-                await mc.measure_on_setter(max_travel=20, feed=200)
-            assert not mc.armed
+            await mc.arm(True); await mc.home(); await _until(lambda: mc.homed)
+            with pytest.raises(ml.Refused, match="hasn't been measured"):
+                await mc.jog("y", -1)
+            n = len(emu.lines)
+            await mc.change_tool(0)
+            await _until(lambda: len(emu.lines) > n)
+            assert emu.lines[n:] == ["M6 T0"]
+            await _until(lambda: mc.routine["stage"] == "awaiting", timeout=15)       # the machine is in TOOL state
+            assert emu.state == "Tool" and emu.mpos[:2] == [-11.6, -14.6]
+            await mc.confirm_tool_change()
+            await _until(lambda: emu.lines[-1] == "M490.2")
+            await _until(lambda: mc.routine["stage"] in ("done", "failed"), timeout=30)
+            assert mc.routine["stage"] == "done", mc.routine
+            assert emu.tool == 0 and mc.tool_ok() and abs(mc.measured["touch_z"] - emu.setter_z) < 1e-3
+            await mc.jog("y", -1); await _until(lambda: not mc.jog_busy)
+            # the same number again: M6 would do nothing, so the app re-measures with M491
+            n = len(emu.lines)
+            await mc.change_tool(0)
+            await _until(lambda: len(emu.lines) > n)
+            assert emu.lines[n:] == ["M491"] and not mc.tool_ok()
+            await _until(lambda: mc.routine["stage"] in ("done", "failed"), timeout=30)
+            assert mc.routine["stage"] == "done" and mc.tool_ok()
         finally:
             await mc.disconnect(); await emu.stop()
     run(go())
 
 
-def test_change_tool_parks_waits_measures_and_only_then_allows_motion():
+def test_origin_anchor_and_makeras_auto_z_probe():
     async def go():
         emu, mc, _ = await _setup()
         try:
             mc.profile.anchor1 = (-191.28, -194.45)
             await mc.arm(True); await mc.home(); await _until(lambda: mc.homed)
-            await mc.change_tool(3)
-            await _until(lambda: mc.tool_change["stage"] == "awaiting", timeout=15)
-            assert emu.mpos[:2] == [-11.6, -14.6] and emu.mpos[2] == -1.0          # parked at the change position, Z up
-            with pytest.raises(ml.Refused, match="hasn't been measured"):
-                await mc.jog("y", -1)
-            n = len(emu.lines)
-            await mc.confirm_tool_change()
-            await _until(lambda: mc.tool_change["stage"] in ("done", "failed"), timeout=30)
-            assert mc.tool_change["stage"] == "done", mc.tool_change
-            assert emu.tool == 3 and mc.tool_ok() and emu.mpos[2] == -1.0
-            sent = emu.lines[n:]
-            assert any(l.startswith("G38.6 Z-90") for l in sent) and "M493.1" in sent and "M493.2 T3" in sent
-            await mc.jog("y", -1)                                                     # measured: motion allowed
-            await _until(lambda: not mc.jog_busy)
-            # a new change cancels the old measurement straight away
+            _measured(mc, emu)
+            with pytest.raises(ml.Refused, match="probe \\(T0\\)"):
+                await mc.auto_z_probe(50, 50)                    # T6 fitted
             await mc.change_tool(0)
-            assert not mc.tool_ok()
-            await _until(lambda: mc.tool_change["stage"] == "awaiting", timeout=15)
-            await mc.cancel_tool_change()
-            assert mc.tool_change is None and not mc.tool_ok()
+            await _until(lambda: mc.routine["stage"] == "awaiting", timeout=15)
+            await mc.confirm_tool_change()
+            await _until(lambda: mc.routine["stage"] in ("done", "failed"), timeout=30)
+            await mc.set_origin_anchor()
+            await _until(lambda: emu.lines[-1].startswith("G10"))
+            assert emu.lines[-1] == "G10 L2 P0 X-191.280 Y-194.450" and emu.wco[:2] == [-191.28, -194.45]
+            n = len(emu.lines)
+            await asyncio.sleep(0.4)                             # the new work offset reaches the status
+            await mc.auto_z_probe(50, 50)                        # the stock centre, in work coordinates
+            await _until(lambda: len(emu.lines) > n)
+            assert emu.lines[n:] == ["M495 X50.000 Y50.000 O0 F0"]
+            await _until(lambda: mc.routine["stage"] in ("done", "failed"), timeout=30)
+            assert mc.routine["stage"] == "done", mc.routine
+            assert abs(emu.mpos[0] + 141.28) < 1e-6 and abs(emu.mpos[1] + 144.45) < 1e-6
+            assert abs(emu.wco[2] + 55.0) < 1e-6                 # work Z zero = the stock top
+            await asyncio.sleep(0.4)
+            assert abs(mc.link.status["wpos"][2] - 1.0) < 1e-3  # lifted 1 mm above it
         finally:
             await mc.disconnect(); await emu.stop()
     run(go())
+

@@ -15,6 +15,7 @@ import argparse
 import asyncio
 import io
 import math
+import re
 import sys
 import time
 from pathlib import Path
@@ -41,6 +42,9 @@ class Z1Emu:
         self.crashes: list[str] = []
         self.setter_z = -61.0                           # machine Z at which the fitted tool trips the tool setter
         self.tool = 6
+        self._tool_wait = asyncio.Event()
+        # the surface under the probe tip, machine Z: stock 100x100 at the anchor, MDF elsewhere
+        self.surface_z = lambda x, y: -55.0 if (-191.28 <= x <= -91.28 and -194.45 <= y <= -94.45) else -75.0
         self.probe_start_delay = 0.8                    # s of 'Idle' before a G38.6 starts moving (as seen on a real Z1)
         self.clients = 0
         self._move: asyncio.Task | None = None
@@ -73,6 +77,53 @@ class Z1Emu:
         for ax, v in zip("xyz", self.mpos):
             if v > 0.0 + 1e-9 or v < -self.TRAVEL[ax] - 1e-9:
                 self.crashes.append(f"{ax.upper()} ran to {v:.3f} (outside 0 .. {-self.TRAVEL[ax]:g})")
+        self.state = "Idle"
+
+    async def _go(self, x=None, y=None, z=None, rate=1500.0):
+        tgt = [self.mpos[0] if x is None else x, self.mpos[1] if y is None else y, self.mpos[2] if z is None else z]
+        await self._move_to(tgt, rate)
+        self.state = "Run"
+
+    async def _touch(self, surface, rate):
+        stop = surface
+        await self._move_to([self.mpos[0], self.mpos[1], stop], rate)
+        self.state = "Run"
+        self.replies.append(f"[PRB:{self.mpos[0]:.3f},{self.mpos[1]:.3f},{self.mpos[2]:.3f}:1]")
+
+    async def _routine(self, change_to):
+        """M6 Tn (change_to=n: park, TOOL wait, then measure) or M491 (change_to=None: measure the fitted tool)."""
+        last = list(self.mpos)
+        await self._go(z=-3.0)
+        if change_to is not None:
+            await self._go(-11.6, -14.6)
+            self._tool_wait.clear()
+            self.state = "Tool"
+            await self._tool_wait.wait()
+            self.state = "Run"
+        await self._go(z=-1.0)
+        await self._go(-191.28 + 181, -194.45 + 181)
+        await self._touch(self.setter_z, 500.0)
+        await self._go(z=self.mpos[2] + 1.0)
+        await self._touch(self.setter_z, 100.0)
+        if change_to is not None:
+            self.tool = change_to
+        await self._go(z=-20.0)
+        await self._go(z=-3.0)
+        await self._go(last[0], last[1])
+        self.replies.append("Done ATC")
+        self.state = "Idle"
+
+    async def _z_probe(self, wx, wy):
+        """M495 X Y O F: Z up, go to work X,Y, touch the surface (500 then 100), set work Z zero there, lift 1 mm."""
+        await self._go(z=-1.0)
+        await self._go(wx + self.wco[0], wy + self.wco[1])
+        surf = self.surface_z(self.mpos[0], self.mpos[1])
+        await self._touch(surf, 500.0)
+        await self._go(z=self.mpos[2] + 1.0)
+        await self._touch(surf, 100.0)
+        self.wco[2] = self.mpos[2]
+        await self._go(z=self.mpos[2] + 1.0)
+        self.replies.append("Done ATC")
         self.state = "Idle"
 
     async def _home(self):
@@ -133,6 +184,46 @@ class Z1Emu:
             return None
         if u.startswith("DIAGNOSE"):
             return "{S:0,10000,0,0,34,30|L:0,0|V:1,45|F:0,0|G:1,0,0,0,0|T:0|C:1|E:0,0,0,0,0,1,1,0|P:%d,0|I:0|RSSI:-40}" % int(self.mpos[2] <= self.setter_z + 1e-6)
+        if re.match(r"^M6\b", u) or (u.startswith("T") and " M6" in u):
+            n = int(float(re.search(r"T(-?\d+)", u).group(1)))
+            if n == self.tool:
+                return None                              # the firmware does nothing for the same tool number
+            self.replies.append(f"Please change the tool to: T{n}")
+            self._start(self._routine(change_to=n), "Run")
+            return None
+        if u.startswith("M490.2"):
+            self._tool_wait.set()
+            return "ok"
+        if u.startswith("M491"):
+            self._start(self._routine(change_to=None), "Run")
+            return None
+        if u.startswith("M495"):
+            w = dict((t[0].upper(), float(t[1:])) for t in s.split()[1:] if len(t) > 1)
+            self._start(self._z_probe(w.get("X", 0) + w.get("O", 0), w.get("Y", 0) + w.get("F", 0)), "Run")
+            return None
+        if u.startswith("G10 L2 P0") or u.replace(" ", "").startswith("G10L2P0"):
+            w = dict((t[0].upper(), float(t[1:])) for t in re.findall(r"[XYZ]-?[\d.]+", s.replace(" ", "")))
+            for i, a_ in enumerate("XYZ"):
+                if a_ in w:
+                    self.wco[i] = w[a_]
+            return "ok"
+        if u.startswith("G38.2"):
+            words = dict((t[0].lower(), float(t[1:])) for t in s.split()[1:] if len(t) > 1)
+            z_target = self.mpos[2] + words.get("z", 0.0)
+            surf = self.surface_z(self.mpos[0], self.mpos[1])
+            stop = max(z_target, surf)
+            hit = surf >= z_target
+            async def probe2():
+                self.state = "Idle"
+                await asyncio.sleep(self.probe_start_delay)
+                self.state = "Run"
+                await self._move_to([self.mpos[0], self.mpos[1], stop], words.get("f", 100.0))
+                self.replies.append(f"[PRB:{self.mpos[0]:.3f},{self.mpos[1]:.3f},{self.mpos[2]:.3f}:{int(hit)}]" + ("" if hit else "\nALARM: Probe fail"))
+                if not hit:
+                    self.halted = True
+                    self.state = "Alarm"
+            self._start(probe2())
+            return None
         if u.startswith("G38.6"):
             words = dict((t[0].lower(), float(t[1:])) for t in s.split()[1:] if len(t) > 1)
             z_target = self.mpos[2] + words.get("z", 0.0)

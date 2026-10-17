@@ -341,8 +341,8 @@ class MachineControl:
         self.last_action = 0.0
         self.switch_state: dict[str, bool] = {}
         self.measured: dict | None = None    # {"tool": n, "touch_z": z, "t": ..}: the tool measured on the setter this session
-        self.tool_change: dict | None = None # {"tool": n, "stage": moving|awaiting|measuring|done|failed, "msg": ..}
-        self._tc_task: asyncio.Task | None = None
+        self.routine: dict | None = None     # a Makera routine being followed: {kind, command, stage, msg, ...}
+        self._rt_task: asyncio.Task | None = None
         self.events: list[str] = []
         self._watch: asyncio.Task | None = None
 
@@ -355,7 +355,7 @@ class MachineControl:
         self.link = link
         self.armed = self.homed = self._homing = False
         self.jog_busy = None
-        self.measured = self.tool_change = None
+        self.measured = self.routine = None
         self._note(f"connected to {host}:{port}")
         self._watch = asyncio.create_task(self._watchdog())
         return self.payload()
@@ -460,7 +460,7 @@ class MachineControl:
                 # real Z1 2026-10-17: held at about -57,-58 while the status said -1,-1): show it as unreliable
                 "position_reliable": bool(st) and st.get("state") not in ("Hold", "Pause", "Alarm"),
                 "z_floor": self.z_floor, "switches": dict(self.switch_state), "events": self.events[-20:],
-                "measured": self.measured, "tool_ok": self.tool_ok(), "tool_change": self.tool_change,
+                "measured": self.measured, "tool_ok": self.tool_ok(), "routine": self.routine,
                 "log": [t for _, t in (self.link.log[-30:] if self.link else [])],
                 "limits": {"jog_max": JOG_MAX, "travel": self.profile.travel, "margin": self.profile.margin, "top": self.profile.top},
                 "profile": self.profile.name}
@@ -608,153 +608,6 @@ class MachineControl:
         a = self.profile.anchor1
         return a[0] + self.profile.setter_from_anchor[0], a[1] + self.profile.setter_from_anchor[1]
 
-    async def _wait_idle(self, timeout: float) -> dict:
-        t0 = time.time()
-        await asyncio.sleep(0.3)
-        while time.time() - t0 < timeout:
-            st = self._status()
-            if st and self.fresh() and st["state"] in ("Idle", "Alarm", "Hold", "Pause"):
-                return st
-            await asyncio.sleep(0.1)
-        raise Refused("the machine didn't finish in time: check it")
-
-    def _last_prb(self, since: float):
-        for t, ln in reversed(self.link.log):
-            if t < since:
-                break
-            m = re.search(r"\[PRB:([-\d.]+),([-\d.]+),([-\d.]+):(\d)\]", ln)
-            if m:
-                return [float(m.group(i)) for i in (1, 2, 3)], m.group(4) == "1"
-        return None, False
-
-    async def _wait_prb(self, since: float, timeout: float):
-        """Wait for the firmware's own probe result ([PRB:x,y,z:ok]) after `since`, or an alarm. The status can still
-        read Idle for a moment after a probing move is sent (seen on a real Z1), so the state alone proves nothing."""
-        t0 = time.time()
-        while time.time() - t0 < timeout:
-            prb, ok = self._last_prb(since)
-            st = self._status()
-            if prb is not None:
-                await self._wait_state("Idle", 10.0)
-                return prb, ok
-            if st and st["state"] == "Alarm":
-                return None, False
-            await asyncio.sleep(0.1)
-        raise Refused("no probe result from the machine in time: check it")
-
-    async def _wait_state(self, state: str, timeout: float) -> dict:
-        t0 = time.time()
-        while time.time() - t0 < timeout:
-            st = self._status()
-            if st and self.fresh() and st["state"] == state:
-                return st
-            if st and st["state"] == "Alarm":
-                return st
-            await asyncio.sleep(0.1)
-        raise Refused(f"the machine didn't reach {state} in time: check it")
-
-    async def _jog_z_and_wait(self, dz: float, scale: float) -> None:
-        z0 = self._status()["mpos"][2]
-        await self.link.line(f"$J Z{dz:.3f} F{scale:g}")
-        t0 = time.time()
-        while time.time() - t0 < 15.0:                      # done = Idle AND at the new height (not just Idle)
-            st = self._status()
-            if st and st["state"] == "Idle" and abs(st["mpos"][2] - (z0 + dz)) < 0.02:
-                return
-            if st and st["state"] == "Alarm":
-                break
-            await asyncio.sleep(0.1)
-        self.armed = False
-        raise Refused("the lift off the setter didn't finish as expected: Control off, check the machine")
-
-    def _check_over_setter(self, st: dict) -> None:
-        sx, sy = self.setter_xy
-        mx, my = st["mpos"][0], st["mpos"][1]
-        if abs(mx - sx) > 0.05 or abs(my - sy) > 0.05:
-            raise Refused(f"not over the tool setter (machine X{sx:.2f} Y{sy:.2f}); go there first")
-
-    async def measure_on_setter(self, max_travel: float = 90.0, feed: float = 100.0) -> dict:
-        """Lower the fitted tool / probe onto the tool setter (G38.6: the firmware stops it when the setter triggers),
-        back off 1 mm with a jog, touch again slowly. Refuses unless over the setter with Z at the top and both pins
-        clear. Waits on the firmware's [PRB:] result, never on a status snapshot."""
-        st = self._need(armed=True, idle=True, homed=True)
-        if self.jog_busy:
-            raise Refused("the previous move hasn't finished")
-        if not (0 < max_travel <= 100) or not (0 < feed <= 200):
-            raise Refused("measure: travel 0..100 mm, feed 0..200 mm/min")
-        self._check_over_setter(st)
-        if st["mpos"][2] < self.profile.top - Z_TOP_BAND:
-            raise Refused("start the measurement with Z at the top of travel")
-        pins = (await self.diagnose()).get("P") or [None, None]
-        if pins[:2] != [0, 0]:
-            raise Refused(f"probe / setter pins read {pins}: both must be clear before lowering")
-        self.last_action = time.time()
-        t0 = time.time()
-        self._note(f"measuring on the tool setter: G38.6 down up to {max_travel:g} mm at {feed:g} mm/min")
-        await self.link.line(f"G38.6 Z{-max_travel:.3f} F{feed:g}")
-        z1, ok1 = await self._wait_prb(t0, max_travel / feed * 60.0 + 20.0)
-        if not ok1:
-            self.armed = False
-            st = self._status() or {}
-            raise Refused(f"the setter did not trigger (state {st.get('state')}{', ' + str(st.get('halt')) if st.get('halt') else ''}): "
-                          "Control off, check the machine")
-        return await self.touch_again(first=z1)
-
-    async def touch_again(self, first=None, feed: float = 100.0) -> dict:
-        """With the tool resting on the setter (after a first touch): lift 1 mm with a jog and touch again slowly, then
-        compare. `first` defaults to the last [PRB:] the machine reported."""
-        st = self._need(armed=True, idle=True, homed=True)
-        self._check_over_setter(st)
-        if first is None:
-            first, ok = self._last_prb(0.0)
-            if first is None or not ok:
-                raise Refused("no earlier setter touch to repeat")
-        if abs(st["mpos"][2] - first[2]) > 0.1:
-            raise Refused(f"the tool is not resting on the setter (Z {st['mpos'][2]:.3f}, touch was {first[2]:.3f})")
-        self.last_action = time.time()
-        await self._jog_z_and_wait(1.0, 0.25)
-        t1 = time.time()
-        await self.link.line(f"G38.6 Z-2.000 F{min(feed, 100.0):g}")
-        z2, ok2 = await self._wait_prb(t1, 20.0)
-        if not ok2:
-            self.armed = False
-            raise Refused("second touch on the setter failed: Control off, check the machine")
-        if abs(first[2] - z2[2]) > 0.05:
-            self.armed = False
-            raise Refused(f"the two touches disagree ({first[2]:.3f} vs {z2[2]:.3f}): Control off, check the setter")
-        self.setter_touch = {"first": first, "second": z2, "t": time.time()}
-        self._note(f"setter touched at machine Z {z2[2]:.3f} (first {first[2]:.3f})")
-        return {**self.payload(), "setter_touch": self.setter_touch}
-
-    async def store_tool(self, number: int) -> dict:
-        """After a two-touch setter measurement in this session: M493.1 (the firmware sets the tool length offset from
-        that last probe, relative to its reference tool) and M493.2 T<number> (declare the loaded tool). T0 = the probe:
-        with it loaded the firmware refuses to start the spindle. Moves nothing."""
-        st = self._need(armed=True, idle=True, homed=True)
-        tch = getattr(self, "setter_touch", None)
-        if not tch or time.time() - tch["t"] > 900:
-            raise Refused("measure the tool on the setter first (in the last 15 minutes)")
-        if not isinstance(number, int) or not (number == 0 or 1 <= number <= 99):
-            raise Refused("tool number: 0 (probe) or 1..99")
-        prb, ok = self._last_prb(tch["t"] - 30)
-        if prb is None or not ok or abs(prb[2] - tch["second"][2]) > 1e-3:
-            raise Refused("the machine's last probe result isn't the setter touch: measure again")
-        await self.link.line("M493.1")
-        await asyncio.sleep(0.4)
-        await self.link.line(f"M493.2 T{number}")
-        t0 = time.time()
-        while time.time() - t0 < 5:
-            st = self._status()
-            if st and (st.get("tool") or {}).get("number") == number:
-                break
-            await asyncio.sleep(0.1)
-        tl = (self._status() or {}).get("tool") or {}
-        if tl.get("number") != number:
-            raise Refused(f"the machine still reports T{tl.get('number')}: check it")
-        self.measured = {"tool": number, "touch_z": tch["second"][2], "offset": tl.get("offset"), "t": time.time()}
-        self._note(f"stored: T{number}, length offset {tl.get('offset')}")
-        return {**self.payload(), "stored": {"tool": number, "offset": tl.get("offset"), "touch_z": tch["second"][2]}}
-
     async def raise_z_top(self, feed: float = 300.0) -> dict:
         """Raise Z to the top of travel (machine Z = profile.top - 0.5) at `feed`, XY untouched."""
         st = self._need(armed=True, idle=True, homed=True)
@@ -768,79 +621,124 @@ class MachineControl:
         self._note(f"raise Z to the top at {feed:g} mm/min")
         return self.payload()
 
-    # -- change tool: raise Z, park, wait for the user, measure on the setter, store, raise Z
-    async def _wait_move(self, timeout: float = 120.0) -> None:
-        t0 = time.time()
-        while self.jog_busy and time.time() - t0 < timeout:
-            st = self._status() or {}
-            if st.get("state") in ("Hold", "Pause", "Alarm"):
-                raise Refused(f"stopped: the machine is {st.get('state')}")
-            await asyncio.sleep(0.1)
-        if self.jog_busy:
-            raise Refused("the move didn't finish in time")
-        st = self._status() or {}
-        if st.get("state") != "Idle":
-            raise Refused(f"the machine is {st.get('state')} after the move")
+    # -- Makera's own routines (firmware ATCHandler), wrapped: checks before, one command, watch, checks after.
+    #    M6 Tn: Z up, park, TOOL wait (front button or M490.2), measure on the setter, store, "Done ATC".
+    #    M491: re-measure the fitted tool (M6 to the same number does nothing). M495 X Y O0 F0: auto Z probe at work
+    #    X,Y: probe on, touch the stock (500 then 100 mm/min), set work Z zero there, probe off. Each saves and restores
+    #    the modal state (push/pop_state), so absolute mode etc. come back unless it is halted part-way.
+    def _routine_done(self, since: float) -> bool:
+        return any(t >= since and "Done ATC" in ln for t, ln in self.link.log)
+
+    def _prbs(self, since: float) -> list:
+        out = []
+        for t, ln in self.link.log:
+            if t >= since:
+                m = re.search(r"\[PRB:([-\d.]+),([-\d.]+),([-\d.]+):(\d)\]", ln)
+                if m:
+                    out.append(([float(m.group(i)) for i in (1, 2, 3)], m.group(4) == "1"))
+        return out
+
+    async def _watch_routine(self, kind: str, since: float, timeout: float) -> None:
+        """Follow a firmware routine to its 'Done ATC' (or an alarm), keeping self.routine up to date."""
+        r = self.routine
+        try:
+            t0 = time.time()
+            while time.time() - t0 < timeout:
+                await asyncio.sleep(0.2)
+                st = self._status() or {}
+                if st.get("state") == "Alarm":
+                    h = st.get("halt") or {}
+                    raise Refused(f"the machine alarmed during {kind}: {h.get('reason', 'halted')} ({h.get('advice', 'Unlock, then home')})")
+                if st.get("state") == "Tool" and r["stage"] == "running":
+                    r.update(stage="awaiting", msg=f"fit {'the probe' if r.get('tool') == 0 else 'T' + str(r.get('tool'))} with the lever, "
+                             "then press the machine's front button (or Confirm here): the machine measures it on the setter")
+                    await self._push()
+                if self._routine_done(since) and st.get("state") == "Idle":
+                    break
+            else:
+                raise Refused(f"{kind} didn't finish in time: check the machine")
+            prbs = self._prbs(since)
+            if not prbs or not all(ok for _, ok in prbs):
+                raise Refused(f"{kind} finished without a confirmed touch: check the machine")
+            st = self._status()
+            if kind in ("tool change", "re-measure"):
+                tl = (st.get("tool") or {})
+                if tl.get("number") != r["tool"]:
+                    raise Refused(f"after the change the machine reports T{tl.get('number')}, not T{r['tool']}")
+                z = prbs[-1][0][2]
+                self.measured = {"tool": r["tool"], "touch_z": z, "offset": tl.get("offset"), "t": time.time()}
+                r.update(stage="done", msg=f"T{r['tool']} measured by the machine: setter touch at machine Z {z:.3f}, length offset {tl.get('offset')}")
+            else:
+                z = prbs[-1][0][2]
+                r.update(stage="done", touch=prbs[-1][0], wpos=st.get("wpos"),
+                         msg=f"stock top touched at machine Z {z:.3f}; work Z zero set there (work Z now {st['wpos'][2]:.3f})")
+            self._note(r["msg"])
+        except Refused as e:
+            r.update(stage="failed", msg=str(e))
+            self.armed = False
+            self._note(f"{kind} failed: {e}")
+        except asyncio.CancelledError:
+            r.update(stage="failed", msg="stopped watching (cancelled)")
+        await self._push()
+
+    def _start_routine(self, kind: str, command: str, timeout: float, **info) -> None:
+        if self.routine and self.routine["stage"] in ("running", "awaiting"):
+            raise Refused(f"{self.routine['kind']} is still running")
+        since = time.time()
+        self.routine = {"kind": kind, "command": command, "stage": "running", "msg": f"{kind}: {command}", **info}
+        self._rt_task = asyncio.create_task(self._watch_routine(kind, since, timeout))
 
     async def change_tool(self, number: int) -> dict:
-        """Start a tool change: Z up, head to the change position. The flow then waits for confirm_tool_change()."""
-        if self.tool_change and self.tool_change["stage"] in ("moving", "awaiting", "measuring"):
-            raise Refused("a tool change is already in progress")
+        """Makera's manual tool change (M6 Tn) - or M491 to re-measure when the number isn't changing. Either way the
+        machine measures the tool on its setter (the rule: every tool, the probe included)."""
         if not isinstance(number, int) or not (number == 0 or 1 <= number <= 99):
             raise Refused("tool number: 0 (probe) or 1..99")
-        self._need(armed=True, idle=True, homed=True)
-        self.measured = None                         # whatever was measured no longer counts
-        self.tool_change = {"tool": number, "stage": "moving", "msg": "raising Z and moving to the tool-change position"}
-        self._tc_task = asyncio.create_task(self._tc_park())
+        st = self._need(armed=True, idle=True, homed=True)
+        current = (st.get("tool") or {}).get("number")
+        self.measured = None
+        cmd = "M491" if current == number else f"M6 T{number}"
+        self._start_routine("re-measure" if cmd == "M491" else "tool change", cmd, 600.0, tool=number)
+        await self.link.line(cmd)
+        self._note(f"{cmd} sent")
         return self.payload()
-
-    async def _tc_park(self) -> None:
-        try:
-            await self.raise_z_top(300.0)
-            await self._wait_move()
-            x, y = self.profile.change_xy
-            await self.goto_xy(x, y, 600.0, internal=True)
-            await self._wait_move()
-            n = self.tool_change["tool"]
-            self.tool_change.update(stage="awaiting", msg=f"fit {'the probe (T0)' if n == 0 else f'T{n}'} with the lever, then Confirm: "
-                                    "the machine will measure it on the tool setter")
-            self._note(f"tool change: waiting for T{n}")
-        except Refused as e:
-            self.tool_change.update(stage="failed", msg=str(e))
-            self.armed = False
-        await self._push()
 
     async def confirm_tool_change(self) -> dict:
-        if not self.tool_change or self.tool_change["stage"] != "awaiting":
-            raise Refused("no tool change is waiting for a confirm")
-        self._need(armed=True, idle=True, homed=True)
-        self.tool_change.update(stage="measuring", msg="measuring the tool on the setter")
-        self._tc_task = asyncio.create_task(self._tc_measure())
+        """The 'continue' of Makera's tool change (same as the front button): M490.2."""
+        r = self.routine
+        st = self._status() or {}
+        if not r or r["stage"] != "awaiting" or st.get("state") != "Tool":
+            raise Refused("the machine isn't waiting for a tool change")
+        await self.link.line("M490.2")
+        r.update(stage="running", msg="measuring the tool on the setter")
         return self.payload()
 
-    async def _tc_measure(self) -> None:
-        n = self.tool_change["tool"]
-        try:
-            sx, sy = self.setter_xy
-            await self.goto_xy(sx, sy, 600.0, internal=True)
-            await self._wait_move()
-            res = await self.measure_on_setter(90.0, 100.0)
-            await self.store_tool(n)
-            await self.raise_z_top(300.0)
-            await self._wait_move()
-            self.tool_change.update(stage="done", msg=f"T{n} measured: setter touch at machine Z {res['setter_touch']['second'][2]:.3f}, "
-                                    f"length offset {self.measured.get('offset')}")
-        except Refused as e:
-            self.tool_change.update(stage="failed", msg=str(e))
-            self.armed = False
-        await self._push()
+    async def set_origin_anchor(self) -> dict:
+        """Work X/Y origin = Anchor 1 (the L-bracket's inside corner), as MakeraStudio does: G10 L2 P0 X Y. Z untouched."""
+        self._need(armed=True, idle=True, homed=True)
+        ax, ay = self.profile.anchor1
+        await self.link.line(f"G10 L2 P0 X{ax:.3f} Y{ay:.3f}")
+        self._note(f"work XY origin set to Anchor 1 (machine X{ax:.2f} Y{ay:.2f})")
+        return self.payload()
 
-    async def cancel_tool_change(self) -> dict:
-        if self._tc_task and not self._tc_task.done():
-            self._tc_task.cancel()
-            await self.link.realtime(b"!") if self.connected else None
-        self.tool_change = None
-        self._note("tool change cancelled")
+    async def auto_z_probe(self, wx: float | None = None, wy: float | None = None) -> dict:
+        """Makera's auto Z probe (M495 X Y O0 F0) at work X,Y (default: where the head is). Sets work Z zero on the
+        surface. Only with the probe (T0) fitted and measured by the machine."""
+        st = self._need(armed=True, idle=True, homed=True)
+        self._need_tool_measured()
+        if (st.get("tool") or {}).get("number") != 0:
+            raise Refused("the auto Z probe needs the probe (T0) fitted and measured: Change tool → 0")
+        wp = st.get("wpos") or [None, None, None]
+        wx = wp[0] if wx is None else wx
+        wy = wp[1] if wy is None else wy
+        mx, my = st["mpos"][0] + (wx - wp[0]), st["mpos"][1] + (wy - wp[1])
+        for ax, v in (("x", mx), ("y", my)):
+            lo, hi = -self.profile.travel[ax] + self.profile.margin, self.profile.top
+            if not (lo - 1e-9 <= v <= hi + 1e-9):
+                raise Refused(f"that point is outside the travel ({ax.upper()} {v:.2f} machine)")
+        cmd = f"M495 X{wx:.3f} Y{wy:.3f} O0 F0"
+        self._start_routine("auto Z probe", cmd, 300.0, at=[mx, my])
+        await self.link.line(cmd)
+        self._note(f"{cmd} sent (Makera's auto Z probe at machine X{mx:.2f} Y{my:.2f})")
         return self.payload()
 
     async def home(self) -> dict:
