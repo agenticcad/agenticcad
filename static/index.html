@@ -446,6 +446,21 @@
   .mv-badge.Hold, .mv-badge.Pause { background:#6b5e10; color:#fff3b0; } .mv-badge.Alarm { background:#7a1f1f; color:#ffd4d4; } .mv-badge.stale { background:#555; color:#eee; }
   .mv-camtoggle { margin-left:auto; color:#cfd6df; font-size:12px; display:flex; gap:5px; align-items:center; background:rgba(0,0,0,.45); padding:3px 8px; border-radius:6px; }
   .mv-side { display:flex; flex-direction:column; gap:10px; overflow:auto; min-height:0; }
+  #machine-view.with-prog { grid-template-columns:minmax(0,1fr) 320px 360px; }
+  .mv-prog { min-height:0; display:flex; } .mvp-card { flex:1; display:flex; flex-direction:column; min-height:0; }
+  .mvp-ops { flex:1; overflow:auto; min-height:60px; margin:0 -4px; }
+  .mvp-setup { font-size:11px; text-transform:uppercase; letter-spacing:.05em; color:var(--accent2); margin:8px 4px 2px; display:flex; gap:6px; align-items:center; cursor:pointer; }
+  .mvp-op { display:flex; align-items:center; gap:7px; padding:5px 4px; border-radius:6px; font-size:12.5px; position:relative; }
+  .mvp-op:hover { background:var(--panel2); } .mvp-op .sw { width:10px; height:10px; border-radius:2px; flex:none; }
+  .mvp-op .nm { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; } .mvp-op .meta { color:var(--muted); font-size:11px; white-space:nowrap; }
+  .mvp-op.cur { background:rgba(78,161,255,.14); box-shadow:inset 2px 0 0 var(--accent2); } .mvp-op.done .nm { color:var(--muted); }
+  .mvp-op .bar { position:absolute; left:4px; right:4px; bottom:1px; height:2px; background:var(--accent2); border-radius:2px; transform-origin:left; }
+  .mvp-foot { border-top:1px solid var(--line); margin-top:8px; padding-top:8px; display:flex; flex-direction:column; gap:6px; }
+  .mvp-job { border:1px solid var(--line); border-radius:8px; padding:8px; font-size:12px; display:flex; flex-direction:column; gap:6px; }
+  .mvp-job .pb { height:6px; background:var(--panel2); border-radius:4px; overflow:hidden; } .mvp-job .pb div { height:100%; background:var(--accent2); }
+  .mvp-job.failed, .mvp-job.aborted { border-color:var(--err); } .mvp-job.done { border-color:var(--ok); } .mvp-job.awaiting { border-color:var(--accent); }
+  .mvp-check { font-size:12.5px; display:flex; flex-direction:column; gap:6px; min-width:340px; } .mvp-check ul { margin:0; padding-left:18px; }
+  .mvp-check .warn { color:#ffd166; }
   .mv-card { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:10px 12px; }
   .mv-h { font-weight:600; margin-bottom:6px; display:flex; gap:8px; align-items:baseline; } .mv-h .muted { font-weight:400; font-size:12px; }
   .mv-row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin:4px 0; }
@@ -472,7 +487,7 @@
   #mv-conn-state { font-size:12px; white-space:nowrap; }
   .mv-tc { margin-top:6px; padding:8px 10px; border-radius:8px; background:rgba(78,161,255,.10); border:1px solid rgba(78,161,255,.35); font-size:12.5px; }
   .mv-tc.failed { background:rgba(255,92,92,.10); border-color:rgba(255,92,92,.45); } .mv-tc.done { background:rgba(76,211,122,.10); border-color:rgba(76,211,122,.4); }
-  @media (max-width: 1000px) { #machine-view { grid-template-columns:1fr; grid-template-rows:minmax(180px,38vh) auto; overflow:auto; } .mv-side { overflow:visible; } }
+  @media (max-width: 1000px) { #machine-view, #machine-view.with-prog { grid-template-columns:1fr; grid-template-rows:minmax(180px,38vh) auto; overflow:auto; } .mv-side, .mvp-ops { overflow:visible; } }
 </style>
 </head>
 <body>
@@ -518,7 +533,8 @@
           <div class="rg" data-tab="ext"><div class="rgl">Extensions</div><div class="rgb" id="rg-ext"></div></div>
           <div class="rg" data-tab="machine"><div class="rgl">Connection</div><div class="rgb" id="rg-machine"><div class="mv-conn">
             <input id="mv-host" placeholder="machine address (e.g. 192.168.1.36)" spellcheck="false"><button class="btn small" id="mv-discover" title="Listen for Makera machines on this network">Find</button>
-            <button class="btn small primary" id="mv-connect">Connect</button><span id="mv-conn-state" class="muted">not connected</span></div></div></div>
+            <button class="btn small primary" id="mv-connect">Connect</button><span id="mv-conn-state" class="muted">not connected</span>
+            <label class="mv-sw" style="margin-left:14px" title="Show the CAM program's operations next to the camera, to run them on the machine and follow them"><input type="checkbox" id="mv-prog-on"> Program panel</label></div></div></div>
         </div>
       </div>
     </div>
@@ -546,6 +562,14 @@
       <div class="mv-cam"><img id="mv-cam-img" alt=""><div id="mv-cam-off">Camera off</div>
         <div class="mv-cam-bar"><span id="mv-badge" class="mv-badge">offline</span><span id="mv-cam-note" class="muted"></span>
           <label class="mv-camtoggle"><input type="checkbox" id="mv-cam-on" checked> Camera</label></div></div>
+      <div class="mv-prog" id="mv-prog" style="display:none"><div class="mv-card mvp-card">
+        <div class="mv-h">Program <span class="muted" id="mvp-name"></span></div>
+        <div id="mvp-ops" class="mvp-ops"></div>
+        <div class="mvp-foot">
+          <div class="mv-row mv-small"><label class="mv-sw" title="Run the selected operations lifted this far above the work: the spindle runs, nothing is cut — to watch the moves first"><input type="checkbox" id="mvp-air"> Air cut</label><input type="number" id="mvp-air-mm" value="10" min="1" max="50" step="1" style="width:52px"><span class="muted">mm above</span></div>
+          <button class="btn primary" id="mvp-run" style="width:100%">Run selected on the machine…</button>
+          <div id="mvp-job" class="mvp-job" style="display:none"></div>
+        </div></div></div>
       <div class="mv-side">
         <div class="mv-card mv-safety">
           <button class="mv-halt" id="mv-halt" title="Stop now: motion and spindle stop, the machine goes to Alarm (unlock and home afterwards). Always available.">STOP</button>
@@ -1421,6 +1445,7 @@ function loadProgram(p) {
   clearCam(); hideFixturePreview(); program = p; for (const k of Object.keys(fxPending)) delete fxPending[k];
   const has = !!p;
   for (const id of ['cam-sep', 'tp-toggle', 'stock-toggle']) document.getElementById(id).style.display = has ? '' : 'none';
+  if (typeof mvpRender === 'function') { MVP.key = ''; mvpRender(MV.st || {}); }
   if (!has) { renderCamTab(); return; }
   for (const op of p.ops) {
     const cutPos = [], rapPos = []; const cutCounts = new Int32Array(op.moves.length + 1), rapidCounts = new Int32Array(op.moves.length + 1);
@@ -5408,8 +5433,87 @@ async function mvPost(body) {
   } catch (e) { mvMsg('request failed: ' + e.message); }
   finally { MV.busy = false; }
 }
+// Program panel: the CAM program's operations, run on the machine (upload + play) and followed line by line
+const MVP = { sel: new Set(), on: false, key: '' };
+try { MVP.on = localStorage.getItem('agenticcad.mvProg') === '1'; } catch {}
+function mvpRender(st) {
+  const box = mvEl('mv-prog'); box.style.display = MVP.on ? '' : 'none'; mvEl('machine-view').classList.toggle('with-prog', MVP.on); mvEl('mv-prog-on').checked = MVP.on;
+  if (!MVP.on) return;
+  const job = st && st.job, active = job && ['uploading', 'starting', 'running', 'awaiting', 'paused'].includes(job.stage);
+  const ops = (program && program.ops) || [];
+  mvEl('mvp-name').textContent = program ? `${program.name} · ${program.machine}` : 'no CAM program';
+  const key = (program ? program.name + ops.map(o => o.key + o.time).join() : '') + '|' + (job ? job.name + job.stage : '');
+  const runIdx = job ? (job.ops_index || []) : [];
+  if (key !== MVP.key) {
+    MVP.key = key;
+    for (const i of [...MVP.sel]) if (i >= ops.length) MVP.sel.delete(i);
+    const el = mvEl('mvp-ops'); el.innerHTML = '';
+    if (!program) el.innerHTML = '<div class="muted mv-small" style="padding:6px 4px">Build a CAM program (CAM tab) to run its operations here.</div>';
+    (program ? program.setups || [] : []).forEach((stp, si) => {
+      const mine = ops.map((o, i) => [o, i]).filter(([o]) => (o.setup || 0) === si);
+      const h = document.createElement('div'); h.className = 'mvp-setup';
+      h.innerHTML = `<input type="checkbox" ${mine.length && mine.every(([, i]) => MVP.sel.has(i)) ? 'checked' : ''} ${active ? 'disabled' : ''}> Setup ${si + 1} · ${esc(stp.name)} · ${esc(stp.wcs || '')}`;
+      h.querySelector('input').onchange = e => { for (const [, i] of mine) e.target.checked ? MVP.sel.add(i) : MVP.sel.delete(i); MVP.key = ''; mvpRender(MV.st); };
+      el.appendChild(h);
+      for (const [o, i] of mine) {
+        const r = document.createElement('label'); r.className = 'mvp-op'; r.dataset.i = i;
+        r.innerHTML = `<input type="checkbox" ${MVP.sel.has(i) ? 'checked' : ''} ${active ? 'disabled' : ''}><span class="sw" style="background:${o.color}"></span><span class="nm">${i + 1}. ${esc(o.name)}</span><span class="meta">T${o.tool.number} · ${o.time.toFixed(1)} min</span>`;
+        r.querySelector('input').onchange = e => { e.target.checked ? MVP.sel.add(i) : MVP.sel.delete(i); MVP.key = ''; mvpRender(MV.st); };
+        el.appendChild(r);
+      }
+    });
+  }
+  // live progress on the rows of the running job
+  const cur = job && job.op != null ? runIdx[job.op] : null;
+  document.querySelectorAll('#mvp-ops .mvp-op').forEach(r => {
+    const i = +r.dataset.i, k = runIdx.indexOf(i), jo = job && k >= 0 ? job.ops[k] : null;
+    r.classList.toggle('cur', active && i === cur);
+    r.classList.toggle('done', !!(job && jo && (job.stage === 'done' || (job.line > jo.end))));
+    let bar = r.querySelector('.bar');
+    if (jo && active && job.line >= jo.start) {
+      if (!bar) { bar = document.createElement('div'); bar.className = 'bar'; r.appendChild(bar); }
+      bar.style.transform = `scaleX(${Math.min(1, (job.line - jo.start + 1) / Math.max(1, jo.end - jo.start + 1))})`;
+    } else if (bar) bar.remove();
+  });
+  const conn = st && st.connected, s = (st && st.status) || {};
+  const ready = conn && st.armed && st.homed && s.state === 'Idle' && !active && MVP.sel.size > 0 && program;
+  const run = mvEl('mvp-run'); run.disabled = !ready;
+  run.title = !program ? 'no CAM program' : !MVP.sel.size ? 'tick the operations to run' : !conn ? 'connect first' : !st.armed ? 'turn Control on' : !st.homed ? 'home first' : active ? 'a program is running' : s.state !== 'Idle' ? `machine is ${s.state}` : '';
+  run.textContent = MVP.sel.size ? `Run ${MVP.sel.size} operation${MVP.sel.size === 1 ? '' : 's'} on the machine…` : 'Run selected on the machine…';
+  const jb = mvEl('mvp-job');
+  if (!job) { jb.style.display = 'none'; return; }
+  jb.style.display = ''; jb.className = 'mvp-job ' + job.stage;
+  const pct = job.stage === 'uploading' ? Math.round((job.upload || 0) * 100) : Math.round(job.percent || 0);
+  const t = Math.round(job.seconds || 0), tt = `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`;
+  const label = { uploading: 'Uploading', starting: 'Starting', running: 'Running', awaiting: 'Tool change', paused: 'Paused', done: 'Finished', failed: 'Failed', aborted: 'Stopped' }[job.stage] || job.stage;
+  jb.innerHTML = `<div><b>${label}</b> · ${esc(job.name)}${job.air_cut ? ` · <span style="color:var(--accent)">air cut +${job.air_cut} mm</span>` : ''}</div>
+    <div class="pb"><div style="width:${pct}%"></div></div>
+    <div class="muted">${job.stage === 'uploading' ? `${pct}% sent` : `line ${job.line || 0} of ${job.lines} · ${pct}% · ${tt}`}${cur != null && ops[cur] ? ` · ${esc(ops[cur].name)}` : ''}</div>
+    ${job.msg && !['running', 'uploading'].includes(job.stage) ? `<div>${esc(job.msg)}</div>` : ''}
+    <div class="mv-row">${job.stage === 'awaiting' ? '<button class="btn primary" data-j="confirm_tool">Confirm (front button)</button>' : ''}
+      ${job.stage === 'running' ? '<button class="btn" data-j="job_pause" title="Finish the moves in hand, then stop (spindle keeps its state until abort)">Pause</button>' : ''}
+      ${job.stage === 'paused' ? '<button class="btn primary" data-j="job_resume">Resume</button>' : ''}
+      ${active ? '<button class="btn danger" data-j="job_abort" title="Stop the program and the spindle (the machine stays homed)">Stop program</button>' : ''}</div>`;
+  jb.querySelectorAll('[data-j]').forEach(b => b.onclick = () => mvPost({ action: b.dataset.j }));
+}
+async function mvpRun() {
+  const ops = [...MVP.sel].sort((a, b) => a - b), air = mvEl('mvp-air').checked ? +mvEl('mvp-air-mm').value : 0;
+  const r = await mvPost({ action: 'check_ops', ops, air });
+  if (!r || !r.check) return;
+  const c = r.check, d = document.createElement('div'); d.className = 'mvp-check';
+  const wo = r.status && r.status.mpos && r.status.wpos ? r.status.mpos.map((m, i) => m - r.status.wpos[i]) : null;
+  d.innerHTML = `<div><b>${esc(c.program)}</b> · setup ${esc(c.setup)} (${esc(c.wcs || '')}) · ${c.ops.length} operation${c.ops.length === 1 ? '' : 's'} · about ${c.time_min} min · ${c.lines} lines</div>
+    <ul>${c.ops.map(o => `<li>${esc(o.name)} · T${o.tool ?? '?'}</li>`).join('')}</ul>
+    <div class="muted">${c.notes.map(esc).join('<br>')}</div>
+    ${wo ? `<div class="muted">Work origin on the machine: X ${wo[0].toFixed(3)} · Y ${wo[1].toFixed(3)} (machine). It must be this setup's origin.</div>` : ''}
+    ${air ? `<div style="color:var(--accent)">Air cut: everything ${air} mm higher; the spindle still runs.</div>` : ''}
+    <div class="warn">The machine runs this on its own once started: keep a hand on the e-stop. Pause, Stop program and STOP stay available here.</div>`;
+  const ok = await openModal('Run on the machine', d, [['Cancel', false], [air ? 'Start air cut' : 'Start', true, true]]);
+  if (ok) mvPost({ action: 'run_ops', ops, air });
+}
 function mvRender(st) {
   MV.st = st;
+  mvpRender(st);
   const s = st.status || {}, conn = st.connected, state = !conn ? 'offline' : (!st.fresh ? 'stale' : (st.homing ? 'Home' : (st.jogging ? 'Jog' : s.state || '?')));
   const b = mvEl('mv-badge'); b.textContent = state.toUpperCase() + (state === 'Alarm' && s.halt ? ' · ' + s.halt.reason : ''); b.className = 'mv-badge ' + state;
   b.title = state === 'Alarm' && s.halt ? s.halt.advice : '';
@@ -5469,6 +5573,8 @@ const MV_P3_HINT = {
     } catch (e) { mvMsg('discovery failed: ' + e.message); }
   };
   mvEl('mv-halt').onclick = () => mvPost({ action: 'halt' });
+  mvEl('mv-prog-on').onchange = e => { MVP.on = e.target.checked; try { localStorage.setItem('agenticcad.mvProg', MVP.on ? '1' : '0'); } catch {} MVP.key = ''; mvpRender(MV.st || {}); mvCamera(); };
+  mvEl('mvp-run').onclick = () => mvpRun();
   mvEl('mv-hold').onclick = () => mvPost({ action: 'hold' });
   mvEl('mv-resume').onclick = () => mvPost({ action: 'resume' });
   mvEl('mv-unlock').onclick = () => mvPost({ action: 'unlock' });

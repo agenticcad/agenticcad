@@ -766,6 +766,35 @@ class MachineBody(BaseModel):
     kind: str | None = None
     depth: float | None = None
     dia: float | None = None
+    ops: list[int] | None = None
+    air: float | None = None
+
+
+def _program_for_ops(body: MachineBody) -> tuple[dict, dict, str]:
+    """The CAM program's chosen operations (one setup) as the Z1 will play them: (prepared program, info, file label)."""
+    prog = agent.program
+    if prog is None:
+        raise machine_link.Refused("no CAM program: build one in the CAM tab first")
+    idx = sorted(set(int(i) for i in (body.ops or [])))
+    if not idx:
+        raise machine_link.Refused("pick the operations to run")
+    if idx[0] < 0 or idx[-1] >= len(prog.ops):
+        raise machine_link.Refused("those operations are not in the current program (it was rebuilt?)")
+    ops = [prog.ops[i] for i in idx]
+    st = prog.setup_of(ops[0])
+    if any(prog.setup_of(o) is not st for o in ops):
+        raise machine_link.Refused("those operations are in different setups: run one setup at a time (re-clamp and re-zero between them)")
+    air = float(body.air or 0.0)
+    if not (0.0 <= air <= 50.0):
+        raise machine_link.Refused("air-cut lift: 0 .. 50 mm")
+    sub = cam.Program(st, ops, name=prog.name)
+    prep = machine_link.prepare_program(sub.gcode(), [o.name for o in ops], air_cut=air)
+    for o, src in zip(prep["ops"], ops):
+        o.update(key=src.key, kind=src.kind, color=src.color, time=round(src.time_minutes(st.machine), 2))
+    label = f"{prog.name}_op{idx[0] + 1}" + (f"-{idx[-1] + 1}" if len(idx) > 1 else "") + ("_air" if air else "")
+    info = {"program": prog.name, "setup": st.name, "wcs": st.wcs, "ops_index": idx,
+            "time_min": round(sum(o.time_minutes(st.machine) for o in ops), 1)}
+    return prep, info, label
 
 
 @app.get("/api/machine")
@@ -821,6 +850,21 @@ async def machine_post(body: MachineBody):
         elif a == "probe_3d":                            # Makera's 3D-probe routine (M480.n) from where the head is
             res = await machine.probe_3d(body.kind or "", body.x if body.x is not None else 20.0,
                                          body.y if body.y is not None else 20.0, body.depth or 2.0, body.dia or 2.0)
+        elif a == "check_ops":                            # what running these operations would do (nothing is sent)
+            prep, info, label = _program_for_ops(body)
+            chk = machine.check_job(prep)
+            return {**machine.payload(), "check": {"label": machine_link.program_filename(label), "lines": prep["lines"],
+                                                   "ops": prep["ops"], "tools": prep["tools"], "extents": prep["extents"],
+                                                   "notes": chk["notes"], **info}}
+        elif a == "run_ops":                              # upload the chosen operations to the machine and play them
+            prep, info, label = _program_for_ops(body)
+            res = await machine.run_program(label, prep, info)
+        elif a == "job_pause":
+            res = await machine.job_pause()
+        elif a == "job_resume":
+            res = await machine.job_resume()
+        elif a == "job_abort":
+            res = await machine.job_abort()
         elif a == "goto_xy":
             res = await machine.goto_xy(body.x if body.x is not None else float('nan'), body.y if body.y is not None else float('nan'), body.feed or 300.0)
         elif a == "home":

@@ -5,7 +5,19 @@ features, patch bumps fix things. The version shown in the UI header comes from 
 
 ## [Unreleased]
 
+## [0.46.0] — 2026-10-17
+
 ### Added
+- **Run CAM operations on the machine** (experimental; not yet tried on a real Z1 — start with an air cut). The
+  Machine tab has a *Program panel* (toggle it in the connection bar): the CAM program's setups and operations; tick
+  the ones to run (one setup at a time) and press Run. A confirmation shows the operations, tools, lines, Z range,
+  the machine's work origin and the checks; the app then uploads the program to the machine's SD card (Makera's
+  own transfer: 8 KB packets checked by MD5) and plays it. While it runs the panel and the phone show the operation,
+  line, percent and time; tool changes in the program wait for you and are measured by the machine; *Pause*,
+  *Resume* and *Stop program* are there, and Hold / STOP as always. *Air cut* lifts the whole program N mm.
+  Before sending: Control on, homed, Idle, the first tool measured if it is already fitted, every line within the
+  Z1's 62 characters, no relative moves / probing / offset changes, and the program's X/Y reach inside the travel
+  from the current work origin. The Z1 emulator plays programs too (upload, play, progress, pause / resume / abort).
 - **Workholding that matches a real setup.** Bare stock can sit anywhere on the bed: its front-left corner is set in
   bed millimetres (shown as machine X/Y too), with *Centre*, *Into the L-bracket* and *From machine* (reads the connected
   machine's probed work origin and places the stock to match). New fixtures: **Makera L-bracket** (thin / thick, at its

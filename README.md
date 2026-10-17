@@ -306,8 +306,17 @@ Safety rules in `machine_link`:
 - **Home first** (Z goes up first), Idle, one move at a time; jogs of at most 10 mm (Z down 1 mm, slower); go-to
   moves XY only with Z at the top; every target inside the travel box and a Z floor in work coordinates.
 - **Never sent:** bare `M490` (on the Z1 it drives the Z motor's pins through a tool-changer routine the machine
-  doesn't have) and `M498.2` (erases the stored tool lengths and G54). No free-form G-code, no spindle control, no
-  running programs from the app yet.
+  doesn't have) and `M498.2` (erases the stored tool lengths and G54). No free-form G-code and no manual spindle
+  control.
+- **Running operations** (experimental; the upload is not yet tried on a real Z1 — start with an air cut): the Machine
+  tab's *Program panel* lists the CAM program's setups and operations; tick some (one setup at a time) and *Run*. The
+  app builds those operations' G-code, removes comments, refuses lines over 62 characters (the Z1 plays lines from
+  64-byte slots), relative moves, probing and offset changes, checks the program's X/Y reach against the travel from
+  the machine's current work origin, then uploads it to the machine's SD the way MakeraStudio does (a pull protocol
+  in 8 KB packets with an MD5) and starts it with `play`. Progress comes from the machine's status (`|P:` line,
+  percent, time) and is shown per operation, on the phone too; tool changes inside the program stop for you and are
+  measured by the machine. *Air cut* runs it N mm higher first. Pause (`suspend`), Resume and *Stop program*
+  (`abort`, spindle off) stay available, as do Hold and STOP.
 - Alarms show their reason and the way out (Unlock, release the e-stop, reset, or power-cycle); positions are shown
   as unknown while held or in alarm (the Z1 then reports the planned position, not where the head stopped).
 - The agent can read the machine (`machine_status`: state, positions, a camera frame) but cannot command it.

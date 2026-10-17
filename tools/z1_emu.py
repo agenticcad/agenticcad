@@ -21,7 +21,8 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from machine_link import T_LINE, T_REALTIME, T_STATUS, T_TEXT, frame, parse_frames  # noqa: E402
+from machine_link import (T_FILE_CAN, T_FILE_DATA, T_FILE_END, T_FILE_MD5, T_FILE_START, T_FILE_VIEW, T_LINE,  # noqa: E402
+                          T_REALTIME, T_STATUS, T_TEXT, PATH_ESC, frame, parse_frames)
 
 
 class Z1Emu:
@@ -50,6 +51,11 @@ class Z1Emu:
         self.ball_r = 1.0                               # 3D probe ball radius (2 mm ruby)
         self.probe3d_fail = False                       # True: the probe never triggers (tests the Z-drop guard)
         self.probe_start_delay = 0.8                    # s of 'Idle' before a G38.6 starts moving (as seen on a real Z1)
+        self.sd: dict[str, bytes] = {}                 # the machine's SD card (the ESP32 side): path -> file
+        self._up: dict | None = None                    # an upload in progress {path, md5, count, size, got}
+        self.play: dict | None = None                   # the program being played {path, lines, i, t0, pct}
+        self._play_task: asyncio.Task | None = None
+        self.raw_lines: list[str] = []                  # console lines exactly as received (to check: no newline on play)
         self.clients = 0
         self._move: asyncio.Task | None = None
         self._hold = asyncio.Event()
@@ -62,7 +68,9 @@ class Z1Emu:
         f = lambda v: ",".join(f"{a:.4f}" for a in v)
         return (f"<{self.state}|MPos:{f(self.mpos)},0.0000,0.0000|WPos:{f(w)},0.0000,0.0000|F:0.0,2000.0,100.0"
                 f"|S:0.0,10000.0,100.0,0,27.2,27.4,0,0,0,0|T:{self.tool},-17.297,-1|L:0, 0, 0, 0.0,100.0"
-                + ("|H:1" if self.halted else "") + "|C:3,1,0,1|E:0,0,0,1,7613|OTA:0,0>")
+                + ("|H:1" if self.halted else "")
+                + (f"|P:{self.play['i']},{self.play['pct']},{int(time.time() - self.play['t0'])}" if self.play else "")
+                + "|C:3,1,0,1|E:0,0,0,1,7613|OTA:0,0>")
 
     # ---- motion
     async def _move_to(self, target, rate_mm_min):
@@ -293,10 +301,111 @@ class Z1Emu:
         self.state = state                              # queued motion counts as running (a hold applies to it)
         self._move = asyncio.create_task(coro)
 
+    # ---- files and programs (upload pull protocol, play / suspend / resume / abort, |P: progress)
+    def on_file(self, t: int, p: bytes) -> list[tuple[int, bytes]]:
+        """A file-transfer frame from the host -> the frames to send back."""
+        out: list[tuple[int, bytes]] = []
+        if t == T_FILE_START:
+            txt = p.decode(errors="replace")
+            for k, v in PATH_ESC.items():
+                txt = txt.replace(v, k)
+            self._up = {"path": txt.split(" ", 1)[1] if " " in txt else "", "md5": None, "count": 0, "size": 0, "got": {}}
+        elif t == T_FILE_MD5 and self._up is not None:
+            self._up["md5"] = p.decode()
+            out.append((T_FILE_VIEW, b""))                # "send me the file info"
+        elif t == T_FILE_VIEW and self._up is not None:
+            self._up["count"], self._up["size"] = int.from_bytes(p[:4], "big"), int.from_bytes(p[4:6], "big")
+            out.append((T_FILE_DATA, (1).to_bytes(4, "big")))
+        elif t == T_FILE_DATA and self._up is not None:
+            seq = int.from_bytes(p[:4], "big")
+            self._up["got"][seq] = p[4:]
+            if seq < self._up["count"]:
+                out.append((T_FILE_DATA, (seq + 1).to_bytes(4, "big")))
+            else:
+                import hashlib
+                data = b"".join(self._up["got"][i] for i in range(1, self._up["count"] + 1))
+                if hashlib.md5(data).hexdigest() != self._up["md5"]:
+                    out.append((T_FILE_CAN, b""))
+                else:
+                    self.sd[self._up["path"]] = data
+                    out.append((T_FILE_END, b""))
+                    out.append((T_TEXT, f"Info: upload success: {self._up['path']}.\n".encode()))
+                self._up = None
+        elif t == T_FILE_CAN:
+            self._up = None
+        return out
+
+    async def _run_program(self):
+        pl = self.play
+        try:
+            x = y = z = None
+            for i, ln in enumerate(pl["lines"], 1):
+                while pl.get("paused"):
+                    self.state = "Pause"
+                    await asyncio.sleep(0.02)
+                pl["i"] = i
+                pl["pct"] = round(100 * i / len(pl["lines"]))
+                u = ln.strip().upper()
+                m6 = re.search(r"M0?6\b", u) and re.search(r"T(\d+)", u)
+                if m6:
+                    n = int(m6.group(1))
+                    if n != self.tool:
+                        self.replies.append(f"Please change the tool to: T{n}")
+                        await self._routine(change_to=n)
+                    continue
+                words = dict((a, float(v)) for a, v in re.findall(r"([XYZF])(-?\d*\.?\d+)", u))
+                if not any(a in words for a in "XYZ"):
+                    continue
+                if "G53" in u:
+                    tgt = [words.get(a, m) for a, m in zip("XYZ", self.mpos)]
+                else:
+                    x, y, z = words.get("X", x), words.get("Y", y), words.get("Z", z)
+                    tgt = [self.mpos[k] if v is None else v + self.wco[k] for k, v in enumerate((x, y, z))]
+                self.state = "Run"
+                await self._move_to(tgt, words.get("F", 3000.0) if not re.match(r"G0\b", u) else 3000.0)
+            pl["pct"] = 100
+            self.state = "Idle"
+            await asyncio.sleep(1.0)                    # the 100 % report is held for a second, then the field goes
+        except asyncio.CancelledError:
+            pass
+        finally:
+            if self.play is pl:
+                self.play = None
+            if self.state in ("Run", "Pause"):
+                self.state = "Idle"
+
     # ---- commands
     def on_line(self, line: str) -> str | None:
+        self.raw_lines.append(line)
         s = line.strip()
         self.lines.append(s)
+        if s.startswith("play "):
+            path = s[5:]
+            for k, v in PATH_ESC.items():
+                path = path.replace(v, k)
+            if line.endswith("\n"):
+                return "Error:start check failed.file does not exist or CRC wrong [P1]"
+            if self.halted or self.play:
+                return "Currently printing, abort print first" if self.play else None
+            if path not in self.sd:
+                return "Error:open file failed[P0]"
+            self.play = {"path": path, "lines": self.sd[path].decode().splitlines(), "i": 0, "pct": 0, "t0": time.time()}
+            self.state = "Run"
+            self._play_task = asyncio.create_task(self._run_program())
+            return None
+        if s == "suspend" and self.play:
+            self.play["paused"] = True
+            return None
+        if s == "resume" and self.play:
+            self.play["paused"] = False
+            self.state = "Run"
+            return None
+        if s == "abort" and self.play:
+            if self._play_task:
+                self._play_task.cancel()
+            self.play = None
+            self.state = "Idle"
+            return "Aborted playing or paused file."
         u = s.upper()
         if u.startswith("$X"):
             if self.halted or self.state == "Alarm":
@@ -452,6 +561,9 @@ class Z1Emu:
                         reply = self.on_line(p.decode(errors="replace"))
                         if reply:
                             writer.write(frame(T_TEXT, (reply + "\n").encode()))
+                    elif 0xB0 <= t <= 0xB6:
+                        for t2, p2 in self.on_file(t, p):
+                            writer.write(frame(t2, p2))
                 while self.replies:
                     writer.write(frame(T_TEXT, (self.replies.pop(0) + "\n").encode()))
                 await writer.drain()

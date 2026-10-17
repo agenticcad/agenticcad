@@ -432,3 +432,103 @@ def test_3d_probe_that_never_triggers_is_held():
         finally:
             await mc.disconnect(); await emu.stop()
     run(go())
+
+
+PROG = """; AgenticCAD makera post: test
+; tool T6 flat
+G21 G90 G17
+; Top: zero G54 at stock-top-left
+G54
+; Face [face] T6 flat D3.175
+M6 T6
+M3 S10000
+G0 Z5
+G0 X10 Y10
+G1 Z-0.5 F300
+G1 X40 F1200
+G0 Z5
+; Outline [contour] T3 flat D3.175
+M6 T3
+M3 S12000
+G0 X5 Y5
+G1 Z-1 F300
+G1 X45 Y5 F900
+G1 X45 Y45
+G0 Z5
+M5
+G53 G0 Z-1
+"""
+
+
+def test_prepare_program_strips_maps_ops_and_refuses_unsafe():
+    prep = ml.prepare_program(PROG, ["Face", "Outline"])
+    lines = prep["text"].splitlines()
+    assert not any(l.startswith(";") for l in lines) and all(len(l) <= ml.MAX_LINE for l in lines)
+    assert [o["name"] for o in prep["ops"]] == ["Face", "Outline"] and prep["tools"] == [6, 3]
+    f, o = prep["ops"]
+    assert lines[f["start"] - 1] == "M6 T6" and lines[o["start"] - 1] == "M6 T3" and f["end"] == o["start"] - 1 and o["end"] == len(lines)
+    assert prep["extents"]["x"] == [5.0, 45.0] and prep["extents"]["z"] == [-1.0, 5.0]
+    air = ml.prepare_program(PROG, ["Face", "Outline"], air_cut=10)
+    assert air["extents"]["z"] == [9.0, 15.0] and "G53 G0 Z-1" in air["text"]          # machine-coordinate moves untouched
+    assert "G28" in ml.prepare_program("; Face [face]\nM6 T6\nG28\n", ["Face"])["text"]      # the Z1's park move
+    for bad, why in (("G91 G0 X1", "relative"), ("G38.2 Z-5", "probing"), ("G10 L20 P0 Z0", "offset"), ("M490", "never sent"), ("G1 X" + "1" * 70, "characters")):
+        with pytest.raises(ml.Refused, match=why):
+            ml.prepare_program("; Face [face]\nM6 T6\n" + bad + "\n", ["Face"])
+    with pytest.raises(ml.Refused, match="found 1 of 2"):
+        ml.prepare_program("; Face [face]\nM6 T6\n", ["Face", "Gone"])
+    assert ml.program_filename("obsidian logo - ops 2..5") == "obsidian_logo_ops_2..5.nc"
+
+
+def test_run_program_uploads_plays_changes_tool_and_finishes():
+    async def go():
+        emu, mc, _ = await _setup(speed=60.0)
+        try:
+            await mc.arm(True); await mc.home(); await _until(lambda: mc.homed)
+            _measured(mc, emu)                                       # T6 fitted and measured
+            emu.wco = [-150.0, -150.0, -60.0]
+            await asyncio.sleep(0.4)
+            prep = ml.prepare_program(PROG, ["Face", "Outline"])
+            far = ml.prepare_program(PROG.replace("X45", "X160"), ["Face", "Outline"])
+            with pytest.raises(ml.Refused, match="outside"):
+                mc.check_job(far)                                    # X 160 from a work origin at -150 runs past the top end (machine X 10)
+            await mc.run_program("test job", prep)
+            await _until(lambda: mc.job["stage"] in ("running", "awaiting", "done", "failed"), timeout=20)
+            assert emu.sd["/sd/gcodes/test_job.nc"] == prep["text"].encode()
+            assert "play /sd/gcodes/test_job.nc" in emu.raw_lines            # sent without a newline
+            await _until(lambda: mc.job["stage"] in ("awaiting", "failed"), timeout=30)
+            assert mc.job["stage"] == "awaiting" and mc.job["want_tool"] == 3 and mc.job["op"] == 1, mc.job
+            await mc.confirm_tool_change()
+            await _until(lambda: mc.job["stage"] in ("done", "failed"), timeout=60)
+            assert mc.job["stage"] == "done", mc.job
+            assert emu.tool == 3 and mc.measured["tool"] == 3 and mc.tool_ok()
+            assert not emu.crashes
+        finally:
+            await mc.disconnect(); await emu.stop()
+    run(go())
+
+
+def test_program_pause_resume_and_abort():
+    async def go():
+        emu, mc, _ = await _setup(speed=2.0)
+        try:
+            await mc.arm(True); await mc.home(); await _until(lambda: mc.homed)
+            _measured(mc, emu)
+            emu.wco = [-150.0, -150.0, -60.0]
+            await asyncio.sleep(0.4)
+            prep = ml.prepare_program(PROG, ["Face", "Outline"])
+            await mc.run_program("pause test", prep)
+            await _until(lambda: mc.job["stage"] == "running", timeout=20)
+            await mc.job_pause()
+            await _until(lambda: mc.job["stage"] == "paused", timeout=10)
+            with pytest.raises(ml.Refused, match="Idle"):
+                await mc.jog("x", 1)                                   # nothing else moves the machine meanwhile
+            await mc.job_resume()
+            await _until(lambda: mc.job["stage"] == "running", timeout=10)
+            await mc.job_abort()
+            await _until(lambda: "abort" in emu.raw_lines)
+            assert mc.job["stage"] == "aborted"
+            await asyncio.sleep(1.0)
+            assert mc.job["stage"] == "aborted" and emu.play is None
+        finally:
+            await mc.disconnect(); await emu.stop()
+    run(go())

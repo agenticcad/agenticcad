@@ -67,7 +67,8 @@
   .muted { color:var(--muted); } .small { font-size:12.5px; }
   .sheet { position:fixed; left:0; right:0; bottom:0; z-index:9; padding:12px 14px calc(env(safe-area-inset-bottom) + 12px); background:rgba(24,27,33,.96); backdrop-filter:blur(10px); -webkit-backdrop-filter:blur(10px); border-top:1px solid var(--line); transform:translateY(110%); transition:transform .25s; }
   .sheet.show { transform:none; } .sheet .in { max-width:532px; margin:0 auto; } .sheet .m { font-size:14px; margin-bottom:10px; } .sheet .k { font-size:11px; letter-spacing:.08em; color:var(--warn); font-weight:800; margin-bottom:4px; }
-  body.sheeted { padding-bottom:calc(env(safe-area-inset-bottom) + 150px); }
+  body.sheeted { padding-bottom:calc(env(safe-area-inset-bottom) + 170px); }
+  .pbar { height:6px; background:var(--card2); border-radius:4px; overflow:hidden; margin:0 0 10px; } .pbar div { height:100%; background:var(--blue); width:0; }
   #p3kind, .pane input[type=number] { background:var(--card2); color:var(--text); border:1px solid var(--line); border-radius:10px;
     font:inherit; font-size:16px; padding:10px 12px; -webkit-appearance:none; appearance:none; }
   #p3kind { background-image:linear-gradient(45deg,transparent 50%,var(--muted) 50%),linear-gradient(135deg,var(--muted) 50%,transparent 50%);
@@ -139,7 +140,9 @@
   </div>
 
   <div class="sheet" id="sheet"><div class="in"><div class="k" id="sheetk"></div><div class="m" id="sheetm"></div>
-    <button class="btn primary" id="sheetok" style="width:100%">Confirm — same as the front button</button></div></div>
+    <div class="pbar" id="sheetpb" style="display:none"><div></div></div>
+    <button class="btn primary" id="sheetok" style="width:100%">Confirm — same as the front button</button>
+    <div class="row" id="sheetjob" style="display:none;margin-top:8px"><button class="btn" id="jpause">Pause</button><button class="btn primary" id="jresume">Resume</button><button class="btn" id="jstop" style="color:var(--err)">Stop program</button></div></div></div>
   <div class="toast" id="toast"></div>
 
 <script>
@@ -193,10 +196,21 @@ function render(st) {
   [['rt', rt], ['rt2', rt && ['auto Z probe', '3D probe'].includes(rt.kind) ? rt : null]].forEach(([id, r]) => { const e = $(id); e.style.display = r ? '' : 'none'; if (r) { e.className = 'note ' + r.stage; e.textContent = r.msg; } });
   $('confirm').style.display = rt && rt.stage === 'awaiting' ? '' : 'none';
   const live = rt && ['running', 'awaiting'].includes(rt.stage);
-  $('sheet').classList.toggle('show', !!live); document.body.classList.toggle('sheeted', !!live);
+  const job = st.job, jlive = job && ['uploading', 'starting', 'running', 'awaiting', 'paused'].includes(job.stage);
+  $('sheet').classList.toggle('show', !!(live || jlive)); document.body.classList.toggle('sheeted', !!(live || jlive));
+  $('sheetjob').style.display = jlive && !live ? '' : 'none'; $('sheetpb').style.display = jlive && !live ? '' : 'none';
   if (live) { $('sheetk').textContent = (rt.stage === 'awaiting' ? 'WAITING FOR YOU · ' : 'RUNNING · ') + rt.kind.toUpperCase();
     $('sheetm').textContent = rt.stage === 'awaiting' ? rt.msg : `${rt.command} — the machine is doing this itself; STOP aborts`;
     $('sheetok').style.display = rt.stage === 'awaiting' ? '' : 'none'; }
+  else if (jlive) {
+    const pct = job.stage === 'uploading' ? Math.round((job.upload || 0) * 100) : Math.round(job.percent || 0), t = Math.round(job.seconds || 0);
+    const op = job.op != null && job.ops[job.op] ? job.ops[job.op].name : '';
+    $('sheetk').textContent = { uploading: 'UPLOADING', starting: 'STARTING', running: 'RUNNING', awaiting: 'WAITING FOR YOU · TOOL CHANGE', paused: 'PAUSED' }[job.stage] + ' · PROGRAM' + (job.air_cut ? ' · AIR CUT' : '');
+    $('sheetm').textContent = job.stage === 'awaiting' ? job.msg : `${op ? op + ' · ' : ''}line ${job.line || 0} of ${job.lines} · ${pct}% · ${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`;
+    $('sheetpb').firstElementChild.style.width = pct + '%';
+    $('sheetok').style.display = job.stage === 'awaiting' ? '' : 'none';
+    $('jpause').style.display = job.stage === 'running' ? '' : 'none'; $('jresume').style.display = job.stage === 'paused' ? '' : 'none';
+  }
   const sw = st.switches || {};
   $('laser').classList.toggle('on', !!sw.probe_laser); $('dust').classList.toggle('on', !!sw.dust); $('light').classList.toggle('on', !!sw.light);
   ['laser', 'dust', 'light', 'disconnect'].forEach(id => $(id).disabled = !conn);
@@ -238,6 +252,9 @@ $('tplus').onclick = () => { tnum = Math.min(99, tnum + 1); $('tnum').textConten
 $('change').onclick = () => api({ action: 'change_tool', z: tnum });
 $('confirm').onclick = () => api({ action: 'confirm_tool' });
 $('sheetok').onclick = () => api({ action: 'confirm_tool' });
+$('jpause').onclick = () => api({ action: 'job_pause' });
+$('jresume').onclick = () => api({ action: 'job_resume' });
+$('jstop').onclick = () => { if (confirm('Stop the program? The machine stops moving and the spindle stops.')) api({ action: 'job_abort' }); };
 $('origin').onclick = () => api({ action: 'origin_anchor' });
 $('zprobe').onclick = () => api({ action: 'auto_z_probe' });
 const P3_HINT = {

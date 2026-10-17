@@ -25,7 +25,10 @@ Safety model (MachineControl):
     jog at a time (the next is refused until this one has finished), small steps (JOG_MAX), slow Z-down, every
     target checked against the travel box in machine coordinates AND a Z floor in work coordinates (default 2 mm
     above work zero, so the tool can't be jogged into the stock top or the bed under it).
-  * No free-form G-code, no spindle, no program running from here (yet).
+  * No free-form G-code and no manual spindle control. Programs run only as the CAM program's operations, prepared
+    (prepare_program: comments out, 62-character lines, no relative moves / probing / offset changes), checked
+    against the travel from the current work origin, uploaded to the machine's SD and played; Pause / Resume /
+    Stop program and STOP stay available.
 """
 from __future__ import annotations
 
@@ -39,6 +42,14 @@ from typing import Any, Callable
 SYNC, TAIL = b"\x86\x68", b"\x55\xaa"
 T_REALTIME, T_LINE, T_STATUS, T_TEXT = 0xA1, 0xA2, 0x81, 0x90
 HALT = b"\x18"
+# file transfer (the ESP32 holds the SD card; MakeraStudio's "XMODEM" class, really a machine-driven pull protocol):
+# host B0 "upload <path>", B1 md5 hex; machine B2 -> host B2 [count u32][size u16]; machine B3 [seq u32] -> host B3 [seq][data];
+# machine B4 = done, B5 = cancel (either side), B6 = resend the last frame, 0x91 = alarm during the transfer
+T_FILE_START, T_FILE_MD5, T_FILE_VIEW, T_FILE_DATA, T_FILE_END, T_FILE_CAN, T_FILE_RETRY, T_ALARM = 0xB0, 0xB1, 0xB2, 0xB3, 0xB4, 0xB5, 0xB6, 0x91
+FILE_TYPES = (T_FILE_MD5, T_FILE_VIEW, T_FILE_DATA, T_FILE_END, T_FILE_CAN, T_FILE_RETRY, T_ALARM)
+PACKET = 8192
+MAX_LINE = 62                     # the Z1 plays lines from 64-byte slots: 62 characters + newline + NUL
+PATH_ESC = {" ": "\x01", "?": "\x02", "*": "\x03", "!": "\x04", "~": "\x05"}
 
 
 # ------------------------------------------------------------------ framing
@@ -69,7 +80,7 @@ def parse_frames(buf: bytearray):
             return
         n = int.from_bytes(buf[2:4], "big")
         total = n + 6
-        if n < 3 or n > 8192:
+        if n < 3 or n > PACKET + 64:
             del buf[:2]
             continue
         if len(buf) < total:
@@ -173,6 +184,11 @@ def discover(timeout: float = 3.0, port: int = 3333) -> dict[str, dict[str, Any]
     return seen
 
 
+def escape_path(path: str) -> str:
+    """The Z1's path escaping (space ? * ! ~ -> \\x01..\\x05), as MakeraStudio sends file names."""
+    return "".join(PATH_ESC.get(c, c) for c in path)
+
+
 # ------------------------------------------------------------------ connection
 class Z1Link:
     """One TCP connection to a Makera Z1: polls status, collects console text. Knows nothing about safety."""
@@ -188,6 +204,8 @@ class Z1Link:
         self.on_status: Callable[[dict], None] | None = None
         self._tasks: list[asyncio.Task] = []
         self._lock = asyncio.Lock()
+        self.file_q: asyncio.Queue | None = None           # file-transfer frames while an upload runs
+        self.poll_paused = False
 
     @property
     def connected(self) -> bool:
@@ -238,10 +256,71 @@ class Z1Link:
         self.log.append((time.time(), "> " + text))
         await self.send(T_LINE, (text.rstrip("\n") + "\n").encode())
 
+    async def raw(self, text: str) -> None:
+        """A console command sent exactly as given, no newline: the Z1 needs `play <path>`, `suspend`, `resume` and
+        `abort` that way (the filename's CRC and the exact-match commands break on a trailing newline)."""
+        if BLOCKED.search(text):
+            raise Refused(f"refused to send {text!r}: on the Z1 this command is unsafe (see BLOCKED)")
+        self.log.append((time.time(), "> " + text))
+        await self.send(T_LINE, text.encode())
+
+    async def upload(self, remote: str, data: bytes, progress: Callable[[float], Any] | None = None, timeout: float = 9.0) -> None:
+        """Upload `data` to `remote` (e.g. /sd/gcodes/x.nc) the way MakeraStudio does; raises ConnectionError on failure.
+        The status poll pauses during the transfer."""
+        import hashlib
+        if not data:
+            raise ConnectionError("nothing to upload (empty file)")
+        count = (len(data) + PACKET - 1) // PACKET
+        self.file_q = asyncio.Queue()
+        self.poll_paused = True
+        last: tuple[int, bytes] | None = None
+        ends = 0
+
+        async def put(t: int, payload: bytes) -> None:
+            nonlocal last
+            last = (t, payload)
+            await self.send(t, payload)
+        try:
+            self.log.append((time.time(), f"> upload {remote} ({len(data)} bytes, {count} packets)"))
+            await self.send(T_FILE_START, f"upload {escape_path(remote)}".encode())
+            await self.send(T_FILE_MD5, hashlib.md5(data).hexdigest().encode())
+            while True:
+                try:
+                    t, payload = await asyncio.wait_for(self.file_q.get(), timeout)
+                except asyncio.TimeoutError:
+                    raise ConnectionError(f"the machine stopped answering during the upload ({timeout:g} s)") from None
+                if t == T_FILE_VIEW:
+                    await put(T_FILE_VIEW, count.to_bytes(4, "big") + PACKET.to_bytes(2, "big"))
+                elif t == T_FILE_DATA:
+                    seq = int.from_bytes(payload[:4], "big") if len(payload) >= 4 else 0
+                    if seq < 1 or seq > count:
+                        ends += 1
+                        if ends > 3:
+                            await self.send(T_FILE_CAN, b"")
+                            raise ConnectionError(f"the machine asked for packet {seq} of {count}")
+                        await put(T_FILE_END, b"")
+                        continue
+                    await put(T_FILE_DATA, seq.to_bytes(4, "big") + data[(seq - 1) * PACKET: seq * PACKET])
+                    if progress:
+                        progress(seq / count)
+                elif t == T_FILE_RETRY and last is not None:
+                    await self.send(*last)
+                elif t == T_FILE_END:
+                    break
+                elif t == T_FILE_CAN:
+                    raise ConnectionError("the machine cancelled the upload")
+                elif t == T_ALARM:
+                    await self.send(T_FILE_CAN, b"")
+                    raise ConnectionError("the machine alarmed during the upload")
+        finally:
+            self.file_q = None
+            self.poll_paused = False
+
     async def _poll(self) -> None:
         try:
             while self.connected:
-                await self.realtime(b"?")
+                if not self.poll_paused:
+                    await self.realtime(b"?")
                 await asyncio.sleep(self.poll_s)
         except (ConnectionError, OSError, asyncio.CancelledError):
             pass
@@ -256,6 +335,10 @@ class Z1Link:
                     break
                 buf += d
                 for t, p in parse_frames(buf):
+                    if t in FILE_TYPES and self.file_q is not None:
+                        self.file_q.put_nowait((t, p))
+                        if t != T_ALARM:
+                            continue
                     txt = p.decode(errors="replace")
                     if t == T_STATUS:
                         st = parse_status(txt)
@@ -351,6 +434,73 @@ class Refused(Exception):
     """A command the safety rules don't allow right now; the message says why."""
 
 
+_WORD = re.compile(r"([A-Z])(-?\d*\.?\d+)")
+
+
+def prepare_program(gcode: str, op_names: list[str], air_cut: float = 0.0) -> dict:
+    """G-code from the CAM post -> what the Z1 plays: comments and blank lines removed (the machine stores lines in 64-byte
+    slots), optionally lifted `air_cut` mm (every Z except machine-coordinate G53 moves), each operation's line range
+    (from the post's "; <name> [kind] ..." header comments, in order) and the work-coordinate extents of the moves.
+    Raises Refused for what the Z1 must not get: lines too long, relative moves, homing/probing, blocked commands."""
+    out: list[str] = []
+    ops: list[dict] = []
+    k = 0
+    x = y = z = None
+    ext = {"x": [1e9, -1e9], "y": [1e9, -1e9], "z": [1e9, -1e9]}
+    tools: list[int] = []
+    for raw in gcode.splitlines():
+        s_ = raw.strip()
+        if s_.startswith(";"):
+            if k < len(op_names) and s_[1:].strip().startswith(op_names[k] + " ["):
+                ops.append({"name": op_names[k], "start": len(out) + 1, "tool": None})
+                k += 1
+            continue
+        s_ = re.sub(r"\(.*?\)", "", s_.split(";")[0]).strip().upper()
+        if not s_:
+            continue
+        if BLOCKED.search(s_):
+            raise Refused(f"the program contains {s_!r}, which is never sent to a Z1")
+        if re.search(r"\bG91\b(?!\.)", s_):
+            raise Refused("the program uses relative moves (G91); only absolute programs are run")
+        if re.search(r"\bG(38(\.\d)?|92|10)\b|\$H|\bM49[0-9]", s_):           # G28 is the Z1's park (clearance) move: fine
+            raise Refused(f"the program contains {s_!r}: homing, probing and offset changes stay with the Machine tab")
+        m6 = re.search(r"\bM0?6\b", s_)
+        tw = re.search(r"\bT(\d+)", s_)
+        if m6 and tw:
+            tools.append(int(tw.group(1)))
+            if ops and ops[-1]["tool"] is None:
+                ops[-1]["tool"] = int(tw.group(1))
+        g53 = re.search(r"\bG53\b", s_)
+        if air_cut and not g53:
+            s_ = re.sub(r"Z(-?\d*\.?\d+)", lambda mm: "Z" + f"{float(mm.group(1)) + air_cut:.3f}".rstrip("0").rstrip("."), s_)
+        if not g53:
+            for a, v in _WORD.findall(s_):
+                if a == "X": x = float(v)
+                elif a == "Y": y = float(v)
+                elif a == "Z": z = float(v)
+            if re.search(r"\bG0?[0-3]\b", s_) or re.match(r"^[XYZ]", s_):
+                for a, v in (("x", x), ("y", y), ("z", z)):
+                    if v is not None:
+                        ext[a][0] = min(ext[a][0], v); ext[a][1] = max(ext[a][1], v)
+        if len(s_) > MAX_LINE:
+            raise Refused(f"line {len(out) + 1} is {len(s_)} characters; the Z1 plays at most {MAX_LINE}: {s_[:40]}…")
+        out.append(s_)
+    for i, o in enumerate(ops):
+        o["end"] = ops[i + 1]["start"] - 1 if i + 1 < len(ops) else len(out)
+        if o["tool"] is None and i:                       # no tool change of its own: it keeps the previous op's tool
+            o["tool"] = ops[i - 1]["tool"]
+    if k != len(op_names):
+        raise Refused(f"found {k} of {len(op_names)} operations in the program (headers missing)")
+    return {"text": "\n".join(out) + "\n", "lines": len(out), "ops": ops, "tools": tools,
+            "extents": {a: v for a, v in ext.items() if v[0] <= v[1]}, "air_cut": air_cut}
+
+
+def program_filename(name: str) -> str:
+    """An ASCII file name the Z1 plays safely (no spaces, no ' -' option marker)."""
+    base = re.sub(r"[^A-Za-z0-9_.]+", "_", name).strip("_.")[:40] or "program"
+    return base + ".nc"
+
+
 class MachineControl:
     def __init__(self, emit: Callable[[dict], Any] | None = None):
         self.emit = emit
@@ -366,6 +516,8 @@ class MachineControl:
         self.switch_state: dict[str, bool] = {}
         self.measured: dict | None = None    # {"tool": n, "touch_z": z, "t": ..}: the tool measured on the setter this session
         self.routine: dict | None = None     # a Makera routine being followed: {kind, command, stage, msg, ...}
+        self.job: dict | None = None         # a program sent to the machine: {name, stage, ops, lines, line, percent, ...}
+        self._job_task: asyncio.Task | None = None
         self._rt_task: asyncio.Task | None = None
         self.events: list[str] = []
         self._watch: asyncio.Task | None = None
@@ -379,7 +531,7 @@ class MachineControl:
         self.link = link
         self.armed = self.homed = self._homing = False
         self.jog_busy = None
-        self.measured = self.routine = None
+        self.measured = self.routine = self.job = None
         self._note(f"connected to {host}:{port}")
         self._watch = asyncio.create_task(self._watchdog())
         return self.payload()
@@ -461,6 +613,8 @@ class MachineControl:
                 if self.armed and not self.fresh():
                     self.armed = False
                     self._note("no status from the machine: Control off")
+                if self.job_active:
+                    self.last_action = time.time()                 # a running program keeps Control on
                 if self.armed and time.time() - self.last_action > ARM_IDLE_S:
                     self.armed = False
                     self._note("Control off after 5 minutes unused")
@@ -485,6 +639,7 @@ class MachineControl:
                 "position_reliable": bool(st) and st.get("state") not in ("Hold", "Pause", "Alarm"),
                 "z_floor": self.z_floor, "switches": dict(self.switch_state), "events": self.events[-20:],
                 "measured": self.measured, "tool_ok": self.tool_ok(), "routine": self.routine,
+                "job": {k: v for k, v in self.job.items() if k != "text"} if self.job else None,
                 "log": [t for _, t in (self.link.log[-30:] if self.link else [])],
                 "limits": {"jog_max": JOG_MAX, "travel": self.profile.travel, "margin": self.profile.margin, "top": self.profile.top},
                 "profile": self.profile.name, "probe3d_tool": self.profile.probe3d_tool,
@@ -742,6 +897,11 @@ class MachineControl:
         """The 'continue' of Makera's tool change (same as the front button): M490.2."""
         r = self.routine
         st = self._status() or {}
+        j = self.job
+        if j and j["stage"] == "awaiting" and st.get("state") == "Tool":
+            await self.link.line("M490.2")
+            j.update(stage="running", confirmed=True, msg=f"measuring T{j.get('want_tool')} on the setter, then the program continues")
+            return self.payload()
         if not r or r["stage"] != "awaiting" or st.get("state") != "Tool":
             raise Refused("the machine isn't waiting for a tool change")
         await self.link.line("M490.2")
@@ -912,6 +1072,156 @@ class MachineControl:
             msg += "; measured " + ", ".join(f"{a.upper()} {v:.3f} mm" for a, v in sizes.items())
         out["msg"] = msg
         return out
+
+    # -- programs: upload to the machine's SD, then play (as MakeraStudio does); the machine runs them on its own
+    @property
+    def job_active(self) -> bool:
+        return bool(self.job and self.job["stage"] in ("uploading", "starting", "running", "awaiting", "paused"))
+
+    def check_job(self, prep: dict) -> dict:
+        """Everything that must be true before a program is sent: returns notes for the confirmation, raises Refused."""
+        st = self._need(armed=True, idle=True, homed=True)
+        if self.job_active:
+            raise Refused(f"a program is already {self.job['stage']}")
+        if self.routine and self.routine["stage"] in ("running", "awaiting"):
+            raise Refused(f"{self.routine['kind']} is still running")
+        if self.jog_busy:
+            raise Refused("the previous move hasn't finished")
+        if not prep["lines"]:
+            raise Refused("the program is empty")
+        notes = []
+        fitted = (st.get("tool") or {}).get("number")
+        first = prep["tools"][0] if prep["tools"] else None
+        if first is None:
+            raise Refused("the program never selects a tool (no M6 Tn)")
+        if first == fitted and not self.tool_ok():
+            raise Refused(f"T{fitted} is fitted but hasn't been measured this session: Change tool → {fitted} first")
+        notes.append(f"starts with T{first}" + (" (fitted and measured)" if first == fitted else
+                                                f": the machine will stop for the change from T{fitted} and measure it"))
+        wco = [m - w for m, w in zip(st["mpos"], st["wpos"])]
+        for ax, i in (("x", 0), ("y", 1)):
+            e = prep["extents"].get(ax)
+            if not e:
+                continue
+            lo, hi = -self.profile.travel[ax] + self.profile.margin, self.profile.top
+            a, b = e[0] + wco[i], e[1] + wco[i]
+            if a < lo - 1e-6 or b > hi + 1e-6:
+                raise Refused(f"the program reaches machine {ax.upper()} {a:.1f} .. {b:.1f} from the current work origin, "
+                              f"outside {lo:.1f} .. {hi:.1f}: check the work origin (Machine tab) and the setup")
+        ez = prep["extents"].get("z")
+        if ez:
+            notes.append(f"Z {ez[0]:.2f} .. {ez[1]:.2f} above work zero" + (f" (lifted {prep['air_cut']:g} mm: air cut)" if prep["air_cut"] else ""))
+            if ez[1] + wco[2] > self.profile.top + 1e-6:
+                raise Refused(f"the program's highest Z ({ez[1]:.1f} in work coordinates) is above the machine's travel "
+                              "with the current work zero" + (": use a smaller air-cut lift" if prep["air_cut"] else ""))
+        return {"notes": notes, "work_origin": wco}
+
+    async def run_program(self, name: str, prep: dict, info: dict | None = None) -> dict:
+        """Upload `prep["text"]` as /sd/gcodes/<name> and play it. `prep` comes from prepare_program()."""
+        chk = self.check_job(prep)
+        fname = program_filename(name)
+        path = "/sd/gcodes/" + fname
+        self.last_action = time.time()
+        self.job = {"name": fname, "path": path, "stage": "uploading", "upload": 0.0, "lines": prep["lines"],
+                    "ops": prep["ops"], "tools": prep["tools"], "air_cut": prep["air_cut"], "line": 0, "percent": 0,
+                    "seconds": 0, "op": None, "msg": "uploading", "notes": chk["notes"], **(info or {})}
+        self._note(f"program {fname}: {prep['lines']} lines, {len(prep['ops'])} operation(s)" + (f", air cut +{prep['air_cut']:g} mm" if prep["air_cut"] else ""))
+        self._job_task = asyncio.create_task(self._job_flow(path, prep["text"].encode()))
+        return self.payload()
+
+    async def _job_flow(self, path: str, data: bytes) -> None:
+        j = self.job
+        try:
+            def prog(f):
+                j["upload"] = round(f, 3)
+            await self.link.upload(path, data, prog)
+            j.update(stage="starting", msg="starting")
+            st = self._status() or {}
+            if st.get("state") != "Idle" or not self.armed:
+                raise Refused("the machine is no longer ready (Control off or not Idle): the program was uploaded but not started")
+            await self.link.raw(f"play {escape_path(path)}")
+            self._note(f"play {path}")
+            t0, seen_run, last_progress = time.time(), False, 0.0
+            while True:
+                await asyncio.sleep(0.2)
+                if j["stage"] == "aborted":
+                    break
+                if not self.connected:
+                    raise Refused("connection lost while the program runs: the machine carries on by itself; reconnect to watch it")
+                st = self._status() or {}
+                s = st.get("state")
+                pr = st.get("progress")
+                if pr:
+                    seen_run, last_progress = True, time.time()
+                    j.update(line=int(pr["lines"] or 0), percent=pr.get("percent") or 0, seconds=pr.get("seconds") or 0)
+                    j["op"] = next((i for i, o in enumerate(j["ops"]) if o["start"] <= j["line"] <= o["end"]), j.get("op"))
+                if s == "Alarm":
+                    h = st.get("halt") or {}
+                    raise Refused(f"the machine alarmed: {h.get('reason', 'halted')} ({h.get('advice', 'Unlock, then home')})")
+                if s == "Tool":
+                    o = j["ops"][j["op"]] if j.get("op") is not None and j["op"] < len(j["ops"]) else None
+                    want = (o or {}).get("tool") or (j["tools"][0] if j["tools"] else None)
+                    j["changing"] = True
+                    if j["stage"] != "awaiting" and not j.get("confirmed"):
+                        j.update(stage="awaiting", want_tool=want, msg=f"tool change: fit T{want}, then press the front button (or Confirm): the machine measures it")
+                        await self._push()
+                    continue
+                if j.get("changing") and s in ("Run", "Idle", "Hold"):
+                    tl = st.get("tool") or {}                     # T-1 while it measures; the new number once it has
+                    if tl.get("number") == j.get("want_tool"):
+                        self.measured = {"tool": tl.get("number"), "touch_z": None, "offset": tl.get("offset"), "t": time.time()}
+                        j.update(changing=False, confirmed=False, stage="running", msg="running")
+                    elif j["stage"] == "awaiting":
+                        j.update(stage="running", msg=f"measuring T{j.get('want_tool')} on the setter")
+                if s == "Pause":
+                    if j["stage"] != "paused":
+                        j.update(stage="paused", msg="paused: Resume continues, Stop aborts")
+                    continue
+                if s in ("Run", "Hold") or pr:
+                    seen_run = True
+                    if j["stage"] in ("starting", "paused"):
+                        j.update(stage="running", msg="running")
+                if s == "Idle" and seen_run and not pr and time.time() - last_progress > 1.5:
+                    j.update(stage="done", percent=100, msg=f"finished: {j['lines']} lines in {int(j['seconds']) // 60}:{int(j['seconds']) % 60:02d}")
+                    break
+                if s == "Idle" and not seen_run and time.time() - t0 > 6:
+                    raise Refused("the machine didn't start the program (is it homed? the file name accepted?)")
+        except Refused as e:
+            j.update(stage="failed", msg=str(e))
+        except (ConnectionError, OSError) as e:
+            j.update(stage="failed", msg=f"{type(e).__name__}: {e}")
+        except asyncio.CancelledError:
+            j.update(stage="failed", msg="stopped watching (cancelled)")
+        self._note(f"program {j['name']}: {j['stage']} — {j['msg']}")
+        await self._push()
+
+    async def job_pause(self) -> dict:
+        if not self.job or self.job["stage"] != "running":
+            raise Refused("no program is running")
+        await self.link.raw("suspend")
+        self._note("pause (suspend): the machine finishes the current moves, then stops")
+        return self.payload()
+
+    async def job_resume(self) -> dict:
+        self._need(armed=True, idle=False)
+        if not self.job or self.job["stage"] != "paused":
+            raise Refused("the program isn't paused")
+        self.last_action = time.time()
+        await self.link.raw("resume")
+        self._note("resume")
+        return self.payload()
+
+    async def job_abort(self) -> dict:
+        if not self.connected:
+            raise Refused("not connected")
+        if not self.job_active:
+            raise Refused("no program is running")
+        await self.link.raw("abort")
+        self._note("abort: the machine stops the program and the spindle")
+        if self.job["stage"] == "uploading" and self._job_task:
+            self._job_task.cancel()
+        self.job.update(stage="aborted", msg="aborted")
+        return self.payload()
 
     async def home(self) -> dict:
         st = self._need(armed=True, idle=False)
