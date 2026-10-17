@@ -94,6 +94,11 @@ class Bus:
 bus = Bus()
 agent = CadAgent(WORKSPACE, bus.emit, bus.screenshot)
 machine = machine_link.MachineControl(bus.emit)        # the Machine tab; the agent only reads it
+_live = machine_link.makera_live_config()               # this machine's calibrated anchor, if MakeraStudio has fetched it
+if "coordinate.anchor1_x" in _live and "coordinate.anchor1_y" in _live:
+    machine.profile.anchor1 = (_live["coordinate.anchor1_x"], _live["coordinate.anchor1_y"])
+if "coordinate.clearance_x" in _live and "coordinate.clearance_y" in _live:
+    machine.profile.change_xy = (_live["coordinate.clearance_x"], _live["coordinate.clearance_y"])
 camera = machine_link.CameraRelay()
 agent.machine, agent.camera = machine, camera
 
@@ -790,6 +795,25 @@ async def machine_post(body: MachineBody):
             res = await machine.arm(bool(body.on))
         elif a == "jog":
             res = await machine.jog(body.axis or "", body.dist if body.dist is not None else 0.0)
+        elif a == "diagnose":
+            return {**machine.payload(), "diagnose": await machine.diagnose()}
+        elif a == "goto_setter":
+            sx, sy = machine.setter_xy
+            res = await machine.goto_xy(sx, sy, body.feed or 300.0)
+        elif a == "measure_setter":
+            res = await machine.measure_on_setter(body.z or 90.0, body.feed or 100.0)
+        elif a == "change_tool":
+            res = await machine.change_tool(int(body.z) if body.z is not None else -99)
+        elif a == "confirm_tool":
+            res = await machine.confirm_tool_change()
+        elif a == "cancel_tool":
+            res = await machine.cancel_tool_change()
+        elif a == "store_tool":
+            res = await machine.store_tool(int(body.z) if body.z is not None else -99)
+        elif a == "touch_again":
+            res = await machine.touch_again()
+        elif a == "raise_z":
+            res = await machine.raise_z_top(body.feed or 300.0)
         elif a == "goto_xy":
             res = await machine.goto_xy(body.x if body.x is not None else float('nan'), body.y if body.y is not None else float('nan'), body.feed or 300.0)
         elif a == "home":

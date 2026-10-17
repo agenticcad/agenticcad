@@ -23,6 +23,11 @@ async def _setup(**kw):
     return emu, mc, cam
 
 
+def _measured(mc, emu):
+    """Jog-mechanics tests: treat the emulator's fitted tool as measured (the change-tool test does it for real)."""
+    mc.measured = {"tool": emu.tool, "touch_z": emu.setter_z, "offset": -17.297, "t": 0}
+
+
 async def _until(cond, timeout=5.0):
     t0 = asyncio.get_running_loop().time()
     while not cond():
@@ -61,6 +66,9 @@ def test_connect_is_monitor_only_and_jogging_needs_control_and_homing():
             await mc.home()
             await _until(lambda: mc.homed)
             assert emu.mpos == [-1.0, -1.0, -1.0]
+            with pytest.raises(ml.Refused, match="hasn't been measured"):
+                await mc.jog("x", -5)                      # the rule: no motion before the fitted tool is measured
+            _measured(mc, emu)
             assert [l for l in emu.lines if l.startswith("$H")]
             await mc.jog("x", -5)
             await _until(lambda: not mc.jog_busy)
@@ -76,7 +84,7 @@ def test_limits_steps_and_z_floor_are_enforced_before_anything_is_sent():
     async def go():
         emu, mc, _ = await _setup()
         try:
-            await mc.arm(True); await mc.home(); await _until(lambda: mc.homed)
+            await mc.arm(True); await mc.home(); await _until(lambda: mc.homed); _measured(mc, emu)
             n = len(emu.lines)
             with pytest.raises(ml.Refused, match="outside"):
                 await mc.jog("x", 1)                       # past the home end (machine 0)
@@ -116,6 +124,7 @@ def test_one_jog_at_a_time_and_hold_halt_always_work():
             emu.speed = 50.0
             await _until(lambda: mc.homed)
             emu.speed = 1.0
+            _measured(mc, emu)
             await mc.jog("y", -10)
             with pytest.raises(ml.Refused):
                 await mc.jog("y", -10)                     # still moving
@@ -195,7 +204,7 @@ def test_goto_xy_needs_z_at_top_and_stays_in_the_box_and_laser_switch():
     async def go():
         emu, mc, _ = await _setup()
         try:
-            await mc.arm(True); await mc.home(); await _until(lambda: mc.homed)
+            await mc.arm(True); await mc.home(); await _until(lambda: mc.homed); _measured(mc, emu)
             await mc.switch("probe_laser", True)
             await _until(lambda: emu.switches["probe_laser"])
             await mc.goto_xy(-191.28, -194.45, 300)          # the Z1's Anchor 1 (live config)
@@ -226,6 +235,66 @@ def test_unsafe_z1_commands_are_never_sent():
             for ok in ("M490.1", "M490.2", "M498.1", "M4900"):
                 assert not ml.BLOCKED.search(ok), ok
             assert not any(l.upper().startswith(("M490", "M498.2")) for l in emu.lines)
+        finally:
+            await mc.disconnect(); await emu.stop()
+    run(go())
+
+
+def test_measure_on_setter_touches_twice_and_refuses_when_unsafe():
+    async def go():
+        emu, mc, _ = await _setup()
+        try:
+            mc.profile.anchor1 = (-191.28, -194.45)
+            await mc.arm(True); await mc.home(); await _until(lambda: mc.homed); _measured(mc, emu)
+            with pytest.raises(ml.Refused, match="not over the tool setter"):
+                await mc.measure_on_setter()
+            sx, sy = mc.setter_xy
+            assert (round(sx, 2), round(sy, 2)) == (-10.28, -13.45)
+            await mc.goto_xy(sx, sy, 600); await _until(lambda: not mc.jog_busy)
+            res = await mc.measure_on_setter(max_travel=90, feed=200)
+            t = res["setter_touch"]
+            assert abs(t["first"][2] - emu.setter_z) < 1e-3 and abs(t["second"][2] - emu.setter_z) < 1e-3
+            assert not any(l.upper().startswith("G91") for l in emu.lines)       # no relative mode left behind
+            res = await mc.store_tool(0)
+            assert res["stored"]["tool"] == 0 and emu.tool == 0 and emu.lines[-2:] == ["M493.1", "M493.2 T0"]
+            await mc.raise_z_top(600); await _until(lambda: not mc.jog_busy, timeout=15)
+            assert emu.mpos[2] == -1.0                               # the top: machine Z -1 (home back-off)
+            # a setter that is out of reach: the probe stops at the travel limit, the machine alarms, Control goes off
+            emu.setter_z = -95.0
+            with pytest.raises(ml.Refused, match="did not trigger"):
+                await mc.measure_on_setter(max_travel=20, feed=200)
+            assert not mc.armed
+        finally:
+            await mc.disconnect(); await emu.stop()
+    run(go())
+
+
+def test_change_tool_parks_waits_measures_and_only_then_allows_motion():
+    async def go():
+        emu, mc, _ = await _setup()
+        try:
+            mc.profile.anchor1 = (-191.28, -194.45)
+            await mc.arm(True); await mc.home(); await _until(lambda: mc.homed)
+            await mc.change_tool(3)
+            await _until(lambda: mc.tool_change["stage"] == "awaiting", timeout=15)
+            assert emu.mpos[:2] == [-11.6, -14.6] and emu.mpos[2] == -1.0          # parked at the change position, Z up
+            with pytest.raises(ml.Refused, match="hasn't been measured"):
+                await mc.jog("y", -1)
+            n = len(emu.lines)
+            await mc.confirm_tool_change()
+            await _until(lambda: mc.tool_change["stage"] in ("done", "failed"), timeout=30)
+            assert mc.tool_change["stage"] == "done", mc.tool_change
+            assert emu.tool == 3 and mc.tool_ok() and emu.mpos[2] == -1.0
+            sent = emu.lines[n:]
+            assert any(l.startswith("G38.6 Z-90") for l in sent) and "M493.1" in sent and "M493.2 T3" in sent
+            await mc.jog("y", -1)                                                     # measured: motion allowed
+            await _until(lambda: not mc.jog_busy)
+            # a new change cancels the old measurement straight away
+            await mc.change_tool(0)
+            assert not mc.tool_ok()
+            await _until(lambda: mc.tool_change["stage"] == "awaiting", timeout=15)
+            await mc.cancel_tool_change()
+            assert mc.tool_change is None and not mc.tool_ok()
         finally:
             await mc.disconnect(); await emu.stop()
     run(go())

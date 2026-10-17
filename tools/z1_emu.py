@@ -36,8 +36,12 @@ class Z1Emu:
         self.halted = False
         self.switches = {"extendout": False, "light": True, "probe_laser": False}
         self.lines: list[str] = []                      # every console line received
+        self.replies: list[str] = []                    # delayed console replies (probe results)
         self.realtime: list[bytes] = []
         self.crashes: list[str] = []
+        self.setter_z = -61.0                           # machine Z at which the fitted tool trips the tool setter
+        self.tool = 6
+        self.probe_start_delay = 0.8                    # s of 'Idle' before a G38.6 starts moving (as seen on a real Z1)
         self.clients = 0
         self._move: asyncio.Task | None = None
         self._hold = asyncio.Event()
@@ -49,7 +53,7 @@ class Z1Emu:
         w = [m - o for m, o in zip(self.mpos, self.wco)]
         f = lambda v: ",".join(f"{a:.4f}" for a in v)
         return (f"<{self.state}|MPos:{f(self.mpos)},0.0000,0.0000|WPos:{f(w)},0.0000,0.0000|F:0.0,2000.0,100.0"
-                f"|S:0.0,10000.0,100.0,0,27.2,27.4,0,0,0,0|T:6,-17.297,-1|L:0, 0, 0, 0.0,100.0"
+                f"|S:0.0,10000.0,100.0,0,27.2,27.4,0,0,0,0|T:{self.tool},-17.297,-1|L:0, 0, 0, 0.0,100.0"
                 + ("|H:1" if self.halted else "") + "|C:3,1,0,1|E:0,0,0,1,7613|OTA:0,0>")
 
     # ---- motion
@@ -127,11 +131,36 @@ class Z1Emu:
             rate = min(self.MAX_RATE[a] for a in moving) * scale
             self._start(self._move_to([m + delta[a] for m, a in zip(self.mpos, "xyz")], rate))
             return None
+        if u.startswith("DIAGNOSE"):
+            return "{S:0,10000,0,0,34,30|L:0,0|V:1,45|F:0,0|G:1,0,0,0,0|T:0|C:1|E:0,0,0,0,0,1,1,0|P:%d,0|I:0|RSSI:-40}" % int(self.mpos[2] <= self.setter_z + 1e-6)
+        if u.startswith("G38.6"):
+            words = dict((t[0].lower(), float(t[1:])) for t in s.split()[1:] if len(t) > 1)
+            z_target = self.mpos[2] + words.get("z", 0.0)
+            stop = max(z_target, self.setter_z)
+            hit = self.setter_z >= z_target
+            async def probe():
+                self.state = "Idle"                     # the real Z1 still reports Idle for a moment after G38.6
+                await asyncio.sleep(self.probe_start_delay)
+                self.state = "Run"
+                await self._move_to([self.mpos[0], self.mpos[1], stop], words.get("f", 100.0))
+                self.replies.append(f"[PRB:{self.mpos[0]:.3f},{self.mpos[1]:.3f},{self.mpos[2]:.3f}:{int(hit)}]" + ("" if hit else "\nALARM: Calibrate fail!"))
+                if not hit:
+                    self.halted = True
+                    self.state = "Alarm"
+            self._start(probe())
+            return None
         if u.startswith("G53"):
             words = dict((t[0].lower(), float(t[1:])) for t in s.split()[1:] if t[0].upper() in "XYZF" and len(t) > 1)
             tgt = [words.get(a, m) for a, m in zip("xyz", self.mpos)]
             self._start(self._move_to(tgt, words.get("f", 1000.0)))
             return None
+        if u.startswith("M493.2"):
+            t = [tok for tok in s.split() if tok.upper().startswith("T")]
+            if t:
+                self.tool = int(float(t[0][1:]))
+            return "ok"
+        if u.startswith("M493.1"):
+            return "ok"
         if u in ("M831", "M832"):
             self.switches["probe_laser"] = u == "M831"
             return "ok"
@@ -185,6 +214,8 @@ class Z1Emu:
                         reply = self.on_line(p.decode(errors="replace"))
                         if reply:
                             writer.write(frame(T_TEXT, (reply + "\n").encode()))
+                while self.replies:
+                    writer.write(frame(T_TEXT, (self.replies.pop(0) + "\n").encode()))
                 await writer.drain()
         except (ConnectionError, asyncio.CancelledError):
             pass

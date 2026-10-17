@@ -435,6 +435,8 @@
   .mv-log { flex:1; overflow:auto; font:11px/1.45 ui-monospace,Menlo,monospace; color:var(--muted); white-space:pre-wrap; max-height:220px; }
   .mv-conn { display:flex; gap:6px; align-items:center; } .mv-conn input { width:210px; background:var(--panel2); border:1px solid var(--line); color:var(--text); border-radius:6px; padding:4px 7px; font-size:12px; }
   #mv-conn-state { font-size:12px; white-space:nowrap; }
+  .mv-tc { margin-top:6px; padding:8px 10px; border-radius:8px; background:rgba(78,161,255,.10); border:1px solid rgba(78,161,255,.35); font-size:12.5px; }
+  .mv-tc.failed { background:rgba(255,92,92,.10); border-color:rgba(255,92,92,.45); } .mv-tc.done { background:rgba(76,211,122,.10); border-color:rgba(76,211,122,.4); }
   @media (max-width: 1000px) { #machine-view { grid-template-columns:1fr; grid-template-rows:minmax(180px,38vh) auto; overflow:auto; } .mv-side { overflow:visible; } }
 </style>
 </head>
@@ -518,6 +520,11 @@
         <div class="mv-card"><div class="mv-h">Position <span class="muted" id="mv-tool"></span></div>
           <table class="mv-pos"><tr><th></th><th>X</th><th>Y</th><th>Z</th></tr><tr><td>Work</td><td id="mv-wx">–</td><td id="mv-wy">–</td><td id="mv-wz">–</td></tr><tr class="muted"><td>Machine</td><td id="mv-mx">–</td><td id="mv-my">–</td><td id="mv-mz">–</td></tr></table>
           <div class="muted mv-small" id="mv-spindle"></div></div>
+        <div class="mv-card"><div class="mv-h">Tool <span class="muted" id="mv-tool-state"></span></div>
+          <div class="mv-row"><span class="mv-small muted">Change to</span><input type="number" id="mv-tc-num" min="0" max="99" step="1" value="0" style="width:56px" title="0 = the probe">
+            <button class="btn" id="mv-tc-start" title="Raise Z, park at the tool-change position, wait for you to swap, then measure the tool on the setter (every tool, the probe included)">Change tool…</button></div>
+          <div id="mv-tc-box" class="mv-tc" style="display:none"><div id="mv-tc-msg"></div>
+            <div class="mv-row"><button class="btn primary" id="mv-tc-confirm">Confirm: measure it</button><button class="btn" id="mv-tc-cancel">Cancel</button></div></div></div>
         <div class="mv-card"><div class="mv-h">Jog <span class="muted" id="mv-jog-why"></span></div>
           <div class="mv-row"><button class="btn" id="mv-home" title="Home all axes (Z goes up first). Needed once per session before jogging.">⌂ Home</button>
             <span class="muted mv-small">Step</span><div class="mv-steps" id="mv-steps"><button data-s="0.1">0.1</button><button data-s="1" class="on">1</button><button data-s="10">10</button></div><span class="muted mv-small">mm</span></div>
@@ -5211,7 +5218,13 @@ function mvRender(st) {
   mvEl('mv-unlock').disabled = !(conn && s.state === 'Alarm');
   const canHome = conn && st.armed && st.fresh && (s.state === 'Idle' || s.state === 'Alarm') && !st.homing;
   mvEl('mv-home').disabled = !canHome;
-  const why = !conn ? 'connect first' : s.state === 'Alarm' ? (s.halt ? s.halt.advice : 'press Unlock') : !st.armed ? 'turn Control on' : !st.homed ? 'home first' : s.state !== 'Idle' ? `machine is ${s.state}` : st.jogging ? 'moving…' : '';
+  const tl = s.tool ? s.tool.number : null, tc = st.tool_change;
+  mvEl('mv-tool-state').textContent = !conn ? '' : `machine has T${tl}` + (st.tool_ok ? ' · measured ✓' : ' · not measured');
+  mvEl('mv-tc-start').disabled = !(conn && st.armed && st.homed && s.state === 'Idle') || (tc && ['moving', 'awaiting', 'measuring'].includes(tc.stage));
+  const box = mvEl('mv-tc-box'); box.style.display = tc ? '' : 'none';
+  if (tc) { box.className = 'mv-tc ' + tc.stage; mvEl('mv-tc-msg').textContent = `T${tc.tool}: ${tc.msg}`;
+    mvEl('mv-tc-confirm').style.display = tc.stage === 'awaiting' ? '' : 'none'; mvEl('mv-tc-cancel').textContent = ['done', 'failed'].includes(tc.stage) ? 'Close' : 'Cancel'; }
+  const why = !conn ? 'connect first' : s.state === 'Alarm' ? (s.halt ? s.halt.advice : 'press Unlock') : !st.armed ? 'turn Control on' : !st.homed ? 'home first' : !st.tool_ok ? 'measure the tool first (Change tool)' : s.state !== 'Idle' ? `machine is ${s.state}` : st.jogging ? 'moving…' : '';
   mvEl('mv-jog-why').textContent = why;
   document.querySelectorAll('#machine-view [data-j]').forEach(x => x.disabled = !!why);
   const zf = mvEl('mv-zfloor'); if (document.activeElement !== zf) zf.value = st.z_floor;
@@ -5246,6 +5259,9 @@ function mvRender(st) {
     mvPost({ action: 'jog', axis: ax, dist: d });
   });
   mvEl('mv-zfloor').onchange = e => mvPost({ action: 'z_floor', z: +e.target.value });
+  mvEl('mv-tc-start').onclick = () => mvPost({ action: 'change_tool', z: Math.round(+mvEl('mv-tc-num').value) });
+  mvEl('mv-tc-confirm').onclick = () => mvPost({ action: 'confirm_tool' });
+  mvEl('mv-tc-cancel').onclick = () => mvPost({ action: 'cancel_tool' });
   mvEl('mv-dust').onchange = e => mvPost({ action: 'switch', axis: 'dust', on: e.target.checked });
   mvEl('mv-light').onchange = e => mvPost({ action: 'switch', axis: 'light', on: e.target.checked });
   mvEl('mv-cam-on').onchange = e => { MV.camOn = e.target.checked; mvCamera(); };
