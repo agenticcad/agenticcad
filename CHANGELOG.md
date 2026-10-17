@@ -5,6 +5,29 @@ features, patch bumps fix things. The version shown in the UI header comes from 
 
 ## [Unreleased]
 
+## [0.47.0] — 2026-10-18
+
+### Added
+- **Tool shapes.** Tools are now described by their real shape: flat, ball, **bull nose** (corner radius), **V-bit /
+  engraver** with its tip diameter, chamfer, drill and **tapered ball**, plus the **shank diameter** (a 0.3 mm endmill on
+  a 1/8" shank), an optional **neck** (diameter and reach) and the **stickout**. Settings ▸ Tools has a *Shape* editor per
+  tool with the fields its type uses and a to-scale drawing of the profile (cutting part, body, shank). The viewer,
+  the simulation and the machine model draw each tool from that profile.
+- **Toolpaths use the shape.** 3D finishing drops the whole tool (cutting shape, neck and shank) onto the surface, so
+  ball, bull-nose, V and tapered-ball tools all follow it without gouging, and a wide shank never dips into it (checked
+  against exact geometry for every type). The 4th-axis maps do the same. 2.5D operations with a non-flat tool plan with
+  its width at the cut depth, so the top of the cut lands exactly on the boundary, and they say what the shape leaves:
+  the floor's ridge height between passes, sloped walls, a cut deeper than the flutes, or a shank that will meet walls.
+- **Collisions from the shape.** The simulator cuts with the real profile up to the flute length; material met above it
+  is reported ("tool above its 2 mm flutes"), as are a neck or a shank wider than the cut meeting the stock ("tool
+  shank"), and the whole tool (not just its tip diameter) against fixtures.
+
+### Fixed
+- 3D finishing could flatten a gently curved pass into one straight move and cut into the part: points along a raster
+  line were dropped by comparing each with its immediate neighbours only. Every dropped point is now checked against
+  the move that replaces it.
+- The Machine tab's *Program panel* switch is a normal checkbox again (it was stretched to the address field's width).
+
 ## [0.46.0] — 2026-10-17
 
 ### Added

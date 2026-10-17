@@ -316,6 +316,21 @@ async def cam_feeds_for(body: FeedsBody):
         return JSONResponse({"error": str(e)}, status_code=400)
 
 
+class ToolShapeBody(BaseModel):
+    tool: dict
+
+
+@app.post("/api/cam/tool_shape")
+async def cam_tool_shape(body: ToolShapeBody):
+    """A tool's profile for the tool editor's drawing (or why the definition is impossible)."""
+    from cam_data import _tool_from
+    try:
+        t = _tool_from({"number": 0, "name": "tool", **body.tool})
+        return {"shape": t.shape.payload()}
+    except (ValueError, TypeError) as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+
+
 @app.get("/api/gcode")
 async def gcode_download():
     if agent.program is None:

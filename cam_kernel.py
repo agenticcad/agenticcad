@@ -37,10 +37,10 @@ class CamError(Exception):
 class Tool:
     number: int
     name: str
-    type: str = "flat"          # flat | ball | vbit | drill | chamfer
-    diameter: float = 6.0
+    type: str = "flat"          # flat | ball | bull | vbit | chamfer | drill | taper_ball (tool_shape.TYPES)
+    diameter: float = 6.0       # the widest the cutting part gets
     flutes: int = 2
-    flute_length: float = 20.0
+    flute_length: float = 20.0  # length of the cutting edges from the tip
     rpm: float = 12000
     feed: float = 1000          # XY feed, mm/min
     plunge: float = 300         # Z feed, mm/min
@@ -48,13 +48,36 @@ class Tool:
     stepover: float = 0.5       # default radial stepover, fraction of diameter
     angle: float = 0.0          # included angle for vbit/chamfer/drill point
     notes: str = ""
+    corner_radius: float = 0.0  # bull nose
+    tip_diameter: float = 0.0   # V-bit / chamfer flat tip; the ball diameter of a tapered ball endmill
+    taper: float = 0.0          # tapered ball: taper angle per side, degrees
+    shank_diameter: float = 0.0 # 0 = the same as the diameter (a 1/8" shank on a 0.3 mm endmill: 3.175)
+    neck_diameter: float = 0.0  # a relieved neck between the flutes and the shank (0 = none)
+    reach: float = 0.0          # how far below the shank the tool stays thin (neck end); 0 = the flute length
+    stickout: float = 0.0       # how far the tool projects from the collet / nut; 0 = estimated
 
     @property
     def radius(self) -> float:
         return self.diameter / 2
 
+    @property
+    def shape(self):
+        """The tool's exact profile (tool_shape.ToolShape): heights, radii, bands, outline."""
+        import tool_shape
+        return tool_shape.shape(self)
+
     def label(self) -> str:
         return f"T{self.number} {self.name}"
+
+
+def tool_payload(tool: Tool) -> dict:
+    """A tool as the UI gets it: its fields plus its shape (outline from the tip, flute length, stickout...)."""
+    d = asdict(tool)
+    try:
+        d["shape"] = tool.shape.payload()
+    except Exception as e:  # noqa: BLE001 — a bad definition shows as an error, the rest still works
+        d["shape"] = {"error": str(e)}
+    return d
 
 
 # What each controller's G-code interpreter accepts, by post. Sources: the controllers' own source / manuals.
@@ -602,9 +625,10 @@ class PathBuilder:
     def __init__(self, setup: Setup, tool: Tool, op: Op):
         self.setup, self.tool, self.op = setup, tool, op
         op.setup = setup
-        if setup.machine.collet and tool.diameter > setup.machine.collet + 1e-6 and tool.type in ("flat", "ball", "drill"):
-            op.warnings.append(f"{tool.label()} Ø{tool.diameter} is larger than the {setup.machine.collet:g} mm collet: "
-                               "check the shank fits (reduced-shank tool?)")
+        shank = getattr(tool, "shank_diameter", 0) or tool.diameter
+        if setup.machine.collet and shank > setup.machine.collet + 1e-6:
+            op.warnings.append(f"{tool.label()}: its Ø{shank:g} shank is larger than the {setup.machine.collet:g} mm collet "
+                               "(set the tool's shank diameter if it is a reduced-shank tool)")
         self.pos: tuple[float, float, float] | None = None
         mf = setup.machine.max_feed
         self.feed = min(tool.feed, mf.get("x", tool.feed), mf.get("y", tool.feed))
@@ -1692,20 +1716,44 @@ def drill(setup: Setup, tool: Tool, points, z_top: float | None = None, z_bottom
     return op
 
 
+def _drop_tip(zmap: np.ndarray, tool: Tool, res: float, depth: float) -> np.ndarray:
+    """Lowest tip height over each height-map cell with no part of the tool below the surface. Only the parts of the
+    tool within `depth` (the material's thickness) of the tip can touch, so wider parts higher up (a big shank) are
+    left out of the footprint once they are above it."""
+    sh = tool.shape
+    rmax = sh.max_radius
+    reach_r = float(np.max(sh.radius_at(np.linspace(0, max(depth, 1e-3), 200))))     # widest part that can touch
+    r = min(rmax, max(reach_r, sh.cut_radius))
+    k = int(math.ceil(r / res))
+    ny, nx = zmap.shape
+    ii, jj = np.mgrid[-k:k + 1, -k:k + 1]
+    d = np.hypot(ii * res, jj * res)
+    h = sh.height(d)
+    tip = np.full_like(zmap, -np.inf)
+    padded = np.pad(zmap, k, mode="edge")
+    for i in range(2 * k + 1):
+        for j in range(2 * k + 1):
+            if np.isfinite(h[i, j]) and h[i, j] <= depth + 1e-9:
+                tip = np.maximum(tip, padded[i:i + ny, j:j + nx] - h[i, j])
+    return tip
+
+
 def parallel3d(setup: Setup, tool: Tool, shape: Shape | None = None, model: ck.Model | None = None,
                z_top: float | None = None, z_bottom: float | None = None, region=None,
                stepover: float | None = None, angle: float = 0.0, resolution: float | None = None,
                rest_from: Tool | None = None, name: str = "Parallel 3D") -> Op:
     """3D finishing: parallel raster passes following the surface (heightmap from the exact shape's
-    triangulation, offset by the tool shape: ball or flat). Cuts down to z_bottom outside the part.
+    triangulation, offset by the tool's whole profile: any type — flat, ball, bull nose, V, tapered ball — with its
+    neck and shank kept out of the surface too). Cuts down to z_bottom outside the part.
     rest_from=<bigger tool>: only where that tool left material (its tip map sits higher)."""
     if shape is None and model is None:
         raise CamError("parallel3d: give shape= or model=")
     shape = shape or model.shape
     op = Op(name, "parallel3d", tool, color=COLORS["parallel3d"])
     pb = PathBuilder(setup, tool, op)
-    so = (stepover or min(tool.stepover, 0.2)) * tool.diameter
-    res = resolution or max(0.2, min(so / 2, tool.diameter / 6))
+    fd = tool.tip_diameter if tool.type == "taper_ball" and tool.tip_diameter else tool.diameter    # what does the finishing
+    so = (stepover or min(tool.stepover, 0.2)) * fd
+    res = resolution or max(0.05, min(0.2, so / 2, fd / 6)) if fd < 1.2 else (resolution or max(0.2, min(so / 2, fd / 6)))
     regp = unary_union(_polys(region)) if region is not None else setup.stock.rect()
     minx, miny, maxx, maxy = regp.bounds
     z_top = setup.stock.top if z_top is None else z_top
@@ -1720,35 +1768,13 @@ def parallel3d(setup: Setup, tool: Tool, shape: Shape | None = None, model: ck.M
         I = np.array(bd["indices"], dtype=np.int64).reshape(-1, 3)
         _raster_triangles(P, I, zmap, minx, miny, res)
     zmap = np.clip(zmap, z_bottom, None)
-    # tool offset (footprint max)
-    r = tool.radius
-    k = int(math.ceil(r / res))
-    off = np.full((2 * k + 1, 2 * k + 1), -np.inf)
-    for i in range(-k, k + 1):
-        for j in range(-k, k + 1):
-            d = math.hypot(i * res, j * res)
-            if d <= r + 1e-9:
-                off[i + k, j + k] = (math.sqrt(max(r * r - d * d, 0.0)) - r) if tool.type == "ball" else 0.0
-    tip = np.full_like(zmap, -np.inf)
-    padded = np.pad(zmap, k, mode="edge")
-    for i in range(2 * k + 1):
-        for j in range(2 * k + 1):
-            if off[i, j] > -np.inf:
-                tip = np.maximum(tip, padded[i:i + ny, j:j + nx] + off[i, j])
+    # drop-cutter on the height map: the tip sits as low as it can with no part of the tool (cutting shape, neck,
+    # shank) below the surface: tip(p) = max over |q - p| <= tool radius of zmap(q) - height_of_tool(|q - p|)
+    tip = _drop_tip(zmap, tool, res, z_top - z_bottom)
     tip = np.clip(tip, z_bottom, z_top)
     mask = None
     if rest_from is not None:
-        rp = rest_from.radius
-        kp = int(math.ceil(rp / res))
-        tip_prev = np.full_like(zmap, -np.inf)
-        padded_p = np.pad(zmap, kp, mode="edge")
-        for i in range(2 * kp + 1):
-            for j in range(2 * kp + 1):
-                d = math.hypot((i - kp) * res, (j - kp) * res)
-                if d <= rp + 1e-9:
-                    o = (math.sqrt(max(rp * rp - d * d, 0.0)) - rp) if rest_from.type == "ball" else 0.0
-                    tip_prev = np.maximum(tip_prev, padded_p[i:i + ny, j:j + nx] + o)
-        tip_prev = np.clip(tip_prev, z_bottom, z_top)
+        tip_prev = np.clip(_drop_tip(zmap, rest_from, res, z_top - z_bottom), z_bottom, z_top)
         mask = (tip_prev - tip) > 0.02          # previous tool sat higher: material left behind
         # grow the mask by one tool radius so passes overlap into the finished area
         g = max(1, int(round(tool.radius / res)))
@@ -1809,16 +1835,24 @@ def parallel3d(setup: Setup, tool: Tool, shape: Shape | None = None, model: ck.M
 
 
 def _simplify_z(pts, tol: float = 0.005):
-    """Drop collinear points along a raster line."""
+    """Drop points along a raster line that the straight move replacing them passes within `tol` of — measured from
+    the last point KEPT, so a gentle curve sampled finely is never flattened into one long chord (which would gouge)."""
+    if len(pts) <= 2:
+        return list(pts)
+    P = np.asarray(pts, dtype=float)
     out = [pts[0]]
-    for a, b, c in zip(pts, pts[1:], pts[2:]):
-        # keep b if it deviates from the line a-c
-        t = (b[0] - a[0], b[1] - a[1], b[2] - a[2]); u = (c[0] - a[0], c[1] - a[1], c[2] - a[2])
-        lu = math.sqrt(u[0] ** 2 + u[1] ** 2 + u[2] ** 2) or 1.0
-        proj = (t[0] * u[0] + t[1] * u[1] + t[2] * u[2]) / lu
-        perp = math.sqrt(max(t[0] ** 2 + t[1] ** 2 + t[2] ** 2 - proj * proj, 0.0))
-        if perp > tol:
-            out.append(b)
+    a = 0
+    i = 2
+    while i < len(P):
+        seg = P[i] - P[a]
+        L = float(np.linalg.norm(seg)) or 1.0
+        mid = P[a + 1:i] - P[a]
+        proj = mid @ seg / L
+        perp = np.sqrt(np.maximum((mid * mid).sum(axis=1) - proj * proj, 0.0))
+        if perp.max() > tol:
+            a = i - 1
+            out.append(pts[a])
+        i += 1
     out.append(pts[-1])
     return out
 
@@ -1957,7 +1991,7 @@ def feeds(tool: Tool, material: str, machine: Machine | None = None, aggressiven
     if machine is not None and plunge > machine.max_feed.get("z", 1e9):
         plunge = machine.max_feed["z"]
     stepdown = round(min(mat["stepdown"] * d, tool.flute_length), 3)
-    if tool.type == "ball":
+    if tool.type in ("ball", "taper_ball"):
         stepdown = round(stepdown * 0.6, 3)
     cap = machine.stepdown_cap(key) if machine is not None else None
     if cap and stepdown > cap:
@@ -2168,7 +2202,7 @@ class Program:
                     M = st.to_model(P)
                 moves = [[m[0], round(float(q[0]), 4), round(float(q[1]), 4), round(float(q[2]), 4), m[4]] + ([m[5]] if len(m) > 5 else [])
                          for m, q in zip(op.moves, M)]
-            ops.append({"name": op.name, "kind": op.kind, "color": op.color, "tool": asdict(op.tool), "setup": si,
+            ops.append({"name": op.name, "kind": op.kind, "color": op.color, "tool": tool_payload(op.tool), "setup": si,
                         "key": op.key, "overrides": op.overrides, "defaults": op.defaults,
                         "cut": {"fields": {k: list(m) for k, m in CUT_FIELDS.get(op.kind, {}).items() if k in op.cut_defaults},
                                 "values": op.cut_defaults, "overrides": op.cut_overrides},
@@ -2755,6 +2789,62 @@ def fixtures(table: dict | None = None) -> None:
     _FIXTURES["table"] = dict(table or {})
 
 
+def _scallop(sh, s: float) -> float:
+    """Height of the ridge a tool profile leaves between two passes s apart on a flat floor."""
+    if s <= 0:
+        return 0.0
+    x = np.linspace(0.0, s, 201)
+    h = np.minimum(sh.cut_height(np.abs(x)), sh.cut_height(np.abs(s - x)))
+    return float(np.nanmax(np.where(np.isfinite(h), h, np.nan))) if np.isfinite(h).any() else float("inf")
+
+
+def _shape_plan(kind: str, args: dict, sig) -> list[str]:
+    """2.5D operations (face / pocket / adaptive / contour) with a tool that is not a flat endmill: plan the path with the
+    tool's width at the cut depth (so the top edge of the cut lands on the boundary and nothing is overcut) by swapping
+    in a flat stand-in of that width — the operation gets the real tool back afterwards — and say what the tool's shape
+    leaves (sloped walls, a scalloped floor, a fillet). Any tool: warn when the cut is deeper than the flutes or deep
+    enough for a wider shank / neck to reach the walls. Returns the notes for op.warnings."""
+    from dataclasses import replace
+    tool: Tool = args["tool"]
+    try:
+        sh = tool.shape
+    except Exception as e:  # noqa: BLE001 — a bad tool definition is reported, the op still builds as before
+        return [f"{tool.label()}: tool shape: {e}"]
+    notes = []
+    zt, zb = args.get("z_top"), args.get("z_bottom")
+    depth = float(zt) - float(zb) if zt is not None and zb is not None else None
+    fl = sh.flute_length
+    if depth is not None and depth > fl + 1e-6:
+        notes.append(f"{tool.label()}: the cut is {depth:.2f} mm deep but the flutes are {fl:g} mm long — the tool's body rubs above them")
+    if depth is not None and sh.max_radius > sh.cut_radius + 1e-6:
+        top = float(sh.height(np.array([sh.cut_radius + 1e-3]))[0])      # where the tool first gets wider than its cut
+        if depth > top + 1e-6:
+            notes.append(f"{tool.label()}: {depth:.2f} mm deep, but {top:.2f} mm above its tip the tool widens to "
+                         f"Ø{2 * sh.max_radius:g} (shank / neck): it hits any wall within {sh.max_radius - sh.cut_radius:.2f} mm of the cut "
+                         "— the simulator checks where")
+    if tool.type == "flat":
+        return notes
+    w = sh.width_at_depth(depth) if depth is not None and depth > 0 else 2 * sh.cut_radius
+    if kind != "contour" or args.get("side", "outside") != "on":
+        if w < tool.diameter - 1e-6:
+            args["tool"] = replace(tool, diameter=round(w, 6), type="flat")
+            notes.append(f"{tool.label()}: planned with its Ø{w:.3f} width at the {depth:.2f} mm depth so the top of the "
+                         "cut stays on the boundary; the walls below follow the tool's shape" if depth else
+                         f"{tool.label()}: planned with its Ø{w:.3f} cutting width")
+    if kind in ("face", "pocket", "adaptive"):
+        so_frac = args.get("stepover") or tool.stepover
+        s = float(so_frac) * (w if w < tool.diameter else tool.diameter)
+        sc = _scallop(sh, s)
+        flat_w = 2 * float(np.max(np.where(sh.cut_height(np.linspace(0, sh.cut_radius, 400)) <= 1e-4,
+                                           np.linspace(0, sh.cut_radius, 400), 0.0)))
+        what = {"ball": "a ball end", "bull": f"a R{tool.corner_radius:g} corner", "taper_ball": "a tapered ball end",
+                "vbit": "a V tip", "chamfer": "a chamfer tip", "drill": "a drill point"}.get(tool.type, tool.type)
+        notes.append(f"{tool.label()} has {what}: the floor is cut by its Ø{flat_w:.3f} flat"
+                     + (f" and left with {sc:.3f} mm ridges between passes {s:.3f} mm apart" if sc > 0.001 else " (passes overlap it: flat)")
+                     + " — use a flat endmill for flat floors")
+    return notes
+
+
 def _plain(v):
     """A cut setting as the CAM tab shows it (numpy scalars -> float; anything else non-scalar -> None)."""
     if isinstance(v, bool) or v is None or isinstance(v, str):
@@ -2814,11 +2904,16 @@ def _overridable(fn, kind: str):
         cut_script = {k: b.arguments.get(k, sig.parameters[k].default) for k in cut_meta if k in sig.parameters}
         for k, v in cut_ov.items():
             b.arguments[k] = v
+        real_tool = b.arguments["tool"]
+        notes = _shape_plan(kind, b.arguments, sig) if kind in ("face", "pocket", "adaptive", "contour") else []
         _OV["depth"] += 1
         try:
             op = fn(*b.args, **b.kwargs)
         finally:
             _OV["depth"] -= 1
+        if op.tool is not real_tool and kind in ("face", "pocket", "adaptive", "contour"):
+            op.tool = real_tool                            # planned with the tool's width at the cut depth (see _shape_plan)
+        op.warnings.extend(notes)
         op.key, op.base_tool, op.overrides, op.defaults = key, tool, ov, defaults
         op.cut_defaults = {k: (None if v is inspect.Parameter.empty else _plain(v)) for k, v in cut_script.items()}
         op.cut_overrides = dict(cut_ov)

@@ -147,7 +147,8 @@ def tip_map(R: np.ndarray, xs: np.ndarray, angles: np.ndarray, tool: Tool) -> np
     na, nx = R.shape
     res_x = float(xs[1] - xs[0]) if nx > 1 else 1.0
     res_a = float(angles[1] - angles[0]) if na > 1 else 1.0
-    rt = tool.radius
+    sh = tool.shape                                     # the tool's profile: any type, its neck and shank included
+    rt = max(tool.radius, sh.max_radius)
     T = np.zeros_like(R)
     kx = int(math.ceil(rt / res_x))
     r_pos = R[R > 0]
@@ -172,11 +173,8 @@ def tip_map(R: np.ndarray, xs: np.ndarray, angles: np.ndarray, tool: Tool) -> np
                 Ys, Zs = ys, zs
             dist2 = dx * dx + Ys * Ys
             inside = dist2 <= rt * rt + 1e-9
-            if tool.type == "ball":
-                prof = rt - np.sqrt(np.maximum(rt * rt - dist2, 0.0))
-            else:
-                prof = 0.0
-            cand = np.where(inside, Zs - prof, -np.inf)
+            prof = sh.height(np.sqrt(np.where(inside, dist2, 0.0)))
+            cand = np.where(inside & np.isfinite(prof), Zs - prof, -np.inf)
             np.maximum(T, cand, out=T)
     return T
 

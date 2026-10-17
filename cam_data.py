@@ -183,6 +183,7 @@ class Library:
     def save_tool(self, data: dict) -> Tool:
         tools = self.tools()
         t = _tool_from(data)
+        t.shape                                             # refuses an impossible shape (tool_shape.ToolShapeError)
         tools = [x for x in tools if x.number != t.number] + [t]
         tools.sort(key=lambda x: x.number)
         self.tools_path.write_text(json.dumps([asdict(x) for x in tools], indent=2))
@@ -207,7 +208,11 @@ class Library:
         for t in self.tools():
             lines.append(f"  - T{t.number} '{t.name}': {t.type} Ø{t.diameter} mm, {t.flutes}F, flute length {t.flute_length}, "
                          f"rpm {t.rpm}, feed {t.feed}, plunge {t.plunge}, stepdown {t.stepdown}, stepover {t.stepover}"
-                         + (f", angle {t.angle}°" if t.angle else "") + (f" — {t.notes}" if t.notes else ""))
+                         + (f", angle {t.angle}°" if t.angle else "")
+                         + (f", corner R{t.corner_radius}" if t.corner_radius else "") + (f", tip Ø{t.tip_diameter}" if t.tip_diameter else "")
+                         + (f", taper {t.taper}°/side" if t.taper else "") + (f", shank Ø{t.shank_diameter}" if t.shank_diameter else "")
+                         + (f", neck Ø{t.neck_diameter} to {t.reach} mm" if t.neck_diameter else (f", reach {t.reach}" if t.reach else ""))
+                         + (f", stickout {t.stickout}" if t.stickout else "") + (f" — {t.notes}" if t.notes else ""))
         return "\n".join(lines)
 
 

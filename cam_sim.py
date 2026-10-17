@@ -6,7 +6,9 @@ Two representations, picked by the setups of the simulated ops:
   radial (4th axis, indexed or continuous): per (x, angle) cell the distance r from the rotary axis to the surface,
          angle measured in the part's A = 0 frame (as cam_rotary.radial_map). The tool (vertical, any Y offset) cuts
          a ray where it covers it out to the current surface.
-Tools are flat, ball or V; the shank above the tip is treated as part of the tool (rapids through material show up).
+Tools cut with their real profile (tool_shape: flat, ball, bull nose, V, chamfer, drill, tapered ball) up to their flute
+length; the parts above it (the body over the flutes, a neck, a wider shank) do not cut: material they meet is a
+collision ("deeper than the flutes", "T9 shank"), as is the holder stack above them.
 The result keeps compressed snapshots for the viewer and compares the final stock with the part: gouges (cut into
 the part), material left on the part, and rapids that hit material.
 """
@@ -26,13 +28,8 @@ EMPTY = 65535
 
 
 def _profile(tool: cam.Tool, d: np.ndarray) -> np.ndarray:
-    """Height of the tool's cutting surface above its tip at radial distance d (inside the tool radius)."""
-    r = tool.radius
-    if tool.type == "ball":
-        return r - np.sqrt(np.maximum(r * r - d * d, 0.0))
-    if tool.type in ("vbit", "chamfer", "drill") and tool.angle:
-        return d / math.tan(math.radians(tool.angle / 2))
-    return np.zeros_like(d)
+    """Height of the tool's cutting surface above its tip at radial distance d (inf outside the cutting part)."""
+    return tool.shape.cut_height(d)
 
 
 def _samples(moves, step: float, with_a: bool):
@@ -233,6 +230,8 @@ def _sim_zmap(program, sel, part, resolution, frames, tol, machine_model=None, p
                 end = len(pts)
             end = max(end, start + 1) if end <= start else end
             P = pts[start:end]; K = kinds[start:end]; I = idx[start:end]
+            if side == 1:
+                _buried_z(collisions, zhi, P, K, I, tool, res, x0, y0, op.name)
             _stamp_z(zhi, zlo, P, K, I, tool, side, res, x0, y0, rapid_hits, op.name)
             if machine_model is not None and side == 1:
                 _collide_z(collisions, zhi, P, I, done, tool, machine_model, res, x0, y0, op.name, st_boxes[0], placement)
@@ -254,7 +253,7 @@ def _sim_zmap(program, sel, part, resolution, frames, tol, machine_model=None, p
     remaining = np.where(zhi > zlo, zhi - zlo, 0.0).sum() * res * res
     out.stats = {"moves": total, "ops": len(sel), "removed_cm3": round((initial - remaining) / 1000.0, 3),
                  "rapid_hits": rapid_hits[:50]}
-    if machine_model is not None or fix_hi is not None:
+    if machine_model is not None or fix_hi is not None or collisions:
         out.stats["collisions"] = _collision_stats(collisions)
         if machine_model is not None:
             out.stats["machine"] = {"key": machine_model.key, "name": machine_model.name, "placement": placement}
@@ -300,7 +299,7 @@ def _stamp_z_run(zhi, zlo, P, K, I, tool, side, res, x0, y0, rapid_hits, op_name
     ny, nx = zhi.shape
     if len(P) == 0:
         return
-    R = tool.radius
+    R = tool.shape.cut_radius
     k = int(math.ceil(R / res)) + 1
     oy, ox = np.mgrid[-k:k + 1, -k:k + 1]
     oy = oy.ravel(); ox = ox.ravel()
@@ -313,8 +312,10 @@ def _stamp_z_run(zhi, zlo, P, K, I, tool, side, res, x0, y0, rapid_hits, op_name
         # exact distance from the real tool position to each cell centre (no snapping)
         d = np.hypot(x0 + CX * res - P[s:e, 0:1], y0 + CY * res - P[s:e, 1:2])
         ok = (CX >= 0) & (CX < nx) & (CY >= 0) & (CY < ny) & (d < R - 1e-4)   # touching a cell centre is not cutting it
+        prof_all = _profile(tool, np.where(ok, d, 0.0))
+        ok &= np.isfinite(prof_all)
         flat = (CY * nx + CX)[ok]
-        prof = _profile(tool, d[ok])
+        prof = prof_all[ok]
         zt = np.broadcast_to(P[s:e, 2:3], d.shape)[ok]
         vals = zt + prof if side > 0 else zt - prof
         rap = (K[s:e] == cam.RAPID)
@@ -334,6 +335,42 @@ def _stamp_z_run(zhi, zlo, P, K, I, tool, side, res, x0, y0, rapid_hits, op_name
             np.minimum.at(zhi.ravel(), flat, vals)
         else:
             np.maximum.at(zlo.ravel(), flat, vals)
+
+
+def _buried_z(hits, zhi, P, K, I, tool, res, x0, y0, op_name):
+    """Before a piece is cut: is there material in the tool's footprint higher than its flutes reach (tip + flute
+    length)? Then the body above the flutes is in the material — a cut deeper than the tool can make. Feed moves only
+    (rapids through material are reported on their own)."""
+    if len(P) == 0:
+        return
+    sh = tool.shape
+    r, fl = sh.cut_radius, sh.flute_length
+    ny, nx = zhi.shape
+    rc = int(math.ceil(r / res))
+    step = max(1, int((r / 2) / (res / 2)))
+    worst = None
+    for k in range(0, len(P), step):
+        if K[k] == cam.RAPID:
+            continue
+        x, y, z = P[k]
+        ix, iy = int(round((x - x0) / res)), int(round((y - y0) / res))
+        xa, xb = max(0, ix - rc), min(nx - 1, ix + rc); ya, yb = max(0, iy - rc), min(ny - 1, iy + rc)
+        if xa > xb or ya > yb:
+            continue
+        sub = zhi[ya:yb + 1, xa:xb + 1]
+        top = float(np.max(sub)) if sub.size else -np.inf
+        if not np.isfinite(top) or top <= z + fl + 0.05:
+            continue
+        yy, xx = np.mgrid[ya:yb + 1, xa:xb + 1]
+        dd = np.hypot((xx - (x - x0) / res) * res, (yy - (y - y0) / res) * res)
+        m = (dd < r) & np.isfinite(sub) & (sub > z + fl + 0.05)
+        if m.any():
+            depth = float((sub[m] - (z + fl)).max())
+            if worst is None or depth > worst["depth"]:
+                worst = {"op": op_name, "move": int(I[k]), "pos": [round(float(x), 2), round(float(y), 2), round(float(z), 2)],
+                         "part": f"tool above its {fl:g} mm flutes", "what": "stock", "depth": round(depth, 2)}
+    if worst is not None:
+        hits.append(worst)
 
 
 def _part_maps_z(part, res, x0, y0, nx, ny):
@@ -535,7 +572,7 @@ def _stamp_r_run(r, P, K, I, tool, res_x, res_a, x0, rapid_hits, op_name):
         okx = (ix >= 0) & (ix < nx) & (np.abs(dx) < R - 1e-4)
         rho_x = np.sqrt(np.maximum(R * R - dx * dx, 0.0))
         ball = tool.type == "ball"
-        prof_x = 0.0 if ball else _profile(tool, np.minimum(np.abs(dx), R))
+        prof_x = 0.0 if ball else np.nan_to_num(_profile(tool, np.minimum(np.abs(dx), R)), posinf=1e6)
         # broadcast to (n, A, X). Tool = cylinder (|y - yt| <= rho at this X) above z_c, plus for a ball the sphere
         # centred R above the tip. The ray is s * (sin phi, cos phi) in machine (y, z).
         z_c = zt[:, None, None] + (R if ball else 0.0) + (prof_x[:, None, :] if not ball else 0.0)
@@ -587,8 +624,8 @@ def _stamp_r_run(r, P, K, I, tool, res_x, res_a, x0, rapid_hits, op_name):
 
 # ----------------------------------------------------------------------------- machine collisions (holder / nose / head / table)
 def tool_stickout(tool: cam.Tool) -> float:
-    """How far the tool projects below the nose/nut face: flute length plus the shank that clears the collet (estimated)."""
-    return float(getattr(tool, "stickout", 0) or 0) or (float(tool.flute_length) + 6.0)
+    """How far the tool projects below the nose/nut face: the tool's own stickout, else its reach + 6 mm (estimated)."""
+    return float(getattr(tool, "stickout", 0) or 0) or float(tool.shape.stickout)
 
 
 def _collision_stats(hits: list[dict]) -> dict:
@@ -612,7 +649,13 @@ def holder_levels(machine_model, tool: cam.Tool) -> list[tuple]:
     ov = getattr(machine_model, "stickout", None)
     if ov:
         stick = max(float(ov), float(tool.flute_length))
-    levels = [("tool shank", tool.radius, float(tool.flute_length), max(stick - float(tool.flute_length), 0.0), None)]
+    sh = tool.shape
+    fl = float(sh.flute_length)
+    # the tool above its flutes, in bands of its real radius (the body over the flutes, a neck, a wider shank)
+    levels = [("tool shank" if r >= sh.max_radius - 1e-6 else "tool neck", r, b, t - b, None)
+              for b, t, r in sh.bands(fl) if b < stick]
+    if not levels:
+        levels = [("tool shank", tool.radius, fl, max(stick - fl, 0.0), None)]
     z = stick
     for lvl in machine_model.nose:
         bxs = lvl.get("boxes") or ([lvl["box"]] if lvl.get("box") else None)
@@ -653,9 +696,10 @@ def _collide_z(hits, zhi, P, I, done, tool, mm, res, x0, y0, op_name, stock, pla
     base = stock.zmin - float(placement.get("fixture", 0.0))         # the plane the stock (or its fixture) stands on
     spoil = 0.0 if placement.get("replaces_spoilboard") else float(mm.spoilboard)
     table_z = base
+    cut_r = tool.shape.cut_radius
     for name, r, zb_off, h, box in levels:
-        if r <= tool.radius + 1e-6 and name == "tool shank":
-            continue                                                   # the flutes clear their own radius
+        if r <= cut_r + 1e-6 and name in ("tool shank", "tool neck"):
+            continue                                                   # inside the flutes' own cut (the buried check covers it)
         c = max(1, int(r / (2 * res)))                                 # coarse cells ~ r/2
         coarse = _pool_max(zhi, c)
         step = max(1, int((r / 2) / (res / 2)))                        # sample spacing ≤ r/2 (samples are res/2 apart)
@@ -675,7 +719,7 @@ def _collide_z(hits, zhi, P, I, done, tool, mm, res, x0, y0, op_name, stock, pla
             xa, xb = max(0, ix - rc), min(nx - 1, ix + rc); ya, yb = max(0, iy - rc), min(ny - 1, iy + rc)
             sub = zhi[ya:yb + 1, xa:xb + 1]
             yy, xx = np.mgrid[ya:yb + 1, xa:xb + 1]
-            mask = _level_mask(xx, yy, x, y, x0, y0, res, r, tool.radius, box) & (sub > zb + 0.02) & np.isfinite(sub)
+            mask = _level_mask(xx, yy, x, y, x0, y0, res, r, cut_r, box) & (sub > zb + 0.02) & np.isfinite(sub)
             if mask.any():
                 depth = float((sub[mask] - zb).max())
                 if worst is None or depth > worst["depth"]:            # one hit per level per piece: the deepest (ramps enter gradually)
@@ -771,7 +815,9 @@ def _collide_fixture(hits, fix, P, K, I, tool, mm, sample_res, op_name):
     if len(P) == 0:
         return
     fix_hi, res, x0, y0 = fix["top"], fix["res"], fix["x0"], fix["y0"]
-    levels = [("tool", float(tool.radius), 0.0, float(tool.flute_length), None)] + (holder_levels(mm, tool) if mm is not None else [])
+    sh = tool.shape
+    levels = [("tool", r, b, t - b, None) for b, t, r in sh.bands(0.0) if t <= sh.flute_length + 1e-6] or [("tool", float(sh.cut_radius), 0.0, float(sh.flute_length), None)]
+    levels += holder_levels(mm, tool) if mm is not None else [("tool shank", r, b, t - b, None) for b, t, r in sh.bands(sh.flute_length)]
     ny, nx = fix_hi.shape
     for name, r, zb_off, h, box in levels:
         c = max(1, int(r / (2 * res)))

@@ -175,10 +175,18 @@ Agent-native, like the CAD side: a second script per design, `cam.py`, written b
 
 - **Libraries**: `workspace/machines/*.json` (travel, max feeds, rapid, spindle range, safe/clearance Z,
   tool-change policy `pause|manual|none|split`, collet, 4th axis, `max_stepdown` per material for the feeds
-  calculator, start/end G-code blocks) and `workspace/tools.json`
-  (flat / ball / V-bit / drill with feeds, plunge, stepdown, stepover). Edit them in **Settings ▸ Machines** (a form
-  per machine, or JSON) and **Settings ▸ Tools** (an editable table with the feeds & speeds calculator), or ask the
-  agent (`save_machine`, `save_tool`).
+  calculator, start/end G-code blocks) and `workspace/tools.json` (feeds, plunge, stepdown, stepover and the tool's
+  shape). Edit them in **Settings ▸ Machines** (a form per machine, or JSON) and **Settings ▸ Tools** (an editable
+  table with the feeds & speeds calculator and a *Shape* editor that draws the tool to scale), or ask the agent
+  (`save_machine`, `save_tool`).
+- **Tool shapes** ([tool_shape.py](tool_shape.py)): flat, ball, bull nose (corner radius), V-bit / engraver (angle + tip
+  Ø), chamfer, drill (point angle) and tapered ball (ball Ø + taper per side), each with its flute length, an optional
+  neck (Ø and reach), the shank Ø (a 0.3 mm endmill on a 1/8" shank) and the stickout. One profile (radius against
+  height above the tip) feeds everything: the tool drawn in the viewer, the simulation and machine model; 3D finishing
+  drops the whole tool (cutting shape, neck, shank) onto the surface, so any type follows it without gouging; the 4th
+  axis maps; 2.5D operations plan a non-flat tool with its width at the cut depth (the top of the cut lands on the
+  boundary) and say what its shape leaves (scallop height, sloped walls); the simulator cuts with the real profile up
+  to the flute length and reports the body above the flutes, a neck or a wider shank meeting the stock as collisions.
 - **Per-operation tool settings**: click an operation in the CAM tab to see its tool's spindle speed, feed, plunge,
   stepdown and stepover. Blank fields use the tool's values; anything you type overrides them for that operation
   only (with a calculator to fill them for a material). Overrides are one line at the top of `cam.py`,

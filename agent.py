@@ -1360,7 +1360,7 @@ class CadAgent:
         from dataclasses import asdict
         import fixture_lib
         return {"machines": [asdict(m) for m in self.library.machines().values()],
-                "tools": [asdict(t) for t in self.library.tools()], "machine_scripts": self.library.machine_scripts(),
+                "tools": [cam.tool_payload(t) for t in self.library.tools()], "machine_scripts": self.library.machine_scripts(),
                 "fixtures": fixture_lib.list_fixtures(self.workspace)}
 
     def _write_state(self) -> None:

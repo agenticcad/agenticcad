@@ -336,6 +336,10 @@
   .tool-tbl input[type=number] { -moz-appearance:textfield; appearance:textfield; } .tool-tbl input::-webkit-inner-spin-button, .tool-tbl input::-webkit-outer-spin-button { -webkit-appearance:none; margin:0; }
   #modal .fs-box input[type=range] { width:170px; flex:none; padding:0; border:0; background:none; }
   .tool-tbl tr.dirty td:first-child { box-shadow:inset 3px 0 0 var(--accent); }
+  .tshape { display:flex; gap:16px; align-items:flex-start; margin-top:12px; border:1px solid var(--line); border-radius:8px; padding:10px 12px; }
+  .tshape-f { flex:1; min-width:0; } .tshape-kv { grid-template-columns:150px 1fr; gap:5px 8px; align-items:center; }
+  #modal .tshape-kv input { width:90px; box-sizing:border-box; background:var(--bg); color:var(--text); border:1px solid var(--line); border-radius:5px; padding:4px 5px; font:inherit; }
+  .tshape-svg { flex:none; background:#0f1216; border-radius:8px; }
   .fs-box { border:1px solid var(--line); border-radius:8px; padding:10px 12px; margin-top:14px; }
   .fs-box .fs-row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; font-size:12px; } .fs-box .fs-row label { color:var(--muted); }
   .fs-box select { background:var(--bg); color:var(--text); border:1px solid var(--line); border-radius:6px; padding:4px 6px; font:inherit; }
@@ -483,7 +487,7 @@
   .mv-logcard { flex:1; min-height:120px; display:flex; flex-direction:column; }
   .mv-msg { color:var(--err); font-size:12px; min-height:0; } .mv-msg.ok { color:var(--ok); }
   .mv-log { flex:1; overflow:auto; font:11px/1.45 ui-monospace,Menlo,monospace; color:var(--muted); white-space:pre-wrap; max-height:220px; }
-  .mv-conn { display:flex; gap:6px; align-items:center; } .mv-conn input { width:210px; background:var(--panel2); border:1px solid var(--line); color:var(--text); border-radius:6px; padding:4px 7px; font-size:12px; }
+  .mv-conn { display:flex; gap:6px; align-items:center; } .mv-conn input:not([type=checkbox]) { width:210px; background:var(--panel2); border:1px solid var(--line); color:var(--text); border-radius:6px; padding:4px 7px; font-size:12px; }
   #mv-conn-state { font-size:12px; white-space:nowrap; }
   .mv-tc { margin-top:6px; padding:8px 10px; border-radius:8px; background:rgba(78,161,255,.10); border:1px solid rgba(78,161,255,.35); font-size:12.5px; }
   .mv-tc.failed { background:rgba(255,92,92,.10); border-color:rgba(255,92,92,.45); } .mv-tc.done { background:rgba(76,211,122,.10); border-color:rgba(76,211,122,.4); }
@@ -1862,8 +1866,7 @@ function applySimAt(k, f) {
       if (hits.length) simInfo.style.color = 'var(--red, #ff6b6b)';
     } else {
       if (renderedMode) toolObj = holderMesh(t);
-      else { const h = Math.max(t.diameter * 4, 12); const g = new THREE.CylinderGeometry(t.diameter / 2, t.type === 'ball' ? t.diameter / 2 : t.diameter / 2, h, 24); g.rotateX(Math.PI / 2); g.translate(0, 0, h / 2);
-        toolObj = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color: 0xffffff, transparent: true, opacity: 0.7, metalness: 0.4, roughness: 0.3 })); }
+      else toolObj = toolBody(t, null, simToolMats);
       toolObj.position.copy(pos); toolObj.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), toolAxisFor(c.op, f < 0.5 ? mv : nxt)); camGroup.add(toolObj);
       simTip = pos.clone();
       simInfo.textContent = `${opTxt} · (${pos.x.toFixed(1)}, ${pos.y.toFixed(1)}, ${pos.z.toFixed(2)}) · ${timeTxt}${speedTxt}`;
@@ -2287,15 +2290,38 @@ function tickRendered() {                             // follow the tool; spin i
     controls.target.copy(next); camera.position.add(delta);
   }
 }
+// a tool drawn from its real profile ([[z, r], ...] from the tip, from tool_shape on the server): the cutting part (up to the
+// flute length) and the rest (the body over the flutes, a neck, the shank) as two lathe meshes, up to `stick` above the tip
+const _toolGeo = new Map();
+function toolGeometries(t, stick) {
+  const sh = t.shape || {}, fl = +(sh.flute_length || t.flute_length || 10);
+  let pts = sh.outline && sh.outline.length > 1 ? sh.outline.map(p => [+p[0], +p[1]]) : [[0, 0], [0, t.diameter / 2], [fl + 6, t.diameter / 2]];
+  stick = Math.max(+(stick || sh.stickout || fl + 6), fl + 0.1);
+  const key = JSON.stringify([pts, fl, stick]);
+  if (_toolGeo.has(key)) return _toolGeo.get(key);
+  const rAt = z => { for (let i = 1; i < pts.length; i++) if (pts[i][0] >= z) { const a = pts[i - 1], b = pts[i]; return b[0] > a[0] ? a[1] + (b[1] - a[1]) * (z - a[0]) / (b[0] - a[0]) : b[1]; } return pts[pts.length - 1][1]; };
+  if (pts[pts.length - 1][0] < stick) pts.push([stick, pts[pts.length - 1][1]]);
+  pts = pts.filter(p => p[0] <= stick); if (pts[pts.length - 1][0] < stick) pts.push([stick, rAt(stick)]);
+  const cut = pts.filter(p => p[0] < fl).concat([[fl, rAt(fl)]]);
+  const body = [[fl, rAt(fl)]].concat(pts.filter(p => p[0] > fl), [[stick, 0]]);
+  const lathe = q => { const g = new THREE.LatheGeometry(q.map(p => new THREE.Vector2(Math.max(p[1], 0), p[0])), 40); g.rotateX(Math.PI / 2); g.computeVertexNormals(); return g; };
+  const out = { cut: lathe(cut), body: lathe(body), fl, stick };
+  _toolGeo.set(key, out);
+  return out;
+}
+function toolBody(t, stick, mats) {                    // a Group with the tool along +Z from its tip at the origin
+  const g = toolGeometries(t, stick), grp = new THREE.Group();
+  const a = new THREE.Mesh(g.cut, mats.cut), b = new THREE.Mesh(g.body, mats.body);
+  a.castShadow = b.castShadow = true; grp.add(a, b); grp.userData.stick = g.stick;
+  return grp;
+}
 function holderMesh(t) {                              // tool with flutes + the machine's holder stack (chrome), hanging from the nose levels
-  const grp = new THREE.Group(), r = t.diameter / 2, fl = Math.min(+t.flute_length || 10, 40), stick = (machineInfo && machineInfo.stickout) || fl + 6;
+  const grp = new THREE.Group(), r = t.diameter / 2, fl = Math.min(+t.flute_length || 10, 40), stick = (machineInfo && machineInfo.stickout) || (t.shape && t.shape.stickout) || fl + 6;
   const fluteMat = new THREE.MeshPhysicalMaterial({ color: 0x6f7378, metalness: 0.95, roughness: 0.28, map: fluteTexture(), envMapIntensity: 1.2 });
   const shankMat = new THREE.MeshPhysicalMaterial({ color: 0x9a9fa5, metalness: 0.95, roughness: 0.3, envMapIntensity: 1.2 });
   const chrome = new THREE.MeshPhysicalMaterial({ color: 0xcfd3d7, metalness: 1.0, roughness: 0.16, envMapIntensity: 1.4 });
   const dark = new THREE.MeshPhysicalMaterial({ color: 0x3a3d42, metalness: 0.6, roughness: 0.5 });
-  const flutes = new THREE.Mesh(new THREE.CylinderGeometry(r, t.type === 'vbit' ? r * 0.05 : r * 0.98, fl, 32).rotateX(Math.PI / 2).translate(0, 0, fl / 2), fluteMat);
-  const shank = new THREE.Mesh(new THREE.CylinderGeometry(r, r, Math.max(stick - fl, 0.5), 32).rotateX(Math.PI / 2).translate(0, 0, fl + Math.max(stick - fl, 0.5) / 2), shankMat);
-  grp.add(flutes, shank);
+  grp.add(toolBody(t, stick, { cut: fluteMat, body: shankMat }));
   let z = stick;
   for (const lvl of ((machineInfo && machineInfo.nose) || [{ name: 'collet nut', r: Math.max(r + 4, 9.5), h: 20 }, { name: 'spindle', r: 26, h: 80 }])) {
     const h = Math.min(lvl.h, 120), m = /nut|collet/i.test(lvl.name) ? chrome : (/head|body|column|cap/i.test(lvl.name) ? dark : chrome);
@@ -2307,6 +2333,8 @@ function holderMesh(t) {                              // tool with flutes + the 
   grp.traverse(o => { if (o.material) o.material.clippingPlanes = material.clippingPlanes; });
   return grp;
 }
+const simToolMats = { cut: new THREE.MeshStandardMaterial({ color: 0xffffff, transparent: true, opacity: 0.85, metalness: 0.4, roughness: 0.3 }),
+                      body: new THREE.MeshStandardMaterial({ color: 0x8d949c, transparent: true, opacity: 0.55, metalness: 0.5, roughness: 0.4 }) };
 let _fluteTex = null;
 function fluteTexture() {                             // two helical light stripes on dark carbide
   if (_fluteTex) return _fluteTex;
@@ -2400,7 +2428,7 @@ function attachStage() { machineRig.stockNode.add(stageGroup); machineRig.flip =
 function stickoutFor(t) {
   const fl = t ? (+t.flute_length || 10) : 10, d = machineRig && machineRig.data;
   if (d && d.stickout) return Math.max(+d.stickout, fl);
-  return (t && +t.stickout) || fl + 6;
+  return (t && +t.stickout) || (t && t.shape && +t.shape.stickout) || fl + 6;
 }
 function poseRig(tip, aDeg, t) {
   if (!machineRig) return;
@@ -2430,10 +2458,9 @@ function poseRig(tip, aDeg, t) {
   }
   if (machineRig.tool) { machineRig.headZ.remove(machineRig.tool); machineRig.tool.traverse(o => o.geometry && o.geometry.dispose()); machineRig.tool = null; }
   if (t) {                                                                     // the tool hangs from the nose bottom (home pose; the spindle node carries it)
-    const r = t.diameter / 2, fl = Math.min(+t.flute_length || 10, stick), grp = new THREE.Group();
-    const flutes = new THREE.Mesh(new THREE.CylinderGeometry(r, r * (t.type === 'vbit' ? 0.05 : 1), fl, 24).rotateX(Math.PI / 2).translate(0, 0, fl / 2), new THREE.MeshStandardMaterial({ color: 0xd8dde3, metalness: 0.85, roughness: 0.35 }));
-    const shank = new THREE.Mesh(new THREE.CylinderGeometry(r, r, Math.max(stick - fl, 0.01), 24).rotateX(Math.PI / 2).translate(0, 0, fl + Math.max(stick - fl, 0.01) / 2), new THREE.MeshStandardMaterial({ color: 0x9aa0a6, metalness: 0.9, roughness: 0.4 }));
-    grp.add(flutes, shank); grp.position.set(home[0], home[1], home[2] - stick); machineRig.headZ.add(grp); machineRig.tool = grp;
+    const grp = toolBody(t, stick, { cut: new THREE.MeshStandardMaterial({ color: 0xd8dde3, metalness: 0.85, roughness: 0.35 }),
+                                     body: new THREE.MeshStandardMaterial({ color: 0x9aa0a6, metalness: 0.9, roughness: 0.4 }) });
+    grp.position.set(home[0], home[1], home[2] - stick); machineRig.headZ.add(grp); machineRig.tool = grp;
   }
 }
 function rigHasDoors() { return !!(machineRig && machineRig.data.nodes.some(n => n.door)); }
@@ -4913,7 +4940,8 @@ const MACHINE_FIELDS = [
   ['Arc format', 'arc_format', 'select', [['ij', 'I/J centre offsets (every controller)'], ['r', 'R radius word (not Makera)']]],
   ['Helical arcs', 'helical_arcs', 'bool', 'arcs may move Z (helical ramp entries); off = flat arcs only'],
   ['4th axis', 'rotary', 'rotary'], ['Start G-code', 'program_start', 'lines'], ['End G-code', 'program_end', 'lines'], ['Notes', 'notes', 'area']];
-const TOOL_TYPES = ['flat', 'ball', 'vbit', 'drill', 'chamfer'];
+const TOOL_TYPES = ['flat', 'ball', 'bull', 'vbit', 'chamfer', 'drill', 'taper_ball'];
+const TOOL_TYPE_LABEL = { flat: 'flat', ball: 'ball', bull: 'bull nose', vbit: 'V / engraver', chamfer: 'chamfer', drill: 'drill', taper_ball: 'tapered ball' };
 function libraryEditor(mPane, tPane) {
   const clone = o => JSON.parse(JSON.stringify(o));
   const ms = library.machines.map(m => ({ orig: m.name, m: clone(m), dirty: false })), delM = [];
@@ -4972,13 +5000,62 @@ function libraryEditor(mPane, tPane) {
         <label style="color:var(--text);display:flex;gap:6px;align-items:center;margin-top:6px"><input type="checkbox" data-p="rotary.installed" data-t="bool" ${v.installed !== false ? 'checked' : ''} style="width:auto"> module installed on the machine now</label>` : ''}</div>`;
     return `<label>${label}</label>${h}`;
   }
+  let tSel = -1;
+  // the shape of one tool: the fields its type uses, and its real profile drawn to scale (from /api/cam/tool_shape)
+  const SHAPE_FIELDS = {
+    corner_radius: ['Corner radius', 'mm', t => t === 'bull'], tip_diameter: ['Tip Ø', 'mm', t => ['vbit', 'chamfer'].includes(t)],
+    ball_tip: ['Ball Ø (at the tip)', 'mm', t => t === 'taper_ball'], taper: ['Taper per side', '°', t => t === 'taper_ball'],
+    shank_diameter: ['Shank Ø', 'mm (blank = same as Ø)', () => true], neck_diameter: ['Neck Ø', 'mm (blank = no neck)', () => true],
+    reach: ['Reach (neck length)', 'mm from the tip (blank = flute length)', () => true], stickout: ['Stickout', 'mm out of the collet (blank = estimate)', () => true] };
+  let shapeTimer = null;
+  function renderShapeEd() {
+    const el = tPane.querySelector('#tshape-ed'); if (!el) return;
+    const x = ts[tSel]; if (!x) { el.innerHTML = ''; return; }
+    const t = x.t, typ = t.type || 'flat';
+    const val = k => k === 'ball_tip' ? t.tip_diameter : t[k];
+    el.innerHTML = `<div class="tshape"><div class="tshape-f"><div class="set-h" style="margin:0 0 6px">T${t.number} ${esc(t.name || '')} · shape<span class="muted">${TOOL_TYPE_LABEL[typ] || typ} · Ø${t.diameter} · flutes ${t.flute_length} mm${['vbit', 'chamfer', 'drill'].includes(typ) ? ` · ${t.angle || (typ === 'drill' ? 118 : '?')}° included` : ''}</span></div>
+      <div class="kv tshape-kv">${Object.entries(SHAPE_FIELDS).filter(([, [, , on]]) => on(typ)).map(([k, [lab, unit]]) =>
+        `<div>${lab}</div><div><input type="number" step="any" min="0" data-s="${k}" value="${val(k) ? +val(k) : ''}"> <span class="muted">${unit}</span></div>`).join('')}</div>
+      <div class="muted" data-s="err" style="margin-top:6px"></div><div class="muted" data-s="facts" style="margin-top:4px;font-size:11.5px"></div></div>
+      <div class="tshape-svg" data-s="svg"></div></div>`;
+    el.querySelectorAll('input[data-s]').forEach(inp => inp.oninput = () => {
+      const k = inp.dataset.s, v = inp.value === '' ? 0 : num(inp.value);
+      t[k === 'ball_tip' ? 'tip_diameter' : k] = v; x.dirty = true;
+      const tr = tPane.querySelector(`tr[data-i="${tSel}"]`); if (tr) tr.classList.add('dirty');
+      clearTimeout(shapeTimer); shapeTimer = setTimeout(drawShape, 200);
+    });
+    drawShape();
+  }
+  async function drawShape() {
+    const el = tPane.querySelector('#tshape-ed'); const x = ts[tSel]; if (!el || !x) return;
+    const box = el.querySelector('[data-s=svg]'), err = el.querySelector('[data-s=err]'), facts = el.querySelector('[data-s=facts]');
+    let r;
+    try { r = await api('/api/cam/tool_shape', { tool: x.t }); } catch (e) { err.textContent = e.message; err.style.color = 'var(--err)'; return; }
+    if (r.error) { err.textContent = r.error; err.style.color = 'var(--err)'; return; }
+    err.textContent = ''; const sh = r.shape, pts = sh.outline, top = Math.min(sh.stickout, Math.max(sh.shank_start + 4, sh.flute_length + 2));
+    const W = 220, H = 300, pad = 16, rmax = Math.max(...pts.map(p => p[1])), sc = Math.min((W - 2 * pad) / (2 * rmax), (H - 2 * pad) / top);
+    const X = rr => W / 2 + rr * sc, Y = z => H - pad - z * sc;
+    const clip = pts.filter(p => p[0] <= top);
+    const half = q => q.map(p => `${X(p[1]).toFixed(1)},${Y(p[0]).toFixed(1)}`).join(' ') + ' ' + q.slice().reverse().map(p => `${X(-p[1]).toFixed(1)},${Y(p[0]).toFixed(1)}`).join(' ');
+    const rAt = z => { for (let i = 1; i < pts.length; i++) if (pts[i][0] >= z) { const a = pts[i - 1], b = pts[i]; return b[0] > a[0] ? a[1] + (b[1] - a[1]) * (z - a[0]) / (b[0] - a[0]) : b[1]; } return pts[pts.length - 1][1]; };
+    const fl = sh.flute_length, cut = clip.filter(p => p[0] < fl).concat([[fl, rAt(fl)]]), body = [[fl, rAt(fl)]].concat(clip.filter(p => p[0] > fl), [[top, rAt(top)]]);
+    box.innerHTML = `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">
+      <polygon points="${half(body)}" fill="#8d949c55" stroke="#8d949c" stroke-width="1"/>
+      <polygon points="${half(cut)}" fill="#ff8c4255" stroke="#ff8c42" stroke-width="1.2"/>
+      <line x1="${pad / 2}" x2="${W - pad / 2}" y1="${Y(fl)}" y2="${Y(fl)}" stroke="#ff8c42" stroke-dasharray="3 3" stroke-width="0.8"/>
+      <text x="${W - pad / 2}" y="${Y(fl) - 3}" fill="#ff8c42" font-size="10" text-anchor="end">flutes ${fl} mm</text>
+      ${sh.shank_start < top ? `<line x1="${pad / 2}" x2="${W - pad / 2}" y1="${Y(sh.shank_start)}" y2="${Y(sh.shank_start)}" stroke="#8d949c" stroke-dasharray="2 3" stroke-width="0.8"/><text x="${pad / 2}" y="${Y(sh.shank_start) - 3}" fill="#8d949c" font-size="10">shank from ${sh.shank_start.toFixed(2)}</text>` : ''}
+      <text x="${W / 2}" y="${H - 3}" fill="#8b94a1" font-size="10" text-anchor="middle">tip · ${(sc).toFixed(1)} px/mm${top < sh.stickout ? ` · ${sh.stickout.toFixed(1)} mm out of the collet` : ''}</text></svg>`;
+    facts.textContent = `cuts Ø${(2 * sh.cut_radius).toFixed(3)} at most · widest Ø${(2 * sh.max_radius).toFixed(3)} · reach ${sh.reach.toFixed(2)} mm · stickout ${sh.stickout.toFixed(1)} mm${2 * sh.max_radius > 2 * sh.cut_radius + 1e-3 ? ' — wider above the cut: checked against walls in the simulation' : ''}`;
+  }
   const TCOLS = [['T#', 'number', 'num', '40px'], ['Name', 'name', 'text', ''], ['Type', 'type', 'type', '74px'], ['Ø mm', 'diameter', 'num', '58px'], ['Flutes', 'flutes', 'num', '46px'], ['Flute len', 'flute_length', 'num', '58px'],
     ['RPM', 'rpm', 'num', '66px'], ['Feed', 'feed', 'num', '58px'], ['Plunge', 'plunge', 'num', '58px'], ['Stepdown', 'stepdown', 'num', '62px'], ['Stepover %', 'stepover', 'pct', '66px'], ['Angle °', 'angle', 'num', '52px']];
   function renderTools() {
     tPane.innerHTML = `<div class="set-h">Tool library<span class="muted">defaults every operation uses; override them per operation in the CAM tab</span><button class="btn small" data-a="tadd" style="margin-left:auto">+ Add tool</button></div>
-      <table class="tool-tbl"><tr>${TCOLS.map(([l, , , w]) => `<th style="${w ? 'width:' + w : ''}">${l}</th>`).join('')}<th style="width:24px"></th></tr>
-      ${ts.map((x, i) => `<tr data-i="${i}" class="${x.dirty ? 'dirty' : ''}">${TCOLS.map(([, k, t]) => `<td>${t === 'type' ? `<select data-k="${k}">${TOOL_TYPES.map(o => `<option ${o === x.t.type ? 'selected' : ''}>${o}</option>`).join('')}</select>`
-        : `<input data-k="${k}" data-t="${t}" ${t === 'text' ? '' : 'type="number" step="any"'} value="${t === 'pct' ? +(x.t[k] * 100).toFixed(2) : (x.t[k] ?? '').toString().replace(/"/g, '&quot;')}">`}</td>`).join('')}<td><button class="btn small" data-a="tdel" title="delete">✕</button></td></tr>`).join('')}</table>
+      <table class="tool-tbl"><tr>${TCOLS.map(([l, , , w]) => `<th style="${w ? 'width:' + w : ''}">${l}</th>`).join('')}<th style="width:96px"></th></tr>
+      ${ts.map((x, i) => `<tr data-i="${i}" class="${x.dirty ? 'dirty' : ''}">${TCOLS.map(([, k, t]) => `<td>${t === 'type' ? `<select data-k="${k}">${TOOL_TYPES.map(o => `<option value="${o}" ${o === x.t.type ? 'selected' : ''}>${TOOL_TYPE_LABEL[o]}</option>`).join('')}</select>`
+        : `<input data-k="${k}" data-t="${t}" ${t === 'text' ? '' : 'type="number" step="any"'} value="${t === 'pct' ? +(x.t[k] * 100).toFixed(2) : (x.t[k] ?? '').toString().replace(/"/g, '&quot;')}">`}</td>`).join('')}<td style="white-space:nowrap"><button class="btn small ${tSel === i ? 'primary' : ''}" data-a="tshape" title="Shape: tip, corner, shank, neck, stickout — with a drawing">Shape</button> <button class="btn small" data-a="tdel" title="delete">✕</button></td></tr>`).join('')}</table>
+      <div id="tshape-ed"></div>
       <div class="fs-box"><div class="set-h" style="margin-top:0">Feeds &amp; speeds calculator<span class="muted">fills a tool's rpm, feed, plunge, stepdown and stepover for a material</span></div>
         <div class="fs-row"><label>Tool</label><select data-f="tool">${ts.map((x, i) => `<option value="${i}">T${x.t.number} ${x.t.name}</option>`).join('')}</select>
           <label>Material</label><select data-f="mat">${camMaterials.map(m => `<option ${m === 'aluminium' ? 'selected' : ''}>${m}</option>`).join('')}</select>
@@ -4992,7 +5069,10 @@ function libraryEditor(mPane, tPane) {
       const x = ts[+tr.dataset.i];
       tr.querySelectorAll('[data-k]').forEach(e => e.oninput = e.onchange = () => { const t = e.dataset.t; x.t[e.dataset.k] = t === 'text' || !t ? e.value : t === 'pct' ? num(e.value) / 100 : num(e.value); x.dirty = true; tr.classList.add('dirty'); });
       tr.querySelector('[data-a=tdel]').onclick = () => { if (x.orig != null) delT.push(x.orig); ts.splice(+tr.dataset.i, 1); renderTools(); };
+      tr.querySelector('[data-a=tshape]').onclick = () => { tSel = tSel === +tr.dataset.i ? -1 : +tr.dataset.i; renderTools(); };
+      tr.querySelector('select[data-k=type]').addEventListener('change', () => { if (tSel === +tr.dataset.i) renderShapeEd(); });
     });
+    renderShapeEd();
     const F = k => tPane.querySelector(`[data-f="${k}"]`); let res = null;
     const calc = async () => {
       F('aggr-v').textContent = Math.round(F('aggr').value * 100) + '%'; F('ae-v').textContent = Math.round(F('ae').value * 100) + '% of Ø';

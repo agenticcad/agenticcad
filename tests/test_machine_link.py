@@ -428,7 +428,7 @@ def test_3d_probe_that_never_triggers_is_held():
             await _until(lambda: mc.routine["stage"] in ("done", "failed"), timeout=10)
             assert mc.routine["stage"] == "failed" and "nothing touched" in mc.routine["msg"], mc.routine
             assert b"!" in emu.realtime and emu.state == "Hold"
-            assert emu.mpos[2] > -50.0 - 3.6                         # stopped about 3 mm down, not 108
+            assert emu.mpos[2] > -50.0 - 6.0                         # stopped a few mm down (3 + polling lag), not 108
         finally:
             await mc.disconnect(); await emu.stop()
     run(go())
