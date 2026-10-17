@@ -56,6 +56,34 @@ class Tool:
         return f"T{self.number} {self.name}"
 
 
+# What each controller's G-code interpreter accepts, by post. Sources: the controllers' own source / manuals.
+#   arc_formats   : arc centre forms it takes, preferred first ("ij" = I/J offsets from the start, "r" = radius word)
+#   helical_arcs  : G2/G3 may also move Z
+#   max_arc_sweep : degrees per arc the post writes in each form (R near 180 deg is ill-conditioned, so R arcs stay
+#                   well short of it)
+#   max_line      : longest line the controller reads (0 = no practical limit); comments_count: whether comment text
+#                   counts towards it
+CONTROLLERS = {
+    # GRBL 1.1 (gnea/grbl): gcode.c takes I/J/K and R (negative R = the long way round), helical via mc_arc's linear
+    # axis; rejects I/J arcs whose start and end radii differ by > 0.005 mm and > 0.1 % of the radius (the post puts
+    # the centre on the chord's bisector so they match). protocol.h LINE_BUFFER_SIZE 80; comments are dropped as the
+    # line is read, so they don't count.
+    "grbl": {"name": "GRBL", "arc_formats": ("ij", "r"), "helical_arcs": True, "max_arc_sweep": {"ij": 180.0, "r": 135.0},
+             "max_line": 80, "comments_count": False},
+    # Makera Z1 / Carvera firmware (Smoothieware fork, MakeraZ1Firmware): Robot::compute_arc takes the radius from
+    # I/J only, there is no R form; append_arc moves the linear axis (helical); segments arcs to 0.002 mm
+    # (mm_max_arc_error default, not set in configZ1.default). Lines longer than 63 characters are truncated.
+    "makera": {"name": "Makera (Smoothieware)", "arc_formats": ("ij",), "helical_arcs": True, "max_arc_sweep": {"ij": 180.0},
+               "max_line": 63, "comments_count": True},
+    # Haas NGC / Classic (Fanuc-style): I/J/K and R, helical G2/G3 with Z.
+    "haas": {"name": "Haas", "arc_formats": ("ij", "r"), "helical_arcs": True, "max_arc_sweep": {"ij": 180.0, "r": 135.0},
+             "max_line": 0, "comments_count": False},
+    # LinuxCNC rs274ngc: centre (I/J) and radius format, helical; LINELEN 255.
+    "linuxcnc": {"name": "LinuxCNC", "arc_formats": ("ij", "r"), "helical_arcs": True, "max_arc_sweep": {"ij": 180.0, "r": 135.0},
+                 "max_line": 255, "comments_count": True},
+}
+
+
 @dataclass
 class Machine:
     name: str
@@ -73,6 +101,8 @@ class Machine:
     program_end: list[str] = field(default_factory=list)
     arcs: bool = True                       # emit G2/G3 where the path is circular
     arc_tolerance: float = 0.05             # max deviation (mm) between polyline and fitted arc
+    arc_format: str = "ij"                  # "ij" (centre offsets I/J) | "r" (radius word); only what the controller takes
+    helical_arcs: bool = True               # arcs may move Z (helical ramps); off = only flat arcs
     notes: str = ""
     post: str = "grbl"                      # grbl | makera (Makera Z1 / Carvera family) | haas (Haas NGC/Classic) | linuxcnc (rs274ngc)
     # optional rotary 4th axis: {"axis": "A", "about": "x", "max_diameter": mm, "max_length": mm,
@@ -83,6 +113,26 @@ class Machine:
     max_stepdown: dict = field(default_factory=dict)
     # machine model overrides (Settings ▸ Machines ▸ Model): {"nose": [{name, r, h}...], "spoilboard": mm, "clearance": mm, "stickout": mm}
     model: dict | None = None
+
+    def capabilities(self) -> dict:
+        """What the post may emit for this machine: its controller's limits (CONTROLLERS, by post) combined with the
+        machine's own choices. An arc format the controller doesn't take falls back to one it does (see warnings())."""
+        ctl = CONTROLLERS.get(self.post, CONTROLLERS["grbl"])
+        fmt = self.arc_format if self.arc_format in ctl["arc_formats"] else ctl["arc_formats"][0]
+        return {"controller": ctl["name"], "arcs": bool(self.arcs) and bool(ctl["arc_formats"]), "arc_format": fmt,
+                "arc_formats": ctl["arc_formats"], "helical_arcs": bool(self.helical_arcs) and ctl["helical_arcs"],
+                "max_arc_sweep": ctl["max_arc_sweep"].get(fmt, 180.0), "max_line": ctl["max_line"],
+                "comments_count": ctl["comments_count"]}
+
+    def warnings(self) -> list[str]:
+        ctl = CONTROLLERS.get(self.post, CONTROLLERS["grbl"])
+        out = []
+        if self.arc_format not in ("ij", "r"):
+            out.append(f"{self.name}: arc_format must be 'ij' or 'r' (got {self.arc_format!r}); using I/J")
+        elif self.arcs and self.arc_format not in ctl["arc_formats"]:
+            out.append(f"{self.name}: the {ctl['name']} controller doesn't take {self.arc_format.upper()}-format arcs; "
+                       f"the post writes {ctl['arc_formats'][0].upper()}")
+        return out
 
     def stepdown_cap(self, material: str) -> float | None:
         caps = {MATERIAL_ALIASES.get(str(k).lower().strip(), str(k).lower().strip()): v for k, v in self.max_stepdown.items()}
@@ -1994,6 +2044,7 @@ class Program:
             return ["program has no operations"]
         self.assign_wcs()
         m = self.machine
+        w += m.warnings()
         for st in self.setups:
             tag = f"{st.name}: " if len(self.setups) > 1 else ""
             b = self.bounds(st)
@@ -2130,9 +2181,9 @@ def _circle3(p1, p2, p3):
     return ux, uy, math.hypot(ax - ux, ay - uy)
 
 
-def _arc_ok(pts, tol):
-    """Do these XY points (>=3) lie on one arc within tol, with fine enough chords and consistent turning?
-    Returns (cx, cy, cw) or None."""
+def _arc_ok(pts, tol, max_sweep: float = math.pi):
+    """Do these XY points (>=3) lie on one arc within tol, with fine enough chords and consistent turning, sweeping
+    at most max_sweep radians? Returns (cx, cy, cw) or None."""
     c = _circle3(pts[0], pts[len(pts) // 2], pts[-1])
     if c is None:
         return None
@@ -2159,7 +2210,7 @@ def _arc_ok(pts, tol):
         elif (cr > 0) != (sign > 0):
             return None
         sweep += 2 * math.asin(min(1.0, ch / (2 * r)))
-    if sweep > math.pi + 1e-6:
+    if sweep > max_sweep + 1e-6:
         return None
     return cx, cy, sign < 0      # cw = clockwise (negative cross) in G17
 
@@ -2220,9 +2271,10 @@ def _merge_collinear3(pts, tol):
     return out
 
 
-def _with_arcs(moves, tol):
-    """Yield moves, replacing runs of feed moves that lie on a circle — flat, or helical with z linear along the
-    arc (ramp entries) — with ('arc', x, y, z, f, cx, cy, cw); straight stretches are merged into single lines."""
+def _with_arcs(moves, tol, max_sweep: float = math.pi, helical: bool = True):
+    """Yield moves, replacing runs of feed moves that lie on a circle — flat, or (helical) with z linear along the
+    arc (ramp entries) — with ('arc', x, y, z, f, cx, cy, cw); straight stretches are merged into single lines.
+    Arcs sweep at most max_sweep radians."""
     if tol is None:
         for m in moves:
             yield tuple(m)
@@ -2247,8 +2299,8 @@ def _with_arcs(moves, tol):
             best = None
             e = k + 3
             while e <= len(run):
-                res = _arc_ok([q[:2] for q in run[k:e]], tol)
-                if res is None or not _z_linear(run[k:e], tol):
+                res = _arc_ok([q[:2] for q in run[k:e]], tol, max_sweep)
+                if res is None or not _z_linear(run[k:e], tol) or (not helical and abs(run[e - 1][2] - run[k][2]) > 1e-9):
                     break
                 best = (e, res)
                 e += 1
@@ -2297,7 +2349,7 @@ def _fmt(v: float) -> str:
 #            no canned cycles / coolant / G93; arcs must not move A; G28 goes to the clearance position;
 #            M600 suspends the file. Feed for moves with A follows the firmware's own rule (_makera_feed).
 # =============================================================================
-MAKERA_MAX_LINE = 63
+MAKERA_MAX_LINE = CONTROLLERS["makera"]["max_line"]
 
 
 def _makera_perimeter(y: float, z: float) -> float:
@@ -2333,6 +2385,8 @@ def _emit(prog: Program, dialect: str) -> str:
     _fmt = _fmt_dec if fan else globals()["_fmt"]      # noqa: F841 - local shadow: numbers in this post carry a decimal point
     prog.assign_wcs()
     m0 = prog.setup.machine
+    caps = m0.capabilities()
+    max_line = caps["max_line"]
     out: list[str] = []
     g93 = False                                        # inverse-time feed mode is active (fan dialects, rotary moves)
 
@@ -2340,15 +2394,12 @@ def _emit(prog: Program, dialect: str) -> str:
         text = text.replace("(", "[").replace(")", "]")
         if mk:                                          # the dispatcher hoists G90/G91 even out of comments
             text = text.replace("G90", "G 90").replace("G91", "G 91")
-            out.append(("; " + text)[:MAKERA_MAX_LINE])
-        elif fan:
-            out.append("(" + text.replace(";", ",") + ")")
-        else:
-            out.append("; " + text)
+        c = "(" + text.replace(";", ",") + ")" if fan else "; " + text
+        out.append(c[:max_line] if max_line and caps["comments_count"] else c)
 
     def line(t: str):
-        if mk and len(t) > MAKERA_MAX_LINE:
-            raise CamError(f"G-code line longer than {MAKERA_MAX_LINE} characters for the Makera controller: {t}")
+        if max_line and len(t) > max_line:
+            raise CamError(f"G-code line longer than {max_line} characters for the {caps['controller']} controller: {t}")
         out.append(t)
 
     def home_z():
@@ -2494,18 +2545,31 @@ def _emit(prog: Program, dialect: str) -> str:
             line(f"G0 Z{_fmt(safe)}")
             last = [None, None, safe, cur_a]
             last_f = None
-        use_arcs = m.arcs and not op.uses_a
+        use_arcs = caps["arcs"] and not op.uses_a
         moves = op.moves
-        for item in _with_arcs(moves, m.arc_tolerance if use_arcs else None):
+        for item in _with_arcs(moves, m.arc_tolerance if use_arcs else None, math.radians(caps["max_arc_sweep"]),
+                               caps["helical_arcs"]):
             if item[0] == "arc":
                 _, x, y, z, f, cx, cy, cw = item
                 x -= ox; y -= oy; z -= oz; cx -= ox; cy -= oy
                 sx = last[0] if last[0] is not None else x; sy = last[1] if last[1] is not None else y
+                # the centre goes on the chord's perpendicular bisector, so the start and end radii are equal (GRBL
+                # rejects I/J arcs whose radii differ by > 0.005 mm; an R arc is defined by that radius)
+                mx, my = (sx + x) / 2, (sy + y) / 2
+                ux, uy = -(y - sy), x - sx
+                ul = math.hypot(ux, uy)
+                if ul > 1e-9:
+                    ux, uy = ux / ul, uy / ul
+                    tpar = (cx - mx) * ux + (cy - my) * uy
+                    cx, cy = mx + ux * tpar, my + uy * tpar
                 fw = ""
                 if f and f != last_f:
                     fw = f" F{_fmt(f)}"; last_f = f
                 zw = f" Z{_fmt(z)}" if last[2] is None or abs(z - last[2]) > 1e-6 else ""
-                line(f"{'G2' if cw else 'G3'} X{_fmt(x)} Y{_fmt(y)}{zw} I{_fmt(cx - sx)} J{_fmt(cy - sy)}{fw}")
+                if caps["arc_format"] == "r":
+                    line(f"{'G2' if cw else 'G3'} X{_fmt(x)} Y{_fmt(y)}{zw} R{_fmt(math.hypot(sx - cx, sy - cy))}{fw}")
+                else:
+                    line(f"{'G2' if cw else 'G3'} X{_fmt(x)} Y{_fmt(y)}{zw} I{_fmt(cx - sx)} J{_fmt(cy - sy)}{fw}")
                 last = [x, y, z, last[3]]
                 continue
             k, x, y, z, f = item[:5]

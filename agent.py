@@ -293,7 +293,7 @@ feeds on A moves are converted to the firmware's own rule. The Z1 is light (150 
 per pass; keep tools ≤ the 3.175 mm collet unless the user has another collet.
 Notes: coordinates are setup-frame (= model coordinates for a plain top setup; Z up); the post subtracts the WCS origin.
 Contours get tangential arc lead-in/out by default (lead=radius; lead=0 disables) and start mid-way along the
-longest straight edge. The post fits G2/G3 arcs (machine.arcs, machine.arc_tolerance; never while A moves) and merges collinear moves.
+longest straight edge. The post fits G2/G3 arcs (machine.arcs, machine.arc_tolerance, machine.arc_format 'ij'|'r', machine.helical_arcs; never while A moves) within what the machine's controller takes (cam.CONTROLLERS by post: Makera = I/J only, 63-character lines; GRBL 80) and merges collinear moves.
 Materials for feeds(): aluminium, brass, mild-steel, acrylic, hdpe, delrin, plywood, mdf, hardwood, softwood, foam, fr4, carbon-fibre. section(shape, z) returns
 polygons with holes (holes = islands for pocket, inner profiles for contour side="outside"); stock_minus(setup,
 shape, z, expand=tool.diameter) = what to clear at level z (expand lets the tool run off the stock edge); face_polygon(model.get_face(id)) uses a face the user clicked. Depths:

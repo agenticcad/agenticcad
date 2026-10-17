@@ -144,6 +144,90 @@ def test_grbl_post_unchanged_for_generic_machines(machines, plate):
     assert "M600" not in g and "M0" in g and "G94" in g
 
 
+def _arc_program(machine):
+    """A circular pocket and an outside contour round a disc, in model coordinates (origin at 0,0,0): lots of arcs,
+    flat ones and helical ramp entries."""
+    st = cam.Setup(machine, cam.Stock(xmin=-30, xmax=30, ymin=-30, ymax=30, zmin=0, zmax=10), origin=(0, 0, 10))
+    p = cam.Program(st)
+    p.add(cam.pocket(st, flat(), cam.circle(-12, 0, 16), z_top=10, z_bottom=7, stepdown=1.5))
+    p.add(cam.contour(st, flat(), cam.circle(12, 0, 14), z_top=10, z_bottom=8, side="outside", stepdown=1.0))
+    return p
+
+
+def _arcs(g):
+    """(kind, start xyz, end xyz, words) for every G2/G3 line, tracking the position through G0/G1."""
+    pos = [None, None, None]; out = []
+    for l in g.splitlines():
+        if l.startswith((";", "(", "%")):
+            continue
+        w = dict((a, float(b)) for a, b in re.findall(r"([XYZIJRF])(-?[\d.]+)", l))
+        new = [w.get("X", pos[0]), w.get("Y", pos[1]), w.get("Z", pos[2])]
+        m = re.match(r"G([0123])\b", l)
+        if m and m.group(1) in "23" and None not in pos:
+            out.append((m.group(1), tuple(pos), tuple(new), w))
+        if m or any(k in w for k in "XYZ"):
+            pos = new
+    return out
+
+
+def _r_centre(kind, s, e, r):
+    """Centre of a short (<= 180 deg) R-format arc: on the right of the chord for G2, the left for G3."""
+    mx, my = (s[0] + e[0]) / 2, (s[1] + e[1]) / 2
+    dx, dy = e[0] - s[0], e[1] - s[1]
+    d = math.hypot(dx, dy)
+    h = math.sqrt(max(r * r - d * d / 4, 0.0))
+    nx, ny = (dy / d, -dx / d) if kind == "2" else (-dy / d, dx / d)
+    return mx + nx * h, my + ny * h
+
+
+def test_arc_formats_follow_the_controller(machines):
+    """I/J arcs have equal start and end radii (GRBL rejects a mismatch over 0.005 mm); R arcs stay short of 180 deg
+    and land on the toolpath; the Makera controller has no R form, so asking for it still gets I/J and a warning;
+    helical_arcs off keeps Z out of the arcs; lines stay within the controller's limit."""
+    import dataclasses
+    grbl = machines["Generic 3018"]
+    p = _arc_program(grbl)
+    arcs = _arcs(p.gcode())
+    assert len(arcs) > 20 and any("Z" in w for _, _, _, w in arcs)           # helical ramp entries are arcs too
+    for _, s, e, w in arcs:
+        c = (s[0] + w["I"], s[1] + w["J"])
+        assert abs(math.dist(s[:2], c) - math.dist(e[:2], c)) <= 0.002
+    assert all(len(l) <= cam.CONTROLLERS["grbl"]["max_line"] for l in p.gcode().splitlines() if not l.startswith(";"))
+
+    # R format on GRBL: every arc's midpoint (centre from R and the arc direction) lies on the toolpath
+    pr = _arc_program(dataclasses.replace(grbl, arc_format="r"))
+    g = pr.gcode()
+    rarcs = _arcs(g)
+    assert rarcs and all("R" in w and "I" not in w for _, _, _, w in rarcs)
+    segs = [(a[1:3], b[1:3]) for op in pr.ops for a, b in zip(op.moves, op.moves[1:]) if b[0] != cam.RAPID]
+    def dist_to_path(q):
+        best = 1e9
+        for (ax, ay), (bx, by) in segs:
+            vx, vy = bx - ax, by - ay; L2 = vx * vx + vy * vy
+            t = 0.0 if L2 < 1e-12 else max(0.0, min(1.0, ((q[0] - ax) * vx + (q[1] - ay) * vy) / L2))
+            best = min(best, math.hypot(ax + t * vx - q[0], ay + t * vy - q[1]))
+        return best
+    for kind, s, e, w in rarcs[::3]:
+        cx, cy = _r_centre(kind, s, e, w["R"])
+        a0, a1 = math.atan2(s[1] - cy, s[0] - cx), math.atan2(e[1] - cy, e[0] - cx)
+        sweep = (a0 - a1) % (2 * math.pi) if kind == "2" else (a1 - a0) % (2 * math.pi)
+        assert sweep <= math.radians(135) + 1e-3
+        am = a0 - sweep / 2 if kind == "2" else a0 + sweep / 2
+        assert dist_to_path((cx + w["R"] * math.cos(am), cy + w["R"] * math.sin(am))) <= grbl.arc_tolerance + 0.01
+
+    # Makera: no R form in the firmware, so the post keeps I/J and says so
+    z1r = dataclasses.replace(machines["Makera Z1"], arc_format="r")
+    pm = _arc_program(z1r)
+    marcs = _arcs(pm.gcode())
+    assert marcs and all("I" in w and "R" not in w for _, _, _, w in marcs)
+    assert any("doesn't take R-format arcs" in x for x in pm.check())
+    assert z1r.capabilities()["arc_format"] == "ij"
+
+    # helical arcs off: arcs never carry a Z word
+    flat_only = _arcs(_arc_program(dataclasses.replace(grbl, helical_arcs=False)).gcode())
+    assert flat_only and not any("Z" in w for _, _, _, w in flat_only)
+
+
 def test_makera_a_feed_rule():
     """A-only moves: F is deg/min boosted by 360/perimeter below 360 mm; mixed: the A surface speed is held to F."""
     t = 0.5                                                    # minutes

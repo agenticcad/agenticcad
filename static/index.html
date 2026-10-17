@@ -4642,6 +4642,8 @@ const MACHINE_FIELDS = [
   ['Safe Z', 'safe_z', 'num', 'mm above the stock for rapids'], ['Clearance Z', 'clearance_z', 'num', 'mm for start, end and tool changes'],
   ['Tool change', 'tool_change', 'select', [['pause', 'pause (M0 + message)'], ['atc', 'automatic changer (Tn M06)'], ['manual', 'manual (M6 Tn, machine measures the tool)'], ['none', 'none (single tool)'], ['split', 'split (one file per tool)']]],
   ['Arcs', 'arcs', 'bool', 'emit G2/G3 where the path is circular'], ['Arc tolerance', 'arc_tolerance', 'num', 'mm'],
+  ['Arc format', 'arc_format', 'select', [['ij', 'I/J centre offsets (every controller)'], ['r', 'R radius word (not Makera)']]],
+  ['Helical arcs', 'helical_arcs', 'bool', 'arcs may move Z (helical ramp entries); off = flat arcs only'],
   ['4th axis', 'rotary', 'rotary'], ['Start G-code', 'program_start', 'lines'], ['End G-code', 'program_end', 'lines'], ['Notes', 'notes', 'area']];
 const TOOL_TYPES = ['flat', 'ball', 'vbit', 'drill', 'chamfer'];
 function libraryEditor(mPane, tPane) {
@@ -4659,7 +4661,7 @@ function libraryEditor(mPane, tPane) {
       <div>${cur ? `<div class="set-grid" id="m-form">${MACHINE_FIELDS.map(f => machineField(cur.m, f)).join('')}</div>
         <div style="margin-top:10px"><button class="btn small" data-a="json">Edit as JSON…</button></div><div id="m-model" class="muted" style="margin-top:14px">loading the machine model…</div>` : '<div class="muted">No machines. Add one.</div>'}</div></div>`;
     mPane.querySelectorAll('.it').forEach(e => e.onclick = () => { sel = +e.dataset.i; renderMachines(); });
-    mPane.querySelector('[data-a=new]').onclick = () => { ms.push({ orig: null, dirty: true, m: { name: 'My router', controller: 'grbl', post: 'grbl', units: 'mm', travel: { x: 300, y: 300, z: 60 }, max_feed: { x: 3000, y: 3000, z: 600 }, rapid: 3000, spindle: { min: 5000, max: 24000 }, tool_change: 'pause', coolant: false, safe_z: 5, clearance_z: 15, program_start: [], program_end: [], arcs: true, arc_tolerance: 0.05, notes: '', rotary: null, collet: 0 } }); sel = ms.length - 1; renderMachines(); };
+    mPane.querySelector('[data-a=new]').onclick = () => { ms.push({ orig: null, dirty: true, m: { name: 'My router', controller: 'grbl', post: 'grbl', units: 'mm', travel: { x: 300, y: 300, z: 60 }, max_feed: { x: 3000, y: 3000, z: 600 }, rapid: 3000, spindle: { min: 5000, max: 24000 }, tool_change: 'pause', coolant: false, safe_z: 5, clearance_z: 15, program_start: [], program_end: [], arcs: true, arc_tolerance: 0.05, arc_format: 'ij', helical_arcs: true, notes: '', rotary: null, collet: 0 } }); sel = ms.length - 1; renderMachines(); };
     const dup = mPane.querySelector('[data-a=dup]'); if (dup) dup.onclick = () => { const c = clone(cur.m); c.name += ' copy'; ms.push({ orig: null, dirty: true, m: c }); sel = ms.length - 1; renderMachines(); };
     const del = mPane.querySelector('[data-a=del]'); if (del) del.onclick = async () => { if (!await confirmInline(del, `delete ${cur.m.name}`)) return; if (cur.orig) delM.push(cur.orig); ms.splice(sel, 1); sel = Math.max(0, sel - 1); renderMachines(); };
     const js = mPane.querySelector('[data-a=json]'); if (js) js.onclick = () => {

@@ -5,6 +5,26 @@ features, patch bumps fix things. The version shown in the UI header comes from 
 
 ## [Unreleased]
 
+## [0.41.0] — 2026-10-17
+
+### Added
+- **Machines know what their controller takes.** `cam.CONTROLLERS` describes each post's controller, from its source
+  or manual: which arc forms it accepts, whether arcs may move Z, and its line-length limit. Two new machine
+  settings (Settings ▸ Machines, or the machine JSON) choose within that: **Arc format**, I/J centre offsets (the
+  default, every controller) or an R radius word, and **Helical arcs** (off writes flat arcs only). R arcs are kept
+  to 135° each, well short of the half circle where a radius is ambiguous.
+- The Makera Z1 / Carvera firmware works out an arc's radius from I/J only and has no R form (read from
+  MakeraZ1Firmware, Robot::compute_arc), so a Makera machine set to R still gets I/J, and the program check says so.
+  The Z1's G-code is unchanged: it has always been I/J.
+
+### Fixed
+- **Arc centres sit exactly between the arc's ends.** GRBL refuses an I/J arc whose start and end radii differ by
+  more than 0.005 mm (and 0.1 % of the radius). The fitted centre is now moved onto the chord's bisector, so the
+  only difference left is the 3-decimal rounding (≤ 0.002 mm). On a 15,000-arc program the worst was 0.0021 mm
+  before as well, so no existing program was rejected.
+- GRBL lines are held to its 80-character buffer and LinuxCNC's to 255, like the Makera's 63 (comments count only
+  where the controller keeps them).
+
 ## [0.40.0] — 2026-10-17
 
 ### Fixed

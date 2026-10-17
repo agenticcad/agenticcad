@@ -196,8 +196,7 @@ Agent-native, like the CAD side: a second script per design, `cam.py`, written b
 - **UI**: CAM tab (setup, operations with colour/visibility and per-op tool settings, warnings, simulation, G-code
   download/preview), toolpaths + stock + WCS origin drawn in the viewer (rapids red dashed),
   simulation slider with a tool marker, Code tab switch to `cam.py`.
-- **Arcs**: the post fits G2/G3 to circular runs (chord-sagitta checked, ≤180° per arc; `machine.arcs`,
-  `machine.arc_tolerance`) and merges collinear moves. **Lead-in/out**: tangential quarter arcs on contours
+- **Arcs**: the post fits G2/G3 to circular runs (chord-sagitta checked; `machine.arcs`, `machine.arc_tolerance`) in the form the machine's controller takes: `machine.arc_format` `"ij"` (centre offsets, every controller) or `"r"` (radius word; GRBL, Haas, LinuxCNC, not the Makera firmware), `machine.helical_arcs` for ramps. `cam.CONTROLLERS` lists what each post's controller accepts (arc forms, helical arcs, line length) with its source; collinear moves are merged. **Lead-in/out**: tangential quarter arcs on contours
   (`lead=`), start mid-way along the longest straight edge. **Adaptive**: see above. **Rest machining**:
   `rest_from=` on `pocket` / `adaptive` (2.5D, morphological opening) and `parallel3d` (3D tip-map difference).
   **Feeds & speeds**: `feeds(tool, material, machine)` / `apply_feeds(...)`, 13 materials, spindle and feed
