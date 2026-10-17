@@ -783,6 +783,9 @@ class MachineBody(BaseModel):
     dia: float | None = None
     ops: list[int] | None = None
     air: float | None = None
+    line: str | None = None          # console: one line as typed
+    text: str | None = None          # run_file: the .nc file's contents
+    name: str | None = None          # run_file: its name
 
 
 def _program_for_ops(body: MachineBody) -> tuple[dict, dict, str]:
@@ -874,6 +877,34 @@ async def machine_post(body: MachineBody):
         elif a == "run_ops":                              # upload the chosen operations to the machine and play them
             prep, info, label = _program_for_ops(body)
             res = await machine.run_program(label, prep, info)
+        elif a in ("check_file", "run_file"):              # any .nc file, through the same checks as CAM operations
+            if not body.text:
+                raise machine_link.Refused("no file")
+            air = float(body.air or 0.0)
+            if not (0.0 <= air <= 50.0):
+                raise machine_link.Refused("air-cut lift: 0 .. 50 mm")
+            prep = machine_link.prepare_program(body.text, [], air_cut=air)
+            label = Path(body.name or "file").stem + ("_air" if air else "")
+            if a == "check_file":
+                chk = machine.check_job(prep)
+                return {**machine.payload(), "check": {"label": machine_link.program_filename(label), "lines": prep["lines"],
+                                                       "ops": [], "tools": prep["tools"], "extents": prep["extents"],
+                                                       "notes": chk["notes"], "program": body.name or "file"}}
+            res = await machine.run_program(label, prep, {"program": body.name or "file", "file": True})
+        elif a == "set_origin":                            # the head's position becomes these work coordinates (G10 L20)
+            res = await machine.set_origin(body.x, body.y, body.z)
+        elif a == "shift_origin":                          # move X0 Y0 by x, y mm (e.g. probed corner -> the setup's corner)
+            res = await machine.shift_origin(body.x if body.x is not None else float('nan'), body.y if body.y is not None else float('nan'),
+                                             body.kind or "typed", body.name or "shifted")
+        elif a == "console":                               # one line as typed (blocked commands refused)
+            res = await machine.console(body.line or "")
+        elif a == "goto_work_xy":                          # go to work X, Y (converted with the current work offsets)
+            wco = machine._wco()
+            if wco is None or body.x is None or body.y is None:
+                raise machine_link.Refused("need the machine's position and X, Y")
+            res = await machine.goto_xy_raised(body.x + wco[0], body.y + wco[1], body.feed or 300.0)
+        elif a == "goto_xy_raised":                         # Z up to the top first if needed, then machine X, Y
+            res = await machine.goto_xy_raised(body.x if body.x is not None else float('nan'), body.y if body.y is not None else float('nan'), body.feed or 300.0)
         elif a == "job_pause":
             res = await machine.job_pause()
         elif a == "job_resume":

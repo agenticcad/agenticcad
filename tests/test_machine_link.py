@@ -305,6 +305,74 @@ def test_origin_anchor_and_makeras_auto_z_probe():
 
 
 
+def test_origin_record_set_here_and_the_console():
+    """What set the work origin is remembered (for "this setup wants / the machine has"); G10 L20 sets it at the head;
+    the console sends one line as typed but never the blocked commands, settings or tool changes."""
+    async def go():
+        emu, mc, _ = await _setup()
+        try:
+            mc.profile.anchor1 = (-191.28, -194.45)
+            assert mc.payload()["origin"].get("xy") is None          # unknown until this session sets it
+            with pytest.raises(ml.Refused, match="Control is off"):
+                await mc.set_origin(0, 0, None)
+            await mc.arm(True); await mc.home(); await _until(lambda: mc.homed)
+            with pytest.raises(ml.Refused, match="measured"):
+                await mc.set_origin(None, None, 0)                   # Z0 depends on the tool length
+            await mc.set_origin(0, 0, None)
+            assert emu.lines[-1] == "G10 L20 P0 X0.000 Y0.000"
+            o = mc.payload()["origin"]
+            assert o["xy"]["ref"] == "typed" and "z" not in o and abs(o["wco"][0] - emu.mpos[0]) < 1e-6
+            await mc.set_origin_anchor()
+            o = mc.payload()["origin"]
+            assert o["xy"]["ref"] == "anchor1" and not o["xy"].get("changed")
+            emu.wco[0] += 5.0                                        # something else moves the offsets
+            await asyncio.sleep(0.4)
+            assert mc.payload()["origin"]["xy"]["changed"]
+            await asyncio.sleep(0.3)
+            w0 = mc._wco()
+            await mc.shift_origin(101.42, 100.32, "back-right", "front-left corner, shifted by the block size")
+            assert emu.lines[-1] == f"G10 L2 P0 X{w0[0] + 101.42:.3f} Y{w0[1] + 100.32:.3f}"
+            o = mc.payload()["origin"]
+            assert o["xy"]["ref"] == "back-right" and not o["xy"].get("changed")
+            with pytest.raises(ml.Refused, match="outside the travel"):
+                await mc.shift_origin(-400, 0, "x", "x")
+            for bad, why in (("M490", "never sent"), ("M498.2", "never sent"), ("$H", "settings"), ("$100=80", "settings"),
+                             ("$RST=*", "settings"), ("M6 T3", "M6"), ("M491", "tool changes"), ("G0 X1\nG0 Y1", "one line"), ("", "one line")):
+                with pytest.raises(ml.Refused, match=why if why != "M6" else "tool changes|never|own steps"):
+                    await mc.console(bad)
+            n = len(emu.lines)
+            await mc.console("g10 l20 p0 x0")
+            await _until(lambda: len(emu.lines) > n)
+            assert emu.lines[n] == "G10 L20 P0 X0" and mc.payload()["origin"]["xy"]["ref"] == "typed"
+            await mc.console("$#")                                   # a read-only query is fine
+        finally:
+            await mc.disconnect(); await emu.stop()
+    run(go())
+
+
+def test_goto_raised_lifts_z_first_and_checks_before_moving():
+    async def go():
+        emu, mc, _ = await _setup()
+        try:
+            await mc.arm(True); await mc.home(); await _until(lambda: mc.homed)
+            _measured(mc, emu)
+            emu.mpos[2] = -12.0                                   # e.g. where a tool change leaves the head
+            await asyncio.sleep(0.4)
+            with pytest.raises(ml.Refused, match="Z at the top"):
+                await mc.goto_xy(-100, -100, 300)                 # the plain go-to refuses
+            n = len(emu.lines)
+            with pytest.raises(ml.Refused, match="outside"):
+                await mc.goto_xy_raised(-500, -100, 300)          # out of travel: refused before Z moves
+            assert len(emu.lines) == n
+            await mc.goto_xy_raised(-100, -100, 600)
+            await _until(lambda: not mc.jog_busy, timeout=20)
+            assert emu.lines[n].startswith("G53 G1 Z") and emu.lines[n + 1] == "G53 G1 X-100.000 Y-100.000 F600"
+            assert abs(emu.mpos[0] + 100) < 1e-6 and emu.mpos[2] > -2
+        finally:
+            await mc.disconnect(); await emu.stop()
+    run(go())
+
+
 async def _at_top_over(mc, emu, x, y):
     await mc.goto_xy(x, y, 600)
     await _until(lambda: not mc.jog_busy, timeout=10)

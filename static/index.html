@@ -441,58 +441,6 @@
   .design { padding:8px 10px; border-radius:6px; cursor:pointer; display:flex; justify-content:space-between; }
   .design:hover { background:var(--panel2); } .design span { color:var(--muted); font-size:11px; }
   /* ---- Machine tab: live control of a networked machine (camera left, controls right) */
-  #machine-view { position:absolute; left:0; right:0; bottom:0; z-index:3; background:var(--bg); display:grid; grid-template-columns:minmax(0,1fr) 360px; gap:12px; padding:12px; }
-  .mv-cam { position:relative; background:#0b0d10; border:1px solid var(--line); border-radius:10px; overflow:hidden; display:flex; align-items:center; justify-content:center; min-height:0; }
-  .mv-cam img { max-width:100%; max-height:100%; object-fit:contain; display:block; }
-  #mv-cam-off { position:absolute; color:var(--muted); font-size:13px; }
-  .mv-cam-bar { position:absolute; left:10px; right:10px; top:10px; display:flex; gap:10px; align-items:center; }
-  .mv-badge { padding:3px 10px; border-radius:20px; font-weight:700; font-size:12px; letter-spacing:.04em; background:#3a3f48; color:#cfd6df; }
-  .mv-badge.Idle { background:#1f5f3a; color:#c8f5d8; } .mv-badge.Run, .mv-badge.Home, .mv-badge.Jog { background:#7a4a12; color:#ffe3c2; }
-  .mv-badge.Hold, .mv-badge.Pause { background:#6b5e10; color:#fff3b0; } .mv-badge.Alarm { background:#7a1f1f; color:#ffd4d4; } .mv-badge.stale { background:#555; color:#eee; }
-  .mv-camtoggle { margin-left:auto; color:#cfd6df; font-size:12px; display:flex; gap:5px; align-items:center; background:rgba(0,0,0,.45); padding:3px 8px; border-radius:6px; }
-  .mv-side { display:flex; flex-direction:column; gap:10px; overflow:auto; min-height:0; }
-  #machine-view.with-prog { grid-template-columns:minmax(0,1fr) 320px 360px; }
-  .mv-prog { min-height:0; display:flex; } .mvp-card { flex:1; display:flex; flex-direction:column; min-height:0; }
-  .mvp-ops { flex:1; overflow:auto; min-height:60px; margin:0 -4px; }
-  .mvp-setup { font-size:11px; text-transform:uppercase; letter-spacing:.05em; color:var(--accent2); margin:8px 4px 2px; display:flex; gap:6px; align-items:center; cursor:pointer; }
-  .mvp-op { display:flex; align-items:center; gap:7px; padding:5px 4px; border-radius:6px; font-size:12.5px; position:relative; }
-  .mvp-op:hover { background:var(--panel2); } .mvp-op .sw { width:10px; height:10px; border-radius:2px; flex:none; }
-  .mvp-op .nm { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; } .mvp-op .meta { color:var(--muted); font-size:11px; white-space:nowrap; }
-  .mvp-op.cur { background:rgba(78,161,255,.14); box-shadow:inset 2px 0 0 var(--accent2); } .mvp-op.done .nm { color:var(--muted); }
-  .mvp-op .bar { position:absolute; left:4px; right:4px; bottom:1px; height:2px; background:var(--accent2); border-radius:2px; transform-origin:left; }
-  .mvp-foot { border-top:1px solid var(--line); margin-top:8px; padding-top:8px; display:flex; flex-direction:column; gap:6px; }
-  .mvp-job { border:1px solid var(--line); border-radius:8px; padding:8px; font-size:12px; display:flex; flex-direction:column; gap:6px; }
-  .mvp-job .pb { height:6px; background:var(--panel2); border-radius:4px; overflow:hidden; } .mvp-job .pb div { height:100%; background:var(--accent2); }
-  .mvp-job.failed, .mvp-job.aborted { border-color:var(--err); } .mvp-job.done { border-color:var(--ok); } .mvp-job.awaiting { border-color:var(--accent); }
-  .mvp-check { font-size:12.5px; display:flex; flex-direction:column; gap:6px; min-width:340px; } .mvp-check ul { margin:0; padding-left:18px; }
-  .mvp-check .warn { color:#ffd166; }
-  .mv-card { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:10px 12px; }
-  .mv-h { font-weight:600; margin-bottom:6px; display:flex; gap:8px; align-items:baseline; } .mv-h .muted { font-weight:400; font-size:12px; }
-  .mv-row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin:4px 0; }
-  .mv-small { font-size:11.5px; }
-  .mv-halt { width:100%; height:54px; border-radius:10px; border:2px solid #ff7a7a; background:linear-gradient(180deg,#d63a3a,#a51f1f); color:#fff; font-size:20px; font-weight:800; letter-spacing:.12em; cursor:pointer; margin-bottom:6px; }
-  .mv-halt:hover { filter:brightness(1.1); } .mv-halt:disabled { opacity:.4; cursor:default; filter:none; }
-  .mv-arm { display:flex; gap:8px; align-items:flex-start; margin-top:6px; font-size:12px; cursor:pointer; } .mv-arm input { margin-top:2px; }
-  .mv-arm.on b { color:var(--accent); }
-  .mv-pos { width:100%; border-collapse:collapse; font-variant-numeric:tabular-nums; } .mv-pos th { color:var(--muted); font-weight:500; text-align:right; font-size:11px; }
-  .mv-pos td { text-align:right; padding:2px 4px; font-size:14px; } .mv-pos td:first-child { text-align:left; font-size:11.5px; color:var(--muted); } .mv-pos tr.muted td { font-size:11.5px; color:var(--muted); }
-  .mv-steps { display:flex; border:1px solid var(--line); border-radius:6px; overflow:hidden; } .mv-steps button { background:var(--panel2); border:0; color:var(--text); padding:4px 10px; cursor:pointer; font-size:12px; }
-  .mv-steps button.on { background:var(--accent2); color:#08111d; font-weight:600; }
-  .mv-jog { display:flex; gap:14px; align-items:center; justify-content:center; margin:8px 0; }
-  .mv-xy { display:grid; grid-template-areas:". yp ." "xm . xp" ". ym ."; grid-template-columns:repeat(3,52px); grid-template-rows:repeat(3,44px); gap:4px; }
-  .mv-z { display:grid; grid-template-rows:repeat(2,64px); gap:4px; }
-  .mv-xy button, .mv-z button { background:var(--panel2); border:1px solid var(--line); border-radius:8px; color:var(--text); font-weight:700; font-size:14px; cursor:pointer; width:52px; }
-  .mv-xy button:hover:not(:disabled), .mv-z button:hover:not(:disabled) { border-color:var(--accent2); }
-  .mv-xy button:disabled, .mv-z button:disabled, #mv-home:disabled, #mv-resume:disabled, #mv-unlock:disabled { opacity:.35; cursor:default; }
-  .mv-sw { display:flex; gap:6px; align-items:center; font-size:12.5px; cursor:pointer; margin-right:10px; }
-  .mv-logcard { flex:1; min-height:120px; display:flex; flex-direction:column; }
-  .mv-msg { color:var(--err); font-size:12px; min-height:0; } .mv-msg.ok { color:var(--ok); }
-  .mv-log { flex:1; overflow:auto; font:11px/1.45 ui-monospace,Menlo,monospace; color:var(--muted); white-space:pre-wrap; max-height:220px; }
-  .mv-conn { display:flex; gap:6px; align-items:center; } .mv-conn input:not([type=checkbox]) { width:210px; background:var(--panel2); border:1px solid var(--line); color:var(--text); border-radius:6px; padding:4px 7px; font-size:12px; }
-  #mv-conn-state { font-size:12px; white-space:nowrap; }
-  .mv-tc { margin-top:6px; padding:8px 10px; border-radius:8px; background:rgba(78,161,255,.10); border:1px solid rgba(78,161,255,.35); font-size:12.5px; }
-  .mv-tc.failed { background:rgba(255,92,92,.10); border-color:rgba(255,92,92,.45); } .mv-tc.done { background:rgba(76,211,122,.10); border-color:rgba(76,211,122,.4); }
-  @media (max-width: 1000px) { #machine-view, #machine-view.with-prog { grid-template-columns:1fr; grid-template-rows:minmax(180px,38vh) auto; overflow:auto; } .mv-side, .mvp-ops { overflow:visible; } }
 
   /* =================================================================== v2 shell
      top bar (file, workspaces, machine, assistant, settings) · toolbar · left column | viewer | right column */
@@ -572,11 +520,119 @@
   .insp-acts { display:flex; flex-wrap:wrap; gap:6px; margin-top:12px; }
   .insp-empty { color:var(--muted); line-height:1.55; }
   .insp-empty b { color:var(--text); font-weight:500; }
-  /* machine workspace: the camera fills the centre, controls are the right column's Inspector */
-  #machine-view { top:0 !important; grid-template-columns:minmax(0,1fr); }
-  #machine-view.with-prog { grid-template-columns:minmax(0,1fr) 320px; }
-  #insp-machine { display:flex; flex-direction:column; gap:10px; padding:12px; }
-  #insp-machine .mv-side { overflow:visible; }
+
+  /* =================================================================== v2 Machine workspace */
+  /* shared small controls */
+  .btn.sm { padding:3px 9px; font-size:12px; } .btn.pri { background:var(--accent2); border-color:var(--accent2); color:#05101e; font-weight:600; }
+  .btn.acc { background:var(--accent); border-color:var(--accent); color:#1d0d02; font-weight:600; } .btn.ghost { background:transparent; border-color:transparent; color:var(--muted); }
+  .btn.ghost:hover { color:var(--text); background:var(--panel2); } .btn.wide { width:100%; height:36px; font-size:13px; }
+  .inp { display:inline-flex; align-items:center; gap:5px; height:28px; border:1px solid var(--line2); border-radius:7px; background:var(--bg); padding:0 8px; color:var(--mut2); font-size:11.5px; }
+  .inp input { flex:1; min-width:0; width:100%; background:transparent; border:0; color:var(--text); font:12.5px ui-monospace,Menlo,monospace; outline:none; padding:0; }
+  .inp b { color:var(--muted); font-weight:500; font-size:11.5px; } input.inp, select.inp { color:var(--text); font:inherit; font-size:12.5px; } .inp:focus-within, input.inp:focus { border-color:var(--accent2); outline:none; }
+  .mono { font-family:ui-monospace,Menlo,monospace !important; }
+  .tgl { display:inline-flex; align-items:center; gap:8px; cursor:pointer; font-size:12.5px; margin-right:12px; } .tgl input, .ms-ctl input { display:none; }
+  .tgl .sw, .ms-ctl .sw { width:30px; height:17px; border-radius:10px; background:var(--line2); position:relative; flex:none; transition:background .15s; }
+  .tgl .sw::after, .ms-ctl .sw::after { content:""; position:absolute; top:2px; left:2px; width:13px; height:13px; border-radius:50%; background:#aab2bd; transition:left .15s; }
+  .tgl input:checked + .sw, .ms-ctl input:checked + .sw { background:var(--accent); } .tgl input:checked + .sw::after, .ms-ctl input:checked + .sw::after { left:15px; background:#fff; }
+  .tgl input:disabled + .sw { opacity:.4; }
+  .sm { font-size:11.5px; } .wa { color:var(--warn); } span.ok, i.ok { color:var(--ok); } span.acc { color:var(--accent); }
+  /* status strip */
+  #mstrip { display:none; flex:none; height:64px; align-items:center; gap:16px; padding:0 14px; background:var(--panel); border-bottom:1px solid var(--line); position:relative; z-index:6; }
+  body[data-ws=machine] #mstrip { display:flex; }
+  .ms-badge { padding:5px 12px; border-radius:7px; font-weight:700; font-size:12px; letter-spacing:.06em; background:var(--s3); color:var(--muted); white-space:nowrap; display:flex; align-items:center; gap:7px; }
+  .ms-badge::before { content:""; width:8px; height:8px; border-radius:50%; background:currentColor; }
+  .ms-badge.s-Idle { background:rgba(62,207,122,.13); color:var(--ok); } .ms-badge.s-Running, .ms-badge.s-Run, .ms-badge.s-Jog, .ms-badge.s-Home { background:rgba(255,140,66,.14); color:var(--accent); }
+  .ms-badge.s-Tool, .ms-badge.s-Hold, .ms-badge.s-Pause { background:rgba(242,201,76,.13); color:var(--warn); } .ms-badge.s-Alarm { background:rgba(255,90,95,.16); color:var(--err); }
+  .ms-conn { display:flex; gap:6px; align-items:center; } body.m-conn .ms-conn { display:none; } body:not(.m-conn) .ms-live { display:none; }
+  .ms-conn input { width:240px; height:30px; background:var(--bg); border:1px solid var(--line2); border-radius:7px; color:var(--text); padding:0 9px; font:inherit; }
+  .ms-live { display:flex; align-items:center; gap:16px; min-width:0; }
+  .ms-pos { display:flex; gap:14px; font-variant-numeric:tabular-nums; }
+  .ms-pos div { display:flex; flex-direction:column; line-height:1.1; min-width:62px; } .ms-pos small { font-size:9.5px; color:var(--mut2); }
+  .ms-pos b { font:600 16px ui-monospace,Menlo,monospace; } .ms-pos i { font:10.5px ui-monospace,Menlo,monospace; color:var(--mut2); font-style:normal; }
+  .ms-sep { width:1px; height:34px; background:var(--line); }
+  .ms-tool { display:flex; align-items:center; gap:9px; } .ms-tool div { display:flex; flex-direction:column; line-height:1.25; } .ms-tool small { color:var(--muted); font-size:11.5px; }
+  .ms-tool b { font-weight:600; white-space:nowrap; max-width:210px; overflow:hidden; text-overflow:ellipsis; }
+  .ms-ctl { display:flex; align-items:center; gap:8px; cursor:pointer; white-space:nowrap; } .ms-ctl #ms-ctl-txt { color:var(--muted); } .ms-ctl.on b { color:var(--accent); }
+  .ms-msg { flex:1; min-width:0; color:var(--err); font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; } .ms-msg.ok { color:var(--ok); }
+  .ms-right { display:flex; gap:8px; align-items:center; margin-left:auto; } .ms-right .btn { height:34px; padding:0 14px; font-size:13px; }
+  .ms-right .btn:disabled { opacity:.4; }
+  .ms-stop { height:44px; padding:0 26px; border-radius:9px; border:1px solid #ff8a8a; background:linear-gradient(180deg,#e04444,#b52828); color:#fff; font-weight:800; font-size:16px; letter-spacing:.14em; cursor:pointer; box-shadow:0 4px 14px rgba(224,68,68,.3); }
+  .ms-stop:hover { filter:brightness(1.1); } .ms-stop:disabled { opacity:.35; cursor:default; box-shadow:none; filter:none; }
+  /* camera + jog */
+  #machine-view { position:absolute; inset:0; z-index:3; background:#08090b; }
+  .mv-cam { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; overflow:hidden; }
+  .mv-cam img { width:100%; height:100%; object-fit:cover; display:block; }
+  #mv-cam-off { position:absolute; color:var(--muted); font-size:14px; }
+  .mv-cam-tl { position:absolute; left:14px; top:14px; display:flex; gap:8px; }
+  .mv-chip { display:flex; align-items:center; gap:7px; padding:5px 10px; border-radius:7px; background:rgba(10,12,15,.78); color:#e7ebf0; font-size:12px; backdrop-filter:blur(4px); }
+  #mv-live i { width:7px; height:7px; border-radius:50%; background:#ff4d4d; }
+  .mv-camtoggle { position:absolute; right:14px; top:14px; color:#cfd6df; font-size:12px; display:flex; gap:6px; align-items:center; background:rgba(10,12,15,.7); padding:5px 10px; border-radius:7px; cursor:pointer; }
+  .mv-jogpad { position:absolute; right:16px; bottom:16px; display:flex; gap:8px; align-items:flex-end; }
+  .mv-jogpad .jp-why { position:absolute; right:0; bottom:100%; margin-bottom:6px; white-space:nowrap; font-size:11.5px; color:var(--warn); background:rgba(10,12,15,.78); padding:3px 8px; border-radius:6px; }
+  .mv-jogpad .jp-why:empty { display:none; }
+  .jp-z, .jp-xy { background:rgba(16,19,24,.86); border:1px solid rgba(255,255,255,.08); border-radius:12px; padding:6px; backdrop-filter:blur(6px); }
+  .jp-z { display:grid; grid-template-rows:repeat(2,58px); gap:6px; }
+  .jp-xy { display:grid; grid-template-areas:". yp ." "xm c xp" ". ym ."; grid-template-columns:repeat(3,52px); grid-template-rows:repeat(3,44px); gap:4px; }
+  .mv-jogpad button { width:52px; border-radius:8px; border:1px solid rgba(255,255,255,.07); background:rgba(255,255,255,.05); color:var(--text); font-weight:600; cursor:pointer; }
+  .mv-jogpad button:hover:not(:disabled) { background:rgba(78,161,255,.22); border-color:rgba(78,161,255,.5); }
+  .mv-jogpad button:disabled { opacity:.35; cursor:default; } .mv-jogpad .jp-step { background:transparent; border-color:transparent; color:var(--muted); font-weight:500; font-size:11.5px; }
+  .mv-jogpad.off .jp-step { opacity:.6; }
+  /* right column: steps */
+  #insp-machine { padding:0; gap:0; }
+  .msteps { position:sticky; top:0; z-index:2; background:var(--panel); display:grid; grid-template-columns:1fr 1fr 1fr .8fr; border-bottom:1px solid var(--line); }
+  .msteps button { background:none; border:0; border-bottom:2px solid transparent; color:var(--text); font:inherit; text-align:left; padding:11px 10px 10px; cursor:pointer; display:grid; grid-template-columns:auto 1fr; column-gap:7px; align-items:center; min-width:0; }
+  .msteps button:hover { background:var(--panel2); } .msteps button.on { border-bottom-color:var(--accent2); background:rgba(78,161,255,.05); }
+  .msteps .n { width:18px; height:18px; border-radius:50%; background:var(--s3); color:var(--muted); font-size:10.5px; display:grid; place-items:center; grid-row:span 2; align-self:start; }
+  .msteps .ok .n { background:rgba(62,207,122,.16); color:var(--ok); } .msteps b { font-weight:600; font-size:13px; }
+  .msteps small { grid-column:2; color:var(--muted); font-size:11px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .mstep { padding:12px; display:flex; flex-direction:column; gap:10px; }
+  .mcard { background:var(--panel2); border:1px solid var(--line); border-radius:10px; padding:12px 14px; }
+  .mcard:empty, .mstep > p:empty { display:none; } #mi-tc .mcard { margin:12px 12px 0; }
+  .mcard .h, .mstep .h { font-size:10.5px; letter-spacing:.07em; text-transform:uppercase; color:var(--mut2); font-weight:600; margin:0 0 8px; display:flex; align-items:center; gap:8px; }
+  .mcard p { margin:6px 0 0; line-height:1.5; } .mcard .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-top:8px; } .mcard .row:first-of-type { margin-top:0; }
+  .mcard .kv { display:grid; grid-template-columns:86px 1fr; gap:5px 10px; font-size:12.5px; align-items:baseline; } .mcard .kv > span:nth-child(odd) { color:var(--muted); }
+  .mcard .acts { display:flex; gap:8px; align-items:center; margin-top:10px; flex-wrap:wrap; }
+  .chips { display:flex; gap:6px; flex-wrap:wrap; align-items:center; }
+  .chipb { height:24px; padding:0 9px; border-radius:12px; border:1px solid var(--line2); background:var(--bg); color:var(--text); font:inherit; font-size:11.5px; cursor:pointer; } .chipb.on { border-color:var(--accent2); color:#8cc2ff; }
+  .next { display:flex; justify-content:flex-end; }
+  .msetup { width:100%; height:30px; }
+  .zstate { margin-left:auto; text-transform:none; letter-spacing:0; font-size:11px; padding:1px 8px; border-radius:9px; background:var(--s3); color:var(--muted); }
+  .zstate.ok { background:rgba(62,207,122,.14); color:var(--ok); } .zstate.warn { background:rgba(242,201,76,.14); color:var(--warn); }
+  .tc, .tcwait { display:flex; gap:14px; align-items:flex-start; } .tc .t, .tcwait .t { font-weight:600; font-size:14px; }
+  .tcwait, .tc.awaiting { border-color:rgba(255,140,66,.5); background:linear-gradient(180deg, rgba(255,140,66,.10), rgba(255,140,66,.03)); }
+  .tc.failed { border-color:rgba(255,90,95,.5); background:rgba(255,90,95,.07); } .tc.done { border-color:rgba(62,207,122,.4); }
+  .pickrow { display:flex; gap:14px; align-items:center; }
+  #mz-picker .pblk { fill:#d9cdb8; } #mz-picker .pbr { fill:#5d6672; } #mz-picker .lbl { fill:var(--mut2); font-size:10px; }
+  #mz-picker .pk { cursor:pointer; } #mz-picker .pk circle { fill:#2c333d; stroke:#8a939f; stroke-width:1.5; } #mz-picker .pk:hover circle { stroke:#fff; }
+  #mz-picker .pk.on circle { fill:var(--accent2); stroke:#fff; stroke-width:2.5; }
+  .pickf { display:flex; flex-direction:column; gap:8px; flex:1; } .pickf label { display:flex; align-items:center; justify-content:space-between; gap:8px; color:var(--muted); font-size:12px; } .pickf .inp { width:84px; }
+  .shift { display:flex; gap:10px; align-items:center; margin-top:10px; padding:10px; border-radius:8px; background:rgba(78,161,255,.08); border:1px solid rgba(78,161,255,.3); }
+  .shift div { flex:1; display:flex; flex-direction:column; gap:2px; } .shift small { color:var(--muted); font-size:11.5px; line-height:1.4; }
+  .seq { display:flex; align-items:center; gap:10px; padding:9px 0; border-top:1px solid var(--line); } .seq:first-child { border-top:0; }
+  .seq .n { width:20px; height:20px; border-radius:50%; border:1px solid var(--line2); color:var(--muted); font-size:11px; display:grid; place-items:center; flex:none; }
+  .seq.ok .n { background:rgba(62,207,122,.16); border-color:transparent; color:var(--ok); }
+  .seq div { flex:1; display:flex; flex-direction:column; min-width:0; } .seq b { font-weight:500; } .seq small { color:var(--muted); font-size:11.5px; line-height:1.4; }
+  .rd { display:flex; align-items:center; gap:9px; padding:6px 0; font-size:12.5px; } .rd .t { flex:1; }
+  .rd .n { width:18px; height:18px; border-radius:50%; border:1.5px solid var(--line2); display:grid; place-items:center; font-size:11px; flex:none; }
+  .rd.ok .n { background:rgba(62,207,122,.16); border-color:transparent; color:var(--ok); } .rd.warn .n { background:rgba(242,201,76,.16); border-color:transparent; color:var(--warn); }
+  .rd.no .t { color:var(--muted); }
+  .mop { display:flex; align-items:center; gap:8px; padding:6px 6px; border-radius:7px; cursor:pointer; font-size:12.5px; }
+  .mop:hover { background:rgba(255,255,255,.03); } .mop .dot { width:9px; height:9px; border-radius:3px; flex:none; }
+  .mop .nm { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; } .mop .kind { color:var(--mut2); font-size:11px; }
+  .mop .tchip { font-size:10.5px; color:var(--muted); background:var(--s3); border-radius:5px; padding:1px 5px; font-weight:600; } .mop .tm { width:40px; text-align:right; color:var(--muted); font-size:11.5px; }
+  .mop .st { width:46px; text-align:right; font-size:10.5px; color:var(--mut2); } .mop .st .ok { font-style:normal; color:var(--ok); font-size:12px; }
+  .mop .st .spin { display:inline-block; width:11px; height:11px; border-radius:50%; border:2px solid var(--accent); border-right-color:transparent; animation:spin 1s linear infinite; }
+  @keyframes spin { to { transform:rotate(360deg); } }
+  .mop .cb { width:15px; height:15px; border-radius:4px; border:1.5px solid var(--line2); flex:none; }
+  .mop .cb.on { background:var(--accent2); border-color:var(--accent2); background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3.5 8.3l3 3 6-6.6' fill='none' stroke='%2305101e' stroke-width='2'/%3E%3C/svg%3E"); }
+  .mop.cur { background:rgba(255,140,66,.10); box-shadow:inset 2px 0 0 var(--accent); } .mop.done .nm, .mop.done .tm { color:var(--mut2); }
+  .jobc .jt { display:flex; justify-content:space-between; align-items:flex-start; } .jobc .pct { font-size:30px; font-weight:700; letter-spacing:-.02em; margin:2px 0 8px; }
+  .jobc .tm { text-align:right; display:flex; flex-direction:column; } .jobc .tm b { font:600 18px ui-monospace,Menlo,monospace; } .jobc .tm small { color:var(--muted); }
+  .segbar { display:flex; gap:2px; height:7px; margin-bottom:8px; } .segbar > div { background:var(--s3); border-radius:3px; overflow:hidden; } .segbar i { display:block; height:100%; background:var(--accent2); }
+  .jobc.failed, .jobc.aborted { border-color:rgba(255,90,95,.5); } .jobc.done { border-color:rgba(62,207,122,.45); } .jobc.awaiting, .jobc.paused { border-color:rgba(242,201,76,.45); }
+  .mvp-check { font-size:12.5px; display:flex; flex-direction:column; gap:6px; min-width:340px; max-width:520px; } .mvp-check ul { margin:0; padding-left:18px; }
+  .mvp-check .warn { color:var(--warn); } .mvp-check code { font:12.5px ui-monospace,Menlo,monospace; background:var(--bg); padding:2px 6px; border-radius:5px; }
+  .mv-log { overflow:auto; font:11px/1.45 ui-monospace,Menlo,monospace; color:var(--muted); white-space:pre-wrap; max-height:220px; }
 </style>
 </head>
 <body>
@@ -620,12 +676,29 @@
           <div class="rg" data-tab="cam"><div class="rgl">Simulate</div><div class="rgb" id="rg-cam-sim"></div></div>
           <div class="rg on fold fixed" data-tab="design"><div class="rgl">Output</div><div class="rgb" id="rg-output"></div></div>
           <div class="rg on fold fixed right" data-tab="design"><div class="rgl">Extensions</div><div class="rgb" id="rg-ext"></div></div>
-          <div class="rg" data-tab="machine"><div class="rgl">Connection</div><div class="rgb" id="rg-machine"><div class="mv-conn">
-            <input id="mv-host" placeholder="machine address (e.g. 192.168.1.36)" spellcheck="false"><button class="btn small" id="mv-discover" title="Listen for Makera machines on this network">Find</button>
-            <button class="btn small primary" id="mv-connect">Connect</button><span id="mv-conn-state" class="muted">not connected</span>
-            <label class="mv-sw" style="margin-left:14px" title="Show the CAM program's operations next to the camera, to run them on the machine and follow them"><input type="checkbox" id="mv-prog-on"> Program panel</label></div></div></div>
         </div>
       </div>
+</div>
+<div id="mstrip">
+  <span id="ms-badge" class="ms-badge s-offline">OFFLINE</span>
+  <div class="ms-conn"><input id="mv-host" placeholder="machine address, e.g. 192.168.1.36" spellcheck="false"><button class="btn sm" id="mv-discover" title="Listen for Makera machines on this network">Find</button><button class="btn sm pri" id="mv-connect">Connect</button></div>
+  <div class="ms-live">
+    <div class="ms-pos" id="ms-pos"><div><small>X</small><b id="mv-wx">–</b><i id="mv-mx">–</i></div><div><small>Y</small><b id="mv-wy">–</b><i id="mv-my">–</i></div><div><small>Z</small><b id="mv-wz">–</b><i id="mv-mz">–</i></div></div>
+    <span class="ms-sep"></span>
+    <div class="ms-tool"><span id="ms-tool-sil"></span><div><b id="ms-tool">–</b><small id="ms-tool-sub"></small></div></div>
+    <span class="ms-sep"></span>
+    <label class="ms-ctl" id="ms-ctl" title="Control: allow commands that move the machine. Turns itself off on disconnect, alarm, lost status or 5 minutes unused."><input type="checkbox" id="mv-arm"><span class="sw"></span><b>Control</b>&nbsp;<span id="ms-ctl-txt">off</span></label>
+  </div>
+  <span id="mv-msg" class="ms-msg"></span>
+  <div class="ms-right">
+    <button class="btn" id="mv-unlock" title="Clear the Alarm ($X); home before moving">Unlock</button>
+    <button class="btn" id="ms-pause" title="Finish the moves in hand, then stop">Pause</button>
+    <button class="btn pri" id="ms-resume">Resume</button>
+    <button class="btn" id="ms-abort" title="Stop the program and the spindle (the machine stays homed)">Stop program</button>
+    <button class="btn" id="mv-hold" title="Feed hold: pause motion (always available)">Hold</button>
+    <button class="btn" id="mv-resume" title="Resume after a hold (needs Control)">Resume</button>
+    <button class="ms-stop" id="mv-halt" title="Stop now: motion and spindle stop, the machine goes to Alarm (unlock and home afterwards). Always available.">STOP</button>
+  </div>
 </div>
 <div id="app">
   <div id="leftcol">
@@ -654,54 +727,11 @@
     <div id="tip"></div>
     <div id="machine-view" style="display:none">
       <div class="mv-cam"><img id="mv-cam-img" alt=""><div id="mv-cam-off">Camera off</div>
-        <div class="mv-cam-bar"><span id="mv-badge" class="mv-badge">offline</span><span id="mv-cam-note" class="muted"></span>
-          <label class="mv-camtoggle"><input type="checkbox" id="mv-cam-on" checked> Camera</label></div></div>
-      <div class="mv-prog" id="mv-prog" style="display:none"><div class="mv-card mvp-card">
-        <div class="mv-h">Program <span class="muted" id="mvp-name"></span></div>
-        <div id="mvp-ops" class="mvp-ops"></div>
-        <div class="mvp-foot">
-          <div class="mv-row mv-small"><label class="mv-sw" title="Run the selected operations lifted this far above the work: the spindle runs, nothing is cut — to watch the moves first"><input type="checkbox" id="mvp-air"> Air cut</label><input type="number" id="mvp-air-mm" value="10" min="1" max="50" step="1" style="width:52px"><span class="muted">mm above</span></div>
-          <button class="btn primary" id="mvp-run" style="width:100%">Run selected on the machine…</button>
-          <div id="mvp-job" class="mvp-job" style="display:none"></div>
-        </div></div></div>
-      <div class="mv-side">
-        <div class="mv-card mv-safety">
-          <button class="mv-halt" id="mv-halt" title="Stop now: motion and spindle stop, the machine goes to Alarm (unlock and home afterwards). Always available.">STOP</button>
-          <div class="mv-row"><button class="btn" id="mv-hold" title="Feed hold: pause motion (always available)">Hold</button><button class="btn" id="mv-resume" title="Resume after a hold (needs Control)">Resume</button><button class="btn" id="mv-unlock" title="Clear an Alarm ($X); home before moving">Unlock</button></div>
-          <label class="mv-arm"><input type="checkbox" id="mv-arm"><span><b>Control</b> <span class="muted">— allow commands that move the machine. Turns itself off on disconnect, alarm, lost status or 5 minutes unused.</span></span></label>
-        </div>
-        <div class="mv-card"><div class="mv-h">Position <span class="muted" id="mv-tool"></span></div>
-          <table class="mv-pos"><tr><th></th><th>X</th><th>Y</th><th>Z</th></tr><tr><td>Work</td><td id="mv-wx">–</td><td id="mv-wy">–</td><td id="mv-wz">–</td></tr><tr class="muted"><td>Machine</td><td id="mv-mx">–</td><td id="mv-my">–</td><td id="mv-mz">–</td></tr></table>
-          <div class="muted mv-small" id="mv-spindle"></div></div>
-        <div class="mv-card"><div class="mv-h">Tool <span class="muted" id="mv-tool-state"></span></div>
-          <div class="mv-row"><span class="mv-small muted">Change to</span><input type="number" id="mv-tc-num" min="0" max="9999" step="1" value="0" style="width:64px" title="0 = the probe, 9999 = the 3D probe">
-            <button class="btn" id="mv-tc-start" title="Makera's tool change (M6 Tn): Z up, park, wait for you, then the machine measures the tool on its setter. Same number again: re-measure (M491). Every tool, the probe included.">Change tool…</button></div>
-          <div class="mv-row"><button class="btn" id="mv-origin" title="Work X/Y origin = Anchor 1, the L-bracket's inside corner (G10 L2 P0, as MakeraStudio does). Z is not touched.">Origin = Anchor 1</button>
-            <button class="btn" id="mv-zprobe" title="Makera's auto Z probe (M495) at the head's current X/Y: probe on, touch, set work Z zero there, probe off. Needs the probe (T0) fitted and measured.">Auto Z probe here</button></div>
-          <div id="mv-tc-box" class="mv-tc" style="display:none"><div id="mv-tc-msg"></div>
-            <div class="mv-row"><button class="btn primary" id="mv-tc-confirm">Confirm (same as the front button)</button><span class="muted mv-small" id="mv-tc-hint"></span></div></div></div>
-        <div class="mv-card"><div class="mv-h">3D probe <span class="muted" id="mv-p3-why"></span></div>
-          <div class="mv-row"><select id="mv-p3-kind" title="Makera's own 3D-probe routines (M480.n), as MakeraStudio runs them">
-            <optgroup label="Outside corner (stock)"><option value="outside_back_left">Outside corner · back left</option><option value="outside_back_right" selected>Outside corner · back right</option><option value="outside_front_right">Outside corner · front right</option><option value="outside_front_left">Outside corner · front left</option></optgroup>
-            <optgroup label="Inside corner (pocket)"><option value="inside_back_left">Inside corner · back left</option><option value="inside_back_right">Inside corner · back right</option><option value="inside_front_right">Inside corner · front right</option><option value="inside_front_left">Inside corner · front left</option></optgroup>
-            <optgroup label="Centre"><option value="pocket_center">Pocket / bore centre</option><option value="boss_center">Boss centre</option></optgroup></select></div>
-          <div class="mv-row mv-small"><span class="muted">X</span><input type="number" id="mv-p3-x" value="20" min="0" max="80" step="1" style="width:50px"><span class="muted">Y</span><input type="number" id="mv-p3-y" value="20" min="0" max="80" step="1" style="width:50px">
-            <span class="muted">depth</span><input type="number" id="mv-p3-d" value="2" min="0.5" max="10" step="0.5" style="width:46px"><span class="muted">ball ⌀</span><input type="number" id="mv-p3-dia" value="2" min="0.5" max="10" step="0.1" style="width:46px"><span class="muted">mm</span></div>
-          <div class="muted mv-small" id="mv-p3-hint"></div>
-          <div class="mv-row"><span class="muted mv-small">Lower to</span><input type="number" id="mv-p3-h" value="5" min="2" max="50" step="1" style="width:46px"><span class="muted mv-small">mm above work Z0</span>
-            <button class="btn" id="mv-p3-lower" title="Z down only (XY untouched), slowly, to this height above work zero: the start height for a 3D-probe routine. Needs the fitted tool measured.">Lower</button>
-            <button class="btn primary" id="mv-p3-run" title="Runs Makera's routine from where the head is now. The machine moves and probes on its own and overwrites the work origin; the app holds it if the head leaves the routine's area or Z drops too far before touching.">Run 3D probe</button></div></div>
-        <div class="mv-card"><div class="mv-h">Jog <span class="muted" id="mv-jog-why"></span></div>
-          <div class="mv-row"><button class="btn" id="mv-home" title="Home all axes (Z goes up first). Needed once per session before jogging.">⌂ Home</button>
-            <span class="muted mv-small">Step</span><div class="mv-steps" id="mv-steps"><button data-s="0.1">0.1</button><button data-s="1" class="on">1</button><button data-s="10">10</button></div><span class="muted mv-small">mm</span></div>
-          <div class="mv-jog">
-            <div class="mv-xy"><button data-j="y+" style="grid-area:yp">Y+</button><button data-j="x-" style="grid-area:xm">X−</button><button data-j="x+" style="grid-area:xp">X+</button><button data-j="y-" style="grid-area:ym">Y−</button></div>
-            <div class="mv-z"><button data-j="z+">Z+</button><button data-j="z-">Z−</button></div></div>
-          <div class="muted mv-small">Z down: at most 1 mm per click, slowly, never below the Z floor
-            <input type="number" id="mv-zfloor" step="0.5" min="0" max="100" style="width:58px"> mm above work zero.</div></div>
-        <div class="mv-card"><div class="mv-h">Accessories</div>
-          <div class="mv-row"><label class="mv-sw"><input type="checkbox" id="mv-dust"> Dust collector</label><label class="mv-sw"><input type="checkbox" id="mv-light"> Light</label></div></div>
-        <div class="mv-card mv-logcard"><div class="mv-h">Log</div><div id="mv-msg" class="mv-msg"></div><div id="mv-log" class="mv-log"></div></div>
+        <div class="mv-cam-tl"><span class="mv-chip" id="mv-live"><i></i>Live · machine camera</span><span class="mv-chip" id="mv-cam-note"></span></div>
+        <label class="mv-camtoggle"><input type="checkbox" id="mv-cam-on" checked> Camera</label>
+        <div class="mv-jogpad" id="mv-jogpad"><div class="jp-why" id="mv-jog-why"></div>
+          <div class="jp-z"><button data-j="z+">Z+</button><button data-j="z-" title="Z down: at most 1 mm per click, never below the Z floor">Z−</button></div>
+          <div class="jp-xy"><button data-j="y+" style="grid-area:yp">Y+</button><button data-j="x-" style="grid-area:xm">X−</button><button id="mv-step" class="jp-step" style="grid-area:c" title="Jog step: click to change">1 mm</button><button data-j="x+" style="grid-area:xp">X+</button><button data-j="y-" style="grid-area:ym">Y−</button></div></div>
       </div>
     </div>
     <div id="cmd"></div>
@@ -754,7 +784,80 @@
       <div class="tab" data-pane="library" id="tab-library">Library</div>
       <button class="btn" id="side-collapse" title="Hide panel (⌘B)">⟩</button>
     </div>
-    <div class="pane" id="pane-inspect"><div id="insp-design"></div><div id="insp-machine" style="display:none"></div></div>
+    <div class="pane" id="pane-inspect"><div id="insp-design"></div><div id="insp-machine" style="display:none">
+<div id="mi-tc"></div>
+<nav class="msteps" id="msteps"></nav>
+<div class="mstep" data-step="prep" id="mstep-prep">
+  <div class="mcard" id="mp-machine"></div>
+  <div class="mcard"><div class="h">Tool</div>
+    <div class="row"><div id="mp-tool-chips" class="chips"></div></div>
+    <div class="row"><span class="muted">Change to T</span><input type="number" id="mp-tc-num" min="0" max="9999" step="1" value="0" class="inp" style="width:72px"><button class="btn" id="mp-tc-go" data-act="tc" title="Makera's tool change (M6 Tn): Z up, park, wait for you, then the machine measures the tool on its setter. Same number: re-measure (M491). Every tool, the probes included.">Change tool…</button></div>
+    <p class="muted sm">Every tool — the probes too — is measured on the setter before the machine moves with it.</p></div>
+  <div class="mcard"><div class="h">Accessories</div><div class="row"><label class="tgl"><input type="checkbox" id="mv-dust"><span class="sw"></span>Dust collector</label><label class="tgl"><input type="checkbox" id="mv-light"><span class="sw"></span>Light</label></div></div>
+  <div class="next"><button class="btn" data-act="step" data-step="zero">Next: Zero →</button></div>
+</div>
+<div class="mstep" data-step="zero" id="mstep-zero" style="display:none">
+  <select class="msetup inp"></select>
+  <div class="mcard" id="mz-cmp"></div>
+  <div class="mcard"><div class="h">Probe the block · 3D probe</div>
+    <div class="pickrow"><svg id="mz-picker" width="200" height="160" viewBox="0 0 200 160">
+      <path d="M26,138 L26,40 L34,40 L34,130 L130,130 L130,138 Z" class="pbr"/>
+      <rect x="40" y="20" width="130" height="104" rx="3" class="pblk"/>
+      <g class="pk" data-k="obl"><circle cx="40" cy="20" r="8"/><title>back left</title></g><g class="pk" data-k="obr"><circle cx="170" cy="20" r="8"/><title>back right</title></g>
+      <g class="pk" data-k="ofr"><circle cx="170" cy="124" r="8"/><title>front right</title></g><g class="pk" data-k="ofl"><circle cx="40" cy="124" r="8"/><title>front left</title></g>
+      <g class="pk" data-k="c"><circle cx="105" cy="72" r="6"/><title>centre (boss)</title></g>
+      <text x="105" y="154" text-anchor="middle" class="lbl">front</text></svg>
+      <div class="pickf"><label>Step out<span class="inp"><input type="number" id="mz-step" value="20" min="2" max="80" step="1">mm</span></label>
+        <label>Depth<span class="inp"><input type="number" id="mz-depth" value="2" min="0.5" max="10" step="0.5">mm</span></label>
+        <label>Ball Ø<span class="inp"><input type="number" id="mz-dia" value="2" min="0.5" max="10" step="0.1">mm</span></label></div></div>
+    <p class="muted sm" id="mz-pick-note"></p>
+    <div id="mz-seq"></div></div>
+  <div class="mcard"><div class="h">Other ways to zero</div><div class="row">
+    <button class="btn sm" data-act="anchor" title="G10 L2 P0 at Anchor 1, as MakeraStudio does">Origin = Anchor 1</button>
+    <button class="btn sm" data-act="autoz" title="Makera's M495 with the wired probe (T0) where the head is">Auto Z (wired probe)</button>
+    <button class="btn ghost sm" data-act="step" data-step="manual">Type it… (Manual)</button></div></div>
+  <div class="next"><button class="btn" data-act="step" data-step="run">Next: Run →</button></div>
+</div>
+<div class="mstep" data-step="run" id="mstep-run" style="display:none">
+  <select class="msetup inp"></select>
+  <div id="mr-job"></div>
+  <div class="mcard" id="mr-ready-card"><div id="mr-ready"></div></div>
+  <div class="mcard" id="mr-ops"></div>
+  <div class="mcard" id="mr-foot">
+    <div class="row"><label class="tgl" title="Run lifted this far above the work: the spindle runs, nothing is cut — to watch the moves first"><input type="checkbox" id="mvp-air" checked><span class="sw"></span>Air cut first</label><span class="inp" style="width:84px"><input type="number" id="mvp-air-mm" value="10" min="1" max="50" step="1">mm</span><span class="muted sm">above the work</span></div>
+    <button class="btn acc wide" id="mvp-run">Run…</button>
+    <p class="muted sm">Pause finishes the moves in hand and stops; Stop program ends it and stops the spindle; STOP halts everything at once.</p></div>
+</div>
+<div class="mstep" data-step="manual" id="mstep-manual" style="display:none">
+  <p class="wa sm" id="mm-why"></p>
+  <div class="mcard"><div class="h">Go to</div>
+    <div class="row"><select id="mm-space" class="inp" style="width:96px"><option value="work">Work</option><option value="machine">Machine</option></select>
+      <span class="inp" style="width:90px"><b>X</b><input type="number" id="mm-gx" value="0" step="1"></span><span class="inp" style="width:90px"><b>Y</b><input type="number" id="mm-gy" value="0" step="1"></span>
+      <button class="btn sm" data-act="goto">Go</button></div>
+    <div class="row"><button class="btn sm" data-act="raise">Raise Z to the top</button><span class="muted sm">Go raises Z to the top first, then moves X/Y.</span></div>
+    <div class="row"><span class="muted">Lower to</span><span class="inp" style="width:84px"><input type="number" id="mm-lower" value="5" min="2" max="50" step="1">mm</span><span class="muted sm">above work Z0</span><button class="btn sm" data-act="mlower">Lower</button></div></div>
+  <div class="mcard"><div class="h">Set the work origin</div>
+    <div class="row"><button class="btn sm" data-act="x0y0">X0 Y0 here</button><button class="btn sm" data-act="z0">Z0 here</button><button class="btn sm" data-act="anchor">Origin = Anchor 1</button><button class="btn sm" data-act="autoz">Auto Z (wired probe)</button></div>
+    <div class="row"><span class="muted sm">The head is at work</span><span class="inp" style="width:78px"><b>X</b><input type="number" id="mm-ox" step="0.1" placeholder="–"></span><span class="inp" style="width:78px"><b>Y</b><input type="number" id="mm-oy" step="0.1" placeholder="–"></span><span class="inp" style="width:78px"><b>Z</b><input type="number" id="mm-oz" step="0.1" placeholder="–"></span><button class="btn sm" data-act="settyped">Set</button></div></div>
+  <div class="mcard"><div class="h">Any 3D-probe routine</div>
+    <div class="row"><select id="mv-p3-kind" class="inp" title="Makera's own 3D-probe routines (M480.n), as MakeraStudio runs them">
+      <optgroup label="Outside corner (stock)"><option value="outside_back_left">Outside corner · back left</option><option value="outside_back_right" selected>Outside corner · back right</option><option value="outside_front_right">Outside corner · front right</option><option value="outside_front_left">Outside corner · front left</option></optgroup>
+      <optgroup label="Inside corner (pocket)"><option value="inside_back_left">Inside corner · back left</option><option value="inside_back_right">Inside corner · back right</option><option value="inside_front_right">Inside corner · front right</option><option value="inside_front_left">Inside corner · front left</option></optgroup>
+      <optgroup label="Centre"><option value="pocket_center">Pocket / bore centre</option><option value="boss_center">Boss centre</option></optgroup></select></div>
+    <div class="row"><span class="inp" style="width:74px"><b>X</b><input type="number" id="mv-p3-x" value="20" min="0" max="80" step="1"></span><span class="inp" style="width:74px"><b>Y</b><input type="number" id="mv-p3-y" value="20" min="0" max="80" step="1"></span>
+      <span class="inp" style="width:96px"><b>depth</b><input type="number" id="mv-p3-d" value="2" min="0.5" max="10" step="0.5"></span><span class="inp" style="width:86px"><b>Ø</b><input type="number" id="mv-p3-dia" value="2" min="0.5" max="10" step="0.1"></span>
+      <button class="btn sm pri" data-act="p3m">Probe</button></div>
+    <p class="muted sm" id="mm-p3-hint"></p></div>
+  <div class="mcard"><div class="h">Console</div>
+    <div class="row"><input id="mm-con" class="inp mono" placeholder="one line, e.g. G0 X10 Y10" spellcheck="false" style="flex:1"><button class="btn sm" id="mm-con-send" data-act="console">Send…</button></div>
+    <p class="muted sm">One line at a time, sent as typed after you confirm it. Never sent: M490, M498.2, settings ($n=), tool changes (use Prepare).</p></div>
+  <div class="mcard"><div class="h">Run a file</div>
+    <div class="row"><button class="btn sm" data-act="file">Choose a .nc file…</button><span class="muted sm">same checks as a CAM program; Air cut (Run step) applies</span></div>
+    <input type="file" id="mm-filepick" accept=".nc,.gcode,.ngc,.tap,.txt" style="display:none"></div>
+  <div class="mcard"><div class="h">Limits</div><div class="row"><span class="muted">Z floor</span><span class="inp" style="width:84px"><input type="number" id="mv-zfloor" step="0.5" min="0" max="100">mm</span><span class="muted sm">jogging Z down never goes below this above work Z0</span></div></div>
+  <div class="mcard"><div class="h">Log</div><div id="mv-log" class="mv-log"></div></div>
+</div>
+</div></div>
     <div class="pane active" id="pane-chat">
       <div id="messages"></div>
       <div id="thinking">thinking…</div>
@@ -5615,16 +5718,18 @@ async function renderPhonePane(pane) {
 }
 
 
-// ---------------------------------------------------------------- Machine tab: live control of a networked machine
+// ---------------------------------------------------------------- Machine workspace: live control of a networked machine
 // Every command goes to /api/machine, where machine_link decides whether it is allowed (Control on, homed this session,
 // Idle, inside the travel box and above the Z floor). The page only mirrors that state; it never decides on its own.
-const MV = { st: null, step: 1, camOn: true, busy: false };
+// Layout: status strip (state, position, tool, Control, Hold / Pause / STOP) · camera with jog · right column steps
+// Prepare → Zero → Run, and Manual for anything ad hoc (go to, set origin, any 3D-probe routine, console, run a file).
+const MV = { st: null, step: null, camOn: true, busy: false, jog: 1, si: 0, corner: 'obr', ack: '', tcSeen: '' };
+const MVP = { sel: new Set(), key: '' };
 function mvEl(id) { return document.getElementById(id); }
 function mvVisible() { return ribbonTab() === 'machine'; }
 function mvLayout() {
-  const v = mvEl('machine-view'), h = document.getElementById('hdr');
-  if (!v) return;
-  v.style.display = mvVisible() ? 'grid' : 'none';
+  const v = mvEl('machine-view'); if (!v) return;
+  v.style.display = mvVisible() ? 'block' : 'none';
   mvCamera();
 }
 function mvCamera() {
@@ -5633,8 +5738,9 @@ function mvCamera() {
   if (!want && img.dataset.on) { img.removeAttribute('src'); img.src = ''; delete img.dataset.on; }
   mvEl('mv-cam-off').style.display = want ? 'none' : '';
   mvEl('mv-cam-off').textContent = !(MV.st && MV.st.connected) ? 'Not connected' : 'Camera off';
+  mvEl('mv-live').style.display = want ? '' : 'none';
 }
-function mvMsg(text, ok) { const m = mvEl('mv-msg'); m.textContent = text || ''; m.classList.toggle('ok', !!ok); }
+function mvMsg(text, ok) { const m = mvEl('mv-msg'); m.textContent = text || ''; m.classList.toggle('ok', !!ok); m.title = text || ''; }
 async function mvPost(body) {
   if (MV.busy && body.action !== 'halt' && body.action !== 'hold') return;
   MV.busy = body.action === 'jog';
@@ -5643,131 +5749,290 @@ async function mvPost(body) {
     const j = await r.json();
     if (!r.ok) { mvMsg(j.error || ('failed: ' + r.status)); } else mvMsg('');
     if (j && 'connected' in j) mvRender(j);
-    return j;
+    return r.ok ? j : null;
   } catch (e) { mvMsg('request failed: ' + e.message); }
   finally { MV.busy = false; }
 }
-// Program panel: the CAM program's operations, run on the machine (upload + play) and followed line by line
-const MVP = { sel: new Set(), on: false, key: '' };
-try { MVP.on = localStorage.getItem('agenticcad.mvProg') === '1'; } catch {}
-function mvpRender(st) {
-  const box = mvEl('mv-prog'); box.style.display = MVP.on ? '' : 'none'; mvEl('machine-view').classList.toggle('with-prog', MVP.on); mvEl('mv-prog-on').checked = MVP.on;
-  if (!MVP.on) return;
-  const job = st && st.job, active = job && ['uploading', 'starting', 'running', 'awaiting', 'paused'].includes(job.stage);
-  const ops = (program && program.ops) || [];
-  mvEl('mvp-name').textContent = program ? `${program.name} · ${program.machine}` : 'no CAM program';
-  const key = (program ? program.name + ops.map(o => o.key + o.time).join() : '') + '|' + (job ? job.name + job.stage : '');
-  const runIdx = job ? (job.ops_index || []) : [];
-  if (key !== MVP.key) {
-    MVP.key = key;
-    for (const i of [...MVP.sel]) if (i >= ops.length) MVP.sel.delete(i);
-    const el = mvEl('mvp-ops'); el.innerHTML = '';
-    if (!program) el.innerHTML = '<div class="muted mv-small" style="padding:6px 4px">Build a CAM program (CAM tab) to run its operations here.</div>';
-    (program ? program.setups || [] : []).forEach((stp, si) => {
-      const mine = ops.map((o, i) => [o, i]).filter(([o]) => (o.setup || 0) === si);
-      const h = document.createElement('div'); h.className = 'mvp-setup';
-      h.innerHTML = `<input type="checkbox" ${mine.length && mine.every(([, i]) => MVP.sel.has(i)) ? 'checked' : ''} ${active ? 'disabled' : ''}> Setup ${si + 1} · ${esc(stp.name)} · ${esc(stp.wcs || '')}`;
-      h.querySelector('input').onchange = e => { for (const [, i] of mine) e.target.checked ? MVP.sel.add(i) : MVP.sel.delete(i); MVP.key = ''; mvpRender(MV.st); };
-      el.appendChild(h);
-      for (const [o, i] of mine) {
-        const r = document.createElement('label'); r.className = 'mvp-op'; r.dataset.i = i;
-        r.innerHTML = `<input type="checkbox" ${MVP.sel.has(i) ? 'checked' : ''} ${active ? 'disabled' : ''}><span class="sw" style="background:${o.color}"></span><span class="nm">${i + 1}. ${esc(o.name)}</span><span class="meta">T${o.tool.number} · ${o.time.toFixed(1)} min</span>`;
-        r.querySelector('input').onchange = e => { e.target.checked ? MVP.sel.add(i) : MVP.sel.delete(i); MVP.key = ''; mvpRender(MV.st); };
-        el.appendChild(r);
-      }
-    });
+function setHTML(el, html) { if (el && el.__html !== html) { el.__html = html; el.innerHTML = html; } }
+async function mvAsk(title, html, ok) { const d = document.createElement('div'); d.className = 'mvp-check'; d.innerHTML = html; return openModal(title, d, [['Cancel', false], [ok, true, true]]); }
+
+// ---- what the setup wants, what the machine has
+const ORIGIN_WANTS = { 'stock-top-left': { xy: 'front-left', z: 'top' }, 'stock-top-center': { xy: 'centre', z: 'top' },
+  'stock-bottom-left': { xy: 'front-left', z: 'bottom' }, 'stock-bottom-center': { xy: 'centre', z: 'bottom' } };
+const REF_TEXT = { 'front-left': 'front-left corner', 'front-right': 'front-right corner', 'back-left': 'back-left corner', 'back-right': 'back-right corner',
+  centre: 'centre', anchor1: 'Anchor 1 (the L-bracket corner)', typed: 'set by hand', top: 'top of the block', bottom: 'bottom of the stock' };
+const CORNERS = { obl: ['outside_back_left', 'back-left'], obr: ['outside_back_right', 'back-right'], ofr: ['outside_front_right', 'front-right'],
+  ofl: ['outside_front_left', 'front-left'], c: ['boss_center', 'centre'] };
+function mvSetup() { return program && program.setups[Math.min(MV.si, program.setups.length - 1)]; }
+function mvToolName(n) {
+  if (n == null) return '–';
+  if (n === 0) return 'wired probe'; if (n === 9999) return '3D probe'; if (n === 8888) return '3D probe rod';
+  const op = program && program.ops.find(o => o.tool && o.tool.number === n);
+  const t = op ? op.tool : (library.tools || []).find(x => x.number === n);
+  return t ? t.name : '';
+}
+function mvToolShape(n) {
+  const op = program && program.ops.find(o => o.tool && o.tool.number === n);
+  const t = op ? op.tool : (library.tools || []).find(x => x.number === n);
+  return t && t.shape && !t.shape.error ? t.shape : null;
+}
+function toolSil(shape, w = 14, h = 34) {        // the tool's silhouette from its profile (flutes orange, the rest steel)
+  if (!shape || !shape.outline) return `<svg width="${w}" height="${h}"><rect x="${w / 2 - 2}" y="2" width="4" height="${h - 4}" rx="2" fill="#6f7782"/></svg>`;
+  const pts = shape.outline, fl = shape.flute_length || 0, top = Math.min(shape.stickout || 20, Math.max(fl + 4, 12));
+  const rmax = Math.max(...pts.map(p => p[1])), sc = Math.min((w - 2) / (2 * rmax), (h - 2) / top);
+  const X = r => (w / 2 + r * sc).toFixed(1), Y = z => (h - 1 - z * sc).toFixed(1);
+  const rAt = z => { for (let i = 1; i < pts.length; i++) if (pts[i][0] >= z) { const a = pts[i - 1], b = pts[i]; return b[0] > a[0] ? a[1] + (b[1] - a[1]) * (z - a[0]) / (b[0] - a[0]) : b[1]; } return pts[pts.length - 1][1]; };
+  const body = pts.filter(p => p[0] <= top); if (body[body.length - 1][0] < top) body.push([top, rAt(top)]);
+  const poly = q => q.map(p => `${X(p[1])},${Y(p[0])}`).join(' ') + ' ' + [...q].reverse().map(p => `${X(-p[1])},${Y(p[0])}`).join(' ');
+  const cut = body.filter(p => p[0] < fl).concat([[fl, rAt(fl)]]), rest = [[fl, rAt(fl)]].concat(body.filter(p => p[0] > fl));
+  return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}"><polygon points="${poly(rest)}" fill="#8a929d"/><polygon points="${poly(cut)}" fill="#e08a4a"/></svg>`;
+}
+function mvAgo(t) { if (!t) return ''; const d = new Date(t * 1000); return d.toTimeString().slice(0, 5); }
+// where the setup's work origin should be on the machine (bare stock placed on the bed: CAM ▸ Setup ▸ Workholding)
+function mvExpectedOrigin(stp, st) {
+  if (!stp || !st || !st.anchor1 || !stp.fixture || stp.fixture.name) return null;
+  const at = stp.fixture.at || [0, 0], sz = stp.size || [0, 0, 0], w = ORIGIN_WANTS[stp.origin_name];
+  if (!w) return null;
+  const bed = w.xy === 'front-left' ? [at[0] - sz[0] / 2, at[1] - sz[1] / 2] : at;
+  return [bed[0] - st.bed_anchor[0] + st.anchor1[0], bed[1] - st.bed_anchor[1] + st.anchor1[1]];
+}
+function mvZero(st, stp) {                       // {state: ok|warn|none, rows, why}
+  const o = (st && st.origin) || {}, w = stp ? ORIGIN_WANTS[stp.origin_name] : null;
+  const xy = o.xy, z = o.z, exp = mvExpectedOrigin(stp, st), wco = o.wco;
+  const okXY = xy && w && xy.ref === w.xy && !xy.changed, okZ = z && w && z.ref === w.z;
+  let state = !xy && !z ? 'none' : okXY && okZ ? 'ok' : 'warn';
+  const why = [];
+  if (!w) why.push(`this setup's origin (${stp ? stp.origin_name : '–'}) can't be checked automatically`);
+  else {
+    if (!xy) why.push('X/Y not set this session'); else if (xy.changed) why.push('the X/Y offsets changed since they were set here');
+    else if (xy.ref !== w.xy) why.push(`X/Y is at the ${REF_TEXT[xy.ref] || xy.ref}, the setup wants the ${REF_TEXT[w.xy]}`);
+    if (!z) why.push('Z0 not set this session'); else if (z.ref !== w.z) why.push(`Z0 is ${REF_TEXT[z.ref] || z.ref}, the setup wants the ${REF_TEXT[w.z]}`);
   }
-  // live progress on the rows of the running job
-  const cur = job && job.op != null ? runIdx[job.op] : null;
-  document.querySelectorAll('#mvp-ops .mvp-op').forEach(r => {
-    const i = +r.dataset.i, k = runIdx.indexOf(i), jo = job && k >= 0 ? job.ops[k] : null;
-    r.classList.toggle('cur', active && i === cur);
-    r.classList.toggle('done', !!(job && jo && (job.stage === 'done' || (job.line > jo.end))));
-    let bar = r.querySelector('.bar');
-    if (jo && active && job.line >= jo.start) {
-      if (!bar) { bar = document.createElement('div'); bar.className = 'bar'; r.appendChild(bar); }
-      bar.style.transform = `scaleX(${Math.min(1, (job.line - jo.start + 1) / Math.max(1, jo.end - jo.start + 1))})`;
-    } else if (bar) bar.remove();
-  });
-  const conn = st && st.connected, s = (st && st.status) || {};
-  const ready = conn && st.armed && st.homed && s.state === 'Idle' && !active && MVP.sel.size > 0 && program;
-  const run = mvEl('mvp-run'); run.disabled = !ready;
-  run.title = !program ? 'no CAM program' : !MVP.sel.size ? 'tick the operations to run' : !conn ? 'connect first' : !st.armed ? 'turn Control on' : !st.homed ? 'home first' : active ? 'a program is running' : s.state !== 'Idle' ? `machine is ${s.state}` : '';
-  run.textContent = MVP.sel.size ? `Run ${MVP.sel.size} operation${MVP.sel.size === 1 ? '' : 's'} on the machine…` : 'Run selected on the machine…';
-  const jb = mvEl('mvp-job');
-  if (!job) { jb.style.display = 'none'; return; }
-  jb.style.display = ''; jb.className = 'mvp-job ' + job.stage;
-  const pct = job.stage === 'uploading' ? Math.round((job.upload || 0) * 100) : Math.round(job.percent || 0);
-  const t = Math.round(job.seconds || 0), tt = `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`;
-  const label = { uploading: 'Uploading', starting: 'Starting', running: 'Running', awaiting: 'Tool change', paused: 'Paused', done: 'Finished', failed: 'Failed', aborted: 'Stopped' }[job.stage] || job.stage;
-  jb.innerHTML = `<div><b>${label}</b> · ${esc(job.name)}${job.air_cut ? ` · <span style="color:var(--accent)">air cut +${job.air_cut} mm</span>` : ''}</div>
-    <div class="pb"><div style="width:${pct}%"></div></div>
-    <div class="muted">${job.stage === 'uploading' ? `${pct}% sent` : `line ${job.line || 0} of ${job.lines} · ${pct}% · ${tt}`}${cur != null && ops[cur] ? ` · ${esc(ops[cur].name)}` : ''}</div>
-    ${job.msg && !['running', 'uploading'].includes(job.stage) ? `<div>${esc(job.msg)}</div>` : ''}
-    <div class="mv-row">${job.stage === 'awaiting' ? '<button class="btn primary" data-j="confirm_tool">Confirm (front button)</button>' : ''}
-      ${job.stage === 'running' ? '<button class="btn" data-j="job_pause" title="Finish the moves in hand, then stop (spindle keeps its state until abort)">Pause</button>' : ''}
-      ${job.stage === 'paused' ? '<button class="btn primary" data-j="job_resume">Resume</button>' : ''}
-      ${active ? '<button class="btn danger" data-j="job_abort" title="Stop the program and the spindle (the machine stays homed)">Stop program</button>' : ''}</div>`;
-  jb.querySelectorAll('[data-j]').forEach(b => b.onclick = () => mvPost({ action: b.dataset.j }));
+  let place = '';
+  if (exp && wco && xy && w && xy.ref === w.xy && !xy.changed) {
+    const d = Math.hypot(wco[0] - exp[0], wco[1] - exp[1]);
+    place = d < 3 ? `<span class="ok">✓</span> ${d.toFixed(2)} mm from where the setup places it` : `<span class="wa">!</span> ${d.toFixed(1)} mm from where the setup places it — check, or CAM ▸ Setup ▸ From machine`;
+    if (d >= 3 && state === 'ok') state = 'warn';
+  }
+  return { state, why, xy, z, w, place, exp };
 }
-async function mvpRun() {
-  const ops = [...MVP.sel].sort((a, b) => a - b), air = mvEl('mvp-air').checked ? +mvEl('mvp-air-mm').value : 0;
-  const r = await mvPost({ action: 'check_ops', ops, air });
-  if (!r || !r.check) return;
-  const c = r.check, d = document.createElement('div'); d.className = 'mvp-check';
-  const wo = r.status && r.status.mpos && r.status.wpos ? r.status.mpos.map((m, i) => m - r.status.wpos[i]) : null;
-  d.innerHTML = `<div><b>${esc(c.program)}</b> · setup ${esc(c.setup)} (${esc(c.wcs || '')}) · ${c.ops.length} operation${c.ops.length === 1 ? '' : 's'} · about ${c.time_min} min · ${c.lines} lines</div>
-    <ul>${c.ops.map(o => `<li>${esc(o.name)} · T${o.tool ?? '?'}</li>`).join('')}</ul>
-    <div class="muted">${c.notes.map(esc).join('<br>')}</div>
-    ${wo ? `<div class="muted">Work origin on the machine: X ${wo[0].toFixed(3)} · Y ${wo[1].toFixed(3)} (machine). It must be this setup's origin.</div>` : ''}
-    ${air ? `<div style="color:var(--accent)">Air cut: everything ${air} mm higher; the spindle still runs.</div>` : ''}
-    <div class="warn">The machine runs this on its own once started: keep a hand on the e-stop. Pause, Stop program and STOP stay available here.</div>`;
-  const ok = await openModal('Run on the machine', d, [['Cancel', false], [air ? 'Start air cut' : 'Start', true, true]]);
-  if (ok) mvPost({ action: 'run_ops', ops, air });
+function mvReady(st, stp) {                      // the Run checklist
+  const s = (st && st.status) || {}, conn = st && st.connected, tl = s.tool ? s.tool.number : null;
+  const z = mvZero(st, stp), first = program ? (program.ops.find(o => o.setup === MV.si && MVP.sel.has(program.ops.indexOf(o))) || {}).tool : null;
+  const ackKey = stp ? stp.name + JSON.stringify((st && st.origin && st.origin.wco) || []) : '';
+  return [
+    { k: 'conn', ok: !!(conn && st.armed), txt: conn ? (st.armed ? 'Connected · Control on' : 'Turn Control on') : 'Connect the machine', go: 'prep' },
+    { k: 'home', ok: !!(conn && st.homed), txt: st && st.homed ? 'Homed this session' : 'Home the machine', go: 'prep' },
+    { k: 'zero', ok: z.state === 'ok' || MV.ack === ackKey, warn: z.state !== 'ok' && MV.ack === ackKey, txt: z.state === 'ok' ? `Work origin: ${REF_TEXT[z.w.xy]}, ${REF_TEXT[z.w.z]}` : `Work origin: ${z.why[0] || 'not set'}`, go: 'zero', ackKey },
+    { k: 'tool', ok: true, warn: !(first && tl === first.number && st.tool_ok), txt: !first ? 'Tick the operations to run' : (tl === first.number && st.tool_ok) ? `T${first.number} fitted and measured` : `Starts with T${first.number} (${esc(first.name)}): the machine stops for the change and measures it`, go: 'prep' },
+  ];
 }
-function mvRender(st) {
-  MV.st = st;
-  mpillRender(st);
-  mvpRender(st);
-  const s = st.status || {}, conn = st.connected, state = !conn ? 'offline' : (!st.fresh ? 'stale' : (st.homing ? 'Home' : (st.jogging ? 'Jog' : s.state || '?')));
-  const b = mvEl('mv-badge'); b.textContent = state.toUpperCase() + (state === 'Alarm' && s.halt ? ' · ' + s.halt.reason : ''); b.className = 'mv-badge ' + state;
-  b.title = state === 'Alarm' && s.halt ? s.halt.advice : '';
-  mvEl('mv-conn-state').textContent = conn ? `${st.profile} · ${st.host}${st.homed ? ' · homed' : ''}` : 'not connected';
-  mvEl('mv-connect').textContent = conn ? 'Disconnect' : 'Connect';
-  mvEl('mv-connect').classList.toggle('primary', !conn);
-  if (!mvEl('mv-host').value && document.activeElement !== mvEl('mv-host')) mvEl('mv-host').value = conn ? st.host : ((st.saved && st.saved.host) || '');
-  const f = v => (v == null ? '–' : (+v).toFixed(3));
-  const w = s.wpos || [], m = s.mpos || [];
-  const rel = st.position_reliable !== false;
+
+// ---- the strip
+function mvStrip(st) {
+  const s = st.status || {}, conn = st.connected, job = st.job, tc = st.routine;
+  const jobOn = job && ['uploading', 'starting', 'running', 'awaiting', 'paused'].includes(job.stage);
+  const state = !conn ? 'offline' : !st.fresh ? 'stale' : st.homing ? 'Home' : st.jogging ? 'Jog' : (job && job.stage === 'awaiting') || (tc && tc.stage === 'awaiting') ? 'Tool' : jobOn && s.state === 'Run' ? 'Running' : (s.state || '?');
+  const b = mvEl('ms-badge'); b.textContent = state === 'Tool' ? 'TOOL CHANGE' : state.toUpperCase(); b.className = 'ms-badge s-' + state;
+  b.title = state === 'Alarm' && s.halt ? `${s.halt.reason}: ${s.halt.advice}` : '';
+  document.body.classList.toggle('m-conn', !!conn);
+  const f = v => (v == null ? '–' : (+v).toFixed(3)), w = s.wpos || [], m = s.mpos || [], rel = st.position_reliable !== false;
   ['x', 'y', 'z'].forEach((a, i) => { mvEl('mv-w' + a).textContent = rel ? f(w[i]) : '?'; mvEl('mv-m' + a).textContent = rel ? f(m[i]) : '?'; });
-  mvEl('mv-tool').textContent = '';
-  mvEl('mv-tool').textContent = !rel ? 'position unknown while ' + (s.state || '').toLowerCase() : (s.tool ? `T${s.tool.number} · length ${(+s.tool.offset).toFixed(3)}` : '');
-  mvEl('mv-spindle').textContent = s.spindle ? `Spindle ${Math.round(s.spindle.rpm)} rpm` + (s.feed && s.feed.current ? ` · feed ${Math.round(s.feed.current)} mm/min` : '') : '';
-  const arm = mvEl('mv-arm'); arm.checked = !!st.armed; arm.disabled = !conn; arm.closest('.mv-arm').classList.toggle('on', !!st.armed);
-  mvEl('mv-halt').disabled = !conn; mvEl('mv-hold').disabled = !conn;
-  mvEl('mv-resume').disabled = !(conn && st.armed && (s.state === 'Hold' || s.state === 'Pause'));
-  mvEl('mv-unlock').disabled = !(conn && s.state === 'Alarm');
-  const canHome = conn && st.armed && st.fresh && (s.state === 'Idle' || s.state === 'Alarm') && !st.homing;
-  mvEl('mv-home').disabled = !canHome;
-  const tl = s.tool ? s.tool.number : null, tc = st.routine;
-  mvEl('mv-tool-state').textContent = !conn ? '' : `machine has T${tl}` + (st.tool_ok ? ' · measured ✓' : ' · not measured');
-  const busy = tc && ['running', 'awaiting'].includes(tc.stage), ready = conn && st.armed && st.homed && s.state === 'Idle' && !busy;
-  mvEl('mv-tc-start').disabled = !ready; mvEl('mv-origin').disabled = !ready; mvEl('mv-zprobe').disabled = !(ready && st.tool_ok && tl === 0);
-  const p3 = st.probe3d_tool, p3why = !ready ? '' : !st.tool_ok || tl !== p3 ? `fit the 3D probe: Change tool → ${p3}` : st.jogging ? 'moving…' : '';
-  mvEl('mv-p3-why').textContent = p3why; mvEl('mv-p3-run').disabled = !ready || !!p3why; mvEl('mv-p3-lower').disabled = !ready || !st.tool_ok || st.jogging;
-  mvEl('mv-p3-hint').textContent = MV_P3_HINT[mvEl('mv-p3-kind').value.split('_')[0]];
-  const box = mvEl('mv-tc-box'); box.style.display = tc ? '' : 'none';
-  if (tc) { box.className = 'mv-tc ' + tc.stage; mvEl('mv-tc-msg').textContent = `${tc.kind} (${tc.command}): ${tc.msg}`;
-    mvEl('mv-tc-confirm').style.display = tc.stage === 'awaiting' ? '' : 'none';
-    mvEl('mv-tc-hint').textContent = busy ? 'to abort: STOP' : ''; }
-  const why = !conn ? 'connect first' : s.state === 'Alarm' ? (s.halt ? s.halt.advice : 'press Unlock') : !st.armed ? 'turn Control on' : !st.homed ? 'home first' : !st.tool_ok ? 'measure the tool first (Change tool)' : s.state !== 'Idle' ? `machine is ${s.state}` : st.jogging ? 'moving…' : '';
-  mvEl('mv-jog-why').textContent = why;
-  document.querySelectorAll('#machine-view [data-j]').forEach(x => x.disabled = !!why);
-  const zf = mvEl('mv-zfloor'); if (document.activeElement !== zf) zf.value = st.z_floor;
+  mvEl('ms-pos').title = rel ? 'work position (machine position below)' : 'position unknown while ' + (s.state || '').toLowerCase();
+  const tl = s.tool ? s.tool.number : null;
+  setHTML(mvEl('ms-tool-sil'), toolSil(mvToolShape(tl)));
+  mvEl('ms-tool').textContent = tl == null ? 'no tool' : `T${tl}` + (mvToolName(tl) ? ' · ' + mvToolName(tl) : '');
+  mvEl('ms-tool-sub').textContent = s.spindle && s.spindle.rpm > 0 ? `${Math.round(s.spindle.rpm)} rpm` + (s.feed && s.feed.current ? ` · F${Math.round(s.feed.current)}` : '')
+    : tl == null ? '' : st.tool_ok ? 'measured ✓' : 'not measured';
+  const arm = mvEl('mv-arm'); arm.checked = !!st.armed; arm.disabled = !conn; mvEl('ms-ctl').classList.toggle('on', !!st.armed);
+  mvEl('ms-ctl-txt').textContent = st.armed ? 'on' : 'off';
+  mvEl('mv-halt').disabled = !conn;
+  const show = (id, on) => { mvEl(id).style.display = on ? '' : 'none'; };
+  show('mv-unlock', conn && s.state === 'Alarm');
+  show('ms-pause', jobOn && job.stage === 'running'); show('ms-resume', jobOn && job.stage === 'paused'); show('ms-abort', jobOn);
+  show('mv-hold', conn && !jobOn); show('mv-resume', conn && !jobOn && (s.state === 'Hold' || s.state === 'Pause'));
+  mvEl('mv-resume').disabled = !st.armed;
+  mvEl('mv-connect').textContent = conn ? 'Disconnect' : 'Connect';
+  if (!mvEl('mv-host').value && document.activeElement !== mvEl('mv-host')) mvEl('mv-host').value = (st.saved && st.saved.host) || st.host || '';
+  mvEl('mv-cam-note').textContent = jobOn && job.air_cut ? `air cut +${job.air_cut} mm` : tc && tc.stage === 'running' ? tc.kind + '…' : '';
+  mvEl('mv-cam-note').style.display = mvEl('mv-cam-note').textContent ? '' : 'none';
+  // jog: the server decides; the pad mirrors why it would refuse
+  const why = !conn ? 'connect first' : s.state === 'Alarm' ? 'Alarm: Unlock, then Home' : !st.armed ? 'turn Control on' : !st.homed ? 'home first'
+    : !st.tool_ok ? 'measure the tool first' : jobOn ? 'a program is running' : s.state !== 'Idle' ? `machine is ${s.state}` : st.jogging ? 'moving…' : '';
+  mvEl('mv-jog-why').textContent = why; mvEl('mv-jogpad').classList.toggle('off', !!why);
+  document.querySelectorAll('#mv-jogpad [data-j]').forEach(x => x.disabled = !!why);
+}
+
+// ---- the right column
+function mvStepHead(st) {
+  const s = (st && st.status) || {}, conn = st && st.connected, stp = mvSetup(), z = mvZero(st, stp), job = st && st.job;
+  const prepOk = conn && st.homed && st.tool_ok, jobOn = job && ['uploading', 'starting', 'running', 'awaiting', 'paused'].includes(job.stage);
+  const tl = s.tool ? s.tool.number : null;
+  const nOps = program ? program.ops.filter(o => o.setup === MV.si).length : 0;
+  const steps = [
+    ['prep', 'Prepare', prepOk ? 'ok' : '', !conn ? 'connect' : !st.homed ? 'home' : !st.tool_ok ? `measure T${tl}` : `homed · T${tl} measured`],
+    ['zero', 'Zero', z.state === 'ok' ? 'ok' : '', z.state === 'ok' ? `${z.xy.how.replace(/^3D probe, /, '')} ${mvAgo(z.xy.t)}` : z.state === 'none' ? 'set the work origin' : 'check the origin'],
+    ['run', 'Run', job && job.stage === 'done' ? 'ok' : '', jobOn ? (job.stage === 'paused' ? 'paused' : 'running') : program ? `${nOps} operations` : 'no program'],
+    ['manual', 'Manual', '', 'ad hoc'],
+  ];
+  if (!MV.step) MV.step = !prepOk ? 'prep' : z.state !== 'ok' ? 'zero' : 'run';
+  if (jobOn && !MV.jobSeen) { MV.jobSeen = true; MV.step = 'run'; } if (!jobOn) MV.jobSeen = false;
+  setHTML(mvEl('msteps'), steps.map(([k, t, ok, sub], i) => `<button data-act="step" data-step="${k}" class="${MV.step === k ? 'on' : ''} ${ok}">
+    <span class="n">${ok ? '✓' : k === 'manual' ? '⋯' : i + 1}</span><b>${t}</b><small>${esc(sub)}</small></button>`).join(''));
+  document.querySelectorAll('#insp-machine .mstep').forEach(p => p.style.display = p.dataset.step === MV.step ? '' : 'none');
+}
+function mvToolCard(st) {                        // a tool change waiting for you, or a routine running / just finished
+  const s = st.status || {}, r = st.routine, job = st.job, el = mvEl('mi-tc');
+  let html = '';
+  if (!MV.tcInit) { MV.tcInit = true; if (r && (r.stage === 'done' || r.stage === 'failed')) MV.tcSeen = r.kind + r.command + r.stage; }   // a result from before this page opened: not news
+  if (job && job.stage === 'awaiting') {
+    const n = job.want_tool;
+    html = `<div class="mcard tcwait">${toolSil(mvToolShape(n), 22, 70)}<div><div class="t">Fit T${n}${mvToolName(n) ? ' · ' + esc(mvToolName(n)) : ''}</div>
+      <p>The program stopped for the change. Swap the tool, then press the machine's front button or Confirm — the machine measures it before anything moves.</p>
+      <div class="acts"><button class="btn acc" data-act="confirm_tool">Confirm — tool is in</button></div></div></div>`;
+  } else if (r && (r.stage === 'running' || r.stage === 'awaiting' || MV.tcSeen !== r.kind + r.command + r.stage)) {
+    const n = r.tool, awaiting = r.stage === 'awaiting';
+    const title = awaiting ? `Fit T${n}${mvToolName(n) ? ' · ' + esc(mvToolName(n)) : ''}` : r.stage === 'running' ? `${r.kind[0].toUpperCase() + r.kind.slice(1)}…` : r.stage === 'done' ? `${r.kind}: done` : `${r.kind}: failed`;
+    html = `<div class="mcard tc ${r.stage}">${n != null ? toolSil(mvToolShape(n), 22, 70) : ''}<div><div class="t">${title}</div><p>${esc(r.msg)}</p>
+      <div class="acts">${awaiting ? '<button class="btn acc" data-act="confirm_tool">Confirm — tool is in</button><span class="muted">to cancel: STOP</span>' : ''}
+      ${r.stage === 'done' || r.stage === 'failed' ? `<button class="btn ghost" data-act="tc-ok" data-k="${esc(r.kind + r.command + r.stage)}">OK</button>` : ''}</div></div></div>`;
+  }
+  setHTML(el, html);
+}
+function mvPrep(st) {
+  const s = st.status || {}, conn = st.connected, tl = s.tool ? s.tool.number : null;
+  const need = program ? [...new Set(program.ops.filter(o => o.setup === MV.si && o.tool).map(o => o.tool.number))] : [];
+  setHTML(mvEl('mp-machine'), !conn ? `<div class="h">Machine</div><p class="muted">Not connected. Type the machine's address in the bar above (or Find), then Connect. The camera and status show at once; nothing moves until you turn <b>Control</b> on.</p>`
+    : `<div class="h">Machine</div><div class="kv"><span>Connection</span><span>${esc(st.profile)} · ${esc(st.host)}${st.fresh ? '' : ' · <span class="wa">no status</span>'}</span>
+      <span>Control</span><span>${st.armed ? 'on — commands may move the machine' : 'off — monitor only'}</span>
+      <span>Homed</span><span>${st.homed ? '✓ this session' : st.homing ? 'homing…' : '<button class="btn sm" data-act="home">Home</button> needed once per session'}</span>
+      <span>Tool</span><span>${tl == null ? '–' : `T${tl}${mvToolName(tl) ? ' · ' + esc(mvToolName(tl)) : ''} · ${st.tool_ok ? 'measured ✓' : '<span class="wa">not measured</span>'}`}</span></div>
+      <div class="acts"><button class="btn ghost sm" data-act="disconnect">Disconnect</button></div>`);
+  const chips = [...need.map(n => [n, `T${n}`]), [0, 'Probe'], [st.probe3d_tool || 9999, '3D probe']]
+    .map(([n, l]) => `<button class="chipb ${n === tl ? 'on' : ''}" data-act="tcpick" data-n="${n}" title="${esc(mvToolName(n))}">${l}</button>`).join('');
+  setHTML(mvEl('mp-tool-chips'), chips + (need.length ? `<span class="muted sm">this setup uses ${need.map(n => 'T' + n).join(' → ')}</span>` : ''));
+  const ready = conn && st.armed && st.homed && s.state === 'Idle' && !(st.routine && ['running', 'awaiting'].includes(st.routine.stage));
+  mvEl('mp-tc-go').disabled = !ready;
   ['dust', 'light'].forEach(k => { const c = mvEl('mv-' + k); c.disabled = !conn; if (st.switches && k in st.switches) c.checked = st.switches[k]; });
+}
+function mvZeroRender(st) {
+  const stp = mvSetup(), z = mvZero(st, stp), s = st.status || {}, conn = st.connected, tl = s.tool ? s.tool.number : null;
+  mvSetupSelects();
+  const hasRow = (lbl, r) => `<span>${lbl}</span><span>${r ? `${esc(REF_TEXT[r.ref] || r.ref)} · ${esc(r.how)} · ${mvAgo(r.t)}${r.changed ? ' · <span class="wa">changed since</span>' : ''}` : '<span class="muted">not set this session</span>'}</span>`;
+  setHTML(mvEl('mz-cmp'), !stp ? '<div class="h">Work origin</div><p class="muted">No CAM program: this compares the program\'s setup with the machine.</p>'
+    : `<div class="h">This setup wants</div><div class="kv"><span>Origin</span><span>${esc(ORIGIN_TEXT[stp.origin_name] || stp.origin_name)} (${esc(stp.wcs)})</span>
+      <span>Block</span><span>${stp.size.slice(0, 2).map(v => v.toFixed(2)).join(' × ')} mm${stp.fixture && stp.fixture.extra && stp.fixture.extra.length ? ' · ' + stp.fixture.extra.map(f => esc(f.name)).join(', ') : ''}</span></div>
+      <div class="h" style="margin-top:12px">The machine has <span class="zstate ${z.state}">${z.state === 'ok' ? 'matches' : z.state === 'none' ? 'not set' : 'check'}</span></div>
+      <div class="kv">${hasRow('X / Y', z.xy)}${hasRow('Z0', z.z)}${z.place ? `<span>Placement</span><span>${z.place}</span>` : ''}</div>
+      ${z.state !== 'ok' && z.why.length ? `<p class="wa sm">${z.why.map(esc).join(' · ')}</p>` : ''}${mvShiftOffer(st, stp, z)}`);
+  // the corner picker + sequence
+  const [kind, ref] = CORNERS[MV.corner], p3 = st.probe3d_tool || 9999, fitted = tl === p3 && st.tool_ok;
+  document.querySelectorAll('#mz-picker .pk').forEach(g => g.classList.toggle('on', g.dataset.k === MV.corner));
+  const bracket = stp && stp.fixture && (stp.fixture.extra || []).some(f => /L-bracket/i.test(f.name));
+  mvEl('mz-pick-note').textContent = MV.corner === 'ofl' && bracket ? 'Front-left is against the L-bracket: the probe can\'t reach its faces. Probe back-right (X/Y then come from the block size) or set X/Y another way.'
+    : MV.corner === 'c' ? 'Boss centre: the probe goes out past both sides; the centre becomes X0 Y0, the top Z0.' : `The ${ref} corner becomes X0 Y0, the top Z0.`;
+  const wz = (s.wpos || [])[2], ready = conn && st.armed && st.homed && s.state === 'Idle' && !st.jogging;
+  const exp = z.exp, sz = stp ? stp.size : null;
+  let over = null;                              // where to put the probe: 5 mm in from the corner, from the setup's placement
+  if (exp && sz && MV.corner !== 'c') {
+    const fl = ORIGIN_WANTS[stp.origin_name].xy === 'front-left' ? exp : [exp[0] - sz[0] / 2, exp[1] - sz[1] / 2];
+    const cx = /left/.test(ref) ? fl[0] + 5 : fl[0] + sz[0] - 5, cy = /front/.test(ref) ? fl[1] + 5 : fl[1] + sz[1] - 5;
+    over = [cx, cy];
+  }
+  const row = (n, ok, t, sub, act) => `<div class="seq ${ok ? 'ok' : ''}"><span class="n">${ok ? '✓' : n}</span><div><b>${t}</b><small>${sub}</small></div>${act || ''}</div>`;
+  setHTML(mvEl('mz-seq'),
+    row(1, fitted, `Fit the 3D probe (T${p3})`, fitted ? 'fitted and measured' : `the machine has T${tl ?? '–'}`, fitted ? '' : `<button class="btn sm" data-act="tcpick-go" data-n="${p3}" ${ready ? '' : 'disabled'}>Change tool</button>`)
+    + row(2, false, `Over the ${ref} corner, about 5 mm in`, over ? `the setup puts it at machine X ${over[0].toFixed(1)} Y ${over[1].toFixed(1)} — Go there raises Z first, then moves` : 'jog over it watching the camera', over ? `<button class="btn sm" data-act="goto-corner" data-x="${over[0]}" data-y="${over[1]}" ${ready && fitted ? '' : 'disabled'}>Go there</button>` : '')
+    + row(3, false, 'Lower to about 5 mm above the top', z.z ? `work Z is ${wz != null ? (+wz).toFixed(2) : '?'} above Z0 (${esc(z.z.how)})` : 'Z0 isn\'t set this session: jog down watching the camera, 1 mm at a time',
+      z.z ? `<button class="btn sm" data-act="lower" data-h="5" ${ready && fitted ? '' : 'disabled'}>Lower</button>` : '')
+    + row(4, false, `Probe the ${ref} ${MV.corner === 'c' ? '' : 'corner'}`, 'Makera M480 · the app holds it if the head leaves the area or Z drops 10 mm without a touch', `<button class="btn pri sm" data-act="p3" ${ready && fitted ? '' : 'disabled'}>Probe</button>`));
+}
+// a corner was probed, the setup wants another one of the same block: move X0 Y0 by the block size (nothing moves)
+const BLOCK_POS = { 'front-left': [0, 0], 'front-right': [1, 0], 'back-left': [0, 1], 'back-right': [1, 1], centre: [0.5, 0.5] };
+function mvShiftOffer(st, stp, z) {
+  if (!z.xy || !z.w || z.xy.changed || z.xy.ref === z.w.xy || !BLOCK_POS[z.xy.ref] || !BLOCK_POS[z.w.xy]) return '';
+  const [sx, sy] = stp.size, h = BLOCK_POS[z.xy.ref], w = BLOCK_POS[z.w.xy];
+  const dx = +((w[0] - h[0]) * sx).toFixed(3), dy = +((w[1] - h[1]) * sy).toFixed(3);
+  const ok = st.connected && st.armed && st.homed && (st.status || {}).state === 'Idle';
+  return `<div class="shift"><div><b>Move X0 Y0 to the ${REF_TEXT[z.w.xy]}</b><small>${dx >= 0 ? '+' : ''}${dx}, ${dy >= 0 ? '+' : ''}${dy} mm from the probed ${REF_TEXT[z.xy.ref]}, using the setup's block size (${sx.toFixed(2)} × ${sy.toFixed(2)}). Only the offset changes; nothing moves. Right only if that size is the block's real size.</small></div>
+    <button class="btn sm pri" data-act="shift" data-dx="${dx}" data-dy="${dy}" data-ref="${z.w.xy}" data-how="${esc(`${z.xy.ref} corner probed, moved by the block size ${sx.toFixed(2)} × ${sy.toFixed(2)}`)}" ${ok ? '' : 'disabled'}>Move X0 Y0</button></div>`;
+}
+function mvSetupSelects() {
+  const n = program ? program.setups.length : 0;
+  document.querySelectorAll('#insp-machine .msetup').forEach(sel => {
+    sel.style.display = n > 1 ? '' : 'none';
+    const html = n ? program.setups.map((s, i) => `<option value="${i}" ${i === MV.si ? 'selected' : ''}>${esc(s.name)} · ${esc(s.wcs)}</option>`).join('') : '';
+    if (sel.__html !== html) { sel.__html = html; sel.innerHTML = html; }
+  });
+}
+function mvRun(st) {
+  const stp = mvSetup(), job = st.job, jobOn = job && ['uploading', 'starting', 'running', 'awaiting', 'paused'].includes(job.stage);
+  mvSetupSelects();
+  const ops = program ? program.ops.map((o, i) => ({ ...o, i })).filter(o => o.setup === MV.si) : [];
+  const key = program ? program.name + MV.si + ops.map(o => o.key + o.time).join() : '';
+  if (key !== MVP.key) { MVP.key = key; MVP.sel = new Set(ops.map(o => o.i)); }
+  const runIdx = job ? (job.ops_index || []) : [], jops = job ? (job.ops || []) : [];
+  let cur = null;
+  if (job && job.line) jops.forEach((o, k) => { if (job.line >= o.start && job.line <= o.end) cur = k; });
+  const ready = mvReady(st, stp), canRun = ready.every(r => r.ok) && MVP.sel.size && !jobOn;
+  // progress
+  let prog = '';
+  if (job && !job.file) {
+    const pct = job.stage === 'uploading' ? Math.round((job.upload || 0) * 100) : Math.round(job.percent || 0);
+    const t = Math.round(job.seconds || 0), tt = `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`;
+    const left = job.time_min && pct > 0 && pct < 100 ? Math.max(0, job.time_min * (1 - pct / 100)) : null;
+    const label = { uploading: 'Uploading', starting: 'Starting', running: 'Running', awaiting: 'Tool change', paused: 'Paused', done: 'Finished', failed: 'Failed', aborted: 'Stopped' }[job.stage] || job.stage;
+    const segs = jops.map((o, k) => { const w = (o.end - o.start + 1) / Math.max(1, job.lines) * 100; const pi = runIdx[k]; const c = program && program.ops[pi] ? program.ops[pi].color : '#4ea1ff';
+      const done = job.line >= o.end || job.stage === 'done' ? 1 : job.line >= o.start ? (job.line - o.start) / Math.max(1, o.end - o.start) : 0;
+      return `<div style="flex:${w}"><i style="width:${(done * 100).toFixed(1)}%;background:${c}"></i></div>`; }).join('');
+    prog = `<div class="mcard jobc ${job.stage}"><div class="jt"><div><span class="muted">${cur != null && jops[cur] ? `${esc(jops[cur].name)} · operation ${cur + 1} of ${jops.length}` : label}</span>
+        <div class="pct">${job.stage === 'done' ? 'Done' : pct + '%'}</div></div><div class="tm"><b>${tt}</b>${left != null ? `<small>~${Math.ceil(left)} min left</small>` : ''}</div></div>
+      <div class="segbar">${segs || `<div style="flex:1"><i style="width:${pct}%"></i></div>`}</div>
+      <div class="muted sm">${job.stage === 'uploading' ? `${pct}% sent to the machine` : `line ${(job.line || 0).toLocaleString()} of ${job.lines.toLocaleString()}`} · ${esc(job.name)} on the machine's SD card${jobOn ? ' · keeps running if Wi-Fi drops' : ''}${job.air_cut ? ` · <span class="acc">air cut +${job.air_cut} mm</span>` : ''}</div>
+      ${job.msg && !['running', 'uploading'].includes(job.stage) ? `<div class="sm">${esc(job.msg)}</div>` : ''}
+      ${['done', 'failed', 'aborted'].includes(job.stage) ? `<div class="acts">${job.stage === 'done' && job.air_cut ? '<span class="sm">Air cut finished: untick Air cut to cut for real.</span>' : job.stage === 'done' ? `<span class="sm">Next: ${program && program.setups.length > MV.si + 1 ? `unclamp, flip, then Zero for ${esc(program.setups[MV.si + 1].name)}` : 'unclamp the part'}.</span>` : ''}</div>` : ''}</div>`;
+  } else if (job && job.file) {
+    const pct = Math.round(job.stage === 'uploading' ? (job.upload || 0) * 100 : job.percent || 0);
+    prog = `<div class="mcard jobc ${job.stage}"><div class="jt"><div><span class="muted">${esc(job.program || job.name)}</span><div class="pct">${job.stage === 'done' ? 'Done' : pct + '%'}</div></div></div>
+      <div class="segbar"><div style="flex:1"><i style="width:${pct}%"></i></div></div><div class="muted sm">line ${(job.line || 0).toLocaleString()} of ${job.lines.toLocaleString()} · ${esc(job.name)}${job.msg && job.stage !== 'running' ? ' · ' + esc(job.msg) : ''}</div></div>`;
+  }
+  setHTML(mvEl('mr-job'), prog);
+  // an air cut that finished: the next run of these operations is the real cut (once per finished air cut)
+  if (job && job.stage === 'done' && job.air_cut && MV.airDone !== job.name + job.seconds) { MV.airDone = job.name + job.seconds; mvEl('mvp-air').checked = false; }
+  mvEl('mr-ready-card').style.display = jobOn ? 'none' : '';
+  setHTML(mvEl('mr-ready'), jobOn ? '' : `<div class="h">Ready to run</div>${ready.map(r => `<div class="rd ${r.ok ? (r.warn ? 'warn' : 'ok') : 'no'}"><span class="n">${r.ok ? (r.warn ? '!' : '✓') : ''}</span><span class="t">${r.txt}</span>
+      ${!r.ok && r.k === 'zero' && st.connected ? `<button class="btn ghost sm" data-act="ack" data-k="${esc(r.ackKey)}" title="The work origin is right for this setup: I checked it">I checked it</button>` : ''}
+      ${!r.ok ? `<button class="btn ghost sm" data-act="step" data-step="${r.go}">${r.go === 'prep' ? 'Prepare' : 'Zero'} →</button>` : ''}</div>`).join('')}`);
+  const opRow = o => {
+    const k = runIdx.indexOf(o.i), inJob = job && k >= 0;
+    const state = !inJob ? '' : job.stage === 'done' || (cur != null && k < cur) ? 'done' : k === cur && jobOn ? 'cur' : jobOn ? 'queued' : '';
+    return `<div class="mop ${state}" data-act="${jobOn ? '' : 'opsel'}" data-i="${o.i}">${jobOn ? '' : `<span class="cb ${MVP.sel.has(o.i) ? 'on' : ''}"></span>`}<span class="dot" style="background:${o.color}"></span>
+      <span class="nm">${esc(o.name)}</span><span class="kind">${esc(o.kind)}</span><span class="tchip">T${o.tool ? o.tool.number : '?'}</span><span class="tm">${o.time.toFixed(1)}m</span>
+      <span class="st">${state === 'done' ? '<i class="ok">✓</i>' : state === 'cur' ? '<i class="spin"></i>' : state === 'queued' ? 'queued' : ''}</span></div>`;
+  };
+  const selT = ops.filter(o => MVP.sel.has(o.i)).reduce((a, o) => a + o.time, 0);
+  setHTML(mvEl('mr-ops'), !program ? '<p class="muted">No CAM program yet: make one in CAM, then come back here to run it.</p>'
+    : `<div class="h">${esc(stp.name)} · ${esc(stp.wcs)} <span class="muted" style="text-transform:none;letter-spacing:0;font-weight:400">${jobOn ? '' : `· ${MVP.sel.size} of ${ops.length} · ${fmtMin(selT)}`}</span>
+      ${jobOn ? '' : '<span style="margin-left:auto"><button class="btn ghost sm" data-act="opall">All</button><button class="btn ghost sm" data-act="opnone">None</button></span>'}</div>${ops.filter(o => !jobOn || runIdx.includes(o.i)).map(opRow).join('')}`);
+  mvEl('mr-foot').style.display = jobOn || !program ? 'none' : '';
+  const run = mvEl('mvp-run'); run.disabled = !canRun;
+  run.textContent = mvEl('mvp-air').checked ? `Air cut ${MVP.sel.size} operation${MVP.sel.size === 1 ? '' : 's'} (+${+mvEl('mvp-air-mm').value} mm)…` : `Run ${MVP.sel.size} operation${MVP.sel.size === 1 ? '' : 's'}…`;
+  run.title = canRun ? '' : !MVP.sel.size ? 'tick the operations to run' : (ready.find(r => !r.ok) || {}).txt || '';
+}
+function mvManual(st) {
+  const s = st.status || {}, conn = st.connected, ready = conn && st.armed && st.homed && s.state === 'Idle' && !st.jogging;
+  mvEl('mm-why').textContent = ready ? '' : !conn ? 'connect first' : !st.armed ? 'turn Control on' : !st.homed ? 'home first' : s.state !== 'Idle' ? `machine is ${s.state}` : 'moving…';
+  document.querySelectorAll('#mstep-manual [data-act]').forEach(b => { if (b.dataset.act !== 'file' && b.dataset.act !== 'step') b.disabled = !ready; });
+  mvEl('mm-p3-hint').textContent = MV_P3_HINT[mvEl('mv-p3-kind').value.split('_')[0]];
+  const zf = mvEl('mv-zfloor'); if (document.activeElement !== zf) zf.value = st.z_floor;
   const log = mvEl('mv-log'), stick = log.scrollTop + log.clientHeight >= log.scrollHeight - 4;
   log.textContent = [...(st.events || []), ...(st.log || []).slice(-12).map(l => '  ' + l)].join('\n');
   if (stick) log.scrollTop = log.scrollHeight;
+}
+function mvRender(st) {
+  MV.st = st; fxMachineInfo = st;
+  mpillRender(st);
+  mvStrip(st); mvStepHead(st); mvToolCard(st); mvPrep(st); mvZeroRender(st); mvRun(st); mvManual(st);
   mvCamera();
 }
 const MV_P3_HINT = {
@@ -5775,10 +6040,43 @@ const MV_P3_HINT = {
   inside: 'Start about 5 mm above the top surface, just outside the pocket corner (diagonally). It moves in by X / Y, drops to the depth and probes back to the two walls: the corner becomes X0 Y0, the top Z0.',
   pocket: 'Start inside the pocket or bore, near the middle, at least 2 mm below its edge. X / Y: more than half the width (0 skips that axis). The centre becomes X0 Y0; Z is not set.',
   boss: 'Start about 5 mm above the middle of the boss. X / Y: more than half its width plus clearance (0 skips that axis). The centre becomes X0 Y0, the top Z0.' };
+async function mvProbe(kind, x, y, depth, dia) {
+  const label = kind.replace(/_/g, ' ');
+  if (!await mvAsk('3D probe', `<div><b>Makera's 3D probe: ${esc(label)}</b> (X ${x} · Y ${y} · depth ${depth} · ball Ø${dia})</div>
+    <div>The machine moves and probes on its own from where the head is now and overwrites the work origin.</div>
+    <div class="warn">Keep a hand on the e-stop. STOP here halts it at once.</div>`, 'Probe')) return;
+  mvPost({ action: 'probe_3d', kind, x, y, depth, dia });
+}
+async function mvRunOps() {
+  const ops = [...MVP.sel].sort((a, b) => a - b), air = mvEl('mvp-air').checked ? +mvEl('mvp-air-mm').value : 0;
+  const r = await mvPost({ action: 'check_ops', ops, air });
+  if (!r || !r.check) return;
+  const c = r.check, wo = r.origin && r.origin.wco;
+  const ok = await mvAsk('Run on the machine', `<div><b>${esc(c.program)}</b> · setup ${esc(c.setup)} (${esc(c.wcs || '')}) · ${c.ops.length} operation${c.ops.length === 1 ? '' : 's'} · about ${c.time_min} min · ${c.lines} lines</div>
+    <ul>${c.ops.map(o => `<li>${esc(o.name)} · T${o.tool ?? '?'}</li>`).join('')}</ul>
+    <div class="muted">${c.notes.map(esc).join('<br>')}</div>
+    ${wo ? `<div class="muted">Work origin on the machine: X ${wo[0].toFixed(3)} · Y ${wo[1].toFixed(3)} (machine).</div>` : ''}
+    ${air ? `<div style="color:var(--accent)">Air cut: everything ${air} mm higher; the spindle still runs.</div>` : ''}
+    <div class="warn">The machine runs this on its own once started: keep a hand on the e-stop. Pause, Stop program and STOP stay in the bar at the top.</div>`, air ? 'Start air cut' : 'Start');
+  if (ok) mvPost({ action: 'run_ops', ops, air });
+}
+async function mvRunFile(file) {
+  const text = await file.text(), air = mvEl('mvp-air').checked ? +mvEl('mvp-air-mm').value : 0;
+  const r = await mvPost({ action: 'check_file', text, name: file.name, air });
+  if (!r || !r.check) return;
+  const c = r.check;
+  const ok = await mvAsk('Run a file on the machine', `<div><b>${esc(file.name)}</b> · ${c.lines} lines · tools ${c.tools.map(t => 'T' + t).join(' → ') || '–'}</div>
+    <div class="muted">${c.notes.map(esc).join('<br>')}</div>
+    <div class="muted">Same checks as a CAM program: absolute moves only, no homing / probing / offset changes, inside the travel from the current work origin.</div>
+    ${air ? `<div style="color:var(--accent)">Air cut: everything ${air} mm higher.</div>` : ''}
+    <div class="warn">The machine runs it on its own once started: keep a hand on the e-stop.</div>`, air ? 'Start air cut' : 'Start');
+  if (ok) mvPost({ action: 'run_file', text, name: file.name, air });
+}
 (function mvInit() {
   mvEl('mv-connect').onclick = () => MV.st && MV.st.connected ? mvPost({ action: 'disconnect' })
     : (() => { const v = mvEl('mv-host').value.trim(), m = v.match(/^(.*?)(?::(\d+))?(?:\/(\d+))?$/);   // host[:port][/camport] (the emulator)
          return mvPost({ action: 'connect', host: m[1], port: m[2] ? +m[2] : undefined, cam_port: m[3] ? +m[3] : undefined }); })();
+  mvEl('mv-host').onkeydown = e => { if (e.key === 'Enter') mvEl('mv-connect').click(); };
   mvEl('mv-discover').onclick = async () => {
     mvMsg('listening for machines…', true);
     try { const j = await fetch('/api/machine/discover').then(r => r.json());
@@ -5788,46 +6086,84 @@ const MV_P3_HINT = {
     } catch (e) { mvMsg('discovery failed: ' + e.message); }
   };
   mvEl('mv-halt').onclick = () => mvPost({ action: 'halt' });
-  mvEl('mv-prog-on').onchange = e => { MVP.on = e.target.checked; try { localStorage.setItem('agenticcad.mvProg', MVP.on ? '1' : '0'); } catch {} MVP.key = ''; mvpRender(MV.st || {}); mvCamera(); };
-  mvEl('mvp-run').onclick = () => mvpRun();
   mvEl('mv-hold').onclick = () => mvPost({ action: 'hold' });
   mvEl('mv-resume').onclick = () => mvPost({ action: 'resume' });
   mvEl('mv-unlock').onclick = () => mvPost({ action: 'unlock' });
+  mvEl('ms-pause').onclick = () => mvPost({ action: 'job_pause' });
+  mvEl('ms-resume').onclick = () => mvPost({ action: 'job_resume' });
+  mvEl('ms-abort').onclick = () => mvPost({ action: 'job_abort' });
   mvEl('mv-arm').onchange = e => mvPost({ action: 'arm', on: e.target.checked });
-  mvEl('mv-home').onclick = () => mvPost({ action: 'home' });
-  mvEl('mv-steps').querySelectorAll('button').forEach(b => b.onclick = () => { MV.step = +b.dataset.s; mvEl('mv-steps').querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b)); });
-  document.querySelectorAll('#machine-view [data-j]').forEach(b => b.onclick = () => {
+  mvEl('mv-step').onclick = () => { MV.jog = MV.jog === 1 ? 10 : MV.jog === 10 ? 0.1 : 1; mvEl('mv-step').textContent = MV.jog + ' mm'; };
+  document.querySelectorAll('#mv-jogpad [data-j]').forEach(b => b.onclick = () => {
     const ax = b.dataset.j[0], sign = b.dataset.j[1] === '+' ? 1 : -1;
-    let d = MV.step * sign; if (ax === 'z' && sign < 0) d = -Math.min(MV.step, 1);   // Z down: 1 mm per click at most
+    let d = MV.jog * sign; if (ax === 'z' && sign < 0) d = -Math.min(MV.jog, 1);   // Z down: 1 mm per click at most
     mvPost({ action: 'jog', axis: ax, dist: d });
   });
-  mvEl('mv-zfloor').onchange = e => mvPost({ action: 'z_floor', z: +e.target.value });
-  mvEl('mv-tc-start').onclick = () => mvPost({ action: 'change_tool', z: Math.round(+mvEl('mv-tc-num').value) });
-  mvEl('mv-tc-confirm').onclick = () => mvPost({ action: 'confirm_tool' });
-  mvEl('mv-origin').onclick = () => mvPost({ action: 'origin_anchor' });
-  mvEl('mv-zprobe').onclick = () => mvPost({ action: 'auto_z_probe' });
-  mvEl('mv-p3-kind').onchange = () => MV.st && mvRender(MV.st);
-  mvEl('mv-p3-lower').onclick = () => mvPost({ action: 'lower_to', z: +mvEl('mv-p3-h').value });
-  mvEl('mv-p3-run').onclick = () => {
-    const k = mvEl('mv-p3-kind'), label = k.selectedOptions[0].textContent;
-    if (!confirm(`Run Makera's 3D probe: ${label}?\n\nThe machine moves and probes on its own from where the head is now and overwrites the work origin. Keep a hand on the e-stop.`)) return;
-    mvPost({ action: 'probe_3d', kind: k.value, x: +mvEl('mv-p3-x').value, y: +mvEl('mv-p3-y').value, depth: +mvEl('mv-p3-d').value, dia: +mvEl('mv-p3-dia').value });
-  };
   mvEl('mv-dust').onchange = e => mvPost({ action: 'switch', axis: 'dust', on: e.target.checked });
   mvEl('mv-light').onchange = e => mvPost({ action: 'switch', axis: 'light', on: e.target.checked });
   mvEl('mv-cam-on').onchange = e => { MV.camOn = e.target.checked; mvCamera(); };
   mvEl('mv-cam-img').onerror = () => { const img = mvEl('mv-cam-img'); delete img.dataset.on; setTimeout(mvCamera, 2000); };
+  mvEl('mv-zfloor').onchange = e => mvPost({ action: 'z_floor', z: +e.target.value });
+  mvEl('mv-p3-kind').onchange = () => MV.st && mvRender(MV.st);
+  mvEl('mvp-air').onchange = mvEl('mvp-air-mm').onchange = () => MV.st && mvRender(MV.st);
+  mvEl('mvp-run').onclick = () => mvRunOps();
+  mvEl('mm-filepick').onchange = e => { const f = e.target.files[0]; e.target.value = ''; if (f) mvRunFile(f); };
+  mvEl('mm-con').onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); mvEl('mm-con-send').click(); } };
+  document.querySelectorAll('#insp-machine .msetup').forEach(s => s.onchange = () => { MV.si = +s.value; MVP.key = ''; MV.st && mvRender(MV.st); });
+  document.querySelectorAll('#mz-picker .pk').forEach(g => g.onclick = () => { MV.corner = g.dataset.k; MV.st && mvRender(MV.st); });
+  const num = id => +mvEl(id).value, opt = id => mvEl(id).value.trim() === '' ? null : +mvEl(id).value;
+  mvEl('insp-machine').addEventListener('click', async e => {
+    const b = e.target.closest('[data-act]'); if (!b || b.disabled || !b.dataset.act) return;
+    const a = b.dataset.act, st = MV.st || {};
+    if (a === 'step') { MV.step = b.dataset.step; mvRender(st); return; }
+    if (a === 'home') return mvPost({ action: 'home' });
+    if (a === 'disconnect') return mvPost({ action: 'disconnect' });
+    if (a === 'confirm_tool') return mvPost({ action: 'confirm_tool' });
+    if (a === 'tc-ok') { MV.tcSeen = b.dataset.k; return mvRender(st); }
+    if (a === 'tcpick') { mvEl('mp-tc-num').value = b.dataset.n; return; }
+    if (a === 'tcpick-go' || a === 'tc') {
+      const n = a === 'tc' ? Math.round(num('mp-tc-num')) : +b.dataset.n;
+      if (!await mvAsk('Change tool', `<div><b>Change to T${n}${mvToolName(n) ? ' · ' + esc(mvToolName(n)) : ''}</b></div><div>Makera's tool change (M6 T${n}, or M491 to re-measure the same tool): Z goes up, the head parks and waits for you; after Confirm the machine measures the tool on its setter.</div>`, 'Start the change')) return;
+      return mvPost({ action: 'change_tool', z: n });
+    }
+    if (a === 'goto-corner') { if (await mvAsk('Go to the corner', `<div>Move to machine X ${(+b.dataset.x).toFixed(2)} Y ${(+b.dataset.y).toFixed(2)} at 300 mm/min. Z goes up to the top of travel first if it isn't there.</div><div class="muted">This is where the CAM setup places the block. Check on the camera that the probe ends up over the block, 5 mm in from the corner.</div>`, 'Go')) mvPost({ action: 'goto_xy_raised', x: +b.dataset.x, y: +b.dataset.y, feed: 300 }); return; }
+    if (a === 'lower' || a === 'mlower') { const h = a === 'lower' ? +b.dataset.h : num('mm-lower');
+      if (await mvAsk('Lower Z', `<div>Lower Z only (X/Y stay) to <b>${h} mm above work Z0</b>, at 300 mm/min.</div><div class="muted">Watch the camera; Hold or STOP if it looks wrong.</div>`, 'Lower')) mvPost({ action: 'lower_to', z: h }); return; }
+    if (a === 'p3') { const [kind] = CORNERS[MV.corner]; return mvProbe(kind, num('mz-step'), num('mz-step'), num('mz-depth'), num('mz-dia')); }
+    if (a === 'p3m') return mvProbe(mvEl('mv-p3-kind').value, num('mv-p3-x'), num('mv-p3-y'), num('mv-p3-d'), num('mv-p3-dia'));
+    if (a === 'anchor') { if (await mvAsk('Origin = Anchor 1', '<div>Work X0 Y0 = Anchor 1, the L-bracket\'s inside corner (G10 L2 P0, as MakeraStudio does). Z is not touched. Nothing moves.</div>', 'Set')) mvPost({ action: 'origin_anchor' }); return; }
+    if (a === 'autoz') { if (await mvAsk('Auto Z probe', '<div>Makera\'s auto Z probe (M495) here: the wired probe (T0) goes down until it touches, and work Z0 is set on that surface.</div><div class="warn">The probe must be over the stock.</div>', 'Probe')) mvPost({ action: 'auto_z_probe' }); return; }
+    if (a === 'x0y0' || a === 'z0' || a === 'settyped') {
+      const v = a === 'x0y0' ? { x: 0, y: 0 } : a === 'z0' ? { z: 0 } : { x: opt('mm-ox'), y: opt('mm-oy'), z: opt('mm-oz') };
+      const words = Object.entries(v).filter(([, x]) => x != null).map(([k, x]) => `${k.toUpperCase()} ${x}`).join(', ');
+      if (!words) return mvMsg('type at least one value');
+      if (await mvAsk('Set the work origin', `<div>The head's current position becomes <b>work ${words}</b> (G10 L20 P0). Nothing moves.</div>${'z' in v ? '<div class="muted">Z uses the fitted tool\'s measured length.</div>' : ''}`, 'Set')) mvPost({ action: 'set_origin', ...v });
+      return;
+    }
+    if (a === 'shift') { if (await mvAsk('Move X0 Y0', `<div>Work X0 Y0 moves by <b>${b.dataset.dx}, ${b.dataset.dy} mm</b> to the ${esc(REF_TEXT[b.dataset.ref])} (G10 L2 P0). Z0 stays. Nothing moves.</div>`, 'Move X0 Y0'))
+        mvPost({ action: 'shift_origin', x: +b.dataset.dx, y: +b.dataset.dy, kind: b.dataset.ref, name: b.dataset.how }); return; }
+    if (a === 'raise') { if (await mvAsk('Raise Z', '<div>Raise Z to the top of travel at 300 mm/min. X/Y stay.</div>', 'Raise')) mvPost({ action: 'raise_z' }); return; }
+    if (a === 'goto') { const work = mvEl('mm-space').value === 'work', x = num('mm-gx'), y = num('mm-gy');
+      if (await mvAsk('Go to', `<div>Move to <b>${work ? 'work' : 'machine'} X ${x} Y ${y}</b> at 300 mm/min. Z goes up to the top of travel first if it isn't there.</div>`, 'Go')) mvPost({ action: work ? 'goto_work_xy' : 'goto_xy_raised', x, y, feed: 300 }); return; }
+    if (a === 'console') { const line = mvEl('mm-con').value.trim(); if (!line) return;
+      if (await mvAsk('Send to the machine', `<div><code>${esc(line)}</code></div><div class="warn">Sent exactly as typed. The app doesn't check where a move in it goes — only that it isn't blocked.</div>`, 'Send')) { const r = await mvPost({ action: 'console', line }); if (r) mvEl('mm-con').value = ''; } return; }
+    if (a === 'file') return mvEl('mm-filepick').click();
+    if (a === 'run') return mvRunOps();
+    if (a === 'ack') { MV.ack = b.dataset.k; return mvRender(st); }
+    if (a === 'opsel') { const i = +b.dataset.i; MVP.sel.has(i) ? MVP.sel.delete(i) : MVP.sel.add(i); return mvRender(st); }
+    if (a === 'opall' || a === 'opnone') { MVP.sel = new Set(a === 'opall' && program ? program.ops.map((o, i) => o.setup === MV.si ? i : -1).filter(i => i >= 0) : []); return mvRender(st); }
+  });
   document.querySelectorAll('#ws [data-rtab]').forEach(b => b.addEventListener('click', mvLayout));
   window.addEventListener('resize', mvLayout);
   fetch('/api/machine').then(r => r.json()).then(mvRender).catch(() => {});
   mvLayout();
 })();
+function mvpRender() { MVP.key = ''; if (MV.st) mvRender(MV.st); }   // the CAM program changed
 
 // ---------------------------------------------------------------- v2 shell: Inspector contents, machine pill
 (function v2Shell() {
   const insp = document.getElementById('pane-inspect'), idle = document.getElementById('insp-design');
   insp.insertBefore(cmdEl, idle);                                   // the active command's settings live in the Inspector
-  document.getElementById('insp-machine').appendChild(document.querySelector('#machine-view .mv-side'));
   // a command opening shows the Inspector (and the column, if hidden); the idle view returns when it closes
   new MutationObserver(() => {
     const on = cmdEl.classList.contains('on');

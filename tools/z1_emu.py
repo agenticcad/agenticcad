@@ -457,6 +457,12 @@ class Z1Emu:
             w = dict((t[0].upper(), float(t[1:])) for t in s.split()[1:] if len(t) > 1)
             self._start(self._z_probe(w.get("X", 0) + w.get("O", 0), w.get("Y", 0) + w.get("F", 0)), "Run")
             return None
+        if u.replace(" ", "").startswith("G10L20P0"):
+            w = dict((t[0].upper(), float(t[1:])) for t in re.findall(r"[XYZ]-?[\d.]+", s.replace(" ", "")[8:]))
+            for i, a_ in enumerate("XYZ"):
+                if a_ in w:
+                    self._set_work(i, w[a_])
+            return "ok"
         if u.startswith("G10 L2 P0") or u.replace(" ", "").startswith("G10L2P0"):
             w = dict((t[0].upper(), float(t[1:])) for t in re.findall(r"[XYZ]-?[\d.]+", s.replace(" ", "")))
             for i, a_ in enumerate("XYZ"):
