@@ -84,3 +84,22 @@ def test_each_kind_adds_one_line_and_builds(ag):
             await ag.add_cam_op(dict(kind="drill", tool=5, dmin=50, dmax=60))
         assert ag.cam_code == code and (ag.workspace / "cam.py").read_text() == code
     asyncio.run(go())
+
+
+def test_the_assistant_makes_the_same_edits_through_cam_edit(ag):
+    import asyncio
+
+    async def go():
+        ag._make_server()
+        T = ag.tool_handlers
+        await ag.build(PART, source="user")
+        await ag.set_cam_code(CAM, source="user")
+        r = await T["cam_edit"]({"action": "add_op", "spec": {"kind": "contour", "tool": 1, "name": "Outline"}})
+        assert "Done" in r["content"][0]["text"] and [o.name for o in ag.program.ops] == ["Face", "Outline"]
+        r = await T["cam_edit"]({"action": "set_override", "op": "Outline", "values": {"feed": 321, "color": "#123456"}})
+        assert "Done" in r["content"][0]["text"]
+        op = ag.program.ops[1]
+        assert op.tool.feed == 321 and op.color == "#123456" and "overrides({" in ag.cam_code
+        r = await T["cam_edit"]({"action": "add_op", "spec": {"kind": "face", "tool": 77}})
+        assert r["content"][0]["text"].startswith("Not changed")
+    asyncio.run(go())

@@ -790,29 +790,7 @@ class MachineBody(BaseModel):
 
 def _program_for_ops(body: MachineBody) -> tuple[dict, dict, str]:
     """The CAM program's chosen operations (one setup) as the Z1 will play them: (prepared program, info, file label)."""
-    prog = agent.program
-    if prog is None:
-        raise machine_link.Refused("no CAM program: build one in the CAM tab first")
-    idx = sorted(set(int(i) for i in (body.ops or [])))
-    if not idx:
-        raise machine_link.Refused("pick the operations to run")
-    if idx[0] < 0 or idx[-1] >= len(prog.ops):
-        raise machine_link.Refused("those operations are not in the current program (it was rebuilt?)")
-    ops = [prog.ops[i] for i in idx]
-    st = prog.setup_of(ops[0])
-    if any(prog.setup_of(o) is not st for o in ops):
-        raise machine_link.Refused("those operations are in different setups: run one setup at a time (re-clamp and re-zero between them)")
-    air = float(body.air or 0.0)
-    if not (0.0 <= air <= 50.0):
-        raise machine_link.Refused("air-cut lift: 0 .. 50 mm")
-    sub = cam.Program(st, ops, name=prog.name)
-    prep = machine_link.prepare_program(sub.gcode(), [o.name for o in ops], air_cut=air)
-    for o, src in zip(prep["ops"], ops):
-        o.update(key=src.key, kind=src.kind, color=src.color, time=round(src.time_minutes(st.machine), 2))
-    label = f"{prog.name}_op{idx[0] + 1}" + (f"-{idx[-1] + 1}" if len(idx) > 1 else "") + ("_air" if air else "")
-    info = {"program": prog.name, "setup": st.name, "wcs": st.wcs, "ops_index": idx,
-            "time_min": round(sum(o.time_minutes(st.machine) for o in ops), 1)}
-    return prep, info, label
+    return agent.program_for_ops(body.ops or [], body.air or 0.0)
 
 
 @app.get("/api/machine")
@@ -893,6 +871,9 @@ async def machine_post(body: MachineBody):
             res = await machine.run_program(label, prep, {"program": body.name or "file", "file": True})
         elif a == "set_origin":                            # the head's position becomes these work coordinates (G10 L20)
             res = await machine.set_origin(body.x, body.y, body.z)
+        elif a == "origin_at":                             # X0 Y0 at machine x, y (e.g. the block corner from 3 probed corners)
+            res = await machine.origin_at(body.x if body.x is not None else float('nan'), body.y if body.y is not None else float('nan'),
+                                          body.kind or "typed", body.name or "set")
         elif a == "shift_origin":                          # move X0 Y0 by x, y mm (e.g. probed corner -> the setup's corner)
             res = await machine.shift_origin(body.x if body.x is not None else float('nan'), body.y if body.y is not None else float('nan'),
                                              body.kind or "typed", body.name or "shifted")
@@ -1237,6 +1218,8 @@ async def ws_endpoint(ws: WebSocket) -> None:
                                            "layers": agent.slice_layers, "restore": True}))
         await ws.send_text(json.dumps({"type": "status", "busy": agent.busy,
                                        "agent_ready": agent.client is not None, "auth_required": agent.auth_problem}))
+        for req in agent.pending_machine_requests():                  # approvals still waiting (a reload must not lose them)
+            await ws.send_text(json.dumps({"type": "machine_request", **req}))
         while True:
             raw = await ws.receive_text()
             try:
@@ -1310,6 +1293,8 @@ async def _dispatch(ws: WebSocket, msg: dict) -> None:
             await ws.send_text(json.dumps({"type": "cam_error", "text": str(e)}))
         except Exception as e:  # noqa: BLE001
             await ws.send_text(json.dumps({"type": "cam_error", "text": f"{type(e).__name__}: {e}"}))
+    elif t == "machine_approve":                         # the user's Approve / Decline on an assistant's machine request
+        agent.resolve_machine_request(str(msg.get("id") or ""), bool(msg.get("ok")))
     elif t == "add_op":                                   # CAM tab ▸ Add operation
         try:
             await agent.add_cam_op(msg.get("spec") or {})

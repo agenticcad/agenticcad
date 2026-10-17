@@ -531,6 +531,7 @@ class MachineControl:
         # the work origin as this session set it: {"xy": {ref, how, t, wco}, "z": {ref, how, t}}; empty = set before
         # this session (or by something the app didn't see), so a setup can't rely on it without zeroing
         self.origin: dict = {}
+        self.probes: list[dict] = []         # 3D-probe results this session: {kind, ref, wco [x, y], z, t} (Find the block)
 
     # -- connection
     async def connect(self, host: str, port: int = 2222) -> dict:
@@ -543,6 +544,7 @@ class MachineControl:
         self.jog_busy = None
         self.measured = self.routine = self.job = None
         self.origin = {}
+        self.probes = []
         self._note(f"connected to {host}:{port}")
         self._watch = asyncio.create_task(self._watchdog())
         return self.payload()
@@ -655,7 +657,7 @@ class MachineControl:
                 "limits": {"jog_max": JOG_MAX, "travel": self.profile.travel, "margin": self.profile.margin, "top": self.profile.top},
                 "profile": self.profile.name, "probe3d_tool": self.profile.probe3d_tool,
                 "anchor1": list(self.profile.anchor1), "bed_anchor": list(self.profile.bed_anchor),
-                "origin": self.origin_payload(st)}
+                "origin": self.origin_payload(st), "probes": self.probes[-12:]}
 
     def _wco(self, st: dict | None = None) -> list[float] | None:
         st = st or self._status() or {}
@@ -919,6 +921,9 @@ class MachineControl:
             elif kind == "3D probe":
                 r.update(stage="done", **self._probe3d_result(r, prbs, st))
                 ref = PROBE3D_REF.get(r.get("kind_key", ""), r["label"])
+                self.probes.append({"kind": r.get("kind_key"), "ref": ref, "wco": r.get("origin"), "z": r.get("surface_z"),
+                                    "size": r.get("size"), "t": time.time()})
+                del self.probes[:-12]
                 self._record_origin(xy=(ref, f"3D probe, {r['label']}"), z=("top", f"3D probe, {r['label']}") if r["sub"] != 9 else None)
             else:
                 z = prbs[-1][0][2]
@@ -1003,6 +1008,26 @@ class MachineControl:
         typed = ", ".join(f"{a}{v:g}" for a, v in given.items())
         self._record_origin(xy=("typed", f"set at the head ({typed})") if ("X" in given or "Y" in given) else None,
                             z=("typed", f"set at the head ({typed})") if "Z" in given else None)
+        return self.payload()
+
+    async def origin_at(self, x: float, y: float, ref: str, how: str) -> dict:
+        """Work X0 Y0 at machine X, Y (G10 L2 P0) without moving: e.g. the block's front-left corner worked out from
+        the faces three 3D-probe runs found. Z0 is untouched."""
+        for v in (x, y):
+            if not isinstance(v, (int, float)) or v != v:
+                raise Refused("origin: numbers (machine X, Y)")
+        self._need(armed=True, idle=True, homed=True)
+        if self.jog_busy or self.job_active:
+            raise Refused("wait for the machine to finish")
+        for ax, v in (("x", x), ("y", y)):
+            lo, hi = -self.profile.travel[ax], self.profile.top
+            if not (lo - 1e-9 <= v <= hi + 1e-9):
+                raise Refused(f"machine {ax.upper()} {v:.2f} is outside the travel")
+        await self.link.line(f"G10 L2 P0 X{x:.3f} Y{y:.3f}")
+        self.last_action = time.time()
+        self._note(f"work X0 Y0 set at machine X{x:.3f} Y{y:.3f} ({how})")
+        await asyncio.sleep(0.4)
+        self._record_origin(xy=(str(ref)[:40], str(how)[:120]))
         return self.payload()
 
     async def shift_origin(self, dx: float, dy: float, ref: str, how: str) -> dict:
@@ -1262,7 +1287,7 @@ class MachineControl:
         self.last_action = time.time()
         self.job = {"name": fname, "path": path, "stage": "uploading", "upload": 0.0, "lines": prep["lines"],
                     "ops": prep["ops"], "tools": prep["tools"], "air_cut": prep["air_cut"], "line": 0, "percent": 0,
-                    "seconds": 0, "op": None, "msg": "uploading", "notes": chk["notes"], **(info or {})}
+                    "seconds": 0, "op": None, "msg": "uploading", "notes": chk["notes"], "started": time.time(), **(info or {})}
         self._note(f"program {fname}: {prep['lines']} lines, {len(prep['ops'])} operation(s)" + (f", air cut +{prep['air_cut']:g} mm" if prep["air_cut"] else ""))
         self._job_task = asyncio.create_task(self._job_flow(path, prep["text"].encode()))
         return self.payload()

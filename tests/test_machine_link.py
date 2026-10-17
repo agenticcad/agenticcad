@@ -418,6 +418,17 @@ def test_3d_probe_outside_corner_with_makeras_m480():
             assert mc.routine["stage"] == "done", mc.routine
             assert abs(emu.wco[0] + 91.28) < 0.02 and abs(emu.wco[1] + 94.45) < 0.02 and abs(emu.wco[2] + 55.0) < 1e-6
             assert abs(mc.routine["origin"][0] + 91.28) < 0.02 and "+100.0" in mc.routine["msg"]
+            # remembered for Find the block, and the origin record says what set it
+            p = mc.payload()
+            assert p["probes"][-1]["ref"] == "back-right" and abs(p["probes"][-1]["wco"][0] + 91.28) < 0.02
+            assert p["origin"]["xy"]["ref"] == "back-right" and p["origin"]["z"]["ref"] == "top"
+            # X0 Y0 at the front-left from faces (machine X / Y): nothing moves, the record follows
+            mp = list(emu.mpos)
+            await mc.origin_at(-191.28, -194.45, "front-left", "front-left corner from 3 probed corners")
+            assert emu.lines[-1] == "G10 L2 P0 X-191.280 Y-194.450" and emu.mpos == mp
+            assert mc.payload()["origin"]["xy"]["ref"] == "front-left"
+            with pytest.raises(ml.Refused, match="outside the travel"):
+                await mc.origin_at(-400, 0, "x", "x")
             assert not emu.crashes
         finally:
             await mc.disconnect(); await emu.stop()
@@ -495,7 +506,7 @@ def test_3d_probe_that_never_triggers_is_held():
             await mc.probe_3d("outside_back_right", 20, 20, 2, 2, max_drop=3)
             await _until(lambda: mc.routine["stage"] in ("done", "failed"), timeout=10)
             assert mc.routine["stage"] == "failed" and "nothing touched" in mc.routine["msg"], mc.routine
-            assert b"!" in emu.realtime and emu.state == "Hold"
+            await _until(lambda: b"!" in emu.realtime and emu.state == "Hold", timeout=3)   # the emulator reads the byte a moment later
             assert emu.mpos[2] > -50.0 - 6.0                         # stopped a few mm down (3 + polling lag), not 108
         finally:
             await mc.disconnect(); await emu.stop()

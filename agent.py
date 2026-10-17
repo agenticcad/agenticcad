@@ -14,6 +14,7 @@ import sys
 import shutil
 import re
 import time
+import uuid
 from pathlib import Path
 from typing import Any, Awaitable, Callable
 
@@ -579,7 +580,9 @@ class CadAgent:
         self.auth_problem: str | None = None       # set when Claude Code is not signed in; shown as a banner in every tab
         self.cam_code: str = ""               # CAM script working copy (workspace/cam.py)
         self.slice_result: slicer.SliceResult | None = None   # last 3D-printing slice (only when a slicer is installed)
-        self.machine = None                    # machine_link.MachineControl (set by the server): READ-ONLY to the agent
+        self.machine = None                    # machine_link.MachineControl (set by the server)
+        # the agent's machine actions that wait for the user's Approve (a click in the app, never text in the chat)
+        self.machine_requests: dict[str, dict] = {}
         self.camera = None                     # machine_link.CameraRelay
         self.slice_layers: dict[str, Any] | None = None       # its parsed G-code, viewer payload
         self.program: cam.Program | None = None
@@ -890,6 +893,214 @@ class CadAgent:
         self.notes.append(f"The user added an operation in the CAM tab: `{line}` (appended to cam.py under the "
                           "'operations added in the CAM tab' comment). Keep it when you rewrite the script.")
         return prog
+
+    def program_for_ops(self, ops: list[int], air: float = 0.0) -> tuple[dict, dict, str]:
+        """The CAM program's chosen operations (one setup) as the Z1 will play them: (prepared program, info, file label)."""
+        import machine_link
+        prog = self.program
+        if prog is None:
+            raise machine_link.Refused("no CAM program: build one in the CAM tab first")
+        idx = sorted(set(int(i) for i in (ops or [])))
+        if not idx:
+            raise machine_link.Refused("pick the operations to run")
+        if idx[0] < 0 or idx[-1] >= len(prog.ops):
+            raise machine_link.Refused("those operations are not in the current program (it was rebuilt?)")
+        chosen = [prog.ops[i] for i in idx]
+        st = prog.setup_of(chosen[0])
+        if any(prog.setup_of(o) is not st for o in chosen):
+            raise machine_link.Refused("those operations are in different setups: run one setup at a time (re-clamp and re-zero between them)")
+        air = float(air or 0.0)
+        if not (0.0 <= air <= 50.0):
+            raise machine_link.Refused("air-cut lift: 0 .. 50 mm")
+        sub = cam.Program(st, chosen, name=prog.name)
+        prep = machine_link.prepare_program(sub.gcode(), [o.name for o in chosen], air_cut=air)
+        for o, src in zip(prep["ops"], chosen):
+            o.update(key=src.key, kind=src.kind, color=src.color, time=round(src.time_minutes(st.machine), 2))
+        label = f"{prog.name}_op{idx[0] + 1}" + (f"-{idx[-1] + 1}" if len(idx) > 1 else "") + ("_air" if air else "")
+        info = {"program": prog.name, "setup": st.name, "wcs": st.wcs, "ops_index": idx,
+                "time_min": round(sum(o.time_minutes(st.machine) for o in chosen), 1)}
+        return prep, info, label
+
+    # ------------------------------------------------------------------ the machine, from the chat
+    # Stopping never waits: hold / pause / stop program / STOP run at once. Everything that moves or changes the machine
+    # is checked first, then shown to the user as an approval card (chat and Machine page) and runs only on Approve.
+    MACHINE_NOW = ("status", "hold", "pause", "stop_program", "halt", "check_ops", "connect", "disconnect")
+    MACHINE_ASK = ("control_on", "control_off", "home", "unlock", "resume", "resume_program", "change_tool", "confirm_tool",
+                   "origin_anchor", "auto_z_probe", "set_origin", "shift_origin", "origin_at", "lower_to", "raise_z", "goto",
+                   "probe_3d", "run_ops", "switch", "console")
+
+    def _machine_plan(self, action: str, a: dict) -> tuple[str, Any]:
+        """(what the approval card says, the coroutine factory that does it) - after the checks that can run up front."""
+        import machine_link as ml
+        mc = self.machine
+        f = lambda k, d=None: a.get(k, d)
+        # the same guards the Machine page meets, checked before the user is asked (so a card is never a dead end)
+        if action == "control_on":
+            mc._need(armed=False, idle=False)
+        elif action == "home":
+            mc._need(armed=True, idle=False)
+        elif action in ("change_tool", "origin_anchor", "auto_z_probe", "set_origin", "shift_origin", "origin_at", "lower_to", "raise_z",
+                        "goto", "switch", "console"):
+            mc._need(armed=True, idle=action != "switch", homed=action != "switch")
+            if mc.jog_busy or mc.job_active:
+                raise ml.Refused("the machine is busy: wait for it to finish")
+        if action == "control_on":
+            return "Turn Control on: commands may move the machine (it turns itself off after 5 minutes unused).", lambda: mc.arm(True)
+        if action == "control_off":
+            return "Turn Control off.", lambda: mc.arm(False)
+        if action == "home":
+            return "Home all axes ($H): Z up first, then X and Y to their switches.", mc.home
+        if action == "unlock":
+            return "Clear the Alarm ($X). Home before moving.", mc.unlock
+        if action == "resume":
+            return "Resume after a hold (~).", mc.resume
+        if action == "resume_program":
+            return "Resume the paused program.", mc.job_resume
+        if action == "change_tool":
+            n = int(f("tool", -1))
+            return (f"Tool change to T{n} (Makera's M6 T{n}, or M491 to re-measure): Z up, the head parks and waits for you to "
+                    "swap the tool; after Confirm the machine measures it on the setter."), lambda: mc.change_tool(n)
+        if action == "confirm_tool":
+            return "Confirm the tool is fitted (M490.2, same as the front button): the machine measures it on the setter.", mc.confirm_tool_change
+        if action == "origin_anchor":
+            return "Set work X0 Y0 = Anchor 1, the L-bracket's inside corner (G10 L2 P0). Nothing moves.", mc.set_origin_anchor
+        if action == "auto_z_probe":
+            return "Makera's auto Z probe (M495) where the head is: the wired probe touches the surface, work Z0 is set there.", lambda: mc.auto_z_probe()
+        if action == "set_origin":
+            vals = {k: f(k) for k in ("x", "y", "z") if f(k) is not None}
+            if not vals:
+                raise ml.Refused("set_origin: give x, y and/or z")
+            words = ", ".join(f"{k.upper()} {v:g}" for k, v in vals.items())
+            return f"The head's current position becomes work {words} (G10 L20 P0). Nothing moves.", lambda: mc.set_origin(vals.get("x"), vals.get("y"), vals.get("z"))
+        if action == "shift_origin":
+            dx, dy = float(f("dx", "nan")), float(f("dy", "nan"))
+            ref = str(f("ref", "typed"))
+            return (f"Move work X0 Y0 by {dx:+g}, {dy:+g} mm (to the {ref}). Z0 stays. Nothing moves."), lambda: mc.shift_origin(dx, dy, ref, f"moved by the assistant to the {ref}")
+        if action == "origin_at":
+            x, y = float(f("x", "nan")), float(f("y", "nan"))
+            ref = str(f("ref", "typed"))
+            return (f"Set work X0 Y0 at machine X {x:.3f} Y {y:.3f} (the {ref}). Z0 stays. Nothing moves."), lambda: mc.origin_at(x, y, ref, f"set by the assistant at the {ref}")
+        if action == "lower_to":
+            h = float(f("height", "nan"))
+            return f"Lower Z only (X/Y stay) to {h:g} mm above work Z0 at 300 mm/min.", lambda: mc.lower_to(h)
+        if action == "raise_z":
+            return "Raise Z to the top of travel at 300 mm/min. X/Y stay.", lambda: mc.raise_z_top()
+        if action == "goto":
+            x, y = float(f("x", "nan")), float(f("y", "nan"))
+            work = f("frame", "work") == "work"
+            if work:
+                wco = mc._wco()
+                if wco is None:
+                    raise ml.Refused("no position from the machine")
+                mx, my = x + wco[0], y + wco[1]
+            else:
+                mx, my = x, y
+            return (f"Go to {'work' if work else 'machine'} X {x:g} Y {y:g}" + (f" (machine X {mx:.2f} Y {my:.2f})" if work else "")
+                    + " at 300 mm/min; Z goes up to the top first if it isn't there."), lambda: mc.goto_xy_raised(mx, my, 300.0)
+        if action == "probe_3d":
+            info = mc.check_probe_3d(str(f("kind", "")), float(f("x", 20)), float(f("y", 20)), float(f("depth", 2)), float(f("dia", 2)))
+            return (f"Makera's 3D probe, {info['label']} ({info['command']}) from where the head is now: it moves and probes on "
+                    "its own and overwrites the work origin. The app holds it if the head leaves the area or Z drops 10 mm "
+                    "without a touch."), lambda: mc.probe_3d(str(f("kind")), float(f("x", 20)), float(f("y", 20)), float(f("depth", 2)), float(f("dia", 2)))
+        if action == "run_ops":
+            prep, info, label = self.program_for_ops(f("ops") or [], float(f("air", 0) or 0))
+            chk = mc.check_job(prep)
+            names = ", ".join(o["name"] for o in prep["ops"])
+            return (f"Run on the machine: {names} (setup {info['setup']}, {info['wcs']}) · about {info['time_min']} min"
+                    + (f" · AIR CUT +{prep['air_cut']:g} mm" if prep["air_cut"] else "") + ". " + "; ".join(chk["notes"])
+                    + ". The machine runs it on its own once started."), lambda: mc.run_program(label, prep, info)
+        if action == "switch":
+            what, on = str(f("what", "")), bool(f("on"))
+            return f"Turn the {what} {'on' if on else 'off'}.", lambda: mc.switch(what, on)
+        if action == "console":
+            line = str(f("line", "")).strip()
+            return (f"Send this line to the machine exactly as written: {line}  (the app only checks it isn't blocked; "
+                    "it does not check where a move goes)."), lambda: mc.console(line)
+        raise ml.Refused(f"unknown machine action {action!r}")
+
+    async def machine_action(self, action: str, args: dict | None = None, wait: float = 900.0) -> str:
+        """The agent's way to the machine. Stopping actions and status run at once; the rest wait for the user's Approve."""
+        import machine_link as ml
+        a = dict(args or {})
+        mc = self.machine
+        if action not in self.MACHINE_NOW + self.MACHINE_ASK:
+            return f"Unknown action {action!r}. Actions: {', '.join(self.MACHINE_NOW + self.MACHINE_ASK)}."
+        if mc is None:
+            return "No machine link in this app."
+        try:
+            if action == "connect":
+                if not a.get("host"):
+                    return "Give the machine's address (host)."
+                await mc.connect(str(a["host"]), int(a.get("port") or 2222))
+                if self.camera is not None:
+                    self.camera.set_host(str(a["host"]), int(a.get("cam_port") or 82))
+                return "Connected (monitor only; Control is off). " + mc.describe()
+            if not mc.connected:
+                return "No machine connected. Connect first (action connect with host), or the user connects in the Machine workspace."
+            if action == "status":
+                pr = "; ".join(f"{p['ref']} corner at machine X {p['wco'][0]:.3f} Y {p['wco'][1]:.3f}" + (f", top Z {p['z']:.3f}" if p.get('z') is not None else "")
+                               for p in mc.probes if p.get("wco"))
+                o = mc.origin_payload(mc._status())
+                return (mc.describe() + (f"\n3D-probe results this session: {pr}" if pr else "")
+                        + "\nWork origin set this session: " + (", ".join(f"{k.upper()}: {v['ref']} ({v['how']})" for k, v in o.items() if k in ("xy", "z")) or "nothing yet"))
+            if action == "disconnect":
+                await mc.disconnect()
+                return "Disconnected."
+            if action == "hold":
+                await mc.hold(); return "Feed hold sent. " + mc.describe()
+            if action == "halt":
+                await mc.halt(); return "STOP sent: motion and spindle stopped, the machine is in Alarm (Unlock, then Home)."
+            if action == "pause":
+                await mc.job_pause(); return "Program pausing (finishes the moves in hand)."
+            if action == "stop_program":
+                await mc.job_abort(); return "Program stopped; spindle off."
+            if action == "check_ops":
+                prep, info, label = self.program_for_ops(a.get("ops") or [], float(a.get("air") or 0))
+                chk = mc.check_job(prep)
+                return (f"{label}: {prep['lines']} lines, operations {[o['name'] for o in prep['ops']]}, tools {prep['tools']}, "
+                        f"about {info['time_min']} min. " + "; ".join(chk["notes"]))
+            summary, do = self._machine_plan(action, a)
+        except ml.Refused as e:
+            return f"Refused: {e}"
+        except cam.CamError as e:
+            return f"Refused: {e}"
+        rid = uuid.uuid4().hex[:12]
+        fut = asyncio.get_running_loop().create_future()
+        req = {"id": rid, "action": action, "args": a, "summary": summary, "t": time.time()}
+        self.machine_requests[rid] = {**req, "future": fut}
+        await self.emit({"type": "machine_request", **req})
+        try:
+            ok = await asyncio.wait_for(fut, wait)
+        except asyncio.TimeoutError:
+            ok = None
+        finally:
+            self.machine_requests.pop(rid, None)
+        if not ok:
+            await self.emit({"type": "machine_request_done", "id": rid, "outcome": "expired" if ok is None else "declined"})
+            return ("The user didn't answer the approval in time: nothing was done." if ok is None
+                    else "The user declined: nothing was done. Ask what they want instead.")
+        try:
+            await do()
+        except ml.Refused as e:
+            await self.emit({"type": "machine_request_done", "id": rid, "outcome": "refused", "text": str(e)})
+            return f"Approved, but the machine side refused it: {e}"
+        except Exception as e:  # noqa: BLE001
+            await self.emit({"type": "machine_request_done", "id": rid, "outcome": "failed", "text": str(e)})
+            return f"Approved, but it failed: {type(e).__name__}: {e}"
+        await self.emit({"type": "machine_request_done", "id": rid, "outcome": "done"})
+        return "Approved and sent. " + mc.describe() + ("" if action not in ("change_tool", "probe_3d", "auto_z_probe", "run_ops", "home")
+                                                         else " It is still running: check with action status.")
+
+    def resolve_machine_request(self, rid: str, ok: bool) -> bool:
+        """The user's Approve / Decline (a click in the app)."""
+        r = self.machine_requests.get(rid)
+        if not r or r["future"].done():
+            return False
+        r["future"].set_result(bool(ok))
+        return True
+
+    def pending_machine_requests(self) -> list[dict]:
+        return [{k: v for k, v in r.items() if k != "future"} for r in self.machine_requests.values()]
 
     async def simulate(self, ops: list[int] | None = None, resolution: float | None = None):
         """Run the material-removal simulation (0-based op indices) and show it in the viewer."""
@@ -2442,10 +2653,9 @@ class CadAgent:
             slicing_tools = [slicer_info, slice_for_printing]
 
         @tool("machine_status",
-              "Read-only look at the connected CNC machine (Machine tab): its state, machine and work positions, tool "
-              "and spindle, and (camera=true) a current frame from the machine's camera. You cannot move, home, switch "
-              "or otherwise command the machine: that is the user's, from the Machine tab, by design. If the user asks "
-              "you to move it, tell them to use the Machine tab's controls.",
+              "Look at the connected CNC machine (Machine workspace): its state, machine and work positions, tool and "
+              "spindle, and (camera=true) a current frame from the machine's camera. To act on the machine use "
+              "machine_control.",
               {"type": "object", "properties": {"camera": {"type": "boolean", "default": True}}, "required": []})
         async def machine_status(args: dict[str, Any]) -> dict[str, Any]:
             mc = agent.machine
@@ -2460,7 +2670,53 @@ class CadAgent:
                     content.append({"type": "text", "text": f"(camera unavailable: {e})"})
             return {"content": content}
 
-        tools = [build_model, *([] if LEGACY_BUILD else [edit_model]), inspect_model, screenshot, export_model, get_code, save_design, machine_status,
+        @tool("cam_edit",
+              "Small edits to the CAM program, the same ones the CAM page makes (cam.py is rewritten for you and rebuilt): "
+              "action=set_override {op: operation name, values: {tool fields rpm/feed/plunge/stepdown/stepover, cut fields "
+              "(see the op's CUT settings), color} - empty values clear them}; set_fixture {setup: setup name, fixture: {name: "
+              "holding fixture or null for the bare table, at: [x, y] mm from the bed centre, rot, params, extra: [other "
+              "fixtures {name, at, rot, params}]}}; add_op {spec: {kind: face|adaptive|pocket|contour|drill|parallel3d, "
+              "setup: index, tool: number, name, and per kind: depth | z_bottom, stepover, leave | faces [flat floor face "
+              "ids] | z_bottom, tabs | dmin, dmax | stepover, angle}}. For anything else rewrite the script with build_cam.",
+              {"type": "object", "properties": {"action": {"type": "string"}, "op": {"type": "string"}, "values": {"type": "object"},
+                                                "setup": {"type": "string"}, "fixture": {"type": "object"}, "spec": {"type": "object"}},
+               "required": ["action"]})
+        async def cam_edit(args: dict[str, Any]) -> dict[str, Any]:
+            act = args.get("action")
+            try:
+                if act == "set_override":
+                    prog = await agent.set_op_override(str(args.get("op") or ""), args.get("values") or {})
+                elif act == "set_fixture":
+                    prog = await agent.set_setup_fixture(str(args.get("setup") or ""), args.get("fixture"))
+                elif act == "add_op":
+                    prog = await agent.add_cam_op(args.get("spec") or {})
+                else:
+                    return {"content": [{"type": "text", "text": "action: set_override, set_fixture or add_op"}]}
+            except cam.CamError as e:
+                return {"content": [{"type": "text", "text": f"Not changed: {e}"}]}
+            return {"content": [{"type": "text", "text": "Done; the program rebuilt.\n" + (prog.summary() if prog else "")}]}
+
+        @tool("machine_control",
+              "Act on the connected CNC machine - a real machine next to the user. Immediate (no approval): status, hold "
+              "(feed hold), pause (a running program), stop_program, halt (STOP: everything stops, Alarm), check_ops "
+              "(what running ops would do; nothing is sent), connect {host}, disconnect. Everything else is checked, then "
+              "shown to the user as an approval card and runs ONLY when they click Approve in the app (your call waits "
+              "for it): control_on, control_off, home, unlock, resume, resume_program, change_tool {tool}, confirm_tool, "
+              "origin_anchor, auto_z_probe (wired probe T0 fitted), set_origin {x,y,z: the head's position becomes these "
+              "work values}, shift_origin {dx,dy,ref}, origin_at {x,y machine, ref} (e.g. the block's front-left corner from "
+              "the faces 3D-probe runs found: status lists them), lower_to {height above work Z0}, raise_z, goto {x,y,frame: "
+              "work|machine; Z goes to the top first}, probe_3d {kind e.g. outside_back_right, x, y, depth, dia; 3D probe "
+              "T9999 fitted}, run_ops {ops: 0-based indices in ONE setup, air: lift mm for an air cut}, switch {what: "
+              "dust|light, on}, console {line: one line of G-code, sent as written}. Rules: one step at a time; say what "
+              "you will do and why before asking; every tool change is measured before moving with it; suggest an air "
+              "cut the first time a program runs at an origin; never ask to run M490 or M498.2. If the user says stop, "
+              "call halt (or hold) first, then talk.",
+              {"type": "object", "properties": {"action": {"type": "string"}, "args": {"type": "object"}}, "required": ["action"]})
+        async def machine_control(args: dict[str, Any]) -> dict[str, Any]:
+            text = await agent.machine_action(str(args.get("action") or ""), args.get("args") or {})
+            return {"content": [{"type": "text", "text": text}]}
+
+        tools = [build_model, *([] if LEGACY_BUILD else [edit_model]), inspect_model, screenshot, export_model, get_code, save_design, machine_status, machine_control, cam_edit,
                  cam_context, build_cam, get_cam_code, export_gcode, simulate_cam, check_interference, check_motion, feeds_speeds, save_machine, save_tool, build_machine, get_machine_code, build_fixture, get_fixture_code,
                  get_parameters, set_parameters, measure_tool, mass_properties, make_drawings, library_tool, kit_tool, sketch_tool,
                  extension_tool, show_panel, configurations_tool] + ext_tools + slicing_tools
