@@ -5,6 +5,16 @@ features, patch bumps fix things. The version shown in the UI header comes from 
 
 ## [Unreleased]
 
+### Added
+- **Machine tab: control a Makera Z1 over Wi-Fi (experimental).** Find the machine on the network, connect, and see
+  its status, positions, tool and spindle, with its camera live beside them. Hold and STOP are always available.
+  Turning on **Control** unlocks Home, a jog pad, dust collector and light. Every move is checked first: homed in
+  this session, Idle, one jog at a time, small steps (Z down 1 mm and slowly), inside the machine's travel and above
+  a Z floor in work coordinates. The Z1's own soft limits are off, so these checks are what stop a jog running into
+  the end of travel or the tool into the bed. Control turns itself off on disconnect, alarm, lost status, STOP or
+  5 minutes unused. The agent can look at the machine (status and a camera frame) but can't command it.
+  Status and camera have been checked on a real Z1. Motion so far only on the included emulator.
+
 ## [0.41.0] — 2026-10-17
 
 ### Added

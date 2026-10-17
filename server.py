@@ -11,13 +11,14 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 import cad_kernel as ck
 import cam_kernel as cam
 import extensions as ext_mod
+import machine_link
 import script_edit
 import slicer
 from agent import CadAgent, claude_cli_candidates, find_claude_cli
@@ -92,6 +93,9 @@ class Bus:
 
 bus = Bus()
 agent = CadAgent(WORKSPACE, bus.emit, bus.screenshot)
+machine = machine_link.MachineControl(bus.emit)        # the Machine tab; the agent only reads it
+camera = machine_link.CameraRelay()
+agent.machine, agent.camera = machine, camera
 
 
 _loader: asyncio.Task | None = None
@@ -115,6 +119,8 @@ async def lifespan(app: FastAPI):
     if task:
         task.cancel()
     watcher.cancel()
+    await machine.disconnect()
+    camera.set_host(None)
     await agent.stop()
 
 
@@ -731,6 +737,100 @@ async def slicer_3mf():
 class SettingsBody(BaseModel):
     settings: dict
     restart: bool = False
+
+
+# ---------------------------------------------------------------- machine control (Machine tab)
+MACHINE_FILE = WORKSPACE / "machine.json"
+
+
+class MachineBody(BaseModel):
+    action: str
+    host: str | None = None
+    port: int | None = None
+    cam_port: int | None = None
+    axis: str | None = None
+    dist: float | None = None
+    on: bool | None = None
+    z: float | None = None
+
+
+@app.get("/api/machine")
+async def machine_get():
+    saved = json.loads(MACHINE_FILE.read_text()) if MACHINE_FILE.exists() else {}
+    return {**machine.payload(), "saved": saved, "camera_error": camera.error}
+
+
+@app.get("/api/machine/discover")
+async def machine_discover():
+    try:
+        found = await asyncio.to_thread(machine_link.discover, 3.0)
+    except OSError as e:
+        return JSONResponse({"error": f"discovery failed: {e}"}, status_code=500)
+    return {"machines": list(found.values())}
+
+
+@app.post("/api/machine")
+async def machine_post(body: MachineBody):
+    a = body.action
+    try:
+        if a == "connect":
+            if not body.host:
+                raise machine_link.Refused("give the machine's address")
+            res = await machine.connect(body.host.strip(), body.port or 2222)
+            camera.set_host(body.host.strip(), body.cam_port or 82)
+            MACHINE_FILE.write_text(json.dumps({"host": body.host.strip(), "port": body.port or 2222, "cam_port": body.cam_port or 82}))
+        elif a == "disconnect":
+            await machine.disconnect()
+            camera.set_host(None)
+            res = machine.payload()
+        elif a == "arm":
+            res = await machine.arm(bool(body.on))
+        elif a == "jog":
+            res = await machine.jog(body.axis or "", body.dist if body.dist is not None else 0.0)
+        elif a == "home":
+            res = await machine.home()
+        elif a == "hold":
+            res = await machine.hold()
+        elif a == "resume":
+            res = await machine.resume()
+        elif a == "halt":
+            res = await machine.halt()
+        elif a == "unlock":
+            res = await machine.unlock()
+        elif a == "switch":
+            res = await machine.switch(body.axis or "", bool(body.on))
+        elif a == "z_floor":
+            res = machine.set_z_floor(body.z if body.z is not None else -1)
+        else:
+            raise machine_link.Refused(f"unknown action {a!r}")
+    except machine_link.Refused as e:
+        return JSONResponse({"error": str(e), **machine.payload()}, status_code=409)
+    except (ConnectionError, OSError, asyncio.TimeoutError) as e:
+        return JSONResponse({"error": f"{type(e).__name__}: {e}" if str(e) else type(e).__name__, **machine.payload()}, status_code=502)
+    await bus.emit({"type": "machine_link", **res})
+    return res
+
+
+@app.get("/api/machine/camera")
+async def machine_camera():
+    """MJPEG stream of the machine camera (one upstream socket shared by every viewer)."""
+    if not camera.host:
+        return JSONResponse({"error": "not connected"}, status_code=409)
+
+    async def gen():
+        async for jpg in camera.frames():
+            yield b"--frame\r\nContent-Type: image/jpeg\r\nContent-Length: " + str(len(jpg)).encode() + b"\r\n\r\n" + jpg + b"\r\n"
+    return StreamingResponse(gen(), media_type="multipart/x-mixed-replace; boundary=frame",
+                             headers={"Cache-Control": "no-store"})
+
+
+@app.get("/api/machine/snapshot")
+async def machine_snapshot():
+    try:
+        jpg = await camera.snapshot()
+    except (machine_link.Refused, asyncio.TimeoutError) as e:
+        return JSONResponse({"error": str(e) or "no frame"}, status_code=409)
+    return Response(jpg, media_type="image/jpeg", headers={"Cache-Control": "no-store"})
 
 
 @app.get("/api/version")

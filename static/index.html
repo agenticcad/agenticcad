@@ -400,6 +400,42 @@
   #modal input { width:100%; background:var(--bg); border:1px solid var(--line); color:var(--text); border-radius:6px; padding:8px; font:inherit; }
   .design { padding:8px 10px; border-radius:6px; cursor:pointer; display:flex; justify-content:space-between; }
   .design:hover { background:var(--panel2); } .design span { color:var(--muted); font-size:11px; }
+  /* ---- Machine tab: live control of a networked machine (camera left, controls right) */
+  #machine-view { position:absolute; left:0; right:0; bottom:0; z-index:3; background:var(--bg); display:grid; grid-template-columns:minmax(0,1fr) 360px; gap:12px; padding:12px; }
+  .mv-cam { position:relative; background:#0b0d10; border:1px solid var(--line); border-radius:10px; overflow:hidden; display:flex; align-items:center; justify-content:center; min-height:0; }
+  .mv-cam img { max-width:100%; max-height:100%; object-fit:contain; display:block; }
+  #mv-cam-off { position:absolute; color:var(--muted); font-size:13px; }
+  .mv-cam-bar { position:absolute; left:10px; right:10px; top:10px; display:flex; gap:10px; align-items:center; }
+  .mv-badge { padding:3px 10px; border-radius:20px; font-weight:700; font-size:12px; letter-spacing:.04em; background:#3a3f48; color:#cfd6df; }
+  .mv-badge.Idle { background:#1f5f3a; color:#c8f5d8; } .mv-badge.Run, .mv-badge.Home, .mv-badge.Jog { background:#7a4a12; color:#ffe3c2; }
+  .mv-badge.Hold, .mv-badge.Pause { background:#6b5e10; color:#fff3b0; } .mv-badge.Alarm { background:#7a1f1f; color:#ffd4d4; } .mv-badge.stale { background:#555; color:#eee; }
+  .mv-camtoggle { margin-left:auto; color:#cfd6df; font-size:12px; display:flex; gap:5px; align-items:center; background:rgba(0,0,0,.45); padding:3px 8px; border-radius:6px; }
+  .mv-side { display:flex; flex-direction:column; gap:10px; overflow:auto; min-height:0; }
+  .mv-card { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:10px 12px; }
+  .mv-h { font-weight:600; margin-bottom:6px; display:flex; gap:8px; align-items:baseline; } .mv-h .muted { font-weight:400; font-size:12px; }
+  .mv-row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin:4px 0; }
+  .mv-small { font-size:11.5px; }
+  .mv-halt { width:100%; height:54px; border-radius:10px; border:2px solid #ff7a7a; background:linear-gradient(180deg,#d63a3a,#a51f1f); color:#fff; font-size:20px; font-weight:800; letter-spacing:.12em; cursor:pointer; margin-bottom:6px; }
+  .mv-halt:hover { filter:brightness(1.1); } .mv-halt:disabled { opacity:.4; cursor:default; filter:none; }
+  .mv-arm { display:flex; gap:8px; align-items:flex-start; margin-top:6px; font-size:12px; cursor:pointer; } .mv-arm input { margin-top:2px; }
+  .mv-arm.on b { color:var(--accent); }
+  .mv-pos { width:100%; border-collapse:collapse; font-variant-numeric:tabular-nums; } .mv-pos th { color:var(--muted); font-weight:500; text-align:right; font-size:11px; }
+  .mv-pos td { text-align:right; padding:2px 4px; font-size:14px; } .mv-pos td:first-child { text-align:left; font-size:11.5px; color:var(--muted); } .mv-pos tr.muted td { font-size:11.5px; color:var(--muted); }
+  .mv-steps { display:flex; border:1px solid var(--line); border-radius:6px; overflow:hidden; } .mv-steps button { background:var(--panel2); border:0; color:var(--text); padding:4px 10px; cursor:pointer; font-size:12px; }
+  .mv-steps button.on { background:var(--accent2); color:#08111d; font-weight:600; }
+  .mv-jog { display:flex; gap:14px; align-items:center; justify-content:center; margin:8px 0; }
+  .mv-xy { display:grid; grid-template-areas:". yp ." "xm . xp" ". ym ."; grid-template-columns:repeat(3,52px); grid-template-rows:repeat(3,44px); gap:4px; }
+  .mv-z { display:grid; grid-template-rows:repeat(2,64px); gap:4px; }
+  .mv-xy button, .mv-z button { background:var(--panel2); border:1px solid var(--line); border-radius:8px; color:var(--text); font-weight:700; font-size:14px; cursor:pointer; width:52px; }
+  .mv-xy button:hover:not(:disabled), .mv-z button:hover:not(:disabled) { border-color:var(--accent2); }
+  .mv-xy button:disabled, .mv-z button:disabled, #mv-home:disabled, #mv-resume:disabled, #mv-unlock:disabled { opacity:.35; cursor:default; }
+  .mv-sw { display:flex; gap:6px; align-items:center; font-size:12.5px; cursor:pointer; margin-right:10px; }
+  .mv-logcard { flex:1; min-height:120px; display:flex; flex-direction:column; }
+  .mv-msg { color:var(--err); font-size:12px; min-height:0; } .mv-msg.ok { color:var(--ok); }
+  .mv-log { flex:1; overflow:auto; font:11px/1.45 ui-monospace,Menlo,monospace; color:var(--muted); white-space:pre-wrap; max-height:220px; }
+  .mv-conn { display:flex; gap:6px; align-items:center; } .mv-conn input { width:210px; background:var(--panel2); border:1px solid var(--line); color:var(--text); border-radius:6px; padding:4px 7px; font-size:12px; }
+  #mv-conn-state { font-size:12px; white-space:nowrap; }
+  @media (max-width: 1000px) { #machine-view { grid-template-columns:1fr; grid-template-rows:minmax(180px,38vh) auto; overflow:auto; } .mv-side { overflow:visible; } }
 </style>
 </head>
 <body>
@@ -430,7 +466,7 @@
           <div data-act="settings">Settings…</div>
         </div></div>
         </div>
-        <nav class="rtabs" role="tablist"><button type="button" data-rtab="design" class="on">Design</button><button type="button" data-rtab="cam">CAM</button><button type="button" data-rtab="output">Output</button><button type="button" data-rtab="ext">Extensions</button></nav>
+        <nav class="rtabs" role="tablist"><button type="button" data-rtab="design" class="on">Design</button><button type="button" data-rtab="cam">CAM</button><button type="button" data-rtab="output">Output</button><button type="button" data-rtab="ext">Extensions</button><button type="button" data-rtab="machine">Machine</button></nav>
         <div class="hdr-right"><button class="hbtn" id="settings-btn" title="Settings: agent, drawings, 3D printing, machines, tools"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.2"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>Settings</button></div>
       </div>
       <div id="ribbon">
@@ -443,6 +479,9 @@
           <div class="rg" data-tab="cam"><div class="rgl">Simulate</div><div class="rgb" id="rg-cam-sim"></div></div>
           <div class="rg" data-tab="output"><div class="rgl">Output</div><div class="rgb" id="rg-output"></div></div>
           <div class="rg" data-tab="ext"><div class="rgl">Extensions</div><div class="rgb" id="rg-ext"></div></div>
+          <div class="rg" data-tab="machine"><div class="rgl">Connection</div><div class="rgb" id="rg-machine"><div class="mv-conn">
+            <input id="mv-host" placeholder="machine address (e.g. 192.168.1.36)" spellcheck="false"><button class="btn small" id="mv-discover" title="Listen for Makera machines on this network">Find</button>
+            <button class="btn small primary" id="mv-connect">Connect</button><span id="mv-conn-state" class="muted">not connected</span></div></div></div>
         </div>
       </div>
     </div>
@@ -466,6 +505,32 @@
     </div>
     <div id="tree"><div class="hd" style="display:flex;align-items:center">Browser<button class="btn small" id="tree-addbody" style="display:none">+ Body</button><button class="btn small" id="tree-addpart" style="margin-left:auto;padding:1px 6px" title="Insert a part from the library">+ Part</button></div><div id="treebody"></div><div id="sketchtree"></div></div>
     <div id="tip"></div>
+    <div id="machine-view" style="display:none">
+      <div class="mv-cam"><img id="mv-cam-img" alt=""><div id="mv-cam-off">Camera off</div>
+        <div class="mv-cam-bar"><span id="mv-badge" class="mv-badge">offline</span><span id="mv-cam-note" class="muted"></span>
+          <label class="mv-camtoggle"><input type="checkbox" id="mv-cam-on" checked> Camera</label></div></div>
+      <div class="mv-side">
+        <div class="mv-card mv-safety">
+          <button class="mv-halt" id="mv-halt" title="Stop now: motion and spindle stop, the machine goes to Alarm (unlock and home afterwards). Always available.">STOP</button>
+          <div class="mv-row"><button class="btn" id="mv-hold" title="Feed hold: pause motion (always available)">Hold</button><button class="btn" id="mv-resume" title="Resume after a hold (needs Control)">Resume</button><button class="btn" id="mv-unlock" title="Clear an Alarm ($X); home before moving">Unlock</button></div>
+          <label class="mv-arm"><input type="checkbox" id="mv-arm"><span><b>Control</b> <span class="muted">— allow commands that move the machine. Turns itself off on disconnect, alarm, lost status or 5 minutes unused.</span></span></label>
+        </div>
+        <div class="mv-card"><div class="mv-h">Position <span class="muted" id="mv-tool"></span></div>
+          <table class="mv-pos"><tr><th></th><th>X</th><th>Y</th><th>Z</th></tr><tr><td>Work</td><td id="mv-wx">–</td><td id="mv-wy">–</td><td id="mv-wz">–</td></tr><tr class="muted"><td>Machine</td><td id="mv-mx">–</td><td id="mv-my">–</td><td id="mv-mz">–</td></tr></table>
+          <div class="muted mv-small" id="mv-spindle"></div></div>
+        <div class="mv-card"><div class="mv-h">Jog <span class="muted" id="mv-jog-why"></span></div>
+          <div class="mv-row"><button class="btn" id="mv-home" title="Home all axes (Z goes up first). Needed once per session before jogging.">⌂ Home</button>
+            <span class="muted mv-small">Step</span><div class="mv-steps" id="mv-steps"><button data-s="0.1">0.1</button><button data-s="1" class="on">1</button><button data-s="10">10</button></div><span class="muted mv-small">mm</span></div>
+          <div class="mv-jog">
+            <div class="mv-xy"><button data-j="y+" style="grid-area:yp">Y+</button><button data-j="x-" style="grid-area:xm">X−</button><button data-j="x+" style="grid-area:xp">X+</button><button data-j="y-" style="grid-area:ym">Y−</button></div>
+            <div class="mv-z"><button data-j="z+">Z+</button><button data-j="z-">Z−</button></div></div>
+          <div class="muted mv-small">Z down: at most 1 mm per click, slowly, never below the Z floor
+            <input type="number" id="mv-zfloor" step="0.5" min="0" max="100" style="width:58px"> mm above work zero.</div></div>
+        <div class="mv-card"><div class="mv-h">Accessories</div>
+          <div class="mv-row"><label class="mv-sw"><input type="checkbox" id="mv-dust"> Dust collector</label><label class="mv-sw"><input type="checkbox" id="mv-light"> Light</label></div></div>
+        <div class="mv-card mv-logcard"><div class="mv-h">Log</div><div id="mv-msg" class="mv-msg"></div><div id="mv-log" class="mv-log"></div></div>
+      </div>
+    </div>
     <div id="cmd"></div>
     <svg id="sketch-svg"></svg>
     <div id="sketch-panel">
@@ -4895,6 +4960,7 @@ function connect() {
           if (m.show) setMachine(true, m.name); else if (machineOn && machineRig && machineRig.name === m.name) { disposeRig(); loadMachineRig().then(() => { if (program && sim) renderSim(); else poseRig(null, 0, null); }); }
         }
         break;
+      case 'machine_link': mvRender(m); break;
       case 'machine_error': document.getElementById('codeerr').textContent = m.text; addMsg('error', `machine model script failed (${m.name}) — see Code tab`); break;
       case 'cam':
         camCode = m.code || ''; lastGcodeLines = m.gcode_lines || 0; loadProgram(m.program);
@@ -5089,6 +5155,103 @@ async function showFixturePreview(name) {
   addMsg('system', `${name} shown at the origin (${r.fixture.height.toFixed(0)} mm to the work origin). Hide it with the Stock toggle or by loading a program.`);
 }
 function hideFixturePreview() { if (fixturePreview) { stageGroup.remove(fixturePreview); fixturePreview = null; } }
+
+// ---------------------------------------------------------------- Machine tab: live control of a networked machine
+// Every command goes to /api/machine, where machine_link decides whether it is allowed (Control on, homed this session,
+// Idle, inside the travel box and above the Z floor). The page only mirrors that state; it never decides on its own.
+const MV = { st: null, step: 1, camOn: true, busy: false };
+function mvEl(id) { return document.getElementById(id); }
+function mvVisible() { return ribbonTab() === 'machine'; }
+function mvLayout() {
+  const v = mvEl('machine-view'), h = document.getElementById('hdr');
+  if (!v) return;
+  v.style.top = (h ? h.offsetHeight : 106) + 'px';
+  v.style.display = mvVisible() ? 'grid' : 'none';
+  mvCamera();
+}
+function mvCamera() {
+  const img = mvEl('mv-cam-img'), want = mvVisible() && MV.camOn && MV.st && MV.st.connected;
+  if (want && !img.dataset.on) { img.src = '/api/machine/camera?t=' + Date.now(); img.dataset.on = '1'; }
+  if (!want && img.dataset.on) { img.removeAttribute('src'); img.src = ''; delete img.dataset.on; }
+  mvEl('mv-cam-off').style.display = want ? 'none' : '';
+  mvEl('mv-cam-off').textContent = !(MV.st && MV.st.connected) ? 'Not connected' : 'Camera off';
+}
+function mvMsg(text, ok) { const m = mvEl('mv-msg'); m.textContent = text || ''; m.classList.toggle('ok', !!ok); }
+async function mvPost(body) {
+  if (MV.busy && body.action !== 'halt' && body.action !== 'hold') return;
+  MV.busy = body.action === 'jog';
+  try {
+    const r = await fetch('/api/machine', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const j = await r.json();
+    if (!r.ok) { mvMsg(j.error || ('failed: ' + r.status)); } else mvMsg('');
+    if (j && 'connected' in j) mvRender(j);
+    return j;
+  } catch (e) { mvMsg('request failed: ' + e.message); }
+  finally { MV.busy = false; }
+}
+function mvRender(st) {
+  MV.st = st;
+  const s = st.status || {}, conn = st.connected, state = !conn ? 'offline' : (!st.fresh ? 'stale' : (st.homing ? 'Home' : (st.jogging ? 'Jog' : s.state || '?')));
+  const b = mvEl('mv-badge'); b.textContent = state.toUpperCase(); b.className = 'mv-badge ' + state;
+  mvEl('mv-conn-state').textContent = conn ? `${st.profile} · ${st.host}${st.homed ? ' · homed' : ''}` : 'not connected';
+  mvEl('mv-connect').textContent = conn ? 'Disconnect' : 'Connect';
+  mvEl('mv-connect').classList.toggle('primary', !conn);
+  if (!mvEl('mv-host').value && document.activeElement !== mvEl('mv-host')) mvEl('mv-host').value = conn ? st.host : ((st.saved && st.saved.host) || '');
+  const f = v => (v == null ? '–' : (+v).toFixed(3));
+  const w = s.wpos || [], m = s.mpos || [];
+  ['x', 'y', 'z'].forEach((a, i) => { mvEl('mv-w' + a).textContent = f(w[i]); mvEl('mv-m' + a).textContent = f(m[i]); });
+  mvEl('mv-tool').textContent = s.tool ? `T${s.tool.number} · length ${(+s.tool.offset).toFixed(3)}` : '';
+  mvEl('mv-spindle').textContent = s.spindle ? `Spindle ${Math.round(s.spindle.rpm)} rpm` + (s.feed && s.feed.current ? ` · feed ${Math.round(s.feed.current)} mm/min` : '') : '';
+  const arm = mvEl('mv-arm'); arm.checked = !!st.armed; arm.disabled = !conn; arm.closest('.mv-arm').classList.toggle('on', !!st.armed);
+  mvEl('mv-halt').disabled = !conn; mvEl('mv-hold').disabled = !conn;
+  mvEl('mv-resume').disabled = !(conn && st.armed && (s.state === 'Hold' || s.state === 'Pause'));
+  mvEl('mv-unlock').disabled = !(conn && s.state === 'Alarm');
+  const canHome = conn && st.armed && st.fresh && (s.state === 'Idle' || s.state === 'Alarm') && !st.homing;
+  mvEl('mv-home').disabled = !canHome;
+  const why = !conn ? 'connect first' : !st.armed ? 'turn Control on' : !st.homed ? 'home first' : s.state !== 'Idle' ? `machine is ${s.state}` : st.jogging ? 'moving…' : '';
+  mvEl('mv-jog-why').textContent = why;
+  document.querySelectorAll('#machine-view [data-j]').forEach(x => x.disabled = !!why);
+  const zf = mvEl('mv-zfloor'); if (document.activeElement !== zf) zf.value = st.z_floor;
+  ['dust', 'light'].forEach(k => { const c = mvEl('mv-' + k); c.disabled = !conn; if (st.switches && k in st.switches) c.checked = st.switches[k]; });
+  const log = mvEl('mv-log'), stick = log.scrollTop + log.clientHeight >= log.scrollHeight - 4;
+  log.textContent = [...(st.events || []), ...(st.log || []).slice(-12).map(l => '  ' + l)].join('\n');
+  if (stick) log.scrollTop = log.scrollHeight;
+  mvCamera();
+}
+(function mvInit() {
+  mvEl('mv-connect').onclick = () => MV.st && MV.st.connected ? mvPost({ action: 'disconnect' })
+    : (() => { const v = mvEl('mv-host').value.trim(), m = v.match(/^(.*?)(?::(\d+))?(?:\/(\d+))?$/);   // host[:port][/camport] (the emulator)
+         return mvPost({ action: 'connect', host: m[1], port: m[2] ? +m[2] : undefined, cam_port: m[3] ? +m[3] : undefined }); })();
+  mvEl('mv-discover').onclick = async () => {
+    mvMsg('listening for machines…', true);
+    try { const j = await fetch('/api/machine/discover').then(r => r.json());
+      if (j.error) return mvMsg(j.error);
+      if (!j.machines.length) return mvMsg('no machine answered (is it on this network?)');
+      mvEl('mv-host').value = j.machines[0].host; mvMsg(`found ${j.machines.map(x => x.name + ' ' + x.host + ' (' + x.state + ')').join(', ')}`, true);
+    } catch (e) { mvMsg('discovery failed: ' + e.message); }
+  };
+  mvEl('mv-halt').onclick = () => mvPost({ action: 'halt' });
+  mvEl('mv-hold').onclick = () => mvPost({ action: 'hold' });
+  mvEl('mv-resume').onclick = () => mvPost({ action: 'resume' });
+  mvEl('mv-unlock').onclick = () => mvPost({ action: 'unlock' });
+  mvEl('mv-arm').onchange = e => mvPost({ action: 'arm', on: e.target.checked });
+  mvEl('mv-home').onclick = () => mvPost({ action: 'home' });
+  mvEl('mv-steps').querySelectorAll('button').forEach(b => b.onclick = () => { MV.step = +b.dataset.s; mvEl('mv-steps').querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b)); });
+  document.querySelectorAll('#machine-view [data-j]').forEach(b => b.onclick = () => {
+    const ax = b.dataset.j[0], sign = b.dataset.j[1] === '+' ? 1 : -1;
+    let d = MV.step * sign; if (ax === 'z' && sign < 0) d = -Math.min(MV.step, 1);   // Z down: 1 mm per click at most
+    mvPost({ action: 'jog', axis: ax, dist: d });
+  });
+  mvEl('mv-zfloor').onchange = e => mvPost({ action: 'z_floor', z: +e.target.value });
+  mvEl('mv-dust').onchange = e => mvPost({ action: 'switch', axis: 'dust', on: e.target.checked });
+  mvEl('mv-light').onchange = e => mvPost({ action: 'switch', axis: 'light', on: e.target.checked });
+  mvEl('mv-cam-on').onchange = e => { MV.camOn = e.target.checked; mvCamera(); };
+  mvEl('mv-cam-img').onerror = () => { const img = mvEl('mv-cam-img'); delete img.dataset.on; setTimeout(mvCamera, 2000); };
+  document.querySelectorAll('#hdr .rtabs [data-rtab]').forEach(b => b.addEventListener('click', mvLayout));
+  window.addEventListener('resize', mvLayout);
+  fetch('/api/machine').then(r => r.json()).then(mvRender).catch(() => {});
+  mvLayout();
+})();
 </script>
 </body>
 </html>

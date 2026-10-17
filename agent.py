@@ -512,6 +512,8 @@ class CadAgent:
         self.auth_problem: str | None = None       # set when Claude Code is not signed in; shown as a banner in every tab
         self.cam_code: str = ""               # CAM script working copy (workspace/cam.py)
         self.slice_result: slicer.SliceResult | None = None   # last 3D-printing slice (only when a slicer is installed)
+        self.machine = None                    # machine_link.MachineControl (set by the server): READ-ONLY to the agent
+        self.camera = None                     # machine_link.CameraRelay
         self.slice_layers: dict[str, Any] | None = None       # its parsed G-code, viewer payload
         self.program: cam.Program | None = None
         cam_path = workspace / "cam.py"
@@ -2335,7 +2337,26 @@ class CadAgent:
 
             slicing_tools = [slicer_info, slice_for_printing]
 
-        tools = [build_model, *([] if LEGACY_BUILD else [edit_model]), inspect_model, screenshot, export_model, get_code, save_design,
+        @tool("machine_status",
+              "Read-only look at the connected CNC machine (Machine tab): its state, machine and work positions, tool "
+              "and spindle, and (camera=true) a current frame from the machine's camera. You cannot move, home, switch "
+              "or otherwise command the machine: that is the user's, from the Machine tab, by design. If the user asks "
+              "you to move it, tell them to use the Machine tab's controls.",
+              {"type": "object", "properties": {"camera": {"type": "boolean", "default": True}}, "required": []})
+        async def machine_status(args: dict[str, Any]) -> dict[str, Any]:
+            mc = agent.machine
+            if mc is None or not mc.connected:
+                return {"content": [{"type": "text", "text": "No machine connected. The user connects one in the Machine tab."}]}
+            content = [{"type": "text", "text": mc.describe()}]
+            if args.get("camera", True) and agent.camera is not None:
+                try:
+                    jpg = await agent.camera.snapshot()
+                    content.insert(0, {"type": "image", "data": base64.b64encode(jpg).decode(), "mimeType": "image/jpeg"})
+                except Exception as e:  # noqa: BLE001
+                    content.append({"type": "text", "text": f"(camera unavailable: {e})"})
+            return {"content": content}
+
+        tools = [build_model, *([] if LEGACY_BUILD else [edit_model]), inspect_model, screenshot, export_model, get_code, save_design, machine_status,
                  cam_context, build_cam, get_cam_code, export_gcode, simulate_cam, check_interference, check_motion, feeds_speeds, save_machine, save_tool, build_machine, get_machine_code, build_fixture, get_fixture_code,
                  get_parameters, set_parameters, measure_tool, mass_properties, make_drawings, library_tool, kit_tool, sketch_tool,
                  extension_tool, show_panel, configurations_tool] + ext_tools + slicing_tools

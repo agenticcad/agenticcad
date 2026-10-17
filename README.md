@@ -274,6 +274,29 @@ Agent-native, like the CAD side: a second script per design, `cam.py`, written b
   collision check sees it where it really is.
 - Not yet: drilling cycles (GRBL has none), thread milling, side-setup simulation.
 
+## Machine control (Makera Z1 over Wi-Fi) — experimental
+
+The **Machine** tab (next to Extensions) connects to a networked machine: live status and positions, the machine's
+camera, a jog pad, homing, dust collector and light, and Hold / STOP. First driver: the Makera Z1 (TCP 2222 framed
+protocol, UDP 3333 discovery, camera on `ws://<ip>:82/ws_video`; [machine_link.py](machine_link.py) documents what was
+read from the firmware and checked on a real machine). Other machines later.
+
+The Z1's firmware has its soft limits off and no switches at the far end of travel, so the guard in `machine_link`
+is what keeps it out of trouble:
+- **Connecting is monitor-only.** Status, camera, Hold and STOP. Hold and STOP always work.
+- **Control** must be turned on for anything that moves the machine. It turns itself off on disconnect, alarm, lost
+  status, a STOP, or 5 minutes unused.
+- **Jogging needs a homing cycle seen in this session** (Z goes up first) and an Idle machine. One jog at a time:
+  the next is refused until the last has finished. Steps of at most 10 mm (XY, Z up) and 1 mm for Z down, which also
+  runs slower. Every target is checked against the travel box in machine coordinates and a **Z floor** in work
+  coordinates (default 2 mm above work zero).
+- **No free-form G-code, no spindle, no running programs** from the app yet.
+- The agent can read the machine (`machine_status`: state, positions, a camera frame) but cannot command it.
+
+`tools/z1_emu.py` is a Z1 emulator (protocol, homing, jogs, hold/halt, switches, camera) used by
+`tests/test_machine_link.py`; like the real firmware it does not stop a jog past the end, so the tests prove the
+guard does.
+
 ## 3D printing (external slicer)
 
 AgenticCAD does not bundle a slicer. If **OrcaSlicer** (or Bambu Studio, same CLI) is installed on the computer
