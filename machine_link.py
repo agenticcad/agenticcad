@@ -657,6 +657,7 @@ class MachineControl:
                     break
             else:
                 raise Refused(f"{kind} didn't finish in time: check the machine")
+            await asyncio.sleep(0.6)                        # let the status catch up with the routine's last move
             prbs = self._prbs(since)
             if not prbs or not all(ok for _, ok in prbs):
                 raise Refused(f"{kind} finished without a confirmed touch: check the machine")
@@ -670,8 +671,9 @@ class MachineControl:
                 r.update(stage="done", msg=f"T{r['tool']} measured by the machine: setter touch at machine Z {z:.3f}, length offset {tl.get('offset')}")
             else:
                 z = prbs[-1][0][2]
-                r.update(stage="done", touch=prbs[-1][0], wpos=st.get("wpos"),
-                         msg=f"stock top touched at machine Z {z:.3f}; work Z zero set there (work Z now {st['wpos'][2]:.3f})")
+                r.update(stage="done", touch=prbs[-1][0], touches=[p_[0][2] for p_ in prbs], wpos=st.get("wpos"),
+                         msg=f"surface touched at machine Z {z:.3f} (first {prbs[0][0][2]:.3f}); work Z zero set there "
+                             f"(the probe is now {st['wpos'][2]:.3f} above it)")
             self._note(r["msg"])
         except Refused as e:
             r.update(stage="failed", msg=str(e))

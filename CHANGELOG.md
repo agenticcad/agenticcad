@@ -5,6 +5,30 @@ features, patch bumps fix things. The version shown in the UI header comes from 
 
 ## [Unreleased]
 
+## [0.43.0] — 2026-10-17
+
+### Added
+- **Machine tab: Makera's own tool change, tool measurement and auto Z probe**, run from the app and checked on a
+  real Z1. *Change tool* sends `M6 Tn`: the machine parks, waits for you to fit the tool and press its button (or
+  Confirm here), then measures it on its tool setter. The same number again re-measures with `M491`. *Origin =
+  Anchor 1* sets work X/Y zero at the L-bracket's inside corner (`G10 L2`, as MakeraStudio does). *Auto Z probe here*
+  runs `M495` at the head's position: probe on, touch the surface, set work Z zero there, probe off. The app checks
+  before each (homed, Idle, Control on, limits) and after (the touch results, the tool and its length, no alarm).
+- **Every tool change is measured, the probe included**: the app refuses jogs and go-to moves until the fitted tool
+  has been measured in this session.
+- **Go to machine X/Y** (with Z at the top), **raise Z to the top**, the **probe laser** switch (to check positions
+  from a safe height) and a **pin check** (probe, tool setter and e-stop inputs).
+- The Z1's calibrated positions (Anchor 1, tool-change position) are read from the machine's own config as
+  MakeraStudio downloads it, not the firmware defaults (this Z1's anchor differs by 1.1 mm).
+
+### Fixed
+- Alarms show their reason ("manual stop", "probe failed", "emergency stop", ...) and the way out: Unlock, release
+  the e-stop first, reset the machine, or power-cycle it.
+- Positions are shown as unknown while the machine is held or in alarm: the Z1 then reports its planned position, not
+  where the head stopped.
+- The app never sends bare `M490` (on the Z1 it drives the Z motor's pins through a tool-changer routine the machine
+  doesn't have) or `M498.2` (erases the stored tool lengths and G54).
+
 ## [0.42.1] — 2026-10-17 (pre-release)
 
 ### Fixed

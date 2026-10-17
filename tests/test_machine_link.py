@@ -298,6 +298,7 @@ def test_origin_anchor_and_makeras_auto_z_probe():
             assert abs(emu.wco[2] + 55.0) < 1e-6                 # work Z zero = the stock top
             await asyncio.sleep(0.4)
             assert abs(mc.link.status["wpos"][2] - 1.0) < 1e-3  # lifted 1 mm above it
+            assert "surface touched" in mc.routine["msg"] and "1.000 above it" in mc.routine["msg"]
         finally:
             await mc.disconnect(); await emu.stop()
     run(go())

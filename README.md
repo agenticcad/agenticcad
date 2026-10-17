@@ -277,25 +277,39 @@ Agent-native, like the CAD side: a second script per design, `cam.py`, written b
 ## Machine control (Makera Z1 over Wi-Fi) — experimental
 
 The **Machine** tab (next to Extensions) connects to a networked machine: live status and positions, the machine's
-camera, a jog pad, homing, dust collector and light, and Hold / STOP. First driver: the Makera Z1 (TCP 2222 framed
-protocol, UDP 3333 discovery, camera on `ws://<ip>:82/ws_video`; [machine_link.py](machine_link.py) documents what was
-read from the firmware and checked on a real machine). Other machines later.
+camera, Hold / STOP, homing, jogging, go-to, the probe laser, dust collector and light, tool changes and the auto Z
+probe. First driver: the Makera Z1 (TCP 2222 framed protocol, UDP 3333 discovery, camera on `ws://<ip>:82/ws_video`;
+[machine_link.py](machine_link.py) documents what was read from the firmware and checked on a real machine). Other
+machines later.
 
-The Z1's firmware has its soft limits off and no switches at the far end of travel, so the guard in `machine_link`
-is what keeps it out of trouble:
-- **Connecting is monitor-only.** Status, camera, Hold and STOP. Hold and STOP always work.
-- **Control** must be turned on for anything that moves the machine. It turns itself off on disconnect, alarm, lost
-  status, a STOP, or 5 minutes unused.
-- **Jogging needs a homing cycle seen in this session** (Z goes up first) and an Idle machine. One jog at a time:
-  the next is refused until the last has finished. Steps of at most 10 mm (XY, Z up) and 1 mm for Z down, which also
-  runs slower. Every target is checked against the travel box in machine coordinates and a **Z floor** in work
-  coordinates (default 2 mm above work zero).
-- **No free-form G-code, no spindle, no running programs** from the app yet.
+**The machine's own routines do the real work; the app wraps them with checks** (before: homed, Idle, Control on,
+position and limits; after: the firmware's `[PRB:]` results, the reported tool and length, no alarm):
+- **Change tool** = Makera's `M6 Tn`: Z up, park, wait (fit the tool, press the front button or Confirm = `M490.2`),
+  then the machine measures it on its tool setter and stores the length. The same tool number again re-measures with
+  `M491` (M6 to the same number does nothing). **Every tool change is measured, the probe (T0) included, and the app
+  refuses jogs and go-to moves until the fitted tool has been measured in this session.**
+- **Origin = Anchor 1** = `G10 L2 P0 X Y` at the L-bracket's inside corner, as MakeraStudio does (Z untouched).
+- **Auto Z probe** = Makera's `M495 X Y O0 F0` at the head's position: probe on, touch (500 then 100 mm/min), work Z
+  zero on that surface, probe off. Makera's routines switch the wired probe on and check it fired; probing without
+  them is how a dead probe gets driven into the stock (it happened once in testing; the e-stop caught it).
+- **Machine-specific values come from the machine's live config** (MakeraStudio's downloaded `ControllerConfig.txt`):
+  this Z1's Anchor 1 was -191.28, -194.45 against the firmware default -192.4, -194.3.
+
+Safety rules in `machine_link`:
+- **Connecting is monitor-only.** Status, camera, Hold and STOP; Hold and STOP always work. **Control** must be on
+  for anything that moves the machine; it turns itself off on disconnect, alarm, lost status, STOP or 5 minutes unused.
+- **Home first** (Z goes up first), Idle, one move at a time; jogs of at most 10 mm (Z down 1 mm, slower); go-to
+  moves XY only with Z at the top; every target inside the travel box and a Z floor in work coordinates.
+- **Never sent:** bare `M490` (on the Z1 it drives the Z motor's pins through a tool-changer routine the machine
+  doesn't have) and `M498.2` (erases the stored tool lengths and G54). No free-form G-code, no spindle control, no
+  running programs from the app yet.
+- Alarms show their reason and the way out (Unlock, release the e-stop, reset, or power-cycle); positions are shown
+  as unknown while held or in alarm (the Z1 then reports the planned position, not where the head stopped).
 - The agent can read the machine (`machine_status`: state, positions, a camera frame) but cannot command it.
 
-`tools/z1_emu.py` is a Z1 emulator (protocol, homing, jogs, hold/halt, switches, camera) used by
-`tests/test_machine_link.py`; like the real firmware it does not stop a jog past the end, so the tests prove the
-guard does.
+`tools/z1_emu.py` is a Z1 emulator (protocol, homing, jogs, hold/halt, the M6 / M491 / M495 routines with a tool
+setter and a stock surface, the camera) used by `tests/test_machine_link.py`; like the real firmware it does not stop
+a jog past the end, so the tests prove the guard does.
 
 ## 3D printing (external slicer)
 
