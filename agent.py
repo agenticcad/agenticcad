@@ -444,6 +444,71 @@ def _find_call(code: str, fname: str) -> tuple[dict, tuple[int, int] | None]:
     return {}, None
 
 
+ADD_OP_MARK = "# ---- operations added in the CAM tab (Add operation); edit or move them like any other line"
+
+
+def _add_op_line(spec: dict, program, tools: dict, model) -> str:
+    """CAM tab ▸ Add operation: one `program.add(...)` line from a checked spec (never code from the page).
+    kinds: face, adaptive (around the part), pocket (picked flat floor faces), contour (part outline), drill (detected
+    holes), parallel3d (3D finish over the part)."""
+    kind = spec.get("kind")
+    if kind not in ("face", "adaptive", "pocket", "contour", "drill", "parallel3d"):
+        raise cam.CamError(f"unknown operation kind {kind!r}")
+    def num(k, lo, hi, default=None):
+        v = spec.get(k)
+        if v in (None, ""):
+            if default is None:
+                raise cam.CamError(f"{k}: a value is needed")
+            return default
+        try:
+            v = float(v)
+        except (TypeError, ValueError):
+            raise cam.CamError(f"{k}: a number") from None
+        if not (lo <= v <= hi) or v != v:
+            raise cam.CamError(f"{k}: {lo:g} .. {hi:g}")
+        return round(v, 4)
+    si = int(num("setup", 0, max(0, len(program.setups) - 1), 0))
+    n = int(num("tool", 0, 99999))
+    if n not in tools:
+        raise cam.CamError(f"T{n} isn't in the tool library")
+    taken = {o.name for o in program.ops}
+    base = " ".join(str(spec.get("name") or kind.capitalize()).split())[:60] or kind
+    name, k = base, 2
+    while name in taken:
+        name, k = f"{base} {k}", k + 1
+    S, T = f"program.setups[{si}]", f"tools[{n}]"
+    bottom = round(float(model.bbox_min[2]), 4)
+    if kind == "face":
+        call = f"face({S}, {T}, z_bottom={S}.stock.top - {num('depth', 0.01, 20, 0.3)!r}"
+    elif kind == "adaptive":
+        call = (f"adaptive({S}, {T}, {S}.stock.rect({T}.diameter).difference(silhouette(part)), z_top={S}.stock.top, "
+                f"z_bottom={num('z_bottom', -1000, 1000, bottom)!r}, stepover={num('stepover', 0.03, 0.6, 0.15)!r}, "
+                f"stock_to_leave={num('leave', 0, 5, 0.2)!r}")
+    elif kind == "pocket":
+        faces = spec.get("faces") or []
+        if not faces or not all(isinstance(f, int) for f in faces) or len(faces) > 50:
+            raise cam.CamError("pick the pocket's flat floor face(s) in the viewer")
+        info = {f.id: f for f in model.faces}
+        zs = set()
+        for f in faces:
+            fi = info.get(f)
+            if fi is None or fi.kind != "PLANE" or not fi.normal or fi.normal[2] < 0.99:
+                raise cam.CamError(f"face {f} isn't a flat face facing up")
+            zs.add(round(fi.center[2], 3))
+        if max(zs) - min(zs) > 0.01:
+            raise cam.CamError("the picked floors are at different heights: add one pocket per height")
+        call = (f"pocket({S}, {T}, [face_polygon(model.get_face(f)) for f in {sorted(faces)!r}], z_top={S}.stock.top, "
+                f"z_bottom={min(zs)!r}, stock_to_leave={num('leave', 0, 5, 0.0)!r}")
+    elif kind == "contour":
+        call = (f"contour({S}, {T}, silhouette(part), z_top={S}.stock.top, z_bottom={num('z_bottom', -1000, 1000, bottom)!r}, "
+                f"side=\"outside\", tabs={int(num('tabs', 0, 12, 0))}")
+    elif kind == "drill":
+        call = f"drill({S}, {T}, holes(part, dmin={num('dmin', 0, 200, 0)!r}, dmax={num('dmax', 0, 1000, 1000)!r})"
+    else:
+        call = f"parallel3d({S}, {T}, shape=part, stepover={num('stepover', 0.02, 0.6, 0.1)!r}, angle={num('angle', -180, 180, 0)!r}"
+    return f"program.add({call}, name={name!r}))"
+
+
 def _find_overrides(code: str) -> tuple[dict, tuple[int, int] | None]:
     return _find_call(code, "overrides")
 
@@ -803,6 +868,27 @@ class CadAgent:
         what = ", ".join(f"{k}={v:g}" if isinstance(v, float) else f"{k}={v!r}" for k, v in vals.items()) if vals else "cleared (script defaults)"
         self.notes.append(f"The user set per-operation overrides in the CAM tab for '{key}': {what}. They live in the "
                           "`overrides({...})` line of cam.py (tool values, cut settings, colour); keep that line when you rewrite the script.")
+        return prog
+
+    async def add_cam_op(self, spec: dict) -> cam.Program | None:
+        """CAM tab ▸ Add operation: append one program.add(...) line to cam.py and rebuild. cam.py changes only if the
+        new program builds."""
+        if self.program is None or not self.cam_code.strip() or self.model is None:
+            raise cam.CamError("build a CAM program first (or ask the assistant for one)")
+        line = _add_op_line(spec, self.program, self.library.tool_map(), self.model)
+        code = self.cam_code.rstrip("\n") + "\n"
+        if ADD_OP_MARK not in code:
+            code += "\n" + ADD_OP_MARK + "\n"
+        code += line + "\n"
+        before = self.cam_code
+        try:
+            prog = await self.set_cam_code(code, source="user")
+        except cam.CamError:                                       # it doesn't build: cam.py goes back as it was
+            self.cam_code = before
+            (self.workspace / "cam.py").write_text(before)
+            raise
+        self.notes.append(f"The user added an operation in the CAM tab: `{line}` (appended to cam.py under the "
+                          "'operations added in the CAM tab' comment). Keep it when you rewrite the script.")
         return prog
 
     async def simulate(self, ops: list[int] | None = None, resolution: float | None = None):

@@ -1310,6 +1310,13 @@ async def _dispatch(ws: WebSocket, msg: dict) -> None:
             await ws.send_text(json.dumps({"type": "cam_error", "text": str(e)}))
         except Exception as e:  # noqa: BLE001
             await ws.send_text(json.dumps({"type": "cam_error", "text": f"{type(e).__name__}: {e}"}))
+    elif t == "add_op":                                   # CAM tab ▸ Add operation
+        try:
+            await agent.add_cam_op(msg.get("spec") or {})
+        except cam.CamError as e:
+            await ws.send_text(json.dumps({"type": "cam_error", "text": str(e)}))
+        except Exception as e:  # noqa: BLE001
+            await ws.send_text(json.dumps({"type": "cam_error", "text": f"{type(e).__name__}: {e}"}))
     elif t == "set_sketch":
         try:
             await agent.set_sketch(msg.get("name") or "sketch1", msg.get("plane") or {}, msg.get("items") or [], constraints=msg.get("constraints") or [])

@@ -494,7 +494,7 @@
   #ribbon .rgdd .rb, #ribbon .rg.fold .rgb .rb { width:100%; justify-content:flex-start; height:32px; padding:0 10px; }
   #ribbon .rgdd .rb .lb, #ribbon .rg.fold .rgb .rb .lb { display:inline; }
   #ribbon .rg.fold.right .rgb { left:auto; right:0; }
-  body[data-ws=machine] #hdr { display:none; }
+  body[data-ws=machine] #hdr, body[data-ws=cam] #hdr { display:none; }
   /* left column: Browser + Parameters (Design) */
   #leftcol { width:250px; flex:none; display:flex; flex-direction:column; min-height:0; overflow:auto; background:var(--panel); border-right:1px solid var(--line); }
   body:not([data-ws=design]) #leftcol, body.sketching #leftcol { display:none; }
@@ -633,6 +633,79 @@
   .mvp-check { font-size:12.5px; display:flex; flex-direction:column; gap:6px; min-width:340px; max-width:520px; } .mvp-check ul { margin:0; padding-left:18px; }
   .mvp-check .warn { color:var(--warn); } .mvp-check code { font:12.5px ui-monospace,Menlo,monospace; background:var(--bg); padding:2px 6px; border-radius:5px; }
   .mv-log { overflow:auto; font:11px/1.45 ui-monospace,Menlo,monospace; color:var(--muted); white-space:pre-wrap; max-height:220px; }
+
+  /* =================================================================== v2 CAM workspace */
+  #cam-left { display:none; flex-direction:column; min-height:0; }
+  body[data-ws=cam] #cam-left { display:flex; } body[data-ws=cam] #leftcol #tree, body[data-ws=cam] #leftcol #params-card { display:none; }
+  body[data-ws=cam]:not(.sketching) #leftcol { display:flex; width:316px; overflow:hidden; }
+  .cl-prog { padding:14px 14px 12px; border-bottom:1px solid var(--line); }
+  .cl-t { font-size:15px; font-weight:600; } .cl-m { color:var(--muted); margin-top:3px; font-size:12px; } .cl-m a.wa { color:var(--warn); }
+  .cl-acts { display:flex; gap:8px; margin-top:10px; } .cl-acts .btn { height:30px; padding:0 11px; }
+  .cl-sub { display:flex; gap:8px; margin-top:8px; font-size:11.5px; align-items:center; } .cl-sub a { color:var(--muted); } .cl-sub a:hover { color:var(--text); }
+  #cam-warn { color:var(--warn); font-size:11.5px; white-space:pre-wrap; } #cam-warn div { margin-top:5px; }
+  #cam-left #cam-empty { margin:12px; }
+  #cam-tree { padding:8px 6px; overflow:auto; flex:1; min-height:120px; }
+  .ct-setup { display:grid; grid-template-columns:14px 1fr auto; align-items:center; gap:2px 6px; padding:7px 8px; border-radius:7px; cursor:pointer; margin-top:2px; }
+  .ct-setup:hover { background:rgba(255,255,255,.03); } .ct-setup.sel { background:rgba(78,161,255,.14); }
+  .ct-setup .car { color:var(--mut2); font-size:10px; } .ct-setup .nm { font-weight:600; }
+  .ct-setup .wcs { font-size:10.5px; color:var(--accent2); border:1px solid rgba(78,161,255,.4); border-radius:8px; padding:0 6px; }
+  .ct-setup .sub { grid-column:2 / 4; color:var(--muted); font-size:11.5px; }
+  .ct-op { display:flex; align-items:center; gap:7px; padding:5px 8px 5px 24px; border-radius:7px; cursor:pointer; font-size:12.5px; }
+  .ct-op:hover { background:rgba(255,255,255,.03); } .ct-op.sel { background:rgba(78,161,255,.14); box-shadow:inset 2px 0 0 var(--accent2); }
+  .ct-op .dot { width:9px; height:9px; border-radius:3px; flex:none; } .ct-op .nm { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .ct-op .ed { display:inline-block; width:6px; height:6px; border-radius:50%; background:var(--accent); margin-left:6px; vertical-align:2px; }
+  .ct-op .kind { color:var(--mut2); font-size:11px; white-space:nowrap; } .ct-op .tchip { font-size:10.5px; color:var(--muted); background:var(--s3); border-radius:5px; padding:1px 5px; font-weight:600; }
+  .ct-op .tm { width:36px; text-align:right; color:var(--muted); font-size:11.5px; }
+  .ct-op .eye { color:var(--mut2); width:14px; text-align:center; visibility:hidden; } .ct-op:hover .eye, .ct-op.hid .eye { visibility:visible; } .ct-op .eye:hover { color:var(--text); }
+  .ct-op.hid .nm, .ct-op.hid .dot { opacity:.4; }
+  .ct-add { color:var(--mut2); padding:6px 8px 6px 24px; cursor:pointer; font-size:12.5px; border-radius:7px; } .ct-add:hover { color:var(--text); background:rgba(255,255,255,.03); }
+  .ct-add.top { padding-left:8px; margin-top:6px; }
+  #cam-tools { border-top:1px solid var(--line); padding:10px 12px 10px; max-height:30%; overflow:auto; flex:none; }
+  #cam-tools:empty { display:none; }
+  .ct-h { font-size:10.5px; letter-spacing:.06em; text-transform:uppercase; color:var(--mut2); font-weight:600; margin-bottom:6px; }
+  .ct-tool { display:flex; gap:8px; align-items:center; padding:2px 0; font-size:12px; } .ct-tool div { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .ct-tool small { color:var(--muted); font-size:11px; margin-left:6px; }
+  /* inspector */
+  #cam-insp { overflow:auto; flex:1; }
+  .ci-head { padding:14px 16px 12px; border-bottom:1px solid var(--line); }
+  .ci-t { display:flex; align-items:center; gap:8px; font-size:15px; font-weight:600; } .ci-t .dot { width:11px; height:11px; border-radius:3px; }
+  .ci-t .chip, .chip { font-size:11px; font-weight:500; color:var(--muted); background:var(--s3); border-radius:9px; padding:1px 8px; } .chip.blue { color:var(--accent2); background:rgba(78,161,255,.12); }
+  .ci-m { color:var(--muted); font-size:12px; margin-top:4px; } .ci-acts { display:flex; gap:8px; margin-top:10px; }
+  .ci-warn { margin:12px 16px; padding:10px 12px; border:1px solid rgba(242,201,76,.4); background:rgba(242,201,76,.06); border-radius:9px; color:#f3d98a; font-size:12px; line-height:1.5; }
+  #cam-insp .opedit { padding:12px 16px; border:0; }
+  #cam-insp .op-tabs { display:flex; gap:16px; border-bottom:1px solid var(--line); margin:-12px -16px 12px; padding:0 16px; }
+  #cam-insp .op-tabs button { background:none; border:0; border-bottom:2px solid transparent; color:var(--muted); font:inherit; font-weight:500; padding:10px 0 8px; cursor:pointer; }
+  #cam-insp .op-tabs button.on { color:var(--text); border-bottom-color:var(--accent2); }
+  #cam-insp .ovgrid { grid-template-columns:110px 1fr 56px; gap:7px 10px; }
+  #cam-insp .ovgrid input, #cam-insp .opedit select { height:30px; border-color:var(--line2); border-radius:7px; padding:0 9px; }
+  #cam-insp .cam-mrow { margin:0; flex-wrap:wrap; } #cam-insp .cam-mrow .cam-lbl { display:none; }
+  /* view toggles + timeline dock */
+  #cam-view { display:none; position:absolute; z-index:4; left:14px; top:12px; gap:8px; }
+  body[data-ws=cam].has-program #cam-view { display:flex; }
+  .seg { display:flex; background:rgba(13,15,19,.85); border:1px solid var(--line); border-radius:8px; padding:2px; backdrop-filter:blur(4px); }
+  .seg button { background:none; border:0; color:var(--muted); font:inherit; font-size:12px; font-weight:500; padding:4px 10px; border-radius:6px; cursor:pointer; }
+  .seg button.on { background:var(--s3); color:var(--text); }
+  body:not([data-ws=cam]) #cam-dock { display:none !important; }
+  #cam-dock { position:absolute; z-index:4; left:0; right:0; bottom:0; background:rgba(20,23,29,.96); border-top:1px solid var(--line); backdrop-filter:blur(6px); }
+  #cam-sim { display:flex; align-items:center; gap:8px; padding:9px 14px 3px; }
+  #cam-sim .btn { height:30px; } .tl-btns { display:flex; gap:4px; } .tl-btns .btn { width:34px; padding:0; }
+  .tl { position:relative; flex:1; height:30px; min-width:80px; }
+  #tl-segs { position:absolute; left:0; right:0; top:6px; height:18px; display:flex; gap:2px; border-radius:5px; overflow:hidden; }
+  .tseg { opacity:.78; min-width:2px; } .tseg.sel { opacity:1; box-shadow:inset 0 0 0 2px rgba(255,255,255,.75); }
+  .tl input[type=range] { position:absolute; inset:0; width:100%; height:30px; margin:0; background:transparent; -webkit-appearance:none; appearance:none; cursor:pointer; }
+  .tl input[type=range]::-webkit-slider-runnable-track { background:transparent; height:30px; }
+  .tl input[type=range]::-webkit-slider-thumb { -webkit-appearance:none; width:4px; height:30px; border-radius:2px; background:#fff; box-shadow:0 0 0 1px rgba(0,0,0,.6), 0 0 8px rgba(255,255,255,.4); }
+  #cam-sim select { height:30px; padding:0 8px; }
+  #sim-infobar { padding:2px 14px 8px; font-size:11.5px; }
+  #cam-simres { padding:8px 14px 6px; border-bottom:1px solid var(--line); }
+  body[data-ws=cam] #bottombar, body[data-ws=cam] #hover, body[data-ws=cam] #stats { display:none; }
+  body[data-ws=cam] #cubewrap { top:12px; }
+
+  .addk { display:grid; grid-template-columns:1fr 1fr; gap:6px; }
+  .addk button { text-align:left; background:var(--bg); border:1px solid var(--line2); border-radius:8px; padding:8px 10px; color:var(--text); font:inherit; cursor:pointer; display:flex; flex-direction:column; gap:2px; }
+  .addk button small { color:var(--muted); font-size:11px; } .addk button.on { border-color:var(--accent2); background:rgba(78,161,255,.08); } .addk button:hover { border-color:var(--muted); }
+  .addf { display:grid; grid-template-columns:100px 1fr auto; gap:7px 10px; align-items:center; font-size:12.5px; } .addf label { color:var(--muted); }
+  .addf .inp { height:30px; width:100%; } .addf .u { color:var(--mut2); font-size:11px; max-width:120px; }
 </style>
 </head>
 <body>
@@ -702,6 +775,15 @@
 </div>
 <div id="app">
   <div id="leftcol">
+  <div id="cam-left">
+    <div class="cl-prog" id="cam-prog" style="display:none"><div class="cl-t" id="cp-name"></div><div class="cl-m" id="cp-meta"></div><div id="cam-warn"></div>
+      <div class="cl-acts"><button class="btn" id="gcode-dl" title="Download the program for the machine">Export G-code</button><button class="btn pri" id="cp-send" title="Machine ▸ Run with the selected setup's operations">Send to machine →</button></div>
+      <div class="cl-sub"><a href="#" id="gcode-preview" title="Show the start of the G-code">G-code</a><span class="muted" id="cam-gcode-meta"></span><a href="#" data-open-libs="machines" style="margin-left:auto" title="Settings ▸ Machines and Tools">Machines &amp; tools</a></div>
+      <pre id="gcode-pre" style="display:none"></pre></div>
+    <div id="cam-empty" class="cam-sec" style="color:var(--muted)">No CAM program yet. Ask the agent, e.g. <i>"Make a CAM program for the Generic 3018: face the stock, drill the holes, pocket the bore and cut the outline with 4 tabs."</i> The agent writes <code>cam.py</code> (see the Code tab) against your machine and tool libraries. <div style="margin-top:8px"><button class="btn small" data-open-libs="machines">Machines &amp; tools…</button></div></div>
+    <div id="cam-tree"></div>
+    <div id="cam-tools"></div>
+  </div>
     <div id="tree"><div class="hd" style="display:flex;align-items:center">Browser<button class="btn small" id="tree-addbody" style="display:none">+ Body</button><button class="btn small" id="tree-addpart" style="margin-left:auto;padding:1px 6px" title="Insert a part from the library">+ Part</button></div><div id="treebody"></div><div id="sketchtree"></div></div>
     <div id="params-card" style="display:none"><div class="hd">Parameters <span class="muted" id="params-hint" style="text-transform:none;letter-spacing:0"></span><select id="cfg-sel" title="Configuration: named sets of parameter values"></select></div><div id="params-body"></div></div>
   </div>
@@ -733,6 +815,19 @@
           <div class="jp-z"><button data-j="z+">Z+</button><button data-j="z-" title="Z down: at most 1 mm per click, never below the Z floor">Z−</button></div>
           <div class="jp-xy"><button data-j="y+" style="grid-area:yp">Y+</button><button data-j="x-" style="grid-area:xm">X−</button><button id="mv-step" class="jp-step" style="grid-area:c" title="Jog step: click to change">1 mm</button><button data-j="x+" style="grid-area:xp">X+</button><button data-j="y-" style="grid-area:ym">Y−</button></div></div>
       </div>
+    </div>
+    <div id="cam-view"><div class="seg" id="cv-scope"><button data-v="sel" title="Only the selected operation's toolpath">Selected op</button><button data-v="all" class="on">All</button></div>
+      <div class="seg" id="cv-show"><button data-v="tp" class="on" title="Toolpaths">Toolpath</button><button data-v="stock" class="on" title="Stock and fixtures">Stock</button><button data-v="machine" title="The machine around the work (A)">Machine</button></div></div>
+    <div id="cam-dock" style="display:none">
+        <div id="cam-simres" style="display:none"><div class="sr-head"><b>Simulation</b><span class="muted" id="sr-sum"></span><button class="btn small" id="sr-more">Details</button><button class="btn small" id="sim-clear" title="Hide the simulated stock">Hide</button></div><div id="cam-simres-body" style="display:none"></div></div>
+      <div id="cam-sim">
+        <button class="btn" id="sim-run" title="Simulate material removal for the shown operations (also checks collisions)">Simulate</button>
+        <button class="btn ghost" id="sim-rendered" title="Rendered simulation: metallic stock, chrome holder, camera following the tool">Rendered</button>
+        <span class="tl-btns"><button class="btn" id="sim-back" title="Previous operation">⏮</button><button class="btn pri" id="sim-play" title="Play / pause">▶</button><button class="btn" id="sim-fwd" title="Next operation">⏭</button></span>
+        <div class="tl"><div id="tl-segs"></div><input type="range" id="sim-range" min="0" max="1000" value="1000" step="1" title="Program time: drag to scrub"></div>
+        <select id="sim-speed" class="btn" title="Playback speed: 1× runs the program at the machine's feed and rapid rates"><option value="0.25">¼×</option><option value="0.5">½×</option><option value="1" selected>1×</option><option value="2">2×</option><option value="5">5×</option><option value="10">10×</option><option value="25">25×</option><option value="100">100×</option></select>
+      </div>
+      <div id="sim-infobar"><span id="sim-info" class="muted">—</span></div>
     </div>
     <div id="cmd"></div>
     <svg id="sketch-svg"></svg>
@@ -882,37 +977,12 @@
       </div>
       <div id="lib-list" class="muted" style="flex:1;overflow:auto;padding:10px 12px">empty — save a design or body here, or import a STEP into the library</div>
     </div>
-    <div class="pane" id="pane-cam">
-      <div id="cam-body">
+    <div class="pane" id="pane-cam"><div id="cam-insp"></div><div style="display:none">
         <div class="cam-mrow" id="cam-machine" title="The design sits on the machine's bed; with a CAM program the simulation plays on the program's machine and collisions flash red.">
           <span class="cam-lbl">Machine view</span><select id="cam-machine-pick" class="btn" title="Which machine to show"></select>
           <button class="btn small" id="cam-machine-show" title="Show the machine around the design (A)">Show machine</button>
           <button class="btn small" id="cam-machine-doors" title="Open or close the machine's doors / canopy" disabled>Open doors</button></div>
-        <div id="cam-empty" class="cam-sec" style="color:var(--muted)">No CAM program yet. Ask the agent, e.g. <i>"Make a CAM program for the Generic 3018: face the stock, drill the holes, pocket the bore and cut the outline with 4 tabs."</i> The agent writes <code>cam.py</code> (see the Code tab) against your machine and tool libraries. <div style="margin-top:8px"><button class="btn small" data-open-libs="machines">Machines &amp; tools…</button></div></div>
-        <div class="cam-sec cam-prog" id="cam-prog" style="display:none">
-          <div class="cp-top"><div class="cp-title"><b id="cp-name"></b><div class="muted" id="cp-meta"></div></div>
-            <button class="btn small" data-open-libs="machines" title="Settings ▸ Machines / Tools">Machines &amp; tools…</button></div>
-          <div class="cp-row"><button class="btn small primary" id="gcode-dl" title="Download the program for the machine">⬇ G-code</button><button class="btn small" id="gcode-preview">Preview</button><span class="muted" id="cam-gcode-meta"></span></div>
-          <div id="cam-warn"></div>
-          <pre id="gcode-pre" style="display:none"></pre>
-        </div>
-        <div id="cam-setups"></div>
-      </div>
-      <div id="cam-dock" style="display:none">
-        <div id="cam-simres" style="display:none"><div class="sr-head"><b>Simulation</b><span class="muted" id="sr-sum"></span><button class="btn small" id="sr-more">Details</button><button class="btn small" id="sim-clear" title="Hide the simulated stock">Hide</button></div><div id="cam-simres-body" style="display:none"></div></div>
-        <div id="cam-sim">
-          <button class="btn" id="sim-run" title="Simulate material removal for the shown operations">Simulate</button>
-          <button class="btn" id="sim-rendered" title="Rendered simulation: metallic stock, chrome holder, camera following the tool">Rendered</button>
-          <span class="dock-sep"></span>
-          <button class="btn" id="sim-back" title="Jump to the previous operation">⏮</button>
-          <button class="btn" id="sim-play" title="Play / pause">▶</button>
-          <button class="btn" id="sim-fwd" title="Jump to the next operation">⏭</button>
-          <input type="range" id="sim-range" min="0" max="1000" value="1000" step="1" title="Program time">
-          <select id="sim-speed" class="btn" title="Playback speed: 1× runs the program at the machine's feed and rapid rates"><option value="0.25">¼×</option><option value="0.5">½×</option><option value="1" selected>1×</option><option value="2">2×</option><option value="5">5×</option><option value="10">10×</option><option value="25">25×</option><option value="100">100×</option></select>
-        </div>
-        <div id="sim-infobar"><span id="sim-info" class="muted">—</span></div>
-      </div>
-    </div>
+</div></div>
     <div class="pane" id="pane-code">
       <textarea id="code" spellcheck="false"></textarea>
       <div id="codeerr"></div>
@@ -1797,69 +1867,191 @@ function renderFixturePanel(el, si = 0) {
   };
 }
 function applyCamVisibility() {
-  for (const c of camOps) { c.cut.visible = c.rapid.visible = showTp && c.visible; }
+  const solo = camScope === 'sel' && camSel.kind === 'op' ? camSel.key : null;   // CAM ▸ Selected op: only its toolpath
+  for (const c of camOps) { c.cut.visible = c.rapid.visible = showTp && c.visible && (!solo || c.op.key === solo); }
   if (stockObj) stockObj.visible = showStock && !simRes; if (originObj) originObj.visible = !renderedMode && (showStock || showTp); if (fixtureObj) fixtureObj.visible = showStock;
 }
 document.getElementById('tp-toggle').onclick = e => { showTp = !showTp; e.currentTarget.classList.toggle('active', showTp); applyCamVisibility(); };
 document.getElementById('stock-toggle').onclick = e => { showStock = !showStock; e.currentTarget.classList.toggle('active', showStock); applyCamVisibility(); };
 
 const setupClosed = new Set(), opHidden = new Set(), opTab = {}, opDraft = {};
+var camSel = { kind: 'setup', si: 0 }, camScope = 'all', camWarnOpen = false;   // var: read by applyCamVisibility, which can run first
 const ORIGIN_TEXT = { 'stock-top-left': 'front-left corner, top of the stock', 'stock-top-center': 'centre, top of the stock',
   'stock-bottom-left': 'front-left corner, bottom of the stock', 'stock-bottom-center': 'centre, bottom of the stock',
   'rotary-axis-left': 'left end, on the 4th-axis centreline', custom: 'a point set in the script' };
 const fmtMin = m => m >= 60 ? `${Math.floor(m / 60)} h ${Math.round(m % 60)} min` : `${m.toFixed(1)} min`;
 function renderCamTab() {
+  // CAM workspace: the program tree (left column), the selected setup / operation (Inspector), the timeline (viewer dock)
   const has = !!program;
   document.getElementById('cam-empty').style.display = has ? 'none' : '';
   document.getElementById('cam-prog').style.display = has ? '' : 'none';
   document.getElementById('cam-dock').style.display = has ? '' : 'none';
-  const box = document.getElementById('cam-setups'); box.innerHTML = '';
-  if (!has) return;
+  document.body.classList.toggle('has-program', has);
+  if (!has) { document.getElementById('cam-tree').innerHTML = ''; document.getElementById('cam-tools').innerHTML = ''; renderCamInsp(); return; }
   renderSpeedUi();
   const setups = program.setups || [];
+  if (camAddPending) { const added = [...program.ops].reverse().find(o => o.name === camAddPending || o.name.startsWith(camAddPending + ' '));
+    if (added) { camSel = { kind: 'op', key: added.key }; camAddPending = null; addOp.vals = {}; } }
+  if (camSel.kind === 'op' && !program.ops.some(o => o.key === camSel.key)) camSel = { kind: 'setup', si: 0 };
+  if (camSel.kind === 'setup' && camSel.si >= setups.length) camSel = { kind: 'setup', si: 0 };
   document.getElementById('cp-name').textContent = program.name;
-  document.getElementById('cp-meta').textContent = `${program.machine} · ${setups.length} setup${setups.length === 1 ? '' : 's'} · ${program.ops.length} operations · ${fmtMin(program.time)}`;
   const warns = program.warnings || [];
-  document.getElementById('cam-warn').innerHTML = warns.length ? `<details><summary>⚠ ${warns.length} warning${warns.length === 1 ? '' : 's'}</summary>${warns.map(w => `<div>${esc(w)}</div>`).join('')}</details>` : '';
-  document.getElementById('cam-gcode-meta').textContent = lastGcodeLines ? `${lastGcodeLines} lines` : '';
+  document.getElementById('cp-meta').innerHTML = `${esc(program.machine)} · ${program.ops.length} operations · ${fmtMin(program.time)}${warns.length ? ` · <a href="#" class="wa" id="cp-warns">${warns.length} warning${warns.length === 1 ? '' : 's'}</a>` : ''}`;
+  document.getElementById('cam-warn').innerHTML = warns.length && camWarnOpen ? warns.map(w => `<div>${esc(w)}</div>`).join('') : '';
+  const wl = document.getElementById('cp-warns'); if (wl) wl.onclick = e => { e.preventDefault(); camWarnOpen = !camWarnOpen; renderCamTab(); };
+  document.getElementById('cam-gcode-meta').textContent = lastGcodeLines ? `${lastGcodeLines.toLocaleString()} lines` : '';
+  const tree = document.getElementById('cam-tree'); tree.innerHTML = '';
   setups.forEach((stp, si) => {
     const mine = program.ops.map((op, i) => [op, i]).filter(([op]) => (op.setup || 0) === si);
-    const closed = setupClosed.has(stp.name), t = mine.reduce((a, [op]) => a + op.time, 0);
-    const card = document.createElement('div'); card.className = 'cam-sec setup-card';
-    const sz = stp.size || [0, 0, 0];
-    card.innerHTML = `<div class="su-head"><span class="car">${closed ? '▸' : '▾'}</span><span class="su-title">Setup ${si + 1} · ${esc(stp.name)}</span><span class="su-wcs" title="Work coordinate system on the machine">${esc(stp.wcs || '')}</span>
-        <span class="meta">${mine.length} op${mine.length === 1 ? '' : 's'} · ${fmtMin(t)}</span><span class="jump" title="Play from this setup">▶</span></div>`
-      + (closed ? '' : `<div class="su-body"><div class="kv su-kv">
-        <div>Stock</div><div>${stp.rotary ? `Ø${(2 * (stp.max_radius || 0)).toFixed(1)} × ${sz[0].toFixed(1)}` : `${sz[0].toFixed(2)} × ${sz[1].toFixed(2)} × ${sz[2].toFixed(2)}`} mm</div>
-        <div>Machined from</div><div>${stp.rotary ? `4th axis · A ${stp.a}°` : esc(stp.orient || 'top')}</div>
-        <div>Work origin</div><div>${esc(ORIGIN_TEXT[stp.origin_name] || stp.origin_name)}</div>
-        <div>Safe height</div><div>${(+stp.safe_z_wcs).toFixed(1)} mm above the origin</div>
-        <div>Workholding</div><div class="su-fx"></div></div>
-        <div class="su-opsh">Operations <span class="muted">· tick to show and simulate · click one for its settings</span></div><div class="su-ops"></div></div>`);
-    card.querySelector('.su-head').onclick = e => { if (e.target.closest('.jump')) return; closed ? setupClosed.delete(stp.name) : setupClosed.add(stp.name); renderCamTab(); };
-    card.querySelector('.su-head .jump').onclick = () => { const i0 = mine.length ? mine[0][1] : -1; if (i0 >= 0 && sim.opStart[i0] >= 0) simSeek(sim.t[sim.opStart[i0]], sim.playing); };
-    box.appendChild(card);
+    const closed = setupClosed.has(stp.name), sz = stp.size || [0, 0, 0];
+    const fx = stp.fixture, held = fx && fx.name ? `in the ${fx.name}` : fx && (fx.extra || []).length ? `on the table · ${fx.extra.map(f => f.name).join(', ')}` : 'on the table';
+    const h = document.createElement('div'); h.className = 'ct-setup' + (camSel.kind === 'setup' && camSel.si === si ? ' sel' : '');
+    h.innerHTML = `<span class="car">${closed ? '▸' : '▾'}</span><span class="nm">Setup ${si + 1} · ${esc(stp.name)}</span><span class="wcs">${esc(stp.wcs || '')}</span>
+      <div class="sub">${stp.rotary ? `Ø${(2 * (stp.max_radius || 0)).toFixed(1)} × ${sz[0].toFixed(1)} on the 4th axis` : `${sz[0].toFixed(1)} × ${sz[1].toFixed(1)} × ${sz[2].toFixed(1)} · ${esc(held)}`}</div>`;
+    h.querySelector('.car').onclick = e => { e.stopPropagation(); closed ? setupClosed.delete(stp.name) : setupClosed.add(stp.name); renderCamTab(); };
+    h.onclick = () => { camSel = { kind: 'setup', si }; renderCamTab(); applyCamVisibility(); };
+    tree.appendChild(h);
     if (closed) return;
-    renderFixturePanel(card.querySelector('.su-fx'), si);
-    const ops = card.querySelector('.su-ops');
     for (const [op, i] of mine) {
-      const r = document.createElement('div'); r.className = 'oprow'; r.dataset.op = i;
-      const nov = Object.keys(opOverrideSet(op)).length, open = opOpen.has(op.key);
-      r.innerHTML = `<input type="checkbox" ${camOps[i]?.visible ? 'checked' : ''} title="Show and simulate this operation"><span class="car">${op.key ? (open ? '▾' : '▸') : ''}</span>`
-        + `<label class="sw" style="background:${op.color}" title="Colour — click to change"><input type="color" value="${op.color}"></label>`
-        + `<span class="nm">${i + 1}. ${esc(op.name)} <span class="muted">${op.kind}</span>${nov ? `<span class="ovb" title="${esc(Object.entries(opOverrideSet(op)).map(([k, v]) => k + ' ' + v).join(', '))}">edited</span>` : ''}</span><span class="meta">T${op.tool.number} Ø${op.tool.diameter} · ${op.time.toFixed(1)} min</span>`;
-      r.querySelector('input[type=checkbox]').onchange = e => { camOps[i].visible = e.target.checked; e.target.checked ? opHidden.delete(op.key) : opHidden.add(op.key); applyCamVisibility(); if (simRes) clearSim(); setupSim(); };
-      r.querySelector('label.sw input').onchange = e => applyOpOverrides(op, { color: e.target.value });
+      const r = document.createElement('div'), vis = camOps[i] ? camOps[i].visible : true;
+      const nov = Object.keys(opOverrideSet(op)).length;
+      r.className = 'ct-op' + (camSel.kind === 'op' && camSel.key === op.key ? ' sel' : '') + (vis ? '' : ' hid');
+      r.innerHTML = `<span class="dot" style="background:${op.color}"></span><span class="nm">${esc(op.name)}${nov ? '<i class="ed" title="settings changed in the CAM tab"></i>' : ''}</span>
+        <span class="eye" title="${vis ? 'Hide (not shown, not simulated)' : 'Show'}">${vis ? '◉' : '○'}</span><span class="kind">${esc(op.kind)}</span><span class="tchip">T${op.tool ? op.tool.number : '?'}</span><span class="tm">${op.time.toFixed(1)}m</span>`;
       r.title = Object.entries(op.params || {}).map(([k, v]) => `${k}=${Array.isArray(v) ? v.join('×') : (typeof v === 'number' ? +v.toFixed(3) : v)}`).join('  ');
-      if (op.key) for (const q of r.querySelectorAll('.nm, .car')) q.onclick = () => { opOpen.has(op.key) ? opOpen.delete(op.key) : opOpen.add(op.key); renderCamTab(); };
-      const j = document.createElement('span'); j.className = 'jump'; j.textContent = '▶'; j.title = 'Play from this operation';
-      j.onclick = ev => { ev.stopPropagation(); if (sim.opStart[i] >= 0) simSeek(sim.t[sim.opStart[i]], true); if (!sim.playing) document.getElementById('sim-play').click(); };
-      r.appendChild(j);
-      ops.appendChild(r);
-      if (open) ops.appendChild(opEditor(op));
+      r.onclick = () => { camSel = op.key ? { kind: 'op', key: op.key, i } : { kind: 'setup', si }; renderCamTab(); applyCamVisibility(); };
+      r.querySelector('.eye').onclick = e => { e.stopPropagation(); if (!camOps[i]) return; camOps[i].visible = !camOps[i].visible; camOps[i].visible ? opHidden.delete(op.key) : opHidden.add(op.key); applyCamVisibility(); if (simRes) clearSim(); setupSim(); renderCamTab(); };
+      r.ondblclick = () => { if (sim.opStart[i] >= 0) simSeek(sim.t[sim.opStart[i]], false); };
+      tree.appendChild(r);
     }
+    const add = document.createElement('div'); add.className = 'ct-add'; add.textContent = '+ Add operation';
+    add.onclick = () => { camSel = { kind: 'add', si }; renderCamTab(); };
+    tree.appendChild(add);
   });
+  const as = document.createElement('div'); as.className = 'ct-add top'; as.textContent = '+ Add setup (flip / re-clamp)';
+  as.onclick = () => { showPane('chat'); inputEl.value = 'Add a second setup to the CAM program: '; inputEl.focus(); };
+  tree.appendChild(as);
+  renderCamTools(); renderCamInsp(); renderTimeline();
 }
+function renderCamTools() {                       // the tools the selected setup uses, in order, with what the library knows
+  const el = document.getElementById('cam-tools'), si = camSelSetup();
+  const seq = [], seen = new Map();
+  for (const op of program.ops.filter(o => (o.setup || 0) === si && o.tool)) {
+    if (!seq.length || seq[seq.length - 1] !== op.tool.number) seq.push(op.tool.number);
+    if (!seen.has(op.tool.number)) seen.set(op.tool.number, op);
+  }
+  el.innerHTML = `<div class="ct-h">Tools · ${seq.map(n => 'T' + n).join(' → ')}</div>` + [...seen.values()].map(op => {
+    const t = op.tool, lib = (library.tools || []).find(x => x.number === t.number && x.name === t.name), bad = t.shape && t.shape.error;
+    return `<div class="ct-tool" title="${esc(t.type)} Ø${t.diameter}${t.flutes ? ' · ' + t.flutes + ' flutes' : ''}${t.shank_diameter ? ' · shank Ø' + t.shank_diameter : ''} · ${lib ? 'in the tool library' : 'defined in cam.py'}${bad ? ' · shape: ' + esc(t.shape.error) : ''}">${toolSil(t.shape, 8, 20)}<div><b>T${t.number}</b> ${esc(t.name)}</div><small>${bad ? '<span class="wa">shape?</span>' : lib ? '✓' : 'cam.py'}</small></div>`;
+  }).join('');
+}
+function camSelSetup() { return camSel.kind === 'setup' || camSel.kind === 'add' ? camSel.si : camSel.kind === 'op' ? ((program.ops.find(o => o.key === camSel.key) || {}).setup || 0) : 0; }
+function renderCamInsp() {
+  const el = document.getElementById('cam-insp'); if (!el) return;
+  el.innerHTML = '';
+  if (!program) {
+    el.innerHTML = `<div class="insp-sec"><div class="insp-h">CAM</div><div class="insp-empty"><b>No CAM program yet.</b> Ask the assistant — e.g. <i>"make the CAM program for the Z1 on the block in the L-bracket"</i> — or write <a href="#" data-a="code">cam.py</a> in Code.</div>
+      <div class="insp-acts"><button class="btn pri" data-a="chat">Ask the assistant</button><button class="btn" data-open-libs="machines">Machines &amp; tools…</button></div></div>`;
+  } else if (camSel.kind === 'op') {
+    const op = program.ops.find(o => o.key === camSel.key), i = program.ops.indexOf(op), t = op.tool || {};
+    const nov = Object.keys(opOverrideSet(op)).length, warns = (program.warnings || []).filter(w => w.includes(op.name));
+    el.innerHTML = `<div class="ci-head"><div class="ci-t"><span class="dot" style="background:${op.color}"></span>${esc(op.name)}<span class="chip">${esc(op.kind)}</span></div>
+      <div class="ci-m">T${t.number} · ${esc(t.name || '')} · ${op.time.toFixed(1)} min${nov ? ` · <span class="acc">${nov} setting${nov === 1 ? '' : 's'} changed</span>` : ''}</div>
+      <div class="ci-acts"><button class="btn sm" data-a="play" title="Play the simulation from this operation">▶ Play from here</button><button class="btn sm ghost" data-a="solo" title="Show only this operation's toolpath">${camScope === 'sel' ? 'Show all' : 'Show only this'}</button></div></div>`;
+    el.appendChild(opEditor(op));
+    if (warns.length) el.insertAdjacentHTML('beforeend', `<div class="ci-warn">${warns.map(esc).join('<br>')}</div>`);
+    el.querySelector('[data-a=play]').onclick = () => { if (sim.opStart[i] >= 0) simSeek(sim.t[sim.opStart[i]], true); if (!sim.playing) document.getElementById('sim-play').click(); };
+    el.querySelector('[data-a=solo]').onclick = () => { setCamScope(camScope === 'sel' ? 'all' : 'sel'); };
+  } else if (camSel.kind === 'add') {
+    renderAddOp(el, camSel.si);
+  } else {
+    const si = camSel.si, stp = program.setups[si], sz = stp.size || [0, 0, 0];
+    const mine = program.ops.filter(o => (o.setup || 0) === si), t = mine.reduce((a, o) => a + o.time, 0);
+    el.innerHTML = `<div class="ci-head"><div class="ci-t">Setup ${si + 1} · ${esc(stp.name)}<span class="chip blue">${esc(stp.wcs || '')}</span></div>
+      <div class="ci-m">How the work is held and where zero is · ${mine.length} operations · ${fmtMin(t)}</div>
+      <div class="ci-acts"><button class="btn sm pri" data-a="send">Send to machine →</button><button class="btn sm ghost" data-a="play">▶ Play this setup</button></div></div>
+      <div class="insp-sec"><div class="insp-h">Stock &amp; origin</div><div class="insp-kv">
+        <span>Stock</span><span>${stp.rotary ? `Ø${(2 * (stp.max_radius || 0)).toFixed(1)} × ${sz[0].toFixed(1)}` : `${sz[0].toFixed(2)} × ${sz[1].toFixed(2)} × ${sz[2].toFixed(2)}`} mm</span>
+        <span>Machined from</span><span>${stp.rotary ? `4th axis · A ${stp.a}°` : esc(stp.orient || 'top')}</span>
+        <span>Work origin</span><span>${esc(ORIGIN_TEXT[stp.origin_name] || stp.origin_name)}</span>
+        <span>Safe height</span><span>${(+stp.safe_z_wcs).toFixed(1)} mm above the origin</span></div>
+        <div class="muted" style="margin-top:8px;font-size:11.5px">Stock size and origin are in cam.py — ask the assistant or edit it in Code.</div></div>
+      <div class="insp-sec"><div class="insp-h">Workholding</div><div class="ci-fx"></div></div>
+      <div class="insp-sec"><div class="insp-h">Machine view</div><div class="ci-mv"></div></div>`;
+    renderFixturePanel(el.querySelector('.ci-fx'), si);
+    el.querySelector('.ci-mv').appendChild(document.getElementById('cam-machine'));
+    el.querySelector('[data-a=send]').onclick = () => camSendToMachine(si);
+    el.querySelector('[data-a=play]').onclick = () => { const o = program.ops.findIndex(x => (x.setup || 0) === si); if (o >= 0 && sim.opStart[o] >= 0) simSeek(sim.t[sim.opStart[o]], true); if (!sim.playing) document.getElementById('sim-play').click(); };
+  }
+  el.querySelectorAll('[data-a=chat]').forEach(b => b.onclick = e => { e.preventDefault(); showPane('chat'); inputEl.focus(); });
+  el.querySelectorAll('[data-a=code]').forEach(b => b.onclick = e => { e.preventDefault(); showPane('code'); });
+}
+function camSendToMachine(si) {                   // Machine ▸ Run with this setup's operations ticked
+  MV.si = si; MVP.key = ''; MV.step = 'run'; setRibbonTab('machine');
+  if (MV.st) mvRender(MV.st);
+}
+function setCamScope(v) {
+  camScope = v; document.querySelectorAll('#cv-scope button').forEach(b => b.classList.toggle('on', b.dataset.v === v));
+  applyCamVisibility(); if (program) renderCamInsp();
+}
+// the timeline: one block per shown operation, its width its share of the program's time; the slider runs over it
+function renderTimeline() {
+  const segs = document.getElementById('tl-segs'); if (!segs || !program) return;
+  const T = sim.T || 1, parts = [];
+  camOps.forEach((c, oi) => {
+    if (!c.visible || sim.opStart[oi] < 0) return;
+    let end = T; for (let j = oi + 1; j < camOps.length; j++) if (sim.opStart[j] >= 0) { end = sim.t[sim.opStart[j]]; break; }
+    const t0 = sim.t[sim.opStart[oi]], sel = camSel.kind === 'op' && camSel.key === c.op.key;
+    parts.push(`<div class="tseg${sel ? ' sel' : ''}" data-oi="${oi}" style="flex:${Math.max(end - t0, T * 0.004)};background:${c.op.color}" title="${esc(c.op.name)} · ${fmtT(end - t0)}"></div>`);
+  });
+  segs.innerHTML = parts.join('');
+}
+// CAM ▸ Add operation: six common kinds with sensible defaults; the server writes one program.add(...) line into cam.py
+const ADD_KINDS = [
+  ['face', 'Face', 'Surface the stock top', ['flat', 'bull']],
+  ['adaptive', 'Adaptive clear', 'Rough everything around the part', ['flat', 'bull']],
+  ['pocket', 'Pocket', 'Clear down to floors you pick', ['flat', 'bull']],
+  ['contour', 'Contour', 'Cut round the part outline', ['flat']],
+  ['drill', 'Drill', 'The model\'s vertical holes', ['drill', 'flat']],
+  ['parallel3d', '3D finish', 'Raster over the part surface', ['ball', 'bull', 'taper_ball', 'flat']]];
+const ADD_FIELDS = {
+  face: [['depth', 'Depth', 'mm below the stock top', 0.3]],
+  adaptive: [['z_bottom', 'Down to Z', 'mm (model) · blank = the part bottom', ''], ['stepover', 'Stepover', 'fraction of Ø', 0.15], ['leave', 'Stock to leave', 'mm', 0.2]],
+  pocket: [['leave', 'Stock to leave', 'mm (walls)', 0]],
+  contour: [['z_bottom', 'Down to Z', 'mm (model) · blank = the part bottom', ''], ['tabs', 'Tabs', 'holding tabs', 0]],
+  drill: [['dmin', 'Holes from Ø', 'mm', 0], ['dmax', 'to Ø', 'mm', 1000]],
+  parallel3d: [['stepover', 'Stepover', 'fraction of Ø', 0.1], ['angle', 'Angle', '° (0 = along X)', 0]] };
+let addOp = { kind: 'adaptive', vals: {} };
+function renderAddOp(el, si) {
+  const k = addOp.kind, meta = ADD_KINDS.find(x => x[0] === k), tools = library.tools || [];
+  const used = new Set(program.ops.filter(o => (o.setup || 0) === si && o.tool).map(o => o.tool.number));
+  const pick = () => { for (const ty of meta[3]) { const t = tools.find(x => x.type === ty && used.has(x.number)) || tools.find(x => x.type === ty); if (t) return t.number; } return tools[0] && tools[0].number; };
+  if (addOp.tool == null || addOp.kindFor !== k) { addOp.tool = pick(); addOp.kindFor = k; }
+  const floors = k === 'pocket' ? [...selFaces].map(f => ({ id: f, ...(model && model.faces.get(f) || {}) })) : [];
+  const flat = floors.filter(f => f.kind === 'plane' || f.kind === 'PLANE');
+  el.innerHTML = `<div class="ci-head"><div class="ci-t">Add an operation<span class="chip blue">Setup ${si + 1}</span></div>
+      <div class="ci-m">Writes one <code>program.add(...)</code> line at the end of cam.py. For anything else, ask the assistant or edit cam.py.</div></div>
+    <div class="insp-sec"><div class="addk">${ADD_KINDS.map(([kk, l, d]) => `<button data-k="${kk}" class="${kk === k ? 'on' : ''}"><b>${l}</b><small>${d}</small></button>`).join('')}</div></div>
+    <div class="insp-sec"><div class="addf">
+      <label>Tool</label><select class="inp" data-f="tool">${tools.map(t => `<option value="${t.number}" ${t.number === addOp.tool ? 'selected' : ''}>T${t.number} · ${esc(t.name)}</option>`).join('')}</select><span></span>
+      <label>Name</label><input class="inp" data-f="name" placeholder="${esc(meta[1])}" value="${esc(addOp.vals.name || '')}"><span></span>
+      ${ADD_FIELDS[k].map(([f, l, u, d]) => `<label>${l}</label><input class="inp" type="number" step="any" data-f="${f}" placeholder="${d === '' ? 'auto' : d}" value="${addOp.vals[f] ?? ''}"><span class="u">${u}</span>`).join('')}</div>
+      ${k === 'pocket' ? `<p class="${flat.length ? 'muted' : 'wa'}" style="font-size:12px;margin:10px 0 0">${flat.length ? `Floors: ${flat.map(f => `face ${f.id} (Z ${(+f.center[2]).toFixed(2)})`).join(', ')}` : 'Click the pocket\'s flat floor in the viewer (shift-click for more floors at the same height).'}</p>` : ''}
+      <div class="insp-acts"><button class="btn pri" data-a="add" ${k === 'pocket' && !flat.length ? 'disabled' : ''}>Add ${esc(meta[1])}</button><button class="btn ghost" data-a="cancel">Cancel</button></div>
+      <p class="muted" id="add-msg" style="font-size:12px"></p></div>`;
+  el.querySelectorAll('.addk button').forEach(b => b.onclick = () => { addOp.kind = b.dataset.k; addOp.vals = { name: addOp.vals.name }; renderCamInsp(); });
+  el.querySelectorAll('[data-f]').forEach(i => i.oninput = i.onchange = () => { if (i.dataset.f === 'tool') addOp.tool = +i.value; else addOp.vals[i.dataset.f] = i.value; });
+  el.querySelector('[data-a=cancel]').onclick = () => { camSel = { kind: 'setup', si }; renderCamTab(); };
+  el.querySelector('[data-a=add]').onclick = () => {
+    const spec = { kind: k, setup: si, tool: addOp.tool, name: addOp.vals.name || meta[1] };
+    for (const [f] of ADD_FIELDS[k]) if (addOp.vals[f] !== undefined && addOp.vals[f] !== '') spec[f] = +addOp.vals[f];
+    if (k === 'pocket') spec.faces = flat.map(f => f.id);
+    camAddPending = spec.name; el.querySelector('#add-msg').textContent = 'adding and rebuilding…';
+    send({ type: 'add_op', spec });
+  };
+}
+var camAddPending = null;
+
 // one operation's overrides, all kinds together (tool values, cut settings, colour), as cam.py's overrides({...}) holds them
 function opOverrideSet(op) {
   return { ...(op.overrides || {}), ...((op.cut || {}).overrides || {}), ...(op.color_override ? { color: op.color } : {}) };
@@ -1970,7 +2162,15 @@ function opEditor(op) {
 document.addEventListener('click', e => { const b = e.target.closest('[data-open-libs]'); if (b) openSettings(b.dataset.openLibs); });
 function safeParse(t, fb) { try { return JSON.parse(t); } catch { return fb; } }
 document.getElementById('gcode-dl').onclick = () => window.open('/api/gcode');
-document.getElementById('gcode-preview').onclick = async () => { const pre = document.getElementById('gcode-pre'); pre.textContent = await fetch('/api/gcode/preview').then(r => r.text()); pre.style.display = pre.style.display === 'none' ? '' : 'none'; };
+document.getElementById('cp-send').onclick = () => camSendToMachine(camSelSetup());
+document.querySelectorAll('#cv-scope button').forEach(b => b.onclick = () => setCamScope(b.dataset.v));
+document.querySelectorAll('#cv-show button').forEach(b => b.onclick = () => {
+  if (b.dataset.v === 'tp') { showTp = !showTp; document.getElementById('tp-toggle').classList.toggle('active', showTp); applyCamVisibility(); }
+  else if (b.dataset.v === 'stock') { showStock = !showStock; document.getElementById('stock-toggle').classList.toggle('active', showStock); applyCamVisibility(); }
+  else setMachine(!machineOn);
+  syncMachineUi();
+});
+document.getElementById('gcode-preview').onclick = async e => { e.preventDefault(); const pre = document.getElementById('gcode-pre'); pre.textContent = await fetch('/api/gcode/preview').then(r => r.text()); pre.style.display = pre.style.display === 'none' ? '' : 'none'; };
 
 // simulation: slider over all visible moves, tool marker, draw range
 let sim = { total: 0, index: [], playing: false, timer: null, t: new Float64Array(1), T: 0, clock: 0, opStart: [], speed: 1, raf: null, last: 0 };
@@ -2012,6 +2212,7 @@ function setupSim() {
     sim.t[i + 1] = acc; prev = mv;
   }
   sim.T = acc; sim.clock = acc; simRange.value = 1000; renderSim(); if (typeof renderSpeedUi === "function") renderSpeedUi();
+  if (typeof renderTimeline === 'function') renderTimeline();
 }
 function simK() {                                   // moves completed at the current clock, and the fraction into the next
   const t = sim.t, n = sim.total; if (!n) return { k: 0, f: 0 };
@@ -2678,6 +2879,7 @@ function syncMachineUi() {                                                     /
   if ([...pick.options].map(o => o.value).join('|') !== names.join('|')) pick.innerHTML = names.map(n => `<option value="${n.replace(/&/g, '&amp;').replace(/"/g, '&quot;')}">${n.replace(/&/g, '&amp;').replace(/</g, '&lt;')}</option>`).join('');
   if (names.includes(want)) pick.value = want;
   show.textContent = machineOn ? 'Hide machine' : 'Show machine'; show.classList.toggle('active', machineOn); show.disabled = !names.length;
+  document.querySelectorAll('#cv-show button').forEach(b => b.classList.toggle('on', b.dataset.v === 'tp' ? showTp : b.dataset.v === 'stock' ? showStock : machineOn));
   doors.disabled = !(machineOn && rigHasDoors()); doors.textContent = machineDoorTarget ? 'Close doors' : 'Open doors';
   doors.title = machineOn && !rigHasDoors() ? 'This machine model has no door nodes (node(..., door="hinge"|"slide"))' : "Open or close the machine's doors / canopy";
 }
@@ -5461,7 +5663,9 @@ function connect() {
         if (m.source === 'user') addMsg('system', 'CAM program rebuilt from Code panel');
         if (m.source === 'agent' && m.program) addMsg('system', `CAM program built: ${m.program.ops.length} ops · ${m.program.time.toFixed(1)} min` + (m.program.warnings.length ? ` · ${m.program.warnings.length} warning(s), see CAM tab` : ''));
         break;
-      case 'cam_error': for (const k of Object.keys(fxPending)) delete fxPending[k]; document.getElementById('codeerr').textContent = m.text; addMsg('error', 'CAM build failed — see Code tab'); break;
+      case 'cam_error': for (const k of Object.keys(fxPending)) delete fxPending[k];
+        if (camAddPending) { camAddPending = null; const am = document.getElementById('add-msg'); if (am) { am.className = 'wa'; am.textContent = 'Not added: ' + m.text.split('\n').filter(Boolean).slice(-2).join(' '); } break; }
+        document.getElementById('codeerr').textContent = m.text; addMsg('error', 'CAM build failed — see Code tab'); break;
       case 'cam_sim':
         if (program) { camOps.forEach((c, i) => { c.visible = m.ops.includes(i); }); applyCamVisibility(); renderCamTab(); setupSim(); startSim(m.sim); }
         break;
@@ -5595,7 +5799,7 @@ function showPane(which) {                      // 'inspect' | 'chat' | 'code' |
   if (pane === 'library') renderLibrary();
   if (pane === 'chat') setTimeout(() => { const m = document.getElementById('messages'); m.scrollTop = m.scrollHeight; }, 0);
 }
-let wsMachineWas = false;
+var wsMachineWas = false;   // var: setRibbonTab runs (and calls onWorkspace) before this line on start-up
 function onWorkspace(ws) {                      // (called by setRibbonTab, also during start-up)
   document.body.dataset.ws = ws;
   // Design shows the part alone: toolpaths, stock, fixtures and the machine belong to CAM (and come back there)
@@ -6171,7 +6375,7 @@ function mvpRender() { MVP.key = ''; if (MV.st) mvRender(MV.st); }   // the CAM 
     if (on && ribbonTab() === 'design') { if (document.body.classList.contains('side-hidden')) setSideHidden(false); if (wsSide.design !== 'inspect') showPane('inspect'); }
     renderDesignInspector();
   }).observe(cmdEl, { attributes: true, attributeFilter: ['class'] });
-  const _rc = renderChips; renderChips = function () { _rc.apply(this, arguments); renderDesignInspector(); };
+  const _rc = renderChips; renderChips = function () { _rc.apply(this, arguments); renderDesignInspector(); if (program && camSel.kind === 'add' && addOp.kind === 'pocket') renderCamInsp(); };
   renderDesignInspector();
   document.getElementById('mpill').onclick = () => setRibbonTab('machine');
 })();
