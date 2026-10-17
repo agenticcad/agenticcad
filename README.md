@@ -307,6 +307,13 @@ Safety rules in `machine_link`:
   as unknown while held or in alarm (the Z1 then reports the planned position, not where the head stopped).
 - The agent can read the machine (`machine_status`: state, positions, a camera frame) but cannot command it.
 
+**Phone control** (Settings ▸ Phone control, off by default): a phone page for the Machine tab — live camera, STOP,
+Hold / Resume / Unlock, Control, jog pad, tool change with a pinned Confirm bar while the machine waits, origin and
+auto Z probe, laser / dust / light. Turning it on starts a second listener on the local network (the desktop app stays
+on 127.0.0.1) that serves only that page and the machine endpoints, each call checked against a random key carried in
+the QR code's link; *New link* locks out old phones. The phone uses the same MachineControl, so every rule above
+applies unchanged. Plain HTTP on the local network: turn it off when you don't need it.
+
 `tools/z1_emu.py` is a Z1 emulator (protocol, homing, jogs, hold/halt, the M6 / M491 / M495 routines with a tool
 setter and a stock surface, the camera) used by `tests/test_machine_link.py`; like the real firmware it does not stop
 a jog past the end, so the tests prove the guard does.

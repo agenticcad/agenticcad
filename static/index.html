@@ -4563,7 +4563,7 @@ renderer.domElement.addEventListener('pointerup', ev => {
 
 // ------------------------------------------------------------------ settings (model, effort, MCP servers)
 document.getElementById('settings-btn').onclick = () => openSettings();
-const SET_TABS = [['general', 'General'], ['mcp', 'MCP servers'], ['ext', 'Extensions'], ['output', 'Drawings & printing'], ['machines', 'Machines'], ['fixtures', 'Fixtures'], ['tools', 'Tools']];
+const SET_TABS = [['general', 'General'], ['mcp', 'MCP servers'], ['ext', 'Extensions'], ['output', 'Drawings & printing'], ['machines', 'Machines'], ['fixtures', 'Fixtures'], ['tools', 'Tools'], ['phone', 'Phone control']];
 let lastSetTab = 'general';
 async function openSettings(tab) {
   const [{ settings, models }, status] = await Promise.all([fetch('/api/settings').then(r => r.json()), fetch('/api/agent/status').then(r => r.json())]);
@@ -4613,12 +4613,14 @@ async function openSettings(tab) {
   <div class="set-pane" data-pane="machines"></div>
   <div class="set-pane" data-pane="fixtures"></div>
   <div class="set-pane" data-pane="tools"></div>
+  <div class="set-pane" data-pane="phone"></div>
   <div class="set-err" id="s-err"></div>`;
   const showTab = k => { lastSetTab = k; for (const b of d.querySelectorAll('[data-tab]')) b.classList.toggle('on', b.dataset.tab === k); for (const p of d.querySelectorAll('[data-pane]')) p.classList.toggle('on', p.dataset.pane === k); };
   d.querySelectorAll('[data-tab]').forEach(b => b.onclick = () => showTab(b.dataset.tab));
   showTab(tab || lastSetTab);
   const libEd = libraryEditor(d.querySelector('[data-pane=machines]'), d.querySelector('[data-pane=tools]'));
   renderFixturesPane(d.querySelector('[data-pane=fixtures]'));
+  renderPhonePane(d.querySelector('[data-pane=phone]'));
   const extPane = d.querySelector('[data-pane=ext]');
   const renderExt = () => {
     extPane.innerHTML = `<div class="set-h">Extensions<span class="muted">Python files that extend the app: ribbon panels, agent tools, script helpers, build checks</span></div>`;
@@ -5164,6 +5166,41 @@ async function showFixturePreview(name) {
   addMsg('system', `${name} shown at the origin (${r.fixture.height.toFixed(0)} mm to the work origin). Hide it with the Stock toggle or by loading a program.`);
 }
 function hideFixturePreview() { if (fixturePreview) { stageGroup.remove(fixturePreview); fixturePreview = null; } }
+// Settings ▸ Phone control: a key-protected page for the phone on the local network (off by default), opened by QR
+function loadQrLib() {
+  if (window.qrcode) return Promise.resolve();
+  return new Promise((res, rej) => { const sc = document.createElement('script'); sc.src = 'https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js'; sc.onload = res; sc.onerror = () => rej(new Error('could not load the QR code library')); document.head.appendChild(sc); });
+}
+async function renderPhonePane(pane) {
+  const st = await fetch('/api/remote').then(r => r.json()).catch(() => null);
+  if (!st) { pane.innerHTML = '<div class="muted">phone control is not available</div>'; return; }
+  pane.innerHTML = `<div class="set-h">Phone control<span class="muted">the Machine tab on your phone: camera, STOP, jog, tool change, probe</span></div>
+    <div class="set-grid" style="margin-top:6px">
+      <label>Phone access</label><label style="color:var(--text);display:flex;gap:8px;align-items:center"><input type="checkbox" id="ph-on" style="width:auto" ${st.enabled ? 'checked' : ''}> allow a phone on this network (with the key in the QR code)</label>
+      <label>Port</label><div style="display:flex;gap:8px;align-items:center"><input id="ph-port" type="number" min="1024" max="65535" value="${st.port}" style="width:100px"><span class="muted">${st.running ? 'listening on ' + st.ip + ':' + st.port : 'off'}</span></div>
+    </div>
+    <div id="ph-body" style="margin-top:14px"></div>
+    <div class="muted" style="margin-top:12px;font-size:12px">Anyone on this network who has the link can use the Machine tab (with the same safety rules as here): keep the link to yourself, and use <b>New link</b> to lock out a phone that had an old one. Plain HTTP on your local network; turn it off when you don't need it.</div>`;
+  const body = pane.querySelector('#ph-body');
+  if (st.error) body.innerHTML = `<div class="err">${esc(st.error)}</div>`;
+  else if (st.enabled && st.running) {
+    body.innerHTML = `<div style="display:flex;gap:18px;align-items:center;flex-wrap:wrap"><div id="ph-qr" style="background:#fff;padding:10px;border-radius:10px;line-height:0;width:220px;height:220px"></div>
+      <div style="flex:1;min-width:220px"><div style="font-weight:600;margin-bottom:6px">Scan with your phone's camera</div>
+      <div class="muted" style="font-size:12px;word-break:break-all;margin-bottom:10px" id="ph-url">${esc(st.url)}</div>
+      <div style="display:flex;gap:8px"><button class="btn small" id="ph-copy">Copy link</button><button class="btn small" id="ph-new">New link</button></div></div></div>`;
+    try {
+      await loadQrLib(); const q = qrcode(0, 'M'); q.addData(st.url); q.make();
+      body.querySelector('#ph-qr').innerHTML = q.createSvgTag({ cellSize: 5, margin: 0, scalable: true });
+      const svg = body.querySelector('#ph-qr svg'); if (svg) { svg.style.width = '200px'; svg.style.height = '200px'; }
+    } catch (e) { body.querySelector('#ph-qr').outerHTML = `<div class="err">${esc(e.message)}: open the link on your phone instead</div>`; }
+    body.querySelector('#ph-copy').onclick = () => navigator.clipboard && navigator.clipboard.writeText(st.url);
+    body.querySelector('#ph-new').onclick = async () => { await fetch('/api/remote', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ new_link: true }) }); renderPhonePane(pane); };
+  }
+  const apply = async patch => { const r = await fetch('/api/remote', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch) }); if (!r.ok) { const j = await r.json().catch(() => ({})); pane.querySelector('#ph-body').innerHTML = `<div class="err">${esc(j.error || 'failed')}</div>`; return; } renderPhonePane(pane); };
+  pane.querySelector('#ph-on').onchange = e => apply({ enabled: e.target.checked });
+  pane.querySelector('#ph-port').onchange = e => apply({ port: +e.target.value });
+}
+
 
 // ---------------------------------------------------------------- Machine tab: live control of a networked machine
 // Every command goes to /api/machine, where machine_link decides whether it is allowed (Control on, homed this session,

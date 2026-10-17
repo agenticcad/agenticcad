@@ -5,6 +5,16 @@ features, patch bumps fix things. The version shown in the UI header comes from 
 
 ## [Unreleased]
 
+## [0.44.0] — 2026-10-17
+
+### Added
+- **Phone control.** Settings ▸ Phone control turns on a page for your phone, opened by scanning a QR code: the
+  Machine tab's camera, STOP, Hold / Resume / Unlock, Control, a thumb-sized jog pad, tool change (with a Confirm bar
+  pinned to the bottom while the machine waits for you), origin at Anchor 1, the auto Z probe, and the laser, dust
+  collector and light. It is off by default; when on, a second listener on your local network serves only that page
+  and the machine endpoints, and every call must carry the random key in the QR code's link (New link locks out old
+  ones). The desktop app stays private to your computer, and the phone goes through the same safety rules.
+
 ## [0.43.0] — 2026-10-17
 
 ### Added

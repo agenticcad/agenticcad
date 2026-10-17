@@ -120,7 +120,10 @@ async def lifespan(app: FastAPI):
     if os.environ.get("AGENTICCAD_NO_AGENT") != "1":      # tests run the API without a Claude session
         task = asyncio.create_task(_connect_agent())
     watcher = asyncio.create_task(_watch_extensions())
+    if os.environ.get("AGENTICCAD_NO_REMOTE") != "1" and _remote_cfg().get("enabled"):
+        await _remote_start()
     yield
+    await _remote_stop()
     if task:
         task.cancel()
     watcher.cancel()
@@ -856,6 +859,151 @@ async def machine_snapshot():
     except (machine_link.Refused, asyncio.TimeoutError) as e:
         return JSONResponse({"error": str(e) or "no frame"}, status_code=409)
     return Response(jpg, media_type="image/jpeg", headers={"Cache-Control": "no-store"})
+
+
+# ---------------------------------------------------------------- phone control (off by default)
+# A second listener on the local network serving only the phone page and the machine endpoints, behind a random key
+# carried in the QR code's URL. The desktop app itself stays on 127.0.0.1. Same MachineControl, same rules.
+import hmac
+import secrets
+import socket as _socket
+
+from fastapi import Request
+
+REMOTE_FILE = WORKSPACE / "remote.json"
+_remote: dict[str, Any] = {"server": None, "task": None, "error": None}
+
+
+def _remote_cfg() -> dict:
+    cfg = {"enabled": False, "port": 8790, "token": ""}
+    try:
+        cfg.update(json.loads(REMOTE_FILE.read_text()))
+    except (OSError, ValueError):
+        pass
+    if not cfg.get("token"):
+        cfg["token"] = secrets.token_urlsafe(18)
+        REMOTE_FILE.write_text(json.dumps(cfg))
+    return cfg
+
+
+def _lan_ip() -> str:
+    s_ = _socket.socket(_socket.AF_INET, _socket.SOCK_DGRAM)
+    try:
+        s_.connect(("10.255.255.255", 1))            # no packet is sent; this picks the outward interface
+        return s_.getsockname()[0]
+    except OSError:
+        return "127.0.0.1"
+    finally:
+        s_.close()
+
+
+def _remote_status() -> dict:
+    cfg = _remote_cfg()
+    running = _remote["server"] is not None and _remote["task"] is not None and not _remote["task"].done()
+    ip = _lan_ip()
+    return {"enabled": cfg["enabled"], "port": cfg["port"], "running": running, "ip": ip, "error": _remote["error"],
+            "url": f"http://{ip}:{cfg['port']}/m?k={cfg['token']}"}
+
+
+phone = FastAPI()
+
+
+def _key_ok(request: Request) -> bool:
+    k = request.headers.get("x-key") or request.query_params.get("k") or ""
+    return hmac.compare_digest(k.encode(), _remote_cfg()["token"].encode())
+
+
+@phone.middleware("http")
+async def _phone_auth(request: Request, call_next):
+    if request.url.path in ("/m", "/m/") or request.url.path.startswith("/m/static/"):
+        return await call_next(request)                   # the page itself; every API call carries the key
+    if not _key_ok(request):
+        return JSONResponse({"error": "not authorised: scan the QR code in AgenticCAD ▸ Settings ▸ Phone control"}, status_code=401)
+    return await call_next(request)
+
+
+@phone.get("/m")
+async def phone_page():
+    return FileResponse(ROOT / "static" / "mobile.html", headers={"Cache-Control": "no-store"})
+
+
+@phone.get("/m/api/machine")
+async def phone_machine_get():
+    return await machine_get()
+
+
+@phone.post("/m/api/machine")
+async def phone_machine_post(body: MachineBody):
+    return await machine_post(body)
+
+
+@phone.get("/m/api/camera")
+async def phone_camera():
+    return await machine_camera()
+
+
+@phone.get("/m/api/snapshot")
+async def phone_snapshot():
+    return await machine_snapshot()
+
+
+async def _remote_start() -> None:
+    import uvicorn
+    await _remote_stop()
+    cfg = _remote_cfg()
+    _remote["error"] = None
+    server = uvicorn.Server(uvicorn.Config(phone, host="0.0.0.0", port=int(cfg["port"]), log_level="warning", lifespan="off"))
+    server.install_signal_handlers = lambda: None         # the main server owns the signals
+
+    async def run():
+        try:
+            await server.serve()
+        except (OSError, SystemExit) as e:
+            _remote["error"] = f"phone control could not start on port {cfg['port']}: {e}"
+    _remote["server"], _remote["task"] = server, asyncio.create_task(run())
+    await asyncio.sleep(0.3)
+
+
+async def _remote_stop() -> None:
+    srv, task = _remote["server"], _remote["task"]
+    _remote["server"] = _remote["task"] = None
+    if srv is not None:
+        srv.should_exit = True
+    if task is not None:
+        try:
+            await asyncio.wait_for(task, 5)
+        except (asyncio.TimeoutError, asyncio.CancelledError):
+            task.cancel()
+
+
+class RemoteBody(BaseModel):
+    enabled: bool | None = None
+    port: int | None = None
+    new_link: bool = False
+
+
+@app.get("/api/remote")
+async def remote_get():
+    return _remote_status()
+
+
+@app.post("/api/remote")
+async def remote_set(body: RemoteBody):
+    cfg = _remote_cfg()
+    if body.port is not None:
+        if not (1024 <= body.port <= 65535):
+            return JSONResponse({"error": "port 1024..65535"}, status_code=400)
+        cfg["port"] = body.port
+    if body.new_link:
+        cfg["token"] = secrets.token_urlsafe(18)          # old QR codes stop working
+    if body.enabled is not None:
+        cfg["enabled"] = body.enabled
+    REMOTE_FILE.write_text(json.dumps(cfg))
+    if cfg["enabled"]:
+        await _remote_start()
+    else:
+        await _remote_stop()
+    return _remote_status()
 
 
 @app.get("/api/version")

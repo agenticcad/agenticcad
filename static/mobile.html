@@ -1,0 +1,232 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#0f1115">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>AgenticCAD Machine</title>
+<style>
+  :root {
+    --bg:#0f1115; --card:#181b21; --card2:#20242c; --line:#2a2f38; --text:#eef1f5; --muted:#8d95a2;
+    --accent:#ff8c42; --blue:#4ea1ff; --ok:#3ecf7a; --warn:#f2c94c; --err:#ff5c5c;
+    --r:16px; --gap:12px;
+  }
+  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html, body { margin:0; background:var(--bg); color:var(--text); font:15px/1.4 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Inter, sans-serif; }
+  body { padding:calc(env(safe-area-inset-top) + 10px) 14px calc(env(safe-area-inset-bottom) + 18px); max-width:560px; margin:0 auto; overscroll-behavior:none; }
+  button { font:inherit; color:inherit; border:0; cursor:pointer; touch-action:manipulation; user-select:none; -webkit-user-select:none; }
+  button:disabled { opacity:.35; cursor:default; }
+  .top { display:flex; align-items:center; gap:10px; margin-bottom:10px; }
+  .brand { font-weight:800; letter-spacing:-.01em; font-size:17px; } .brand b { color:var(--accent); font-weight:800; }
+  .badge { margin-left:auto; padding:6px 12px; border-radius:999px; font-size:12.5px; font-weight:800; letter-spacing:.06em; background:#3a3f48; color:#d8dde5; white-space:nowrap; }
+  .badge.Idle { background:#1d5b37; color:#c9f6da; } .badge.Run, .badge.Home, .badge.Jog, .badge.Busy { background:#7a4a12; color:#ffe3c2; }
+  .badge.Hold, .badge.Pause, .badge.Tool { background:#6b5e10; color:#fff3b0; } .badge.Alarm { background:#7a1f1f; color:#ffd4d4; }
+  .cam { position:relative; border-radius:var(--r); overflow:hidden; background:#07080a; aspect-ratio:4/3; border:1px solid var(--line); }
+  .cam img { width:100%; height:100%; object-fit:cover; display:block; visibility:hidden; } .cam img.live { visibility:visible; }
+  .cam .off { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; color:var(--muted); font-size:14px; }
+  .pos { position:absolute; left:10px; right:10px; bottom:10px; display:flex; gap:6px; }
+  .pos div { flex:1; background:rgba(10,12,16,.72); backdrop-filter:blur(6px); -webkit-backdrop-filter:blur(6px); border-radius:10px; padding:6px 8px; font-variant-numeric:tabular-nums; }
+  .pos small { display:block; color:var(--muted); font-size:10.5px; letter-spacing:.08em; } .pos span { font-weight:700; font-size:16px; }
+  .stop { display:block; width:100%; margin:var(--gap) 0 8px; height:74px; border-radius:var(--r); background:linear-gradient(180deg,#e2423f,#a91d1d); border:2px solid #ff8a87; color:#fff; font-size:26px; font-weight:900; letter-spacing:.18em; box-shadow:0 8px 24px rgba(214,58,58,.35); }
+  .stop:active { transform:scale(.985); filter:brightness(1.1); }
+  .row { display:flex; gap:8px; } .row > * { flex:1; }
+  .btn { background:var(--card2); border:1px solid var(--line); border-radius:12px; padding:13px 10px; font-weight:600; font-size:15px; }
+  .btn.primary { background:var(--blue); border-color:var(--blue); color:#06111f; }
+  .btn.on { background:rgba(255,140,66,.16); border-color:var(--accent); color:#ffd1b3; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:var(--r); padding:12px; margin-top:var(--gap); }
+  .ctl { display:flex; align-items:center; gap:12px; }
+  .ctl .t { flex:1; } .ctl .t b { display:block; font-size:16px; } .ctl .t span { color:var(--muted); font-size:12.5px; }
+  .switch { width:58px; height:34px; border-radius:999px; background:#3a3f48; position:relative; flex:none; transition:background .15s; }
+  .switch::after { content:""; position:absolute; top:3px; left:3px; width:28px; height:28px; border-radius:50%; background:#fff; transition:left .15s; }
+  .switch.on { background:var(--accent); } .switch.on::after { left:27px; }
+  .tabs { display:flex; background:var(--card2); border-radius:12px; padding:4px; gap:4px; margin-top:var(--gap); }
+  .tabs button { flex:1; padding:10px 0; border-radius:9px; background:none; color:var(--muted); font-weight:600; font-size:14px; }
+  .tabs button.on { background:var(--card); color:var(--text); box-shadow:0 1px 0 rgba(255,255,255,.04) inset; }
+  .pane { display:none; } .pane.on { display:block; }
+  .steps { display:flex; gap:6px; margin-bottom:12px; }
+  .steps button { flex:1; padding:9px 0; border-radius:10px; background:var(--card2); border:1px solid var(--line); font-weight:700; }
+  .steps button.on { background:var(--blue); border-color:var(--blue); color:#06111f; }
+  .jog { display:flex; gap:14px; align-items:center; justify-content:center; }
+  .pad { display:grid; grid-template-columns:repeat(3,64px); grid-template-rows:repeat(3,64px); gap:6px; }
+  .pad button, .zcol button { background:var(--card2); border:1px solid var(--line); border-radius:14px; font-weight:800; font-size:17px; }
+  .pad button:active:not(:disabled), .zcol button:active:not(:disabled) { background:#2b3340; border-color:var(--blue); }
+  .pad .c { background:none; border:0; display:flex; align-items:center; justify-content:center; color:var(--muted); font-size:11px; text-align:center; }
+  .zcol { display:grid; grid-template-rows:repeat(2,97px); gap:6px; } .zcol button { width:72px; }
+  .why { color:var(--muted); font-size:12.5px; text-align:center; margin-top:10px; min-height:17px; }
+  .kv { display:flex; justify-content:space-between; padding:6px 0; border-bottom:1px solid var(--line); font-size:14px; } .kv:last-child { border:0; }
+  .kv span:first-child { color:var(--muted); }
+  .note { border-radius:12px; padding:11px 12px; font-size:14px; margin-top:10px; background:rgba(78,161,255,.12); border:1px solid rgba(78,161,255,.35); }
+  .note.failed { background:rgba(255,92,92,.12); border-color:rgba(255,92,92,.45); } .note.done { background:rgba(62,207,122,.12); border-color:rgba(62,207,122,.4); }
+  .num { display:flex; align-items:center; gap:8px; } .num button { width:44px; height:44px; border-radius:12px; background:var(--card2); border:1px solid var(--line); font-size:20px; font-weight:700; }
+  .num output { min-width:58px; text-align:center; font-weight:800; font-size:20px; }
+  .toast { position:fixed; left:14px; right:14px; bottom:calc(env(safe-area-inset-bottom) + 14px); max-width:532px; margin:0 auto; background:#2a1416; border:1px solid var(--err); color:#ffd6d6; border-radius:12px; padding:12px 14px; font-size:14px; transform:translateY(160%); transition:transform .25s; z-index:10; }
+  .toast.ok { background:#12261a; border-color:var(--ok); color:#ccf5dc; } .toast.show { transform:none; }
+  .connect { display:flex; gap:8px; margin-top:var(--gap); } .connect input { flex:1; background:var(--card2); border:1px solid var(--line); color:var(--text); border-radius:12px; padding:12px; font-size:16px; }
+  .muted { color:var(--muted); } .small { font-size:12.5px; }
+  .sheet { position:fixed; left:0; right:0; bottom:0; z-index:9; padding:12px 14px calc(env(safe-area-inset-bottom) + 12px); background:rgba(24,27,33,.96); backdrop-filter:blur(10px); -webkit-backdrop-filter:blur(10px); border-top:1px solid var(--line); transform:translateY(110%); transition:transform .25s; }
+  .sheet.show { transform:none; } .sheet .in { max-width:532px; margin:0 auto; } .sheet .m { font-size:14px; margin-bottom:10px; } .sheet .k { font-size:11px; letter-spacing:.08em; color:var(--warn); font-weight:800; margin-bottom:4px; }
+  body.sheeted { padding-bottom:calc(env(safe-area-inset-bottom) + 150px); }
+</style>
+</head>
+<body>
+  <div class="top"><div class="brand">Agentic<b>CAD</b></div><span class="muted small" id="who"></span><div class="badge" id="badge">…</div></div>
+
+  <div class="cam"><img id="cam" alt=""><div class="off" id="camoff">Camera off</div>
+    <div class="pos"><div><small>X</small><span id="px">–</span></div><div><small>Y</small><span id="py">–</span></div><div><small>Z</small><span id="pz">–</span></div></div></div>
+
+  <div id="conn" class="connect" style="display:none"><input id="host" placeholder="machine address" inputmode="decimal" autocomplete="off"><button class="btn primary" id="connect">Connect</button></div>
+
+  <button class="stop" id="stop">STOP</button>
+  <div class="row"><button class="btn" id="hold">Hold</button><button class="btn" id="resume">Resume</button><button class="btn" id="unlock">Unlock</button></div>
+
+  <div class="card ctl"><div class="t"><b>Control</b><span id="ctlnote">Allow commands that move the machine</span></div><button class="switch" id="arm" aria-label="Control"></button></div>
+
+  <div class="tabs"><button data-p="jog" class="on">Jog</button><button data-p="tool">Tool</button><button data-p="probe">Probe</button><button data-p="more">More</button></div>
+
+  <div class="card pane on" data-p="jog">
+    <div class="steps" id="steps"><button data-s="0.1">0.1</button><button data-s="1" class="on">1</button><button data-s="10">10</button></div>
+    <div class="jog">
+      <div class="pad">
+        <span></span><button data-j="y+">Y+</button><span></span>
+        <button data-j="x-">X−</button><div class="c" id="stepc">1 mm</div><button data-j="x+">X+</button>
+        <span></span><button data-j="y-">Y−</button><span></span>
+      </div>
+      <div class="zcol"><button data-j="z+">Z+</button><button data-j="z-">Z−</button></div>
+    </div>
+    <div class="row" style="margin-top:12px"><button class="btn" id="home">⌂ Home</button><button class="btn" id="raise">Raise Z</button></div>
+    <div class="why" id="why"></div>
+  </div>
+
+  <div class="card pane" data-p="tool">
+    <div class="kv"><span>Fitted</span><span id="tool">–</span></div>
+    <div class="kv"><span>Measured this session</span><span id="meas">–</span></div>
+    <div class="ctl" style="margin-top:12px"><div class="t"><b>Change to</b><span>0 = the probe. Every tool is measured on the setter.</span></div>
+      <div class="num"><button id="tminus">−</button><output id="tnum">0</output><button id="tplus">+</button></div></div>
+    <button class="btn primary" id="change" style="width:100%;margin-top:12px">Change tool</button>
+    <div class="note" id="rt" style="display:none"></div>
+    <button class="btn primary" id="confirm" style="width:100%;margin-top:10px;display:none">Confirm — same as the front button</button>
+  </div>
+
+  <div class="card pane" data-p="probe">
+    <button class="btn" id="origin" style="width:100%">Origin = Anchor 1 (bracket corner)</button>
+    <button class="btn" id="zprobe" style="width:100%;margin-top:8px">Auto Z probe here</button>
+    <button class="btn" id="laser" style="width:100%;margin-top:8px">Probe laser</button>
+    <p class="muted small" style="margin:10px 2px 0">Auto Z probe runs the machine's own routine at the head's position and sets work Z zero on that surface. It needs the probe (T0) fitted and measured.</p>
+    <div class="note" id="rt2" style="display:none"></div>
+  </div>
+
+  <div class="card pane" data-p="more">
+    <div class="row"><button class="btn" id="dust">Dust collector</button><button class="btn" id="light">Light</button></div>
+    <div class="kv" style="margin-top:10px"><span>Spindle</span><span id="spin">–</span></div>
+    <div class="kv"><span>Connection</span><span id="host2">–</span></div>
+    <button class="btn" id="disconnect" style="width:100%;margin-top:10px">Disconnect machine</button>
+  </div>
+
+  <div class="sheet" id="sheet"><div class="in"><div class="k" id="sheetk"></div><div class="m" id="sheetm"></div>
+    <button class="btn primary" id="sheetok" style="width:100%">Confirm — same as the front button</button></div></div>
+  <div class="toast" id="toast"></div>
+
+<script>
+const KEY = (() => { const q = new URLSearchParams(location.search).get('k'); try { if (q) localStorage.setItem('ac_key', q); return q || localStorage.getItem('ac_key') || ''; } catch (e) { return q || ''; } })();
+if (new URLSearchParams(location.search).get('k')) history.replaceState(null, '', '/m');     // keep the key out of screenshots
+const $ = id => document.getElementById(id);
+let ST = null, step = 1, tnum = 0, busy = false, camOn = false;
+function toast(t, ok) { const e = $('toast'); e.textContent = t; e.classList.toggle('ok', !!ok); e.classList.add('show'); clearTimeout(toast.t); toast.t = setTimeout(() => e.classList.remove('show'), ok ? 2200 : 4200); }
+async function api(body) {
+  if (busy && body && !['halt', 'hold'].includes(body.action)) return;
+  busy = body && body.action === 'jog';
+  try {
+    const r = await fetch('/m/api/machine', body ? { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Key': KEY }, body: JSON.stringify(body) } : { headers: { 'X-Key': KEY } });
+    const j = await r.json();
+    if (r.status === 401) { toast(j.error || 'not authorised'); return; }
+    if (!r.ok && j.error) toast(j.error);
+    if (j && 'connected' in j) render(j);
+    return j;
+  } catch (e) { if (body) toast('no answer from AgenticCAD: ' + e.message); }
+  finally { busy = false; }
+}
+const f = v => v == null ? '–' : (+v).toFixed(2);
+function render(st) {
+  ST = st; const s = st.status || {}, conn = st.connected, rt = st.routine;
+  const state = !conn ? 'Offline' : !st.fresh ? 'Stale' : st.homing ? 'Home' : st.jogging ? 'Jog' : (rt && ['running', 'awaiting'].includes(rt.stage)) ? (s.state === 'Tool' ? 'Tool' : 'Busy') : (s.state || '?');
+  $('badge').textContent = state.toUpperCase() + (s.state === 'Alarm' && s.halt ? ' · ' + s.halt.reason : ''); $('badge').className = 'badge ' + state;
+  $('conn').style.display = conn ? 'none' : 'flex';
+  if (!conn && st.saved && st.saved.host && !$('host').value) $('host').value = st.saved.host;
+  const rel = st.position_reliable !== false, w = s.wpos || [];
+  $('px').textContent = rel ? f(w[0]) : '?'; $('py').textContent = rel ? f(w[1]) : '?'; $('pz').textContent = rel ? f(w[2]) : '?';
+  $('who').textContent = conn ? (st.profile || '') : '';
+  $('stop').disabled = !conn; $('hold').disabled = !conn;
+  $('resume').disabled = !(conn && st.armed && ['Hold', 'Pause'].includes(s.state));
+  $('unlock').disabled = !(conn && s.state === 'Alarm');
+  $('arm').classList.toggle('on', !!st.armed); $('arm').disabled = !conn;
+  $('ctlnote').textContent = !conn ? 'Not connected' : s.state === 'Alarm' && s.halt ? s.halt.advice : st.armed ? 'On — moves are allowed (turns itself off when idle)' : 'Allow commands that move the machine';
+  const rbusy = rt && ['running', 'awaiting'].includes(rt.stage), ready = conn && st.armed && st.homed && s.state === 'Idle' && !rbusy;
+  const why = !conn ? 'connect first' : s.state === 'Alarm' ? (s.halt ? s.halt.advice : 'Unlock') : !st.armed ? 'turn Control on' : !st.homed ? 'home first' : !st.tool_ok ? 'measure the tool first (Tool ▸ Change tool)' : s.state !== 'Idle' ? 'machine is ' + s.state : st.jogging ? 'moving…' : '';
+  $('why').textContent = why;
+  document.querySelectorAll('[data-j]').forEach(b => b.disabled = !!why);
+  $('home').disabled = !(conn && st.armed && st.fresh && ['Idle', 'Alarm'].includes(s.state) && !st.homing);
+  $('raise').disabled = !ready;
+  const tl = s.tool ? s.tool.number : null;
+  $('tool').textContent = tl == null ? '–' : (tl === 0 ? 'T0 · probe' : 'T' + tl) + (s.tool ? ` · length ${(+s.tool.offset).toFixed(3)}` : '');
+  $('meas').textContent = st.tool_ok ? 'yes ✓' : 'no';
+  $('change').disabled = !ready; $('origin').disabled = !ready; $('zprobe').disabled = !(ready && st.tool_ok && tl === 0);
+  [['rt', rt], ['rt2', rt && rt.kind === 'auto Z probe' ? rt : null]].forEach(([id, r]) => { const e = $(id); e.style.display = r ? '' : 'none'; if (r) { e.className = 'note ' + r.stage; e.textContent = r.msg; } });
+  $('confirm').style.display = rt && rt.stage === 'awaiting' ? '' : 'none';
+  const live = rt && ['running', 'awaiting'].includes(rt.stage);
+  $('sheet').classList.toggle('show', !!live); document.body.classList.toggle('sheeted', !!live);
+  if (live) { $('sheetk').textContent = (rt.stage === 'awaiting' ? 'WAITING FOR YOU · ' : 'RUNNING · ') + rt.kind.toUpperCase();
+    $('sheetm').textContent = rt.stage === 'awaiting' ? rt.msg : `${rt.command} — the machine is doing this itself; STOP aborts`;
+    $('sheetok').style.display = rt.stage === 'awaiting' ? '' : 'none'; }
+  const sw = st.switches || {};
+  $('laser').classList.toggle('on', !!sw.probe_laser); $('dust').classList.toggle('on', !!sw.dust); $('light').classList.toggle('on', !!sw.light);
+  ['laser', 'dust', 'light', 'disconnect'].forEach(id => $(id).disabled = !conn);
+  $('spin').textContent = s.spindle ? Math.round(s.spindle.rpm) + ' rpm' : '–';
+  $('host2').textContent = conn ? st.host : 'not connected';
+  setCam(conn && !document.hidden);
+}
+function setCam(on) {
+  const img = $('cam');
+  if (on && !camOn) { img.classList.remove('live'); img.src = '/m/api/camera?k=' + encodeURIComponent(KEY) + '&t=' + Date.now(); camOn = true; }
+  if (!on && camOn) { img.removeAttribute('src'); img.classList.remove('live'); camOn = false; }
+  if (camOn && img.naturalWidth > 0) img.classList.add('live');
+  const live = img.classList.contains('live');
+  $('camoff').style.display = live ? 'none' : ''; $('camoff').textContent = !(ST && ST.connected) ? 'Not connected' : on ? 'Connecting camera…' : 'Camera paused';
+}
+$('cam').onload = () => { $('cam').classList.add('live'); $('camoff').style.display = 'none'; };
+$('cam').onerror = () => { camOn = false; $('cam').classList.remove('live'); setTimeout(() => ST && setCam(ST.connected && !document.hidden), 2000); };
+$('stop').onclick = () => { try { navigator.vibrate && navigator.vibrate(60); } catch (e) {} api({ action: 'halt' }); };
+$('hold').onclick = () => api({ action: 'hold' });
+$('resume').onclick = () => api({ action: 'resume' });
+$('unlock').onclick = () => api({ action: 'unlock' });
+$('arm').onclick = () => api({ action: 'arm', on: !(ST && ST.armed) });
+$('home').onclick = () => api({ action: 'home' });
+$('raise').onclick = () => api({ action: 'raise_z', feed: 500 });
+$('connect').onclick = () => api({ action: 'connect', host: $('host').value.trim() });
+$('disconnect').onclick = () => api({ action: 'disconnect' });
+document.querySelectorAll('#steps button').forEach(b => b.onclick = () => { step = +b.dataset.s; document.querySelectorAll('#steps button').forEach(x => x.classList.toggle('on', x === b)); $('stepc').textContent = step + ' mm'; });
+document.querySelectorAll('[data-j]').forEach(b => b.onclick = () => {
+  const ax = b.dataset.j[0], sg = b.dataset.j[1] === '+' ? 1 : -1;
+  let d = step * sg; if (ax === 'z' && sg < 0) d = -Math.min(step, 1);
+  api({ action: 'jog', axis: ax, dist: d });
+});
+document.querySelectorAll('.tabs button').forEach(b => b.onclick = () => {
+  document.querySelectorAll('.tabs button').forEach(x => x.classList.toggle('on', x === b));
+  document.querySelectorAll('.pane').forEach(p => p.classList.toggle('on', p.dataset.p === b.dataset.p));
+});
+$('tminus').onclick = () => { tnum = Math.max(0, tnum - 1); $('tnum').textContent = tnum; };
+$('tplus').onclick = () => { tnum = Math.min(99, tnum + 1); $('tnum').textContent = tnum; };
+$('change').onclick = () => api({ action: 'change_tool', z: tnum });
+$('confirm').onclick = () => api({ action: 'confirm_tool' });
+$('sheetok').onclick = () => api({ action: 'confirm_tool' });
+$('origin').onclick = () => api({ action: 'origin_anchor' });
+$('zprobe').onclick = () => api({ action: 'auto_z_probe' });
+$('laser').onclick = () => api({ action: 'switch', axis: 'probe_laser', on: !(ST.switches || {}).probe_laser });
+$('dust').onclick = () => api({ action: 'switch', axis: 'dust', on: !(ST.switches || {}).dust });
+$('light').onclick = () => api({ action: 'switch', axis: 'light', on: !(ST.switches || {}).light });
+document.addEventListener('visibilitychange', () => { if (ST) setCam(ST.connected && !document.hidden); });
+(async function poll() { if (!document.hidden) await api(); setTimeout(poll, 500); })();
+</script>
+</body>
+</html>
