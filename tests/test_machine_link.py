@@ -127,8 +127,9 @@ def test_one_jog_at_a_time_and_hold_halt_always_work():
             await mc.halt()                                # halt always works: Alarm, Control off, homing needed again
             await _until(lambda: (mc.link.status or {}).get("state") == "Alarm")
             assert not mc.armed and not mc.homed
-            with pytest.raises(ml.Refused):
-                await mc.arm(True)                         # can't arm in Alarm
+            assert mc.link.status["halt"]["code"] == 1 and mc.link.status["halt"]["reason"] == "manual stop"
+            with pytest.raises(ml.Refused, match=r"Alarm \(manual stop\): press Unlock"):
+                await mc.arm(True)                         # can't arm in Alarm; the message says what to do
             await mc.unlock()
             await _until(lambda: (mc.link.status or {}).get("state") == "Idle")
             await mc.arm(True)

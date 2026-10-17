@@ -49,7 +49,8 @@ class Z1Emu:
         w = [m - o for m, o in zip(self.mpos, self.wco)]
         f = lambda v: ",".join(f"{a:.4f}" for a in v)
         return (f"<{self.state}|MPos:{f(self.mpos)},0.0000,0.0000|WPos:{f(w)},0.0000,0.0000|F:0.0,2000.0,100.0"
-                f"|S:0.0,10000.0,100.0,0,27.2,27.4,0,0,0,0|T:6,-17.297,-1|L:0, 0, 0, 0.0,100.0|C:3,1,0,1|E:0,0,0,1,7613|OTA:0,0>")
+                f"|S:0.0,10000.0,100.0,0,27.2,27.4,0,0,0,0|T:6,-17.297,-1|L:0, 0, 0, 0.0,100.0"
+                + ("|H:1" if self.halted else "") + "|C:3,1,0,1|E:0,0,0,1,7613|OTA:0,0>")
 
     # ---- motion
     async def _move_to(self, target, rate_mm_min):

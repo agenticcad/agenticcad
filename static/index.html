@@ -5192,7 +5192,8 @@ async function mvPost(body) {
 function mvRender(st) {
   MV.st = st;
   const s = st.status || {}, conn = st.connected, state = !conn ? 'offline' : (!st.fresh ? 'stale' : (st.homing ? 'Home' : (st.jogging ? 'Jog' : s.state || '?')));
-  const b = mvEl('mv-badge'); b.textContent = state.toUpperCase(); b.className = 'mv-badge ' + state;
+  const b = mvEl('mv-badge'); b.textContent = state.toUpperCase() + (state === 'Alarm' && s.halt ? ' · ' + s.halt.reason : ''); b.className = 'mv-badge ' + state;
+  b.title = state === 'Alarm' && s.halt ? s.halt.advice : '';
   mvEl('mv-conn-state').textContent = conn ? `${st.profile} · ${st.host}${st.homed ? ' · homed' : ''}` : 'not connected';
   mvEl('mv-connect').textContent = conn ? 'Disconnect' : 'Connect';
   mvEl('mv-connect').classList.toggle('primary', !conn);
@@ -5208,7 +5209,7 @@ function mvRender(st) {
   mvEl('mv-unlock').disabled = !(conn && s.state === 'Alarm');
   const canHome = conn && st.armed && st.fresh && (s.state === 'Idle' || s.state === 'Alarm') && !st.homing;
   mvEl('mv-home').disabled = !canHome;
-  const why = !conn ? 'connect first' : !st.armed ? 'turn Control on' : !st.homed ? 'home first' : s.state !== 'Idle' ? `machine is ${s.state}` : st.jogging ? 'moving…' : '';
+  const why = !conn ? 'connect first' : s.state === 'Alarm' ? (s.halt ? s.halt.advice : 'press Unlock') : !st.armed ? 'turn Control on' : !st.homed ? 'home first' : s.state !== 'Idle' ? `machine is ${s.state}` : st.jogging ? 'moving…' : '';
   mvEl('mv-jog-why').textContent = why;
   document.querySelectorAll('#machine-view [data-j]').forEach(x => x.disabled = !!why);
   const zf = mvEl('mv-zfloor'); if (document.activeElement !== zf) zf.value = st.z_floor;

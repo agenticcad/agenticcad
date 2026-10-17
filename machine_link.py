@@ -83,6 +83,21 @@ def parse_frames(buf: bytearray):
 
 # ------------------------------------------------------------------ status
 STATES = ("Idle", "Run", "Hold", "Home", "Alarm", "Tool", "Pause", "Wait", "Sleep")
+# Kernel.h HALT_REASON: why the machine is in Alarm (the status carries |H:n while halted). 1-15 clear with $X / M999,
+# 21-26 need a reset on the machine, 41 a power cycle.
+HALT_REASONS = {1: "manual stop", 2: "homing failed", 3: "probe failed", 4: "calibration failed", 5: "ATC homing failed",
+                6: "invalid tool number", 7: "no tool in the spindle", 8: "a tool is already in the spindle",
+                9: "spindle overheated", 10: "soft limit", 11: "cover open", 12: "probe invalid", 13: "emergency stop",
+                14: "power supply overheated", 15: "not homed", 21: "hard limit", 22: "X motor error", 23: "Y motor error",
+                24: "Z motor error", 25: "spindle stalled", 26: "SD card error", 41: "spindle alarm"}
+
+
+def halt_advice(code: int | None) -> str:
+    if code is None or code < 21:
+        return "press Unlock to clear it, then home"
+    if code < 41:
+        return "it needs a reset on the machine (its button), then home"
+    return "switch the machine off and on again"
 
 
 def parse_status(text: str) -> dict[str, Any] | None:
@@ -114,6 +129,9 @@ def parse_status(text: str) -> dict[str, Any] | None:
                               "temp": nums[4] if len(nums) > 4 else None, "power_temp": nums[5] if len(nums) > 5 else None}
         elif k == "T":
             out["tool"] = {"number": int(nums[0]), "offset": nums[1] if len(nums) > 1 else None}
+        elif k == "H":
+            code = int(nums[0]) if nums and isinstance(nums[0], float) else None
+            out["halt"] = {"code": code, "reason": HALT_REASONS.get(code, f"reason {code}"), "advice": halt_advice(code)}
         elif k == "P":
             out["progress"] = {"lines": nums[0], "percent": nums[1] if len(nums) > 1 else None, "seconds": nums[2] if len(nums) > 2 else None}
         else:
@@ -432,6 +450,9 @@ class MachineControl:
         if homed and not self.homed:
             raise Refused("home the machine first (positions are only trusted after a homing cycle in this session)")
         if idle and st["state"] != "Idle":
+            if st["state"] == "Alarm":
+                h = st.get("halt") or {}
+                raise Refused(f"the machine is in Alarm ({h.get('reason', 'halted')}): {h.get('advice', halt_advice(None))}")
             raise Refused(f"the machine is {st['state']}, not Idle")
         return st
 
@@ -471,8 +492,11 @@ class MachineControl:
         if on:
             self._need(armed=False, idle=False)
             st = self._status()
-            if st["state"] in ("Alarm", "Sleep"):
-                raise Refused(f"the machine is in {st['state']}: clear it on the machine (or Unlock) first")
+            if st["state"] == "Alarm":
+                h = st.get("halt") or {}
+                raise Refused(f"the machine is in Alarm ({h.get('reason', 'halted')}): {h.get('advice', halt_advice(None))}")
+            if st["state"] == "Sleep":
+                raise Refused("the machine is asleep: wake it on the machine first")
             self.armed = True
             self.last_action = time.time()
             self._note("Control on")

@@ -5,6 +5,15 @@ features, patch bumps fix things. The version shown in the UI header comes from 
 
 ## [Unreleased]
 
+## [0.42.1] — 2026-10-17 (pre-release)
+
+### Fixed
+- **Machine tab: an Alarm says why and what to do.** The status's halt reason is shown on the badge ("manual stop",
+  "probe failed", "hard limit", ...), and refusals in Alarm say whether to press Unlock (the reasons the firmware
+  clears with $X), reset the machine (limits, motor errors, spindle stall) or switch it off and on (spindle alarm).
+  It used to say "clear it on the machine (or Unlock)", which sent you to the machine's button for a stop Unlock
+  clears.
+
 ## [0.42.0] — 2026-10-17 (pre-release: machine motion awaiting a supervised test)
 
 ### Added
