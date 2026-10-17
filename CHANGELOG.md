@@ -5,6 +5,8 @@ features, patch bumps fix things. The version shown in the UI header comes from 
 
 ## [Unreleased]
 
+## [0.42.0] — 2026-10-17 (pre-release: machine motion awaiting a supervised test)
+
 ### Added
 - **Machine tab: control a Makera Z1 over Wi-Fi (experimental).** Find the machine on the network, connect, and see
   its status, positions, tool and spindle, with its camera live beside them. Hold and STOP are always available.
