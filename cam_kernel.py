@@ -1146,7 +1146,8 @@ def rest_region(polys, prev_tool: Tool, tool: Tool, overlap: float | None = None
 def adaptive(setup: Setup, tool: Tool, polys, z_top: float, z_bottom: float, stepover: float = 0.15,
              stepdown: float | None = None, helix_diameter: float | None = None, climb: bool = True,
              rest_from: Tool | None = None, stock_to_leave: float = 0.0, chip_thinning: bool = True,
-             max_seconds: float = 120.0, name: str = "Adaptive") -> Op:
+             max_seconds: float = 120.0, stay_down: float | None = None, lift: float = 0.5, hop: float = 0.25,
+             name: str = "Adaptive") -> Op:
     """Constant-engagement (HSM / trochoidal) roughing, by construction:
     the cleared region K (everything outside the pocket counts as cleared, plus the helix entry) is kept
     as an exact polygon. Each pass runs the tool along the curve where the cutter protrudes from K by
@@ -1155,8 +1156,13 @@ def adaptive(setup: Setup, tool: Tool, polys, z_top: float, z_bottom: float, ste
     front. Near walls and in slots the fronts become successive crescents — the trochoidal motion —
     without the engagement ever exceeding ae except transiently at concave corners. Full axial depth
     by default (90% of flute length), helical entry, islands and rest material (rest_from) handled
-    natively, links stay inside cleared ground at feed. Leaves radial scallops of ≤ ae on the walls:
-    follow with a contour finishing pass."""
+    natively. Every pass is climb (decided along its whole length) and is trimmed to where the cutter actually
+    touches material, and entered by a tangential quarter-arc lead-in from the cleared side so the engagement builds
+    from nothing. Links run through cleared ground (straight, or back along the pass just cut, shortened): short ones
+    (≤ stay_down, default 4 × Ø) at feed with the cutter down, longer ones at rapid `hop` mm above the floor; only when
+    no cleared route exists does the cutter lift `lift` mm above this band's top and rapid across inside the pocket
+    (round islands), and a full retract is the last resort. Rapids never run or come down into standing material.
+    Leaves radial scallops of ≤ ae on the walls: follow with a contour finishing pass."""
     op = Op(name, "adaptive", tool, color=COLORS["adaptive"])
     pb = PathBuilder(setup, tool, op)
     src = _polys(polys)
@@ -1220,27 +1226,177 @@ def adaptive(setup: Setup, tool: Tool, polys, z_top: float, z_bottom: float, ste
     hr = min((helix_diameter / 2) if helix_diameter else r * 0.6, max(0.2, Cbig.boundary.distance(ep) * 0.9))
     material0 = P.difference(K0).area
 
-    def oriented(seg, K_inner):
-        """Orient a front segment so the material is on the left (climb) / right (conventional)."""
-        pts = list(seg.coords)
+    def oriented(pts, mat_prep):
+        """Orient a pass so the material is on the left (climb) / right (conventional): a vote over the whole pass,
+        probing the uncut material a little inside the cutter on each side (one probe at a wall can't flip it)."""
         if len(pts) < 2:
             return pts
-        i = len(pts) // 2
-        a, b = pts[max(0, i - 1)], pts[min(len(pts) - 1, i + 1)]
-        tx, ty = b[0] - a[0], b[1] - a[1]
-        ln = math.hypot(tx, ty) or 1.0
-        lx, ly = -ty / ln, tx / ln                           # left normal
-        probe = Point(pts[i][0] + lx * 0.3, pts[i][1] + ly * 0.3)
-        left_is_cleared = K_inner.covers(probe)
-        material_left = not left_is_cleared
-        if material_left != climb:
+        votes = 0
+        n = len(pts) - 1
+        for i in range(0, n, max(1, n // 24)):
+            (ax_, ay_), (bx_, by_) = pts[i], pts[i + 1]
+            tx, ty = bx_ - ax_, by_ - ay_
+            ln = math.hypot(tx, ty)
+            if ln < 1e-9:
+                continue
+            lx, ly = -ty / ln, tx / ln
+            mx, my = (ax_ + bx_) / 2, (ay_ + by_) / 2
+            for dd in (0.35 * r, 0.7 * r):
+                votes += mat_prep.contains(Point(mx + lx * dd, my + ly * dd))
+                votes -= mat_prep.contains(Point(mx - lx * dd, my - ly * dd))
+        if (votes >= 0) != climb:
             pts = pts[::-1]
         return pts
+
+    def engaged_runs(dense, mat_prep):
+        """Split a densified pass into the runs where the cutter touches uncut material (plus one step either side
+        to enter and leave in cleared ground); stretches that only cut air are dropped."""
+        hit = []
+        for x, y in dense:
+            hit.append(mat_prep.contains(Point(x, y)) or any(mat_prep.contains(Point(x + ring_x[k], y + ring_y[k])) for k in range(0, NSA, 2)))
+        runs, i, n = [], 0, len(dense)
+        while i < n:
+            if not hit[i]:
+                i += 1; continue
+            j = i
+            while j + 1 < n and hit[j + 1]:
+                j += 1
+            runs.append(dense[max(0, i - 1):min(n, j + 2)])
+            i = j + 1
+        merged = []
+        for run in runs:                                  # rejoin runs separated by a hair of air
+            if merged and math.dist(merged[-1][-1], run[0]) < 2 * step_len:
+                merged[-1] = merged[-1] + run[1:]
+            else:
+                merged.append(run)
+        return [r_ for r_ in merged if len(r_) >= 2 and sum(math.dist(a, b) for a, b in zip(r_, r_[1:])) > ae * 0.5]
+
+    stay_max = float(stay_down) if stay_down is not None else 4.0 * tool.diameter
+    lifts = hops = 0
+    # links at lift height run inside the allowed centre region C (the cutter stays inside the pocket, where nothing
+    # stands above this band's top): straight if C covers the line, else round islands on a visibility graph of C
+    C_prep = prep(C.buffer(0.005, join_style=1))          # pass ends lie on C's boundary: include it (5 µm)
+    Cs = C.buffer(-0.05, join_style=1).simplify(0.03)      # detour corners just inside C
+    nodes = [c for g in _polys(Cs) for ring in [g.exterior, *g.interiors] for c in list(ring.coords)[:-1]]
+    nodes = [(x + 0.0, y + 0.0) for x, y in nodes]
+
+    def lifted_path(a, b):
+        if C_prep.covers(LineString([a, b])):
+            return [b]
+        import heapq
+        pts = [a, b] + nodes
+        if len(pts) > 600:
+            return None
+        vis = lambda i, j: C_prep.covers(LineString([pts[i], pts[j]]))
+        dist = {0: 0.0}; prev_ = {}; pq = [(0.0, 0)]; seen = set()
+        while pq:
+            dcur, i = heapq.heappop(pq)
+            if i in seen:
+                continue
+            seen.add(i)
+            if i == 1:
+                break
+            for j in range(1, len(pts)):
+                if j in seen:
+                    continue
+                nd = dcur + math.dist(pts[i], pts[j])
+                if nd < dist.get(j, 1e18) and vis(i, j):
+                    dist[j] = nd; prev_[j] = i; heapq.heappush(pq, (nd, j))
+        if 1 not in prev_:
+            return None
+        path, k = [], 1
+        while k != 0:
+            path.append(pts[k]); k = prev_[k]
+        return path[::-1]
+
+    def route_in(a, b, Kc, back):
+        """A route from a to b with the cutter fully in cleared ground: straight, or back along `back` (the pass just
+        cut, which is cleared) shortened by string-pulling. Returns the points after a, or None."""
+        if Kc.covers(LineString([a, b])):
+            return [b]
+        if not back:
+            return None
+        pts = [a] + list(back[::-1]) + [b]
+        out, i, n = [], 0, len(pts)
+        while i < n - 1:
+            best = None
+            for k in range(n - 1, i, -1):                 # farthest point still in sight through cleared ground
+                if Kc.covers(LineString([pts[i], pts[k]])):
+                    best = k; break
+            if best is None:
+                return None
+            out.append(pts[best]); i = best
+        return out
+
+    def lead_in(dense, Kc):
+        """How the cutter enters a pass: nothing extra if it starts in cleared ground (passes are trimmed to start a
+        step before they cut); else a quarter-arc lead-in from the cleared side, tangent to the pass at its start, so
+        the engagement builds up as the arc curves onto the pass; else a straight run-in along the pass. Returns the
+        lead points (the first one is where the link goes), or None. The arc starts in cleared ground and stays in
+        the pocket; it may run into material, which is the point: the cut builds from nothing to the stepover."""
+        if Kc.covers(Point(dense[0])):
+            return None
+        (x0_, y0_), (x1_, y1_) = dense[0], dense[min(1, len(dense) - 1)]
+        tx, ty = x1_ - x0_, y1_ - y0_
+        ln = math.hypot(tx, ty)
+        if ln < 1e-9:
+            return None
+        tx, ty = tx / ln, ty / ln
+        side = -1.0 if climb else 1.0
+        nx_, ny_ = side * (-ty), side * tx                    # away from the material (the cleared side)
+        for rad in (ae + 0.1, 0.5 * (ae + 0.1), r):
+            cx_, cy_ = x0_ + nx_ * rad, y0_ + ny_ * rad
+            arc = []
+            for k in range(8, 0, -1):                         # φ 90° → 0°: from behind-and-beside onto the pass
+                ph = math.radians(90.0 * k / 8)
+                arc.append((cx_ - rad * (math.cos(ph) * nx_ + math.sin(ph) * tx), cy_ - rad * (math.cos(ph) * ny_ + math.sin(ph) * ty)))
+            if Kc.covers(Point(arc[0])) and all(C_prep.covers(Point(q)) for q in arc):
+                return arc
+        for back_ in (0.5 * r, r):
+            q = (x0_ - tx * back_, y0_ - ty * back_)
+            if Kc.covers(Point(q)):
+                return [q]
+        return None
+
+    def link_to(pos, target, z, z_lift, Kc, Kr, back=None):
+        """Move from pos to target at level z: through cleared ground (feed if short, else a low rapid hop), else
+        lift-and-rapid inside the pocket, else retract. Kc is where the cutter centre can feed through cleared ground
+        (its edge may graze the walls by 0.02 mm), Kr the stricter version for rapids (0.005 mm at most, the polygon model's own error):
+        rapids only run or come down near z over Kr; a target off it is fed down to from above the stock. Returns
+        the kind used."""
+        d = math.dist(pos, target)
+        if d < 1e-6:
+            return "none"
+        clear = Kr.covers(Point(target))
+        route = route_in(pos, target, Kc, back)
+        L = sum(math.dist(p_, q_) for p_, q_ in zip([pos] + route, route)) if route is not None else math.inf
+        if L <= stay_max:
+            for wx, wy in route:
+                pb.feed_to(wx, wy, z, feed)
+            return "stay"
+        if route is not None and clear and Kr.covers(LineString([pos] + route).difference(Point(pos).buffer(0.1))):
+            pb._add(RAPID, pos[0], pos[1], z + hop)
+            for wx, wy in route:
+                pb._add(RAPID, wx, wy, z + hop)
+            pb._add(PLUNGE, route[-1][0], route[-1][1], z, pb.plunge)
+            return "hop"
+        path = lifted_path(pos, target)
+        if path is not None:
+            pb._add(RAPID, pos[0], pos[1], z_lift)
+            for wx, wy in path:
+                pb._add(RAPID, wx, wy, z_lift)
+            if clear and z_lift - z > 0.35:
+                pb._add(RAPID, target[0], target[1], z + 0.3)
+            pb._add(PLUNGE, target[0], target[1], z, pb.plunge)
+            return "lift"
+        pb.rapid_xy(target[0], target[1]); pb.plunge_to(z)
+        return "retract"
 
     for z in levels:
         if _time.time() - t_start > max_seconds:
             op.warnings.append(f"adaptive: time budget of {max_seconds:.0f}s exhausted; remaining levels skipped")
             break
+        z_lift = min(max(z_top, z) + lift, setup.safe_z)
         # ---- helical entry
         depth = z_top - z
         n_turns = max(1, math.ceil(depth / min(1.0, tool.diameter * 0.15)))
@@ -1254,7 +1410,6 @@ def adaptive(setup: Setup, tool: Tool, polys, z_top: float, z_bottom: float, ste
         K = K0.union(Point(ex, ey).buffer(hr + r, 48))
         pos = (pb.pos[0], pb.pos[1])
         Kc_prev = None
-        recent = []
         it = 0
         while it < 5000:
             it += 1
@@ -1281,35 +1436,33 @@ def adaptive(setup: Setup, tool: Tool, polys, z_top: float, z_bottom: float, ste
             Kc_poly = K.buffer(-r + 1e-3, join_style=1)
             Kc = prep(Kc_poly)                                   # tool fully inside cleared ground
             Kc_prev = Kc_poly.buffer(-1e-3)
-            remaining = [oriented(g, inner) for g in segs]
-            swept = []
+            mat_prep = prep(P.difference(K))                     # uncut material at this level
+            remaining = []
+            for g in segs:                                       # climb passes, trimmed to where they cut
+                remaining += engaged_runs(_densify(oriented(list(g.coords), mat_prep), step_len), mat_prep)
+            if not remaining:
+                break
+            Klive = K                                         # cleared ground including the passes cut so far
+            last_pass = None
             while remaining:
-                # nearest segment start from the current position
+                # nearest pass start from the current position
                 k = min(range(len(remaining)), key=lambda i: (remaining[i][0][0] - pos[0]) ** 2 + (remaining[i][0][1] - pos[1]) ** 2)
-                pts = remaining.pop(k)
-                dense = _densify(pts, step_len)
-                sx, sy = dense[0]
-                link_line = LineString([pos, (sx, sy)])
-                if Kc.covers(link_line):
-                    pb.feed_to(sx, sy, z, feed); links += 1
-                else:
-                    via = None
-                    from shapely.ops import nearest_points
-                    mid = Point((pos[0] + sx) / 2, (pos[1] + sy) / 2)
-                    cands = []
-                    try:
-                        npt = nearest_points(Kc_poly, mid)[0]; cands.append((npt.x, npt.y))
-                    except Exception:
-                        pass
-                    cands += [(ex, ey)] + recent[-6:]
-                    for wx, wy in cands:
-                        if Kc.covers(LineString([pos, (wx, wy)])) and Kc.covers(LineString([(wx, wy), (sx, sy)])):
-                            via = (wx, wy); break
-                    if via:
-                        pb.feed_to(via[0], via[1], z, feed); pb.feed_to(sx, sy, z, feed); links += 1
-                    else:
-                        pb.rapid_xy(sx, sy); pb.plunge_to(z); retracts += 1
-                mat_prep = prep(P.difference(K))
+                dense = remaining.pop(k)
+                Kc_live = prep(Klive.buffer(-r + 0.02, join_style=1))
+                Kr_live = prep(Klive.buffer(-r + 0.005, join_style=1))
+                lead = lead_in(dense, Kc_live)
+                kind_ = link_to(pos, lead[0] if lead else dense[0], z, z_lift, Kc_live, Kr_live, last_pass)
+                if kind_ == "stay":
+                    links += 1
+                elif kind_ == "hop":
+                    hops += 1
+                elif kind_ == "lift":
+                    lifts += 1
+                elif kind_ == "retract":
+                    retracts += 1
+                if lead:
+                    for lx_, ly_ in lead[1:]:                      # along the lead-in onto the pass
+                        pb.feed_to(lx_, ly_, z, feed)
                 px_, py_ = dense[0]
                 for x, y in dense[1:]:
                     hx, hy = x - px_, y - py_
@@ -1320,17 +1473,17 @@ def adaptive(setup: Setup, tool: Tool, polys, z_top: float, z_bottom: float, ste
                     pb.feed_to(x, y, z, f)
                     px_, py_ = x, y
                 pos = dense[-1]
-                recent.append(dense[len(dense) // 2]); recent = recent[-12:]
-                swept.append(LineString(dense).buffer(r, 16))
+                Klive = Klive.union(LineString(dense).buffer(r, 16))
+                last_pass = dense
                 passes_total += 1
-            K = unary_union([K] + swept).simplify(0.01)
+            K = Klive.simplify(0.01)
         pb.retract()
         reachable = P.buffer(-r, join_style=1).buffer(r + 1e-6, join_style=1)     # what this tool can reach at all
         left = P.difference(K).intersection(reachable).area
         if material0 > 0 and left > 0.03 * material0:
             op.warnings.append(f"adaptive: ~{100 * left / material0:.0f}% of the reachable material was not cleared at z={z:.2f}")
     pb.retract()
-    op.params.update(links=links, retracts=retracts, fronts=passes_total, max_engagement_angle=round(max_eng_seen, 1))
+    op.params.update(links=links, hops=hops, lifts=lifts, retracts=retracts, fronts=passes_total, max_engagement_angle=round(max_eng_seen, 1))
     if max_eng_seen > 2.2 * phi:
         op.warnings.append(f"adaptive: engagement rises to {max_eng_seen:.0f}° in corners (target {phi:.0f}°); feed is reduced there")
     return op

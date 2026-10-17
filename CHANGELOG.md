@@ -5,6 +5,25 @@ features, patch bumps fix things. The version shown in the UI header comes from 
 
 ## [Unreleased]
 
+## [0.39.0] — 2026-10-17
+
+### Fixed
+- **Adaptive roughing moves like a machinist's toolpath.** On a real job (a 1/8" cutter roughing a logo plaque in four
+  depth bands) the old linker spent over half its feed travel re-cutting cleared ground, cut 330 mm conventional,
+  flipped direction between neighbouring passes and retracted to the safe height 31–101 times per band. Now:
+  - every pass is climb, decided by a vote along its whole length (not one probe at its start), and is trimmed to
+    where the cutter actually touches material, so it no longer runs along walls and floors that are already cut;
+  - each pass is entered on a tangential quarter-arc lead-in from the cleared side, so the engagement builds from
+    nothing instead of the cutter being dropped or swung straight into the cut;
+  - links go through cleared ground to the nearest next pass: short ones stay down at feed, longer ones hop 0.25 mm
+    above the floor, and only when no cleared route exists does the cutter lift 0.5 mm above the stock and rapid
+    across inside the pocket. A full retract to the safe height is the last resort (once per band on that job);
+  - rapids never run or come down into standing material (the simulator found 47 such moves on the job above;
+    there are none now).
+
+  On that job: 34.1 → 22.2 min for the four roughing bands; in the first band conventional cutting 332 → 1.3 mm and
+  feed in air 2.8 m → 0.11 m; the same material removed, no gouges or collisions.
+
 ## [0.38.0] — 2026-10-17
 
 ### Changed

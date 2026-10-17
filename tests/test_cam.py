@@ -158,6 +158,59 @@ def test_adaptive_slot_loops_and_slows_in_corners(cam_setup):
     assert op.params["retracts"] <= op.params["fronts"]
 
 
+def _adaptive_quality(op, P, r, z_cut):
+    """Independent fine-grid replay of one level: feed length that is climb (material on the left of travel, CW
+    spindle), conventional, or in air, and the number of rapids below the stock top that would hit uncut material."""
+    res = 0.05
+    minx, miny, maxx, maxy = P.bounds
+    xs = np.arange(minx - r - 1, maxx + r + 1, res); ys = np.arange(miny - r - 1, maxy + r + 1, res)
+    gx, gy = np.meshgrid(xs, ys)
+    M = shapely.contains_xy(P, gx.ravel(), gy.ravel()).reshape(gy.shape)
+    ang = np.arange(72) * math.pi / 36; ox, oy = np.cos(ang), np.sin(ang)
+    out = {"climb": 0.0, "conventional": 0.0, "air": 0.0, "rapid_hits": 0}
+
+    def contact(x, y, rad):
+        sx, sy = x + rad * ox, y + rad * oy
+        ii = np.rint((sy - ys[0]) / res).astype(int); jj = np.rint((sx - xs[0]) / res).astype(int)
+        ok = (ii >= 0) & (ii < M.shape[0]) & (jj >= 0) & (jj < M.shape[1])
+        inm = np.zeros(len(ang), bool); inm[ok] = M[ii[ok], jj[ok]]
+        return inm
+
+    prev = None
+    for m in op.moves:
+        if prev is not None:
+            L = math.dist(prev[1:3], m[1:3])
+            n = max(1, int(L / 0.1))
+            for t in np.linspace(0, 1, n + 1)[1:]:
+                cx, cy = prev[1] + (m[1] - prev[1]) * t, prev[2] + (m[2] - prev[2]) * t
+                cz = prev[3] + (m[3] - prev[3]) * t
+                if m[0] == cam.RAPID and cz < z_cut + 0.5 and contact(cx, cy, r - 0.03).any():
+                    out["rapid_hits"] += 1
+                elif m[0] == cam.FEED and abs(m[3] - z_cut) < 1e-6 and abs(prev[3] - z_cut) < 1e-6 and L > 1e-6:
+                    hx, hy = (m[1] - prev[1]) / L, (m[2] - prev[2]) / L
+                    inm = contact(cx, cy, r - 0.03) & ((ox * hx + oy * hy) > -0.2)
+                    left = (inm & ((-hy * ox + hx * oy) > 0)).sum(); right = (inm & ((-hy * ox + hx * oy) < 0)).sum()
+                    out["air" if left + right == 0 else "climb" if left >= right else "conventional"] += L / n
+                if cz <= z_cut + 1e-6:
+                    M[(gx - cx) ** 2 + (gy - cy) ** 2 <= r * r] = False
+        prev = m
+    return out
+
+
+def test_adaptive_pocket_with_island_climbs_and_links_cleanly(cam_setup):
+    """What a machinist expects of adaptive roughing: climb all the way, no re-cutting of cleared ground in long air
+    passes, links that stay down or hop over cleared ground (never a rapid into standing material), no full retracts."""
+    setup, tools, _ = cam_setup
+    P = cam.rect(-20, -14, 20, 14).difference(cam.circle(4, 3, 8))
+    op = cam.adaptive(setup, tools[1], P, z_top=24, z_bottom=23, stepover=0.25)
+    q = _adaptive_quality(op, P, tools[1].radius, 23.0)
+    cut = q["climb"] + q["conventional"]
+    assert q["rapid_hits"] == 0, q
+    assert q["conventional"] < 0.02 * cut, q             # the old linker: 60 % conventional
+    assert q["air"] < 0.6 * cut, q                       # stay-down links included; the old linker: 1.3 × the cut
+    assert op.params["retracts"] == 0, op.params
+
+
 def test_adaptive_rest_nothing_left_warns(cam_setup):
     setup, tools, _ = cam_setup
     op = cam.adaptive(setup, tools[2], cam.circle(0, 0, 20), z_top=4, z_bottom=2, rest_from=tools[1])

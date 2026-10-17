@@ -576,8 +576,8 @@ but nothing here has been run on a real machine yet by anyone but the author.
   machine models' castings and enclosures are representative
   (the work-area numbers are verified; see Settings ▸ Machines ▸ Model). Side setups and mixed 4th-axis + flat
   programs are simulated separately. Time estimates ignore acceleration.
-- **Adaptive corners rely on feed reduction**, not on geometry; ring-shaped regions still retract for
-  some links. No trochoidal slotting op, no rest for 3D, no Z-level (waterline) finishing.
+- **Adaptive corners rely on feed reduction**, not on geometry: the engagement still rises at sharp concave
+  corners and around small islands, where the feed drops instead. No trochoidal slotting op, no rest for 3D, no Z-level (waterline) finishing.
 - **Sketches have no constraint solver**: dimensions apply when you place or drag a point and are not kept as
   relationships; no sketch fillet, trim or offset.
 - **Manual tools are typed, not dragged** (except Press/Pull): no drag handles for primitives,
