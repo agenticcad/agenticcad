@@ -44,7 +44,8 @@ for name, t in STILLS.items():
 CLIPS = sorted({n.split(":")[1] for n in events if n.startswith("clip:")})
 # clips shown cropped (x, y, w, h in the 1920x1080 frame): the Machine clip runs on an emulator whose camera is a test
 # card, so it shows the status strip and the Inspector's steps, not the camera area
-CROP = {"machine": (1000, 40, 920, 1040)}
+CROP = {"machine": (680, 40, 1240, 1040)}
+CLIP_SPEED = {"machine": 4.0}       # long clips shown faster than real time (the clip caption says so)
 (P / "clips").mkdir(exist_ok=True)
 for name in CLIPS:
     a, b = events.get(f"clip:{name}:start"), events.get(f"clip:{name}:end")
@@ -59,11 +60,13 @@ for name in CLIPS:
             if e["t"] > t: cuts.append((t, e["t"], 1.0))
             cuts.append((e["t"], d, max(1.0, (d - e["t"]) / 2.0))); t = d
     cuts.append((t, b, 1.0))
+    k_all = CLIP_SPEED.get(name, 1.0)
+    cuts = [(s0, s1, k * k_all) for s0, s1, k in cuts]
     fc = []; segs = []
     for i, (s0, s1, k) in enumerate(cuts):
         fc.append(f"[0:v]trim=start={s0:.3f}:end={s1:.3f},setpts=(PTS-STARTPTS)/{k:.4f}[s{i}]"); segs.append(f"[s{i}]")
     crop = (f"crop={CROP[name][2]}:{CROP[name][3]}:{CROP[name][0]}:{CROP[name][1]}," if name in CROP else "")
-    fc.append("".join(segs) + f"concat=n={len(segs)}:v=1:a=0,fps=30,{crop}scale={'920' if name in CROP else '1280'}:-2,format=yuv420p[v]")
+    fc.append("".join(segs) + f"concat=n={len(segs)}:v=1:a=0,fps=30,{crop}scale={CROP[name][2] if name in CROP else 1280}:-2,format=yuv420p[v]")
     mp4 = P / "clips" / f"{name}.mp4"
     run([FF, "-y", "-i", str(raw), "-filter_complex", ";".join(fc), "-map", "[v]", "-an", "-c:v", "libx264", "-preset", "slow", "-crf", "23", "-movflags", "+faststart", str(mp4)])
     run([FF, "-y", "-ss", "0.5", "-i", str(mp4), "-frames:v", "1", "-q:v", "4", str(P / "clips" / f"{name}.jpg")])
@@ -101,7 +104,7 @@ for a_ev, b_ev, k in PACE:
     if a_ev in events and b_ev in events and events[b_ev] > events[a_ev]:
         cuts = _split(cuts, events[a_ev], events[b_ev], k)
 # left out of the hero (still cut as clips): the Machine scene (emulator, camera off) and its set-up
-HERO_SKIP = [("clip:machine:start", "clip:machine:end"), ("clip:machine:end", "open_gearhead")]
+HERO_SKIP = [("clip:tools:end", "open_gearhead")]
 def _drop(cuts, a, b):
     out = []
     for (s0, s1, k0) in cuts:
