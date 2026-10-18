@@ -306,9 +306,14 @@ try:
                 return wait_ms(idle, timeout, label)
 
             def act(sel, ok_text=None):
-                page.click(sel); page.wait_for_timeout(600)
-                if page.locator("#modal button.primary").first.is_visible():
-                    page.wait_for_timeout(700); page.click(f"#modal button.primary{':has-text(' + repr(ok_text) + ')' if ok_text else ''}"); page.wait_for_timeout(500)
+                """Click a control; if it asks (the app's confirmation), confirm - waiting up to 3 s for the question."""
+                page.click(sel)
+                btn = page.locator("#modal button.primary").first
+                try:
+                    btn.wait_for(state="visible", timeout=3000)
+                except Exception:
+                    return
+                page.wait_for_timeout(900); btn.click(); page.wait_for_timeout(500)
 
             def step(name):
                 page.click(f"[data-act=step][data-step={name}]"); page.wait_for_timeout(1000)
