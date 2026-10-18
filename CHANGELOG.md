@@ -5,6 +5,39 @@ features, patch bumps fix things. The version shown in the UI header comes from 
 
 ## [Unreleased]
 
+## [0.48.0] — 2026-10-18 (local build of the v2-ui branch, not released)
+
+### Changed
+- **New layout (v2).** One top bar with the file (its name is the File menu), the workspaces **Design · CAM · Machine**,
+  the machine's status, the Assistant and Settings. The right column is **Inspector · Assistant · Code** in every
+  workspace: the Inspector shows what you are working on (the active command or the selection in Design, the selected
+  operation or setup in CAM, the machine's steps in Machine). Design has a one-row toolbar (less-used tools under *More*,
+  Output and Extensions as menus) with the Browser and Parameters docked on the left, and shows the part alone.
+- **CAM workspace.** The program, its setups, operations and the tools they use are a tree on the left; the Inspector
+  edits the selected operation (Tool & feeds · Cut · Display) or setup (stock, origin, workholding, machine view); the
+  viewer has *Selected op / All* and *Toolpath / Stock / Machine* toggles and a timeline of op-coloured blocks with
+  Simulate, play and speed. *Send to machine* opens Machine ▸ Run with the setup's operations.
+- **Machine workspace.** A status strip (state, position, tool, Control, Hold / Pause / Stop program, STOP) over the
+  camera with the jog pad on it, and four steps: **Prepare** (connect, home, tool change, accessories), **Zero** (what the
+  setup wants next to what set the machine's origin this session, a guided 3D-probe sequence, *Find the block* for a
+  block in the L-bracket), **Run** (a readiness checklist, air cut first, progress op by op) and **Manual**.
+
+### Added
+- **Add operation** in CAM: face, adaptive clearing, pocket (floors picked in the viewer), contour, drill and 3D finish,
+  each written as one `program.add(...)` line in cam.py (left as it was if the program doesn't build).
+- **Find the block**: probe back-right, back-left and front-right, then X0 Y0 goes to the front-left corner at the
+  measured faces; the measured block size is compared with the setup's. Or move X0 Y0 from a probed corner by the
+  block size. The probe's step-out is fitted to the room the travel leaves.
+- **Manual**: go to (Z goes up first), set the origin at the head or by typing, any 3D-probe routine, a one-line console
+  (each line confirmed; blocked commands refused) and *Run a file* for any .nc file with the same checks as a program.
+- **The assistant can work the machine**: stopping (hold, pause, stop program, STOP) at once; everything else as an
+  approval card in the chat and on the Machine page that runs only when you click Approve. It can also change an
+  operation's settings, the workholding and add operations, as the CAM page does.
+
+### Fixed
+- An origin set before another setup's program ran is no longer shown as right for the next setup (re-zero after
+  re-clamping).
+
 ## [0.47.0] — 2026-10-18
 
 ### Added
