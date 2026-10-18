@@ -181,8 +181,11 @@ class Library:
         return m
 
     def save_tool(self, data: dict) -> Tool:
+        """Create a tool, or update the one with this number: the fields given replace, the rest are kept (an update of
+        the feeds must not reset the tool's photo, tip, shank or stickout to their defaults)."""
         tools = self.tools()
-        t = _tool_from(data)
+        old = next((x for x in tools if x.number == int(data.get("number", -1))), None) if "number" in data else None
+        t = _tool_from({**asdict(old), **data} if old else data)
         t.shape                                             # refuses an impossible shape (tool_shape.ToolShapeError)
         tools = [x for x in tools if x.number != t.number] + [t]
         tools.sort(key=lambda x: x.number)

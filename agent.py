@@ -2325,7 +2325,8 @@ class CadAgent:
             head = f"# {'own script' if r['user'] else 'built-in model'} for {r['name']}\n"
             return {"content": [{"type": "text", "text": head + r["code"]}]}
 
-        @tool("save_tool", "Create or update a tool (same number replaces). `tool` fields: number, name, type "
+        @tool("save_tool", "Create or update a tool (same number updates it: the fields you give replace, the others - photo, tip, "
+              "shank, stickout - are kept). `tool` fields: number, name, type "
               "(flat|ball|vbit|drill|chamfer), diameter, flutes, flute_length, rpm, feed, plunge, stepdown, stepover "
               "(fraction of diameter), angle, notes.",
               {"type": "object", "properties": {"tool": {"type": "object"}}, "required": ["tool"]})
