@@ -5,6 +5,19 @@ features, patch bumps fix things. The version shown in the UI header comes from 
 
 ## [Unreleased]
 
+## [0.48.4] — 2026-10-18 (local build of the v2-ui branch, not released)
+
+### Fixed
+- **Ball, bull-nose and V tools leave the floor the stepover promises.** Pocket, adaptive and face passes are planned
+  for the tool's full width, so with a ball nose the middle of a pocket and the corners of its rings were left higher
+  than said (an R1 ball at 0.6 mm stepover: 0.08 – 0.13 mm instead of 0.046; an adaptive's corners up to 0.9 mm). The
+  floor the passes miss is now found and short clean-up passes go over it, linked at the floor (one plunge), and the
+  operation says how much was left and what is left now. Checked in the material simulation.
+
+### Added
+- **Sharp point** for V-bits and chamfer tools (Settings ▸ Tools): a tip Ø of 0 that is right, not missing, so the
+  program stops warning about it.
+
 ## [0.48.3] — 2026-10-18 (local build of the v2-ui branch, not released)
 
 ### Added

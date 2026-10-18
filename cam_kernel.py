@@ -50,6 +50,7 @@ class Tool:
     notes: str = ""
     corner_radius: float = 0.0  # bull nose
     tip_diameter: float = 0.0   # V-bit / chamfer flat tip; the ball diameter of a tapered ball endmill
+    sharp: bool = False         # V-bit / chamfer: the tip really is a point (tip_diameter 0 is right, not missing)
     taper: float = 0.0          # tapered ball: taper angle per side, degrees
     shank_diameter: float = 0.0 # 0 = the same as the diameter (a 1/8" shank on a 0.3 mm endmill: 3.175)
     neck_diameter: float = 0.0  # a relieved neck between the flutes and the shank (0 = none)
@@ -80,7 +81,7 @@ class Tool:
         if self.type == "bull":
             return f"bull nose Ø{g(self.diameter)} R{g(self.corner_radius)}{fl}{sh}"
         if self.type in ("vbit", "chamfer"):
-            tip = f"tip Ø{g(self.tip_diameter)}" if self.tip_diameter else "sharp tip (no tip Ø set)"
+            tip = f"tip Ø{g(self.tip_diameter)}" if self.tip_diameter else "sharp point" if self.sharp else "sharp tip (no tip Ø set)"
             return f"{'V' if self.type == 'vbit' else 'chamfer'} {g(self.angle)}° · {tip} · Ø{g(self.diameter)}{fl}{sh}"
         if self.type == "taper_ball":
             return f"tapered ball tip Ø{g(self.tip_diameter)} · {g(self.taper)}°/side · Ø{g(self.diameter)}{fl}{sh}"
@@ -2128,10 +2129,11 @@ class Program:
         seen = set()
         for op in self.ops:
             t = op.tool
-            if t.type in ("vbit", "chamfer") and not t.tip_diameter and t.label() not in seen:
+            if t.type in ("vbit", "chamfer") and not t.tip_diameter and not t.sharp and t.label() not in seen:
                 seen.add(t.label())
                 w.append(f"{t.label()} ({t.spec()}): no tip Ø set, so it is modelled as a perfectly sharp point; a real tip "
-                         "cuts wider by that much at every depth. Set it in Settings ▸ Tools (e.g. 0.1 for a 0.1 mm V-bit)")
+                         "cuts wider by that much at every depth. Set it in Settings ▸ Tools (e.g. 0.1 for a 0.1 mm V-bit), or "
+                         "tick Sharp point there if it really has none")
         for st in self.setups:
             tag = f"{st.name}: " if len(self.setups) > 1 else ""
             b = self.bounds(st)
@@ -2837,6 +2839,113 @@ def _scallop(sh, s: float) -> float:
     return float(np.nanmax(np.where(np.isfinite(h), h, np.nan))) if np.isfinite(h).any() else float("inf")
 
 
+def _floor_cleanup(op: Op, kind: str, args: dict, plan_tool: Tool, real_tool: Tool) -> list[str]:
+    """A ball / bull / V tool only reaches the floor along its centreline: passes planned for a flat stand-in (rings of a
+    pocket, an adaptive's fronts, face rows) can leave floor further from every pass than the stepover promises - the
+    middle of a pocket and the corners of its rings (a Ø9 pocket with an R1 ball: 0.13 mm left where the stepover says
+    0.046). Find that floor (the tool-centre area at the bottom farther than r_eff from every bottom pass, r_eff = where
+    the profile is the promised ridge height above its tip), add short passes over it, and say what is left."""
+    if real_tool.type == "flat" or kind not in ("face", "pocket", "adaptive") or not op.moves:
+        return []
+    try:
+        sh = real_tool.shape
+    except Exception:  # noqa: BLE001
+        return []
+    zb = (op.params or {}).get("z_bottom", args.get("z_bottom"))
+    if zb is None:
+        return []
+    zb, st = float(zb), op.setup
+    w = plan_tool.diameter
+    if kind == "face":
+        region = unary_union(_polys(args.get("region")) or [st.stock.rect()])
+        C = region
+    else:
+        region = unary_union(_polys(args.get("polys")))
+        C = region.buffer(-(w / 2 + float(args.get("stock_to_leave") or 0.0)) + 1e-3, join_style=1)
+    if C.is_empty:
+        return []
+    so = float(args.get("stepover") or plan_tool.stepover) * w
+    h = max(_scallop(sh, so), 0.003)
+    rr = np.linspace(0.0, sh.cut_radius, 4001)
+    ch = sh.cut_height(rr)
+    ok = rr[np.isfinite(ch) & (ch <= h + 1e-9)]
+    r_eff = float(ok.max()) if len(ok) else 0.0
+    if r_eff < 0.005:
+        return []
+
+    def bottom_passes():
+        out, prev = [], None
+        for mv in op.moves:
+            p = (mv[1], mv[2], mv[3])
+            if prev is not None and mv[0] in (FEED, PLUNGE) and abs(p[2] - zb) < 1e-3 and abs(prev[2] - zb) < 1e-3:
+                out.append(LineString([prev[:2], p[:2]]) if math.hypot(p[0] - prev[0], p[1] - prev[1]) > 1e-6 else Point(p[:2]))
+            elif mv[0] == PLUNGE and abs(p[2] - zb) < 1e-3:
+                out.append(Point(p[:2]))                  # a plunge to the floor touches it there (a clean-up visit)
+            prev = p
+        return unary_union(out) if out else None
+
+    def worst(paths) -> float:                           # the largest distance from floor to the nearest bottom pass
+        import shapely
+        minx, miny, maxx, maxy = C.bounds
+        step = max(r_eff / 3, 0.02, math.sqrt(max(C.area, 1e-9) / 150_000))     # ≤ ~150k samples on a big floor
+        gx, gy = np.meshgrid(np.arange(minx, maxx + step, step), np.arange(miny, maxy + step, step))
+        pts = shapely.points(gx.ravel(), gy.ravel())
+        pts = pts[shapely.contains(C, pts)]
+        return float(shapely.distance(pts, paths).max()) if len(pts) and paths is not None else 0.0
+
+    paths = bottom_passes()
+    if paths is None:
+        return []
+    before = worst(paths)
+    if before <= r_eff + 0.01:
+        return []
+    from shapely.ops import polylabel
+    pb = PathBuilder(st, real_tool, op)
+    pb.feed = min(pb.feed, real_tool.feed); pb.pos = tuple(op.moves[-1][1:4]); n0 = len(op.moves)
+    added = 0
+    for _ in range(4):
+        gaps = C.difference(paths.buffer(r_eff, quad_segs=16)).buffer(-0.01).buffer(0.01)
+        polys = [g for g in getattr(gaps, "geoms", [gaps]) if not g.is_empty and g.area > 1e-6]
+        if not polys:
+            break
+        todo, ordered = list(polys), []
+        at = pb.pos[:2]
+        while todo:
+            g = min(todo, key=lambda g: math.hypot(g.centroid.x - at[0], g.centroid.y - at[1]))
+            todo.remove(g); ordered.append(g); at = (g.centroid.x, g.centroid.y)
+        for g in ordered:
+            mrr = g.minimum_rotated_rectangle
+            c = list(mrr.exterior.coords) if mrr.geom_type == "Polygon" else []
+            if len(c) >= 4 and max(math.dist(c[0], c[1]), math.dist(c[1], c[2])) > 2 * r_eff:
+                a, b_ = (c[0], c[1]) if math.dist(c[0], c[1]) < math.dist(c[1], c[2]) else (c[1], c[2])
+                m1 = ((a[0] + b_[0]) / 2, (a[1] + b_[1]) / 2)
+                o = c[2] if (a, b_) == (c[0], c[1]) else c[3]
+                d = (o[0] - b_[0], o[1] - b_[1])
+                seg = LineString([m1, (m1[0] + d[0], m1[1] + d[1])]).intersection(C)
+                seg = seg if seg.geom_type == "LineString" and seg.length > 0 else Point(polylabel(g, 0.005).coords[0])
+            else:
+                seg = Point(polylabel(g, 0.005).coords[0]) if g.geom_type == "Polygon" else g.representative_point()
+            pts = list(seg.coords)
+            if len(pts) > 1 and math.dist(pb.pos[:2], pts[-1]) < math.dist(pb.pos[:2], pts[0]):
+                pts.reverse()
+            # stay down when the way there is over cleared floor (only ridges this low are left on it); else lift
+            if abs(pb.pos[2] - zb) < 1e-6 and C.buffer(1e-6).covers(LineString([pb.pos[:2], pts[0]])):
+                pb.feed_to(pts[0][0], pts[0][1], zb)
+            else:
+                pb.retract(); pb.rapid_xy(*pts[0]); pb.plunge_to(zb, rapid_to=zb + h, gap=1.0)
+            for p in pts[1:]:
+                pb.feed_to(p[0], p[1], zb)
+            added += 1
+        pb.retract()
+        paths = bottom_passes()
+    after = worst(paths)
+    hb, ha = float(sh.cut_height(np.array([min(before, sh.cut_radius)]))[0]), float(sh.cut_height(np.array([min(after, sh.cut_radius)]))[0])
+    lifts = sum(1 for mv in op.moves[n0:] if mv[0] == PLUNGE)
+    return [f"{real_tool.label()}: the passes left floor up to {before:.2f} mm from any pass (the middle / ring corners: "
+            f"{hb:.3f} mm of material); added {added} short clean-up pass{'es' if added != 1 else ''} there ({lifts} "
+            f"plunge{'s' if lifts != 1 else ''}) - the floor is now within {ha:.3f} mm"]
+
+
 def _shape_plan(kind: str, args: dict, sig) -> list[str]:
     """2.5D operations (face / pocket / adaptive / contour) with a tool that is not a flat endmill: plan the path with the
     tool's width at the cut depth (so the top edge of the cut lands on the boundary and nothing is overcut) by swapping
@@ -2953,8 +3062,10 @@ def _overridable(fn, kind: str):
             op = fn(*b.args, **b.kwargs)
         finally:
             _OV["depth"] -= 1
+        plan_tool = op.tool
         if op.tool is not real_tool and kind in ("face", "pocket", "adaptive", "contour"):
             op.tool = real_tool                            # planned with the tool's width at the cut depth (see _shape_plan)
+        notes += _floor_cleanup(op, kind, b.arguments, plan_tool, real_tool)
         op.warnings.extend(notes)
         op.key, op.base_tool, op.overrides, op.defaults = key, tool, ov, defaults
         op.cut_defaults = {k: (None if v is inspect.Parameter.empty else _plain(v)) for k, v in cut_script.items()}

@@ -5447,13 +5447,13 @@ function toolSpec(t) {                          // the packet's description (cam
   switch (t.type) {
     case 'ball': return `ball R${gnum(t.diameter / 2)}${fl}${sh}`;
     case 'bull': return `Ø${gnum(t.diameter)} R${gnum(t.corner_radius || 0)} corners${fl}${sh}`;
-    case 'vbit': case 'chamfer': return `${t.type === 'vbit' ? 'V' : 'chamfer'} ${gnum(t.angle || 0)}° · ${t.tip_diameter ? 'tip Ø' + gnum(t.tip_diameter) : 'no tip Ø'} · Ø${gnum(t.diameter)}`;
+    case 'vbit': case 'chamfer': return `${t.type === 'vbit' ? 'V' : 'chamfer'} ${gnum(t.angle || 0)}° · ${t.tip_diameter ? 'tip Ø' + gnum(t.tip_diameter) : t.sharp ? 'sharp point' : 'no tip Ø'} · Ø${gnum(t.diameter)}`;
     case 'taper_ball': return `tapered ball Ø${gnum(t.tip_diameter || 0)} · ${gnum(t.taper || 0)}°/side`;
     case 'drill': return `drill Ø${gnum(t.diameter)}${t.angle ? ` · ${gnum(t.angle)}°` : ''}`;
     default: return `Ø${gnum(t.diameter)}${fl}${sh}`;
   }
 }
-const tipMissing = t => ['vbit', 'chamfer'].includes(t.type) && !(+t.tip_diameter > 0);
+const tipMissing = t => ['vbit', 'chamfer'].includes(t.type) && !(+t.tip_diameter > 0) && !t.sharp;
 function libraryEditor(mPane, tPane) {
   const clone = o => JSON.parse(JSON.stringify(o));
   const ms = library.machines.map(m => ({ orig: m.name, m: clone(m), dirty: false })), delM = [];
@@ -5584,7 +5584,7 @@ function libraryEditor(mPane, tPane) {
             <div class="tl2-sec">Size <span class="muted">as on the packet</span></div>
             <div class="tl2-label"><input data-a="label" placeholder="type the packet's label, e.g. 0.1mm x 3.175mm 30deg  ·  R1.0mm x 3.175mm x 17mm 2F" spellcheck="false"><button class="btn small" data-a="fill">Fill</button></div>
             <div class="muted tl2-said" data-a="said"></div>
-            <div class="tl2-grid">${TSIZE[typ].map(field).join('')}</div>
+            <div class="tl2-grid">${TSIZE[typ].map(field).join('')}${['vbit', 'chamfer'].includes(typ) ? `<label></label><label class="tf" style="color:var(--text);cursor:pointer"><input type="checkbox" data-a="sharp" ${t.sharp && !(+t.tip_diameter > 0) ? 'checked' : ''} style="width:auto"> Sharp point (no flat at the tip: a tip Ø of 0 is right)</label>` : ''}</div>
             ${tipMissing(t) ? '<div class="tl2-warn">No tip Ø: the CAM treats this as a perfectly sharp point, so a real tip cuts that much wider at every depth than planned. Set it from the packet (0.1 for a "0.1mm x 3.175mm 30deg" V-bit).</div>' : ''}
             <div class="tl2-sec">Cutting <span class="muted">defaults for every operation with this tool</span></div>
             <div class="tl2-grid">${CUT.map(field).join('')}</div>
@@ -5618,9 +5618,12 @@ function libraryEditor(mPane, tPane) {
         const v = inp.value === '' ? 0 : num(inp.value);
         if (k === 'r') t.diameter = 2 * v; else if (k === 'stepover') t.stepover = v / 100; else t[k] = v;
         mark();
+        if (k === 'tip_diameter' && v > 0) t.sharp = false;
         if (k === 'tip_diameter' && e.type === 'change') renderTools();
       };
     });
+    const sh_ = tPane.querySelector('[data-a=sharp]');
+    if (sh_) sh_.onchange = () => { t.sharp = sh_.checked; if (t.sharp) t.tip_diameter = 0; mark(); renderTools(); };
     tPane.querySelector('[data-a=tdel]').onclick = async e => { if (!await confirmInline(e.currentTarget, `delete T${t.number}`)) return; if (x.orig != null) delT.push(x.orig); ts.splice(tSel, 1); renderTools(); };
     tPane.querySelector('[data-a=tdup]').onclick = () => { const c = clone(t); c.number = Math.max(0, ...ts.map(y => +y.t.number || 0)) + 1; c.name += ' copy'; ts.push({ orig: null, dirty: true, t: c }); tSel = ts.length - 1; renderTools(); };
     const lab = tPane.querySelector('[data-a=label]'), said = tPane.querySelector('[data-a=said]');

@@ -154,3 +154,33 @@ def test_v_tip_counts_everywhere_and_its_absence_is_reported(z1):
     v = cam.feeds(tipped, "aluminium", z1, depth=0.2)
     assert v["chipload"] < body["chipload"] and v["feed"] < body["feed"] and v["stepdown"] <= 0.2
     assert any("Ø0.207 cutting width at 0.2 mm" in n for n in v["notes"])
+
+
+@pytest.mark.parametrize("region", ["square", "circle"])
+def test_ball_pocket_floor_is_as_flat_as_the_stepover_promises(z1, region):
+    """Concentric rings planned for the ball's full width left the pocket's middle and the rings' corners up to 0.13 mm
+    high (an R1 ball, 0.6 mm stepover promising 0.046): short clean-up passes there bring the whole floor within it."""
+    from shapely import contains_xy
+    stock = cam.Stock.block(14, 14, 6, top=0)
+    st = cam.Setup(z1, stock, origin="stock-top-center")
+    ball = T(number=3, type="ball", diameter=2, flute_length=17, stepdown=0.5, stepover=0.3)
+    poly = cam.rect(-5, -5, 5, 5) if region == "square" else cam.circle(0, 0, 9)
+    op = cam.pocket(st, ball, poly, z_top=0, z_bottom=-1.5, name="Ball pocket")
+    assert any("clean-up" in w and "within 0.046" in w for w in op.warnings), op.warnings
+    assert sum(1 for m in op.moves if m[0] == cam.PLUNGE and abs(m[3] + 1.5) < 1e-6) <= 2      # linked at the floor, not a plunge each
+    p = cam.Program(st); p.add(op)
+    r = cam_sim.simulate(p, resolution=0.02)
+    g, z = r.grid, r.final["zhi"]
+    X = g["x0"] + (np.arange(g["nx"]) + 0.5) * g["res"]; Y = g["y0"] + (np.arange(g["ny"]) + 0.5) * g["res"]
+    XX, YY = np.meshgrid(X, Y)
+    floor = z[contains_xy(poly.buffer(-1.02), XX, YY)]
+    assert floor.max() + 1.5 <= 0.046 + 0.01, f"{floor.max() + 1.5:.3f} mm left on the floor"
+
+
+def test_a_sharp_point_is_a_setting_not_a_missing_tip(z1):
+    st = cam.Setup(z1, cam.Stock.block(20, 20, 4, top=0), origin="stock-top-center")
+    for sharp in (False, True):
+        ch = T(number=4, name="90° chamfer", type="chamfer", diameter=3.175, angle=90, flute_length=2, sharp=sharp, stepdown=0.3)
+        p = cam.Program(st); p.add(cam.contour(st, ch, cam.rect(-5, -5, 5, 5), z_top=0, z_bottom=-0.3, side="on", ramp=0, lead=0, name="C"))
+        assert bool([w for w in p.check() if "no tip" in w]) is (not sharp)
+        assert ("sharp point" in ch.spec()) is sharp
