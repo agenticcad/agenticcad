@@ -1,7 +1,7 @@
 """Site screenshots from the REAL app (no agent needed): starts a server on a fresh workspace, builds a few real parts,
 saves them to the part library, and captures
-  params-measure.jpg  — viewer with the Parameters card and a live measurement (landing page, ribbon section)
-  library-tab.jpg     — the Library tab with real parts and thumbnails (landing page)
+  params-measure.jpg  — viewer with the Parameters card and a live measurement (landing page, toolbar section)
+  library-tab.jpg     — the Part library (File ▸ Part library) with real parts and thumbnails (landing page)
 Usage: screens.py <out-dir>"""
 from __future__ import annotations
 
@@ -62,7 +62,7 @@ try:
             page.wait_for_timeout(1200)
 
         # ---- library: build each part and save it through the real "+ Design" flow (thumbnail rendered by the app)
-        page.click(".tab[data-pane='library']")
+        page.click("#filemenu > button"); page.wait_for_timeout(300); page.click("#filemenu [data-act='library']"); page.wait_for_timeout(600)
         for name, desc, tags, code in PARTS:
             build(code)
             page.click("#lib-add"); page.wait_for_selector("#la-name")

@@ -307,7 +307,7 @@ try:
 
             def act(sel, ok_text=None):
                 page.click(sel); page.wait_for_timeout(600)
-                if page.query_selector("#modal button.primary"):
+                if page.locator("#modal button.primary").first.is_visible():
                     page.wait_for_timeout(700); page.click(f"#modal button.primary{':has-text(' + repr(ok_text) + ')' if ok_text else ''}"); page.wait_for_timeout(500)
 
             def step(name):
@@ -318,6 +318,9 @@ try:
                 page.wait_for_selector("[data-act=confirm_tool]", timeout=90_000); page.wait_for_timeout(1800); mark(f"shot:fit-T{n}")
                 page.click("[data-act=confirm_tool]")
                 wait_ms(lambda st: idle(st) and (st.get("measured") or {}).get("tool") == n, 240, f"tc{n}")
+                page.wait_for_timeout(1200)
+                okb = page.locator("#insp-machine button:text-is('OK'), #insp-machine a:text-is('OK')").first
+                if okb.count() and okb.is_visible(): okb.click(); page.wait_for_timeout(400)
 
             ws_("machine"); right("inspect")
             page.fill("#mv-host", f"127.0.0.1:{emu_port}/{emu_cam}"); page.wait_for_timeout(400)
@@ -376,7 +379,7 @@ try:
             sp = page.query_selector("#ms-abort")
             if sp:
                 sp.click(); page.wait_for_timeout(600)
-                if page.query_selector("#modal button.primary"): page.click("#modal button.primary")
+                if page.locator("#modal button.primary").first.is_visible(): page.click("#modal button.primary")
             page.wait_for_timeout(1500)
             ws_("design")
 
@@ -387,8 +390,8 @@ try:
             page.click("#filemenu > button"); page.wait_for_timeout(400); page.click("[data-act='open']"); page.wait_for_selector("#modal .design"); page.wait_for_timeout(600)
             before = stats(); mark("wait:open"); page.click("#modal .design:has-text('planetary_gearhead')")
             page.wait_for_timeout(700)
-            ok = page.query_selector("#modal button:has-text('OK'), #modal button:has-text('Discard')")
-            if ok: ok.click()
+            ok = page.locator("#modal button:has-text('OK'), #modal button:has-text('Discard')").first
+            if ok.count() and ok.is_visible(): ok.click()
             wait_rebuild(before, timeout=400_000); mark("done:open"); page.wait_for_timeout(800)
             js("document.getElementById('fit').click()"); page.wait_for_timeout(1200)
             mark("clip:gearhead:start"); orbit(-320, 60, ms=2200, steps=60); mark("still:gearhead"); page.wait_for_timeout(500)
