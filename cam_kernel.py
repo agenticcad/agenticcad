@@ -751,6 +751,34 @@ def silhouette(shape: Shape, levels: int = 12, tol: float = 0.02) -> MultiPolygo
     return _as_multi(unary_union([section(shape, z, tol) for z in zs]))
 
 
+def outline(shape: Shape, tol: float = 0.02) -> MultiPolygon:
+    """The part's outer outline from above, without holes (silhouette's outer boundaries): e.g. to chamfer its edge."""
+    return _as_multi(unary_union([Polygon(g.exterior) for g in silhouette(shape, tol=tol).geoms]))
+
+
+def face_outline(face) -> Polygon:
+    """A flat face's outer boundary as a polygon, without its holes: e.g. to chamfer only its outside edge."""
+    return Polygon(face_polygon(face).exterior)
+
+
+def outline_face(model, min_cover: float = 0.8):
+    """The part's top face that its outer edge belongs to: the highest flat up-facing face whose outer boundary covers
+    at least `min_cover` of the outline seen from above (a plate's top, also when its edge is rounded or a feature rises
+    above it). Returns the model's face info (id, center...) or None."""
+    ol = outline(model.shape)
+    best = None
+    for f in model.faces:
+        if f.kind != "PLANE" or not f.normal or f.normal[2] < 0.99:
+            continue
+        try:
+            fo = face_outline(model.get_face(f.id))
+        except Exception:  # noqa: BLE001
+            continue
+        if fo.area >= min_cover * ol.area and (best is None or f.center[2] > best.center[2]):
+            best = f
+    return best
+
+
 def stock_minus(setup: Setup, shape: Shape, z: float, expand: float = 0.0, tol: float = 0.02) -> MultiPolygon:
     """Material to remove at level z: stock rectangle minus the part's section (2.5D roughing regions).
     `expand` grows the stock rectangle outward (use ≥ tool diameter when roughing around a part so the
@@ -914,7 +942,8 @@ def _levels(z_top: float, z_bottom: float, stepdown: float) -> list[float]:
 RAMP_DEG = 3.0                      # default entry ramp angle along the path (0 = straight plunge)
 RAMP_FEED = 0.6                     # ramps and helices run at up to this fraction of the cutting feed (see ramp_feed)
 ENTRY_GAP = 0.05                    # ramps / helices start this far above the material the op cuts (rapid to 0.5 above it)
-COLORS = {"face": "#7fd1ff", "contour": "#4ea1ff", "pocket": "#4cd37a", "drill": "#ffd166", "parallel3d": "#c58cff", "engrave": "#ff9f7a", "adaptive": "#ff9f43", "rest": "#8ef0d0"}
+COLORS = {"face": "#7fd1ff", "contour": "#4ea1ff", "pocket": "#4cd37a", "drill": "#ffd166", "parallel3d": "#c58cff", "engrave": "#ff9f7a", "adaptive": "#ff9f43", "rest": "#8ef0d0",
+          "chamfer": "#f2a65a", "vcarve": "#e07bd8"}
 
 
 def face(setup: Setup, tool: Tool, z_top: float | None = None, z_bottom: float | None = None, region=None,
@@ -1736,6 +1765,170 @@ def drill(setup: Setup, tool: Tool, points, z_top: float | None = None, z_bottom
     return op
 
 
+def _cone(tool: Tool, what: str):
+    """A V / chamfer tool's cone: (shape, tip radius, tan of the half angle) - or CamError for any other tool."""
+    if tool.type not in ("vbit", "chamfer") or not (0 < tool.angle < 180):
+        raise CamError(f"{what} needs a V-bit or chamfer tool with its included angle set ({tool.label()} is {tool.type})")
+    sh = tool.shape
+    return sh, float(sh.radius_at(np.array([0.0]))[0]), math.tan(math.radians(tool.angle / 2))
+
+
+def chamfer_edges(setup: Setup, tool: Tool, polys, z_top: float, width: float, side: str = "outside",
+                  tip_below: float = 0.2, stepdown: float | None = None, climb: bool = True, ramp: float = RAMP_DEG,
+                  name: str = "Chamfer") -> Op:
+    """Chamfer the top edges of polygons with a V / chamfer tool: a chamfer `width` mm wide (measured on the top face)
+    at the tool's angle (a 90° tool: as deep as wide). side 'outside': the edges of a part, a boss, its holes (the
+    tool runs outside the material); 'inside': the top edge of a pocket given as its region. The tool's axis runs at
+    the offset that puts its cone exactly on the chamfer, its tip `tip_below` mm under the chamfer's bottom edge (so the
+    edge is clean; the space beside the wall must be cut away that deep already). The tip size is part of the offset."""
+    sh, tip_r, k = _cone(tool, "chamfer_edges")
+    if not (width > 0):
+        raise CamError("chamfer_edges: width must be > 0")
+    if side not in ("outside", "inside"):
+        raise CamError("chamfer_edges: side must be outside | inside")
+    tip_below = max(0.0, float(tip_below))
+    d = width / k                                          # chamfer height on the wall
+    if d + tip_below > sh.flute_length + 1e-9:
+        raise CamError(f"chamfer_edges: a {width:g} mm chamfer is {d:.2f} mm tall; with the tip {tip_below:g} mm below it "
+                       f"that is more than {tool.label()}'s {sh.flute_length:g} mm cutting height")
+    x = float(sh.radius_at(np.array([tip_below]))[0])     # the axis offset from the edge: the cone meets the wall there
+    z_tip = z_top - d - tip_below
+    op = Op(name, "chamfer", tool, color=COLORS["chamfer"])
+    pb = PathBuilder(setup, tool, op)
+    src = _polys(polys)
+    if not src:
+        raise CamError("chamfer_edges: no polygons given")
+    rings = []
+    for p in src:
+        g = p.buffer(x if side == "outside" else -x, join_style=1)
+        for q in _polys(g):
+            q = orient(q, 1.0)
+            if side == "outside":
+                rings.append(_ring_coords(q.exterior, True)); rings += [_ring_coords(h, False) for h in q.interiors]
+            else:
+                rings.append(_ring_coords(q.exterior, False)); rings += [_ring_coords(h, True) for h in q.interiors]
+    if not rings:
+        raise CamError(f"chamfer_edges: nothing left after offsetting by {x:.3f} mm (the shape is too small for this tool)")
+    if not climb:
+        rings = [r[::-1] for r in rings]
+    # deeper laps grow the chamfer: the cone at the same offset, the tip lower each time
+    levels = _levels(z_top - tip_below, z_tip, stepdown or max(tool.stepdown, 0.05))   # shallower: the cone is still in the air
+    op.params = dict(z_top=z_top, z_bottom=z_tip, width=width, height=round(d, 4), side=side, offset=round(x, 4), passes=len(levels))
+    for ring in _nn_order(rings, lambda r: r[0]):
+        ring = _start_on_straight(ring)
+        path = _densify(ring + [ring[0]], 0.5)[:-1]
+        pb.rapid_xy(*path[0]); pb.plunge_to(z_top + ENTRY_GAP, rapid_to=z_top, gap=0.5)
+        s_at = 0.0
+        for z in levels:
+            s_at = _lap_ramp(pb, path, z, ramp, s_at, None)
+        pb.retract()
+    op.warnings.append(f"{tool.label()} ({tool.spec()}): a {width:g} mm chamfer, {d:.3f} mm down the wall; the axis runs "
+                       f"{x:.3f} mm {'outside' if side == 'outside' else 'inside'} the edge with the tip {z_top - z_tip:.3f} mm "
+                       f"below the top - " + ("beside the wall, so that must already be cut that deep" if side == "outside"
+                                               else "inside the pocket"))
+    return op
+
+
+def vcarve(setup: Setup, tool: Tool, polys, z_top: float, max_depth: float | None = None,
+           flat_stepover: float | None = None, sample: float | None = None, name: str = "V-carve") -> Op:
+    """V-carve shapes (letters, a logo) with a V-bit: the tool runs along each shape's centreline (medial axis), as deep
+    as the shape is wide there - its cone touches both sides, so the top edge lands exactly on the outline, corners come
+    out sharp and narrow strokes are shallow. The tip size is part of the depth (a 0.1 mm tip goes 0.05 mm less deep per
+    side). max_depth: no deeper than this - where a stroke is wider the bottom is flat at max_depth and cleared with
+    rings `flat_stepover` apart (default: just under the tip's width)."""
+    from scipy.spatial import Voronoi
+    from shapely.ops import linemerge
+    import shapely
+    sh, tip_r, k = _cone(tool, "vcarve")
+    cap = sh.flute_length - 1e-6 if max_depth is None else min(float(max_depth), sh.flute_length - 1e-6)
+    if cap <= 0:
+        raise CamError("vcarve: max_depth must be > 0")
+    src = _polys(polys)
+    if not src:
+        raise CamError("vcarve: no polygons given")
+    P = unary_union(src)
+    op = Op(name, "vcarve", tool, color=COLORS["vcarve"])
+    pb = PathBuilder(setup, tool, op)
+    ds = sample or max(0.01, min(0.05, math.sqrt(P.area) / 400))
+    r_cap = tip_r + cap * k                                 # wider than this (distance to the edge): the flat bottom
+    chains: list[np.ndarray] = []
+    for poly in _polys(P):
+        rings = [poly.exterior] + list(poly.interiors)
+        pts, ring_id, idx, tang = [], [], [], []
+        for ri, ring in enumerate(rings):
+            L = ring.length
+            n = max(8, int(math.ceil(L / ds)))
+            s = np.linspace(0, L, n, endpoint=False)
+            xy = np.array([ring.interpolate(v).coords[0] for v in s])
+            t = np.roll(xy, -1, 0) - np.roll(xy, 1, 0)
+            t /= np.maximum(np.linalg.norm(t, axis=1)[:, None], 1e-12)
+            pts.append(xy); ring_id += [ri] * n; idx += list(range(n)); tang.append(t)
+        X = np.vstack(pts); T_ = np.vstack(tang); ring_id = np.array(ring_id); idx = np.array(idx)
+        nring = {ri: (ring_id == ri).sum() for ri in set(ring_id.tolist())}
+        vor = Voronoi(X)
+        V = vor.vertices
+        inside = shapely.contains_xy(poly, V[:, 0], V[:, 1])
+        segs = []
+        for (i, j), (a, b) in zip(vor.ridge_points, vor.ridge_vertices):
+            if a < 0 or b < 0 or not (inside[a] and inside[b]):
+                continue
+            if ring_id[i] == ring_id[j]:
+                n = nring[ring_id[i]]
+                gap = abs(int(idx[i]) - int(idx[j])); gap = min(gap, n - gap)
+                if gap <= 3 and float(np.dot(T_[i], T_[j])) > math.cos(math.radians(30)):
+                    continue                                # a spur between neighbours on a smooth stretch of edge
+            segs.append(LineString([V[a], V[b]]))
+        if not segs:
+            continue
+        merged = linemerge(unary_union(segs))
+        for ln in getattr(merged, "geoms", [merged]):
+            if ln.length < ds * 0.5:
+                continue
+            m = max(2, int(math.ceil(ln.length / ds)))
+            xy = np.array([ln.interpolate(v).coords[0] for v in np.linspace(0, ln.length, m + 1)])
+            r = shapely.distance(shapely.points(xy[:, 0], xy[:, 1]), poly.boundary)
+            depth = np.minimum(np.maximum(r - tip_r, 0.0) / k, cap)
+            chains.append(np.column_stack([xy, z_top - depth]))
+    if not chains:
+        raise CamError("vcarve: found no centreline (are the shapes closed polygons?)")
+    # the flat-bottomed part where a stroke is wider than the V at max_depth: rings at max_depth
+    flat = P.buffer(-r_cap, join_style=1)
+    rings_flat = []
+    if not flat.is_empty:
+        fs = flat_stepover or (1.8 * tip_r if tip_r > 0.005 else 0.05)
+        g, i = flat, 0
+        while not g.is_empty and i < 2000:
+            for q in _polys(g):
+                rings_flat += [list(q.exterior.coords)] + [list(h.coords) for h in q.interiors]
+            g = flat.buffer(-fs * (i + 1), join_style=1); i += 1
+        if fs > 2 * tip_r + 1e-9:
+            op.warnings.append(f"vcarve: strokes wider than {2 * r_cap:.2f} mm get a flat bottom at {cap:g} mm; its rings are "
+                               f"{fs:.3f} mm apart but the tip is only Ø{2 * tip_r:.3f}, so ridges up to "
+                               f"{(fs / 2 - tip_r) / k:.3f} mm stay on that floor")
+    # cut: nearest chain next; feed limited so the descent never outruns the plunge rate
+    todo = chains + [np.column_stack([np.array(rg)[:, :2], np.full(len(rg), z_top - cap)]) for rg in rings_flat]
+    at = (0.0, 0.0)
+    deepest = z_top
+    while todo:
+        j = min(range(len(todo)), key=lambda q: min(math.dist(at, todo[q][0, :2]), math.dist(at, todo[q][-1, :2])))
+        c = todo.pop(j)
+        if math.dist(at, c[-1, :2]) < math.dist(at, c[0, :2]):
+            c = c[::-1]
+        pb.rapid_xy(c[0, 0], c[0, 1]); pb.plunge_to(c[0, 2], rapid_to=z_top, gap=0.5)
+        for p0, p1 in zip(c[:-1], c[1:]):
+            L = math.dist(p0[:2], p1[:2]); dz = abs(p1[2] - p0[2])
+            f = pb.feed if dz < 1e-9 else min(pb.feed, pb.plunge * math.hypot(L, dz) / dz)
+            pb.feed_to(p1[0], p1[1], p1[2], f)
+        deepest = min(deepest, float(c[:, 2].min()))
+        at = tuple(c[-1, :2])
+        pb.retract()
+    op.params = dict(z_top=z_top, z_bottom=deepest, max_depth=cap, centrelines=len(chains), flat_rings=len(rings_flat))
+    op.warnings.append(f"{tool.label()} ({tool.spec()}): V-carved {len(chains)} centreline stretch{'es' if len(chains) != 1 else ''}, "
+                       f"deepest {z_top - deepest:.3f} mm" + (f"; strokes wider than {2 * r_cap:.2f} mm have a flat bottom at "
+                                                             f"{cap:g} mm" if rings_flat else ""))
+    return op
+
+
 def _drop_tip(zmap: np.ndarray, tool: Tool, res: float, depth: float) -> np.ndarray:
     """Lowest tip height over each height-map cell with no part of the tool below the surface. Only the parts of the
     tool within `depth` (the material's thickness) of the tip can touch, so wider parts higher up (a big shank) are
@@ -1902,7 +2095,7 @@ def _raster_triangles(P: np.ndarray, I: np.ndarray, zmap: np.ndarray, minx: floa
 
 
 PUBLIC_API = ["Stock.from_model", "Stock.block", "Stock.cylinder", "Setup", "Setup.view", "Program", "face", "contour", "pocket",
-              "adaptive", "drill", "parallel3d", "rest_region", "section", "silhouette", "stock_minus", "holes", "face_polygon",
+              "adaptive", "drill", "parallel3d", "chamfer_edges", "vcarve", "rest_region", "section", "silhouette", "outline", "face_outline", "stock_minus", "holes", "face_polygon",
               "circle", "rect", "feeds", "apply_feeds", "rotary_rough", "rotary_finish", "rotary_wrap", "radial_map"]
 
 
@@ -2770,12 +2963,15 @@ CUT_FIELDS = {
                  "hop": ("Hop height", "mm", "num", None), "chip_thinning": ("Chip-thinning feed", "", "bool", None)},
     "drill": {**_Z, "peck": ("Peck depth", "mm", "num", None), "retract": ("Retract", "mm", "num", None)},
     "parallel3d": {**_Z, "angle": ("Pass angle", "°", "num", None), "resolution": ("Resolution", "mm", "num", None)},
+    "chamfer": {"width": ("Chamfer width", "mm", "num", None), "tip_below": ("Tip below the chamfer", "mm", "num", None), **_CLIMB},
+    "vcarve": {"max_depth": ("Max depth", "mm", "num", None), "flat_stepover": ("Flat-bottom stepover", "mm", "num", None)},
 }
 COLOR_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
 OP_FIELDS = {"face": OVERRIDE_FIELDS, "pocket": OVERRIDE_FIELDS, "adaptive": OVERRIDE_FIELDS,
              "contour": ("rpm", "feed", "plunge", "stepdown"), "drill": ("rpm", "plunge"),
              "parallel3d": ("rpm", "feed", "plunge", "stepover"), "rotary_rough": OVERRIDE_FIELDS,
-             "rotary_finish": ("rpm", "feed", "plunge", "stepover"), "rotary_wrap": OVERRIDE_FIELDS}
+             "rotary_finish": ("rpm", "feed", "plunge", "stepover"), "rotary_wrap": OVERRIDE_FIELDS,
+             "chamfer": ("rpm", "feed", "plunge", "stepdown"), "vcarve": ("rpm", "feed", "plunge")}
 _OV: dict[str, Any] = {"table": {}, "seen": {}, "depth": 0, "used": set()}
 
 
@@ -3084,6 +3280,8 @@ pocket = _overridable(pocket, "pocket")
 adaptive = _overridable(adaptive, "adaptive")
 drill = _overridable(drill, "drill")
 parallel3d = _overridable(parallel3d, "parallel3d")
+chamfer_edges = _overridable(chamfer_edges, "chamfer")
+vcarve = _overridable(vcarve, "vcarve")
 rotary_rough = _overridable(rotary_rough, "rotary_rough")
 rotary_finish = _overridable(rotary_finish, "rotary_finish")
 rotary_wrap = _overridable(rotary_wrap, "rotary_wrap")

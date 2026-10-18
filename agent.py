@@ -453,7 +453,7 @@ def _add_op_line(spec: dict, program, tools: dict, model) -> str:
     kinds: face, adaptive (around the part), pocket (picked flat floor faces), contour (part outline), drill (detected
     holes), parallel3d (3D finish over the part)."""
     kind = spec.get("kind")
-    if kind not in ("face", "adaptive", "pocket", "contour", "drill", "parallel3d"):
+    if kind not in ("face", "adaptive", "pocket", "contour", "drill", "parallel3d", "chamfer", "vcarve"):
         raise cam.CamError(f"unknown operation kind {kind!r}")
     def num(k, lo, hi, default=None):
         v = spec.get(k)
@@ -505,6 +505,39 @@ def _add_op_line(spec: dict, program, tools: dict, model) -> str:
                 f"side=\"outside\", tabs={int(num('tabs', 0, 12, 0))}")
     elif kind == "drill":
         call = f"drill({S}, {T}, holes(part, dmin={num('dmin', 0, 200, 0)!r}, dmax={num('dmax', 0, 1000, 1000)!r})"
+    elif kind in ("chamfer", "vcarve"):
+        t = tools[n]
+        if t.type not in ("vbit", "chamfer"):
+            raise cam.CamError(f"{'chamfering edges' if kind == 'chamfer' else 'V-carving'} needs a V-bit or chamfer tool: T{n} is {t.type}")
+        faces = spec.get("faces") or []
+        if not all(isinstance(f, int) for f in faces) or len(faces) > 200:
+            raise cam.CamError("faces: face ids")
+        info = {f.id: f for f in model.faces}
+        zs = set()
+        for f in faces:
+            fi = info.get(f)
+            if fi is None or fi.kind != "PLANE" or not fi.normal or fi.normal[2] < 0.99:
+                raise cam.CamError(f"face {f} isn't a flat face facing up")
+            zs.add(round(fi.center[2], 3))
+        if kind == "vcarve" and not faces:
+            raise cam.CamError("pick the shapes to V-carve in the viewer (their flat faces: letter floors or tops)")
+        polys = f"[face_polygon(model.get_face(f)) for f in {sorted(faces)!r}]"
+        if zs:
+            top = max(zs)
+        else:                                                 # no faces: the part's outer top edge (a plate under a raised gem)
+            of = cam.outline_face(model)
+            if of is None:
+                raise cam.CamError("couldn't find the part's top face along its outline: pick the flat faces whose edges to chamfer")
+            top, polys = round(float(of.center[2]), 4), f"[face_outline(model.get_face({of.id}))]"
+        z_top = num("z_top", -1000, 1000, top)
+        if kind == "chamfer":
+            call = (f"chamfer_edges({S}, {T}, {polys}, z_top={z_top!r}, width={num('width', 0.01, 20, 0.5)!r}, "
+                    f"tip_below={num('tip_below', 0, 5, 0.2)!r}, side={str(spec.get('side') or 'outside')!r}")
+            if spec.get("side") not in (None, "", "outside", "inside"):
+                raise cam.CamError("side: outside | inside")
+        else:
+            md = spec.get("max_depth")
+            call = f"vcarve({S}, {T}, {polys}, z_top={z_top!r}" + (f", max_depth={num('max_depth', 0.01, 50)!r}" if md not in (None, "") else "")
     else:
         call = f"parallel3d({S}, {T}, shape=part, stepover={num('stepover', 0.02, 0.6, 0.1)!r}, angle={num('angle', -180, 180, 0)!r}"
     return f"program.add({call}, name={name!r}))"
@@ -2678,9 +2711,11 @@ class CadAgent:
               "action=set_override {op: operation name, values: {tool fields rpm/feed/plunge/stepdown/stepover, cut fields "
               "(see the op's CUT settings), color} - empty values clear them}; set_fixture {setup: setup name, fixture: {name: "
               "holding fixture or null for the bare table, at: [x, y] mm from the bed centre, rot, params, extra: [other "
-              "fixtures {name, at, rot, params}]}}; add_op {spec: {kind: face|adaptive|pocket|contour|drill|parallel3d, "
+              "fixtures {name, at, rot, params}]}}; add_op {spec: {kind: face|adaptive|pocket|contour|drill|parallel3d|chamfer|vcarve, "
               "setup: index, tool: number, name, and per kind: depth | z_bottom, stepover, leave | faces [flat floor face "
-              "ids] | z_bottom, tabs | dmin, dmax | stepover, angle}}. For anything else rewrite the script with build_cam.",
+              "ids] | z_bottom, tabs | dmin, dmax | stepover, angle; chamfer (edges of picked flat faces, or the part outline): "
+              "width, tip_below, side, z_top; vcarve (picked faces, e.g. letters): z_top, max_depth}}. For anything else rewrite "
+              "the script with build_cam.",
               {"type": "object", "properties": {"action": {"type": "string"}, "op": {"type": "string"}, "values": {"type": "object"},
                                                 "setup": {"type": "string"}, "fixture": {"type": "object"}, "spec": {"type": "object"}},
                "required": ["action"]})

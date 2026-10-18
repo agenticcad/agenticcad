@@ -103,3 +103,27 @@ def test_the_assistant_makes_the_same_edits_through_cam_edit(ag):
         r = await T["cam_edit"]({"action": "add_op", "spec": {"kind": "face", "tool": 77}})
         assert r["content"][0]["text"].startswith("Not changed")
     asyncio.run(go())
+
+
+def test_chamfer_and_vcarve_from_the_cam_page(ag):
+    import asyncio
+
+    async def go():
+        await ag.build(PART, source="user")
+        await ag.set_cam_code(CAM, source="user")
+        boss_top = next(f.id for f in ag.model.faces if f.kind == "PLANE" and f.normal[2] > 0.99 and abs(f.center[2] - 11.0) < 0.01)
+        await ag.add_cam_op(dict(kind="chamfer", tool=6, width=0.5, name="Chamfer outline"))          # the part outline
+        await ag.add_cam_op(dict(kind="chamfer", tool=6, width=0.3, faces=[boss_top], name="Chamfer boss"))
+        await ag.add_cam_op(dict(kind="vcarve", tool=6, faces=[boss_top], max_depth=0.5, name="Carve"))
+        ops = {o.name: o for o in ag.program.ops}
+        assert ops["Chamfer outline"].kind == "chamfer" and ops["Chamfer boss"].params["z_top"] == pytest.approx(11.0)
+        assert ops["Carve"].kind == "vcarve" and ops["Carve"].params["z_bottom"] == pytest.approx(10.5)
+        assert "chamfer_edges(program.setups[0], tools[6], [face_outline(model.get_face(" in ag.cam_code   # the base's top edge, not the boss
+        assert ops["Chamfer outline"].params["z_top"] == pytest.approx(8.0)
+        code = ag.cam_code
+        for bad, why in ((dict(kind="vcarve", tool=6), "pick the shapes"), (dict(kind="chamfer", tool=1, width=0.5), "V-bit or chamfer"),
+                         (dict(kind="chamfer", tool=6, width=0.5, side="sideways"), "side")):
+            with pytest.raises(cam.CamError, match=why):
+                await ag.add_cam_op(bad)
+        assert ag.cam_code == code
+    asyncio.run(go())

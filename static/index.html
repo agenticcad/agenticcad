@@ -2065,21 +2065,26 @@ const ADD_KINDS = [
   ['pocket', 'Pocket', 'Clear down to floors you pick', ['flat', 'bull']],
   ['contour', 'Contour', 'Cut round the part outline', ['flat']],
   ['drill', 'Drill', 'The model\'s vertical holes', ['drill', 'flat']],
-  ['parallel3d', '3D finish', 'Raster over the part surface', ['ball', 'bull', 'taper_ball', 'flat']]];
+  ['parallel3d', '3D finish', 'Raster over the part surface', ['ball', 'bull', 'taper_ball', 'flat']],
+  ['chamfer', 'Chamfer edges', 'Bevel the top edges of faces you pick, or the outline', ['chamfer', 'vbit']],
+  ['vcarve', 'V-carve', 'Letters or a logo, as deep as they are wide', ['vbit', 'chamfer']]];
 const ADD_FIELDS = {
   face: [['depth', 'Depth', 'mm below the stock top', 0.3]],
   adaptive: [['z_bottom', 'Down to Z', 'mm (model) · blank = the part bottom', ''], ['stepover', 'Stepover', 'fraction of Ø', 0.15], ['leave', 'Stock to leave', 'mm', 0.2]],
   pocket: [['leave', 'Stock to leave', 'mm (walls)', 0]],
   contour: [['z_bottom', 'Down to Z', 'mm (model) · blank = the part bottom', ''], ['tabs', 'Tabs', 'holding tabs', 0]],
   drill: [['dmin', 'Holes from Ø', 'mm', 0], ['dmax', 'to Ø', 'mm', 1000]],
-  parallel3d: [['stepover', 'Stepover', 'fraction of Ø', 0.1], ['angle', 'Angle', '° (0 = along X)', 0]] };
+  parallel3d: [['stepover', 'Stepover', 'fraction of Ø', 0.1], ['angle', 'Angle', '° (0 = along X)', 0]],
+  chamfer: [['width', 'Chamfer width', 'mm, on the top face', 0.5], ['tip_below', 'Tip below the chamfer', 'mm (a clean bottom edge)', 0.2],
+    ['z_top', 'Top Z', 'mm (model) · blank = the picked faces / part top', '']],
+  vcarve: [['z_top', 'Top Z', 'mm (model) · the surface the shapes start at · blank = the picked faces', ''], ['max_depth', 'Max depth', 'mm · blank = as deep as the V goes (flat bottom beyond)', '']] };
 let addOp = { kind: 'adaptive', vals: {} };
 function renderAddOp(el, si) {
   const k = addOp.kind, meta = ADD_KINDS.find(x => x[0] === k), tools = library.tools || [];
   const used = new Set(program.ops.filter(o => (o.setup || 0) === si && o.tool).map(o => o.tool.number));
   const pick = () => { for (const ty of meta[3]) { const t = tools.find(x => x.type === ty && used.has(x.number)) || tools.find(x => x.type === ty); if (t) return t.number; } return tools[0] && tools[0].number; };
   if (addOp.tool == null || addOp.kindFor !== k) { addOp.tool = pick(); addOp.kindFor = k; }
-  const floors = k === 'pocket' ? [...selFaces].map(f => ({ id: f, ...(model && model.faces.get(f) || {}) })) : [];
+  const floors = ['pocket', 'chamfer', 'vcarve'].includes(k) ? [...selFaces].map(f => ({ id: f, ...(model && model.faces.get(f) || {}) })) : [];
   const flat = floors.filter(f => f.kind === 'plane' || f.kind === 'PLANE');
   el.innerHTML = `<div class="ci-head"><div class="ci-t">Add an operation<span class="chip blue">Setup ${si + 1}</span></div>
       <div class="ci-m">Writes one <code>program.add(...)</code> line at the end of cam.py. For anything else, ask the assistant or edit cam.py.</div></div>
@@ -2088,8 +2093,12 @@ function renderAddOp(el, si) {
       <label>Tool</label><select class="inp" data-f="tool">${tools.map(t => `<option value="${t.number}" ${t.number === addOp.tool ? 'selected' : ''}>T${t.number} · ${esc(t.name)}</option>`).join('')}</select><span></span>
       <label>Name</label><input class="inp" data-f="name" placeholder="${esc(meta[1])}" value="${esc(addOp.vals.name || '')}"><span></span>
       ${ADD_FIELDS[k].map(([f, l, u, d]) => `<label>${l}</label><input class="inp" type="number" step="any" data-f="${f}" placeholder="${d === '' ? 'auto' : d}" value="${addOp.vals[f] ?? ''}"><span class="u">${u}</span>`).join('')}</div>
-      ${k === 'pocket' ? `<p class="${flat.length ? 'muted' : 'wa'}" style="font-size:12px;margin:10px 0 0">${flat.length ? `Floors: ${flat.map(f => `face ${f.id} (Z ${(+f.center[2]).toFixed(2)})`).join(', ')}` : 'Click the pocket\'s flat floor in the viewer (shift-click for more floors at the same height).'}</p>` : ''}
-      <div class="insp-acts"><button class="btn pri" data-a="add" ${k === 'pocket' && !flat.length ? 'disabled' : ''}>Add ${esc(meta[1])}</button><button class="btn ghost" data-a="cancel">Cancel</button></div>
+      ${['pocket', 'chamfer', 'vcarve'].includes(k) ? `<p class="${flat.length || k === 'chamfer' ? 'muted' : 'wa'}" style="font-size:12px;margin:10px 0 0">${flat.length ? `Faces: ${flat.map(f => `face ${f.id} (Z ${(+f.center[2]).toFixed(2)})`).join(', ')}` : {
+        pocket: 'Click the pocket\'s flat floor in the viewer (shift-click for more floors at the same height).',
+        chamfer: 'No faces picked: the part\'s outline is chamfered. Click flat faces (shift-click for more) to chamfer their edges and holes instead.',
+        vcarve: 'Click the shapes to carve in the viewer: the flat faces of the letters (shift-click for each one). Their outlines are carved from Top Z down.' }[k]}</p>` : ''}
+      ${k === 'chamfer' ? '<p class="muted" style="font-size:12px;margin:6px 0 0">Run it after the edges are cut: the tool\'s tip runs just below the chamfer, beside the wall.</p>' : ''}
+      <div class="insp-acts"><button class="btn pri" data-a="add" ${(k === 'pocket' || k === 'vcarve') && !flat.length ? 'disabled' : ''}>Add ${esc(meta[1])}</button><button class="btn ghost" data-a="cancel">Cancel</button></div>
       <p class="muted" id="add-msg" style="font-size:12px"></p></div>`;
   el.querySelectorAll('.addk button').forEach(b => b.onclick = () => { addOp.kind = b.dataset.k; addOp.vals = { name: addOp.vals.name }; renderCamInsp(); });
   el.querySelectorAll('[data-f]').forEach(i => i.oninput = i.onchange = () => { if (i.dataset.f === 'tool') addOp.tool = +i.value; else addOp.vals[i.dataset.f] = i.value; });
@@ -2097,7 +2106,7 @@ function renderAddOp(el, si) {
   el.querySelector('[data-a=add]').onclick = () => {
     const spec = { kind: k, setup: si, tool: addOp.tool, name: addOp.vals.name || meta[1] };
     for (const [f] of ADD_FIELDS[k]) if (addOp.vals[f] !== undefined && addOp.vals[f] !== '') spec[f] = +addOp.vals[f];
-    if (k === 'pocket') spec.faces = flat.map(f => f.id);
+    if (['pocket', 'chamfer', 'vcarve'].includes(k)) spec.faces = flat.map(f => f.id);
     camAddPending = spec.name; el.querySelector('#add-msg').textContent = 'adding and rebuilding…';
     send({ type: 'add_op', spec });
   };
@@ -6637,7 +6646,7 @@ function mvpRender() { MVP.key = ''; if (MV.st) mvRender(MV.st); }   // the CAM 
     if (on && ribbonTab() === 'design') { if (document.body.classList.contains('side-hidden')) setSideHidden(false); if (wsSide.design !== 'inspect') showPane('inspect'); }
     renderDesignInspector();
   }).observe(cmdEl, { attributes: true, attributeFilter: ['class'] });
-  const _rc = renderChips; renderChips = function () { _rc.apply(this, arguments); renderDesignInspector(); if (program && camSel.kind === 'add' && addOp.kind === 'pocket') renderCamInsp(); };
+  const _rc = renderChips; renderChips = function () { _rc.apply(this, arguments); renderDesignInspector(); if (program && camSel.kind === 'add' && ['pocket', 'chamfer', 'vcarve'].includes(addOp.kind)) renderCamInsp(); };
   renderDesignInspector();
   document.getElementById('mpill').onclick = () => setRibbonTab('machine');
 })();

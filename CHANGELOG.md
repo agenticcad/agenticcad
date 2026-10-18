@@ -5,6 +5,18 @@ features, patch bumps fix things. The version shown in the UI header comes from 
 
 ## [Unreleased]
 
+## [0.48.5] — 2026-10-18 (local build of the v2-ui branch, not released)
+
+### Added
+- **Chamfer edges** (CAM ▸ Add operation, `chamfer_edges(...)` in cam.py, the assistant): a chamfer of a given width on
+  the top edges of the faces you pick (their outline and holes) or of the part's outline, with a V-bit or chamfer tool.
+  The tool's axis runs at the offset that puts its cone exactly on the chamfer - the tip size included - with its tip a
+  little below the chamfer for a clean edge; bigger chamfers take several laps. With no faces picked it finds the
+  part's top face along its outline (a plate's top, not the top of a raised feature).
+- **V-carve** (`vcarve(...)`): letters or a logo cut along their centrelines, as deep as each stroke is wide, so the
+  top edge follows the outline exactly and corners come out sharp. *Max depth* gives wide strokes a flat bottom.
+- `outline(part)` and `face_outline(face)` for scripts.
+
 ## [0.48.4] — 2026-10-18 (local build of the v2-ui branch, not released)
 
 ### Fixed

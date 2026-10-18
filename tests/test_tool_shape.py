@@ -184,3 +184,46 @@ def test_a_sharp_point_is_a_setting_not_a_missing_tip(z1):
         p = cam.Program(st); p.add(cam.contour(st, ch, cam.rect(-5, -5, 5, 5), z_top=0, z_bottom=-0.3, side="on", ramp=0, lead=0, name="C"))
         assert bool([w for w in p.check() if "no tip" in w]) is (not sharp)
         assert ("sharp point" in ch.spec()) is sharp
+
+
+def _sim_row(st, ops, res=0.02, y=0.0, axis="x"):
+    p = cam.Program(st)
+    for o in ops:
+        p.add(o)
+    r = cam_sim.simulate(p, resolution=res)
+    g, z = r.grid, r.final["zhi"]
+    X = g["x0"] + (np.arange(g["nx"]) + 0.5) * g["res"]; Y = g["y0"] + (np.arange(g["ny"]) + 0.5) * g["res"]
+    return (X, z[np.argmin(abs(Y - y))]) if axis == "x" else (Y, z[:, np.argmin(abs(X - y))])
+
+
+@pytest.mark.parametrize("kw,width", [(dict(type="chamfer", angle=90, sharp=True), 0.5),
+                                      (dict(type="vbit", angle=30, tip_diameter=0.1), 0.2)])
+def test_chamfer_edges_cuts_the_chamfer_asked_for(z1, kw, width):
+    """A boss 4 x 4 (profiled first): the chamfer is `width` wide on top and width / tan(half angle) down the wall, with
+    the tip size in the offset; the top inside it and the wall below it are untouched."""
+    st = cam.Setup(z1, cam.Stock.block(10, 10, 4, top=0), origin="stock-top-center")
+    flat = T(number=2, type="flat", diameter=2, flute_length=8, stepdown=1)
+    tool = T(number=4, diameter=3.175, flute_length=3, stepdown=0.3, **kw)
+    sq = cam.rect(-2, -2, 2, 2)
+    ch = cam.chamfer_edges(st, tool, sq, z_top=0, width=width, name="Chamfer")
+    X, row = _sim_row(st, [cam.contour(st, flat, sq, z_top=0, z_bottom=-2, side="outside", name="Profile"), ch])
+    k = math.tan(math.radians(tool.angle / 2))
+    for x in np.linspace(2 - width * 0.9, 1.995, 6):
+        i = np.argmin(abs(X - x))
+        assert abs(row[i] + max(0.0, X[i] - (2 - width)) / k) < 0.02 / k + 0.005, (X[i], row[i])
+    inner = row[(X > -2 + width + 0.05) & (X < 2 - width - 0.05)]
+    assert abs(inner).max() < 1e-6                              # the top inside the chamfer is untouched
+    with pytest.raises(cam.CamError, match="V-bit or chamfer"):
+        cam.chamfer_edges(st, T(type="flat", diameter=2), sq, z_top=0, width=0.5)
+
+
+def test_vcarve_follows_the_centreline_as_deep_as_the_shape_is_wide(z1):
+    st = cam.Setup(z1, cam.Stock.block(24, 10, 4, top=0), origin="stock-top-center")
+    v90 = T(number=4, type="chamfer", diameter=6, angle=90, flute_length=3, sharp=True)
+    op = cam.vcarve(st, v90, cam.rect(-8, -1, 8, 1), z_top=0, name="V")
+    Y, col = _sim_row(st, [op], y=0.0, axis="y")
+    for y in (-0.5, 0.0, 0.5):
+        assert abs(col[np.argmin(abs(Y - y))] + (1 - abs(y))) < 0.03       # 90°: as deep as the distance to the edge
+    assert abs(col[np.argmin(abs(Y - 1.1))]) < 1e-6 and abs(col[np.argmin(abs(Y + 1.1))]) < 1e-6   # nothing outside
+    capped = cam.vcarve(st, v90, cam.rect(-8, -1, 8, 1), z_top=0, max_depth=0.4, name="V flat")
+    assert capped.params["z_bottom"] == pytest.approx(-0.4) and capped.params["flat_rings"] > 0
