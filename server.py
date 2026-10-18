@@ -887,13 +887,13 @@ async def machine_post(body: MachineBody):
             res = await machine.probe_3d(body.kind or "", body.x if body.x is not None else 20.0,
                                          body.y if body.y is not None else 20.0, body.depth or 2.0, body.dia or 2.0)
         elif a == "check_ops":                            # what running these operations would do (nothing is sent)
-            prep, info, label = _program_for_ops(body)
+            prep, info, label = await asyncio.to_thread(_program_for_ops, body)   # big programs: keep the loop (and status) running
             chk = machine.check_job(prep)
             return {**machine.payload(), "check": {"label": machine_link.program_filename(label), "lines": prep["lines"],
                                                    "ops": prep["ops"], "tools": prep["tools"], "extents": prep["extents"],
                                                    "notes": chk["notes"], **info}}
         elif a == "run_ops":                              # upload the chosen operations to the machine and play them
-            prep, info, label = _program_for_ops(body)
+            prep, info, label = await asyncio.to_thread(_program_for_ops, body)   # big programs: keep the loop (and status) running
             res = await machine.run_program(label, prep, info)
         elif a in ("check_file", "run_file"):              # any .nc file, through the same checks as CAM operations
             if not body.text:

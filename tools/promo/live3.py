@@ -54,7 +54,7 @@ def free_port():
 port, emu_port, emu_cam = free_port(), free_port(), free_port()
 env = {**os.environ, "AGENTICCAD_WORKSPACE": str(ws), "PORT": str(port), "MPLBACKEND": "Agg"}
 server = subprocess.Popen([str(ROOT / ".venv/bin/python"), "server.py"], cwd=ROOT, env=env, stdout=(out / "live-server.log").open("w"), stderr=subprocess.STDOUT)
-emu = subprocess.Popen([str(ROOT / ".venv/bin/python"), "tools/z1_emu.py", "--port", str(emu_port), "--cam-port", str(emu_cam)], cwd=ROOT,
+emu = subprocess.Popen([str(ROOT / ".venv/bin/python"), "tools/z1_emu.py", "--port", str(emu_port), "--cam-port", str(emu_cam), "--stock", "76,52"], cwd=ROOT,
                        stdout=(out / "live-emu.log").open("w"), stderr=subprocess.STDOUT)
 try:
     for _ in range(120):
@@ -229,21 +229,31 @@ try:
                     "the bore and the slot, V-carve the AGENTIC lettering with the 0.3 mm 30° engraving bit (0.3 mm max depth), chamfer "
                     "the plate's top edge 0.5 mm with the 90° chamfer bit, and cut the outline with four tabs. Simulate it.", "cam", timeout=900_000)
             ws_("cam"); page.wait_for_function("document.body.classList.contains('has-program')", timeout=60_000); page.wait_for_timeout(1500)
+            page.click("#home"); page.wait_for_timeout(1400)
             mark("clip:cam:start"); mark("still:cam-tree")
-            ops = page.query_selector_all("#cam-tree .ct-op")
-            for o in ops[:: max(1, len(ops) // 4)][:4]:          # walk a few operations: the Inspector shows each one
-                o.click(); page.wait_for_timeout(1300)
-            vc = page.query_selector("#cam-tree .ct-op:has-text('V-carve'), #cam-tree .ct-op:has-text('carve')")
-            if vc:
-                vc.click(); page.wait_for_timeout(600); page.click("#cv-scope [data-v=sel]"); page.wait_for_timeout(900)
-                js("document.getElementById('fit').click()"); page.wait_for_timeout(1200); zoom(4, (0.5, 0.62)); page.wait_for_timeout(900)
+            n_ops = js("document.querySelectorAll('#cam-tree .ct-op').length")
+            for k in sorted({0, n_ops // 3, (2 * n_ops) // 3})[:3]:   # walk a few operations: the Inspector shows each one
+                js("k => document.querySelectorAll('#cam-tree .ct-op')[k].click()", k); page.wait_for_timeout(1500)
+            vk = js("[...document.querySelectorAll('#cam-tree .ct-op')].findIndex(r => /vcarve|carve/i.test(r.textContent))")
+            if vk >= 0:
+                js("k => document.querySelectorAll('#cam-tree .ct-op')[k].click()", vk); page.wait_for_timeout(700)
+                page.click("#cv-scope [data-v=sel]"); page.wait_for_timeout(900)
+                page.click("#home"); page.wait_for_timeout(900); zoom(5, (0.5, 0.66)); page.wait_for_timeout(1200)
                 mark("still:cam-vcarve")
-                page.click("#cv-scope [data-v=all]"); page.wait_for_timeout(600); js("document.getElementById('fit').click()"); page.wait_for_timeout(900)
-            if js("+document.getElementById('sim-range').max === 0 || !document.getElementById('cam-dock').classList.contains('simmed')"):
+                page.click("#cv-scope [data-v=all]"); page.wait_for_timeout(600); page.click("#home"); page.wait_for_timeout(1000)
+                js("document.querySelectorAll('#cam-tree .ct-setup')[0].click()"); page.wait_for_timeout(600)
+            if not js("/complete/.test(document.getElementById('sim-info').textContent)"):
                 mark("wait:sim"); page.click("#sim-run")
-                page.wait_for_function("!document.getElementById('sim-run').disabled && !/…|Simulating/.test(document.getElementById('sim-run').textContent)", timeout=400_000)
+                page.wait_for_function("/complete/.test(document.getElementById('sim-info').textContent)", timeout=600_000)
                 page.wait_for_timeout(600); mark("done:sim")
             slide("#sim-range", 0, 1000, ms=7000, steps=100); page.wait_for_timeout(1500); orbit(-140, 20, ms=1600); mark("still:cam"); mark("clip:cam:end")
+            # the rendered simulation on the V-carve: metallic stock, the tool followed by the camera
+            if vk >= 0:
+                page.click("#sim-rendered"); page.wait_for_timeout(1500)
+                js("k => document.querySelectorAll('#cam-tree .ct-op')[k].dispatchEvent(new MouseEvent('dblclick', {bubbles: true}))", vk); page.wait_for_timeout(1200)
+                page.select_option("#sim-speed", "5"); mark("clip:camrender:start"); page.click("#sim-play"); page.wait_for_timeout(9000)
+                mark("still:cam-rendered"); page.wait_for_timeout(3000); page.click("#sim-play"); mark("clip:camrender:end")
+                page.click("#sim-rendered"); page.wait_for_timeout(1200); page.select_option("#sim-speed", "1")
 
             # Add operation without chat or code
             add = page.query_selector("#cam-tree .ct-add")
@@ -255,71 +265,118 @@ try:
         # ================================================================ TOOLS
         if "tools" in SCENES:
             page.click("#settings-btn"); page.wait_for_timeout(900)
-            nav = page.query_selector("[data-sp=tools], .set-nav [data-pane=tools], #modal [data-tab=tools]")
-            js("() => { const b = [...document.querySelectorAll('#modal button, #modal a, #modal div')].find(e => e.children.length === 0 && e.textContent.trim() === 'Tools'); b && b.click(); }")
+            page.click("#modal button:text-is('Tools'), #modal [role=tab]:text-is('Tools'), #modal .set-tab:text-is('Tools')")
             page.wait_for_timeout(1200); mark("clip:tools:start"); mark("shot:tools-list")
-            items = page.query_selector_all("#modal [data-pane=tools] .tlist .ti, #modal [data-pane=tools] [data-tool]")
-            for it in items[:6]:
-                it.click(); page.wait_for_timeout(1400)
-            vb = page.query_selector("#modal [data-pane=tools] :text('V-bit')")
-            if vb:
-                vb.click(); page.wait_for_timeout(1500)
+            n_t = js("document.querySelectorAll('.tl2-it').length")
+            for k in range(n_t):                                  # each tool: its packet photo, profile and size fields
+                js("k => document.querySelectorAll('.tl2-it')[k].click()", k); page.wait_for_timeout(1600)
+            ek = js("[...document.querySelectorAll('.tl2-it')].findIndex(e => /engrav|V-bit|30°/i.test(e.textContent))")
+            if ek >= 0:
+                js("k => document.querySelectorAll('.tl2-it')[k].click()", ek); page.wait_for_timeout(1500)
             mark("still:tools"); page.wait_for_timeout(1200); mark("clip:tools:end")
             page.keyboard.press("Escape"); page.wait_for_timeout(600)
 
         # ================================================================ MACHINE (Z1 emulator; clips are cropped to the strip + Inspector)
         if "machine" in SCENES:
+            def ms():
+                return js("fetch('/api/machine').then(r => r.json())")
+
+            def wait_ms(pred, timeout=180, label=None):
+                """Wait (polling the app's own /api/machine) until pred(state) is true."""
+                if label: mark(f"wait:{label}")
+                t_end = time.time() + timeout
+                while True:
+                    st = ms()
+                    if pred(st): break
+                    if time.time() > t_end: raise TimeoutError(f"machine state never got there: {label} {json.dumps(st)[:600]}")
+                    page.wait_for_timeout(500)
+                page.wait_for_timeout(700)
+                if label: mark(f"done:{label}")
+                return st
+
+            def idle(st):
+                return bool(st.get("connected") and st.get("status") and st["status"].get("state") == "Idle"
+                            and not (st.get("routine") and st["routine"].get("stage") in ("running", "awaiting")) and not st.get("jogging"))
+
+            def moved(timeout=120, label=None):
+                """After a command that moves: see it leave Idle (up to 5 s), then wait for Idle again."""
+                t_end = time.time() + 5
+                while time.time() < t_end and idle(ms()):
+                    page.wait_for_timeout(200)
+                return wait_ms(idle, timeout, label)
+
+            def act(sel, ok_text=None):
+                page.click(sel); page.wait_for_timeout(600)
+                if page.query_selector("#modal button.primary"):
+                    page.wait_for_timeout(700); page.click(f"#modal button.primary{':has-text(' + repr(ok_text) + ')' if ok_text else ''}"); page.wait_for_timeout(500)
+
+            def step(name):
+                page.click(f"[data-act=step][data-step={name}]"); page.wait_for_timeout(1000)
+
+            def tool_change(n):
+                step("prep"); page.fill("#mp-tc-num", str(n)); act("#mp-tc-go")
+                page.wait_for_selector("[data-act=confirm_tool]", timeout=90_000); page.wait_for_timeout(1800); mark(f"shot:fit-T{n}")
+                page.click("[data-act=confirm_tool]")
+                wait_ms(lambda st: idle(st) and (st.get("measured") or {}).get("tool") == n, 240, f"tc{n}")
+
             ws_("machine"); right("inspect")
             page.fill("#mv-host", f"127.0.0.1:{emu_port}/{emu_cam}"); page.wait_for_timeout(400)
             mark("clip:machine:start"); page.click("#mv-connect")
-            page.wait_for_function("window.MV && MV.st && MV.st.connected", timeout=30_000); page.wait_for_timeout(1500)
-            js("document.getElementById('mv-cam-on').checked = false; document.getElementById('mv-cam-on').dispatchEvent(new Event('change'))")
-            page.click("#ms-ctl"); page.wait_for_function("MV.st && MV.st.armed", timeout=10_000); page.wait_for_timeout(800)
-            page.click("#mp-machine [data-act=home]"); page.wait_for_timeout(600)
-            if page.query_selector("#modal button"): modal_ok()
-            mark("wait:home"); page.wait_for_function("MV.st && MV.st.homed && MV.st.status && MV.st.status.state === 'Idle'", timeout=120_000); page.wait_for_timeout(800); mark("done:home")
+            wait_ms(lambda st: st.get("connected") and st.get("fresh"), 30)
+            page.uncheck("#mv-cam-on"); page.wait_for_timeout(600)
+            page.click("#ms-ctl"); wait_ms(lambda st: st.get("armed"), 10)
+            act("#mp-machine [data-act=home]")
+            wait_ms(lambda st: st.get("homed") and idle(st), 180, "home")
             mark("still:machine-prepare")
 
-            def tool_change(n):
-                page.fill("#mp-tc-num", str(n)); page.click("#mp-tc-go"); page.wait_for_timeout(500)
-                if page.query_selector("#modal button"): modal_ok()
-                page.wait_for_selector("[data-act=confirm_tool]", timeout=60_000); page.wait_for_timeout(1800); mark(f"shot:fit-T{n}")
-                page.click("[data-act=confirm_tool]")
-                mark(f"wait:tc{n}"); page.wait_for_function(f"MV.st && MV.st.tool && MV.st.tool.number === {n} && !(MV.st.routine && ['running','awaiting'].includes(MV.st.routine.stage)) && MV.st.status.state === 'Idle'", timeout=180_000)
-                page.wait_for_timeout(800); mark(f"done:tc{n}")
+            # Z0 on the block top with the wired probe, then the 3D probe for the corners
+            tool_change(0)
+            step("manual"); page.select_option("#mm-space", "machine"); page.fill("#mm-gx", "-160"); page.fill("#mm-gy", "-160")
+            act("#mstep-manual [data-act=goto]"); moved(120, "goto")
+            act("#mstep-manual [data-act=autoz]"); wait_ms(lambda st: idle(st) and (st.get("origin") or {}).get("z"), 180, "autoz")
             tool_change(9999)
-
-            # Zero: find the block with three probed corners
-            page.click("[data-act=step][data-step=zero], .msteps [data-step=zero]"); page.wait_for_timeout(1200); mark("shot:zero")
+            step("zero"); page.wait_for_timeout(1500); mark("shot:zero")
+            X0, Y0, BW, BD = -191.28, -194.45, 76.0, 52.0       # the emulator's block (--stock 76,52) in the L-bracket corner
+            OVER = {"obr": (X0 + BW - 5, Y0 + BD - 5), "obl": (X0 + 5, Y0 + BD - 5), "ofr": (X0 + BW - 5, Y0 + 5)}
             for k in ("obr", "obl", "ofr"):
                 b = page.query_selector(f"#mz-find [data-act=pickc][data-k={k}]")
-                if b: b.click(); page.wait_for_timeout(600)
-                go = page.query_selector("#mstep-zero [data-act=probe3d], #mstep-zero button:has-text('Probe')")
-                if not go: break
-                go.click(); page.wait_for_timeout(500)
-                if page.query_selector("#modal button"): modal_ok()
-                mark(f"wait:probe-{k}")
-                page.wait_for_function("MV.st && MV.st.routine && ['done','failed'].includes(MV.st.routine.stage) && MV.st.status.state === 'Idle'", timeout=240_000)
-                page.wait_for_timeout(900); mark(f"done:probe-{k}")
-            sx = page.query_selector("#mz-find [data-act=origin3]:not([disabled])")
-            if sx:
-                sx.click(); page.wait_for_timeout(500)
-                if page.query_selector("#modal button"): modal_ok()
-                page.wait_for_timeout(2500)
+                if b: b.click(); page.wait_for_timeout(700)
+                if page.query_selector("#mz-seq [data-act=goto-corner]:not([disabled])"):
+                    act("#mz-seq [data-act=goto-corner]"); moved(120, f"over-{k}")
+                else:                                   # the app doesn't know where the block is: go there by hand
+                    x, y = OVER[k]
+                    step("manual"); page.select_option("#mm-space", "machine"); page.fill("#mm-gx", str(x)); page.fill("#mm-gy", str(y))
+                    act("#mstep-manual [data-act=goto]"); moved(120, f"over-{k}"); step("zero")
+                    b = page.query_selector(f"#mz-find [data-act=pickc][data-k={k}]")
+                    if b: b.click(); page.wait_for_timeout(500)
+                act("#mz-seq [data-act=lower]"); moved(120, f"lower-{k}")
+                n0 = len(ms().get("probes") or [])
+                act("#mz-seq [data-act=p3]")
+                wait_ms(lambda st: idle(st) and len(st.get("probes") or []) > n0, 300, f"probe-{k}")
+            page.wait_for_timeout(800); mark("shot:zero-found")
+            act("#mz-find [data-act=origin3]"); page.wait_for_timeout(2500)
             mark("still:machine-zero")
 
-            # Run: the first tool's block as an air cut
-            page.click("[data-act=step][data-step=run]"); page.wait_for_timeout(1500); mark("shot:run-ready")
-            first = js("(() => { const b = mvToolBlocks(program.ops.map((o, i) => ({...o, i})).filter(o => o.setup === MV.si))[0]; return b && b[0].tool.number; })()")
+            # Run: the first tool's operations as an air cut
+            prog = js("(() => { const p = window.agenticcad.program; return p && p.ops.map(o => ({ setup: o.setup, tool: o.tool && o.tool.number })); })()")
+            first = next((o["tool"] for o in (prog or []) if o.get("setup") == 0 and o.get("tool") is not None), None)
             if first is not None:
-                tool_change(int(first)); page.click("[data-act=step][data-step=run]"); page.wait_for_timeout(1200)
-            mark("still:machine-run-ready")
-            page.click("#mvp-run"); page.wait_for_timeout(800)
-            if page.query_selector("#modal button"): modal_ok()
-            page.wait_for_function("MV.st && MV.st.job && ['running','done'].includes(MV.st.job.stage)", timeout=120_000)
+                tool_change(int(first))
+            step("run"); page.wait_for_timeout(1500); mark("still:machine-run-ready")
+            page.click("#mvp-run")
+            try:
+                page.wait_for_selector("#modal button.primary", timeout=60_000)
+            except Exception:
+                page.screenshot(path=str(out / "run-refused.png"))
+                raise RuntimeError("Run gave no confirmation: " + js("document.getElementById('mv-msg').textContent"))
+            page.wait_for_timeout(1500); mark("shot:run-confirm"); page.click("#modal button.primary"); page.wait_for_timeout(500)
+            wait_ms(lambda st: st.get("job") and st["job"].get("stage") in ("running", "done"), 180, "upload")
             page.wait_for_timeout(9000); mark("still:machine-run")
             page.wait_for_timeout(5000); mark("clip:machine:end")
-            page.click("#mstrip button:has-text('Stop program'), [data-act=jobstop]", timeout=5000) if page.query_selector("#mstrip button:has-text('Stop program')") else None
+            sp = page.query_selector("#ms-abort")
+            if sp:
+                sp.click(); page.wait_for_timeout(600)
+                if page.query_selector("#modal button.primary"): page.click("#modal button.primary")
             page.wait_for_timeout(1500)
             ws_("design")
 

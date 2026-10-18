@@ -661,6 +661,11 @@ class Z1Emu:
 
 async def _main(a):
     emu = Z1Emu(speed=a.speed)
+    if a.stock:                                  # W,D[,top machine Z]: a block of that size in the L-bracket corner
+        w, d, *top = (float(v) for v in a.stock.split(","))
+        x0, y0, zt = -191.28, -194.45, (top[0] if top else -55.0)
+        emu.stock = (x0, x0 + w, y0, y0 + d)
+        emu.surface_z = lambda x, y: zt if (x0 <= x <= x0 + w and y0 <= y <= y0 + d) else -75.0
     port, cam = await emu.start(a.host, a.port, a.cam_port)
     print(f"Z1 emulator: control {a.host}:{port}, camera ws://{a.host}:{cam}/ws_video")
     while True:
@@ -672,5 +677,6 @@ if __name__ == "__main__":
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=2222)
     ap.add_argument("--cam-port", type=int, default=8282)
+    ap.add_argument("--stock", help="W,D[,top]: the block's size (mm) in the L-bracket corner, its top machine Z")
     ap.add_argument("--speed", type=float, default=1.0)
     asyncio.run(_main(ap.parse_args()))

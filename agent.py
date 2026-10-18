@@ -1090,11 +1090,11 @@ class CadAgent:
             if action == "stop_program":
                 await mc.job_abort(); return "Program stopped; spindle off."
             if action == "check_ops":
-                prep, info, label = self.program_for_ops(a.get("ops") or [], float(a.get("air") or 0))
+                prep, info, label = await asyncio.to_thread(self.program_for_ops, a.get("ops") or [], float(a.get("air") or 0))
                 chk = mc.check_job(prep)
                 return (f"{label}: {prep['lines']} lines, operations {[o['name'] for o in prep['ops']]}, tools {prep['tools']}, "
                         f"about {info['time_min']} min. " + "; ".join(chk["notes"]))
-            summary, do = self._machine_plan(action, a)
+            summary, do = await asyncio.to_thread(self._machine_plan, action, a)   # may build a big program: off the loop
         except ml.Refused as e:
             return f"Refused: {e}"
         except cam.CamError as e:

@@ -478,7 +478,7 @@ def prepare_program(gcode: str, op_names: list[str], air_cut: float = 0.0) -> di
         if re.search(r"\bG91\b(?!\.)", s_):
             raise Refused("the program uses relative moves (G91); only absolute programs are run")
         if re.search(r"\bG(38(\.\d)?|92|10)\b|\$H|\bM49[0-9]", s_):           # G28 is the Z1's park (clearance) move: fine
-            raise Refused(f"the program contains {s_!r}: homing, probing and offset changes stay with the Machine tab")
+            raise Refused(f"the program contains {s_!r}: homing, probing and offset changes stay with the Machine workspace")
         m6 = re.search(r"\bM0?6\b", s_)
         tw = re.search(r"\bT(\d+)", s_)
         if m6 and tw:
@@ -723,7 +723,7 @@ class MachineControl:
     def describe(self) -> str:
         """Plain-text status for the agent."""
         if not self.connected:
-            return "No machine connected (Machine tab ▸ Connect)."
+            return "No machine connected (Machine workspace ▸ Connect)."
         st = self._status() or {}
         mp, wp = st.get("mpos"), st.get("wpos")
         f = lambda v: ", ".join(f"{a:.3f}" for a in v) if v else "?"
@@ -1323,7 +1323,7 @@ class MachineControl:
             a, b = e[0] + wco[i], e[1] + wco[i]
             if a < lo - 1e-6 or b > hi + 1e-6:
                 raise Refused(f"the program reaches machine {ax.upper()} {a:.1f} .. {b:.1f} from the current work origin, "
-                              f"outside {lo:.1f} .. {hi:.1f}: check the work origin (Machine tab) and the setup")
+                              f"outside {lo:.1f} .. {hi:.1f}: check the work origin (Machine ▸ Zero) and the setup")
         ez = prep["extents"].get("z")
         if ez:
             notes.append(f"Z {ez[0]:.2f} .. {ez[1]:.2f} above work zero" + (f" (lifted {prep['air_cut']:g} mm: air cut)" if prep["air_cut"] else ""))

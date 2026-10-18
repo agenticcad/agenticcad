@@ -6157,7 +6157,8 @@ function mvLayout() {
 function mvCamera() {
   const img = mvEl('mv-cam-img'), want = mvVisible() && MV.camOn && MV.st && MV.st.connected;
   if (want && !img.dataset.on) { img.src = '/api/machine/camera?t=' + Date.now(); img.dataset.on = '1'; }
-  if (!want && img.dataset.on) { img.removeAttribute('src'); img.src = ''; delete img.dataset.on; }
+  if (!want && img.dataset.on) { img.removeAttribute('src'); delete img.dataset.on; }   // (src='' would show a broken image)
+  img.style.visibility = want ? '' : 'hidden';
   mvEl('mv-cam-off').style.display = want ? 'none' : '';
   mvEl('mv-cam-off').textContent = !(MV.st && MV.st.connected) ? 'Not connected' : 'Camera off';
   mvEl('mv-live').style.display = want ? '' : 'none';

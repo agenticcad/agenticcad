@@ -83,3 +83,37 @@ def test_moves_wait_for_approve_and_stops_do_not(ag):
         finally:
             await ag.machine.disconnect(); await emu.stop()
     asyncio.run(go())
+
+
+def test_building_a_big_program_does_not_stall_the_event_loop(ag, monkeypatch):
+    """Found filming the 1.0 tour: checking a 3-hour program built its G-code on the event loop, the machine's status went
+    stale meanwhile and the check refused ("no current status from the machine"); a real Z1 would also drop Control.
+    The program is built in a worker thread now: other coroutines (the status poll) keep running."""
+    import time as _t
+
+    def slow(ops, air=0.0):
+        _t.sleep(0.6)
+        raise ml.Refused("no CAM program")
+    monkeypatch.setattr(ag, "program_for_ops", slow)
+
+    async def go():
+        emu = Z1Emu(speed=40.0)
+        port, _ = await emu.start()
+        ag.machine = ml.MachineControl()
+        assert "Connected" in await ag.machine_action("connect", {"host": "127.0.0.1", "port": port})
+        ticks = 0
+
+        async def ticker():
+            nonlocal ticks
+            while True:
+                ticks += 1
+                await asyncio.sleep(0.05)
+        t = asyncio.create_task(ticker())
+        try:
+            r = await ag.machine_action("check_ops", {"ops": [0]})
+        finally:
+            t.cancel(); await ag.machine.disconnect(); await emu.stop()
+        return r, ticks
+    r, ticks = asyncio.run(go())
+    assert "no CAM program" in r
+    assert ticks >= 6, f"the loop stalled while the program was built ({ticks} ticks in 0.6 s)"
