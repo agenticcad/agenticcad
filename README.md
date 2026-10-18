@@ -1,19 +1,20 @@
 # AgenticCAD — agent-native CAD/CAM
 
-![AgenticCAD in a real session: describe a part in chat, the exact model appears, click a face, tweak it with the ribbon](docs/demo.gif)
+![AgenticCAD in a real session: describe a part to the Assistant, the exact model appears, click a face, tweak it from the Design toolbar](docs/demo.gif)
 
 Describe the part; a Claude agent writes [build123d](https://build123d.readthedocs.io) code, the exact
 OCCT kernel builds it, and the browser shows it live. Click faces, edges and bodies to reference them in
-chat, or use the Fusion-style ribbon to model by hand — every manual operation is written into the same
+chat, or use the Fusion-style toolbar to model by hand — every manual operation is written into the same
 script, so the design is always one reproducible Python file. Then generate GRBL toolpaths (adaptive
-clearing, contours with tabs, drilling, 3D finishing), shop drawings, STEP/STL and G-code.
+clearing, contours with tabs, drilling, 3D finishing), shop drawings, STEP/STL and G-code, and run the program on a
+Makera Z1 from the same window. CAM and machine control are **experimental**.
 
 > Website, docs and simulated tutorials: **https://agenticcad.github.io/agenticcad/**
 
 > Free for non-commercial use under the PolyForm Noncommercial 1.0.0 licence. Commercial use is A$99 per user per year — see [Licence](#licence).
 
 ```
-browser (three.js viewer · ribbon · sketch editor · chat)  <-- websocket -->  server.py (FastAPI)
+browser (three.js viewer · toolbar · sketch editor · chat) <-- websocket -->  server.py (FastAPI)
                                                                                |-- agent.py       Claude Agent SDK session + in-process MCP tools
                                                                                |-- cad_kernel.py  build123d exec, exact B-rep, display meshing, export
                                                                                |-- cam_kernel.py  2.5D/3D toolpaths, GRBL post
@@ -68,8 +69,14 @@ redistributes it; `agent.find_claude_cli()` locates the user's own install.
 
 ## UI
 
-![AgenticCAD in a real session: ribbon, Browser and Parameters cards, agent tool calls, 3D-printing preview](docs/screenshot.jpg)
+![AgenticCAD 1.0: the top bar with the File menu and the Design · CAM · Machine workspaces, the Design toolbar, Browser and Parameters docked on the left, Inspector · Assistant · Code on the right](docs/screenshot.jpg)
 
+- **Layout**: one top bar with the file (its name is the File menu), the workspaces **Design · CAM · Machine**
+  (CAM and Machine experimental), the machine's status (click it for the Machine workspace), **Assistant** and Settings.
+  The right column is **Inspector · Assistant · Code** in every workspace; the Inspector shows what you are working on
+  (the active command or the selection in Design, the selected operation or setup in CAM, the machine's steps in
+  Machine). Design has a one-row toolbar (less-used tools under *More*, Output and Extensions as menus) with the
+  Browser and Parameters docked on the left.
 - Click a face → chip in the composer; the message gets a `[Selected geometry]` block with the face's
   type/centre/normal/size so the agent can select the same face in code. Shift-click for several.
 - **Reference images**: attach photos, sketches or drawings with 📎, drag-and-drop onto the composer or
@@ -82,18 +89,18 @@ redistributes it; `agent.find_claude_cli()` locates the user's own install.
   since ids are renumbered on every rebuild).
 - Navigation: Fusion-style **ViewCube** top-right — click a face, edge or corner to look from there
   (animated, keeps zoom), drag it to orbit, `⌂` for the home/fit view. Left-drag orbits, right-drag (or ⌘/Ctrl/⇧ + left-drag on a trackpad) pans, wheel zooms.
-- Bottom toolbar: Fit, Edges, display-mesh quality, Undo (revert to previous build).
-- File menu: New / Open / Save / Save as / Import .py / Download .py / **Export STEP** / **Export STL…**
-  (dialog: resolution + all-or-one body).
-- Side panel: drag the divider to resize (double-click resets), `⟩` or ⌘B hides it, `⟨` tab on the right edge shows it again. Remembered per browser.
-- Code tab: the current script with Python syntax highlighting (CodeMirror); edit and Run (⌘↩) to rebuild without the agent.
+- Bottom bar of the viewer: Fit, Edges, display-mesh quality, Undo (revert to previous build).
+- File menu (the design's name in the top bar): New / Open / Save / Save as / Import .py / Import STEP / Download .py /
+  **Export STEP** / **Export STL…** (dialog: resolution + all-or-one body) / Shop drawings / Part library.
+- Right column: drag the divider to resize (double-click resets), `⟩` or ⌘B hides it, `⟨` on the right edge shows it again. Remembered per browser.
+- Code (right column): the current script with Python syntax highlighting (CodeMirror); edit and Run (⌘↩) to rebuild without the agent.
 - Every successful build is saved to `workspace/history/<ms>.py`.
 
 ## Designs (files)
 
 A design **is** its build123d script. `File ▸ Save / Save as…` writes `workspace/designs/<name>.py`;
 `Open…` lists them; `New` starts an empty design (a fresh workspace starts empty too); `Import .py…` uploads a script from disk;
-`Download .py` gives you the current one. The title shows the design name and a `•` when unsaved.
+`Download .py` gives you the current one. The File menu in the top bar shows the design name and a `•` when unsaved.
 The last-open design is reopened on restart. The agent gets a `[Note]` when you open/import/undo or
 edit the script by hand, so it re-reads the code before editing.
 
@@ -123,20 +130,20 @@ Deleting the last body at a level is refused.
 - **Parameters**: every top-level `name = number` in the script is an editable field in the Parameters card under the Browser (↑↓ ±1, ⇧ ±10, ⌥ ±0.1).
   Changing one rewrites that literal in the script and rebuilds; the agent is told. Agent tools:
   `get_parameters`, `set_parameters`.
-- **Measure** (📐 or `M`): click up to two faces/points in the viewer → point distance with Δxyz, minimum
+- **Measure** (toolbar ▸ Inspect ▸ Measure, or `I`): click up to two faces/points in the viewer → point distance with Δxyz, minimum
   face distance, plane gap, centre distance, angle between normals, hole axis spacing; click bodies in the
   Browser for volume/mass/centre of mass, two bodies for clearance or interference volume. Agent tools:
   `measure`, `mass_properties` (material names or g/cm³).
-- **Shop drawings** (ribbon ▸ Drawings, `D`, or File ▸ Shop drawings…; material and sheet in ⚙ Settings): third-angle front/top/right + iso with hidden
+- **Shop drawings** (toolbar ▸ Output ▸ Drawings, `D`, or File ▸ Shop drawings…; material and sheet in ⚙ Settings): third-angle front/top/right + iso with hidden
   lines, overall dimensions, hole callouts (n× Ø, THRU/depth), lettered holes with a coordinate table,
   title block (size, mass, scale, date). SVG per body + assembly, plus DXF of the view geometry
   ([drawing.py](drawing.py)). Agent tool: `make_drawings`.
 - **STEP import** (File ▸ Import STEP…, or drop a .step on the viewer): as a new body in the current design
   (`import_step("file.step")` is added to the script), as a new design, or straight into the library.
-- **Part library** (its own tab, and in the Browser): parts are parametric scripts (whole design saved with
+- **Part library** (File ▸ Part library…, which opens it in the right column, and **+ Part** in the Browser header): parts are parametric scripts (whole design saved with
   its parameters) or exact STEP bodies, with description, tags and thumbnail, in `workspace/library/<part>/`.
   Browser ▸ **+ Part** inserts one (adds `from_library("name", param=value)` as a new body); right-click a
-  body ▸ **Save to library…**; Library tab: search, insert, delete, + Design (parametric), + STEP.
+  body ▸ **Save to library…**; the Library pane: search, insert, delete, + Design (parametric), + STEP.
   The agent sees the part names in every turn and has `library` (list/search/get/insert/save_design/
   save_body/delete); it is told to check the library before modelling standard or reusable parts.
 - **Measure** snaps: vertex > edge > face point, with a live readout (line length, arc radius and sweep,
@@ -176,8 +183,8 @@ Agent-native, like the CAD side: a second script per design, `cam.py`, written b
 - **Libraries**: `workspace/machines/*.json` (travel, max feeds, rapid, spindle range, safe/clearance Z,
   tool-change policy `pause|manual|none|split`, collet, 4th axis, `max_stepdown` per material for the feeds
   calculator, start/end G-code blocks) and `workspace/tools.json` (feeds, plunge, stepdown, stepover and the tool's
-  shape). Edit them in **Settings ▸ Machines** (a form per machine, or JSON) and **Settings ▸ Tools** (an editable
-  table with the feeds & speeds calculator and a *Shape* editor that draws the tool to scale), or ask the agent
+  shape). Edit them in **Settings ▸ Machines** (a form per machine, or JSON) and **Settings ▸ Tools** (a list and an
+  editor that draws the tool to scale, with the feeds & speeds calculator; see [New in 1.0](#new-in-10-cam-and-machine--experimental)), or ask the agent
   (`save_machine`, `save_tool`).
 - **Tool shapes** ([tool_shape.py](tool_shape.py)): flat, ball, bull nose (corner radius), V-bit / engraver (angle + tip
   Ø), chamfer, drill (point angle) and tapered ball (ball Ø + taper per side), each with its flute length, an optional
@@ -187,7 +194,7 @@ Agent-native, like the CAD side: a second script per design, `cam.py`, written b
   axis maps; 2.5D operations plan a non-flat tool with its width at the cut depth (the top of the cut lands on the
   boundary) and say what its shape leaves (scallop height, sloped walls); the simulator cuts with the real profile up
   to the flute length and reports the body above the flutes, a neck or a wider shank meeting the stock as collisions.
-- **Per-operation tool settings**: click an operation in the CAM tab to see its tool's spindle speed, feed, plunge,
+- **Per-operation tool settings**: click an operation in the CAM tree; the Inspector's *Tool & feeds* shows its tool's spindle speed, feed, plunge,
   stepdown and stepover. Blank fields use the tool's values; anything you type overrides them for that operation
   only (with a calculator to fill them for a material). Overrides are one line at the top of `cam.py`,
   `overrides({"Pocket": {"feed": 500, "stepover": 0.3}})`, keyed by operation name (`"Face#2"` for the second op
@@ -201,14 +208,17 @@ Agent-native, like the CAD side: a second script per design, `cam.py`, written b
   change pauses, M30). WCS origin choices: stock-top-left / stock-top-center / stock-bottom-left /
   stock-bottom-center / model-origin / (x, y, z). Checks: machine travel, spindle range, feeds clamped,
   cutting below stock bottom, multi-tool with `tool_change=none`.
-- **UI**: CAM tab (setup, operations with colour/visibility and per-op tool settings, warnings, simulation, G-code
-  download/preview), toolpaths + stock + WCS origin drawn in the viewer (rapids red dashed),
-  simulation slider with a tool marker, Code tab switch to `cam.py`.
+- **UI**: the CAM workspace. The program, its setups, operations (colour/visibility) and the tools they use are a
+  tree on the left, with warnings, *Export G-code* and a G-code preview; the Inspector edits the selected operation
+  (Tool & feeds · Cut · Display) or setup (stock & origin, workholding, machine view). Toolpaths + stock + WCS origin
+  are drawn in the viewer (rapids red dashed) with *Selected op / All* and *Toolpath / Stock / Machine* toggles, and a
+  timeline of op-coloured blocks with Simulate, play, speed and a tool marker; `cam.py` is in Code (right column).
+  *Send to machine →* opens Machine ▸ Run with the setup's operations.
 - **Arcs**: the post fits G2/G3 to circular runs (chord-sagitta checked; `machine.arcs`, `machine.arc_tolerance`) in the form the machine's controller takes: `machine.arc_format` `"ij"` (centre offsets, every controller) or `"r"` (radius word; GRBL, Haas, LinuxCNC, not the Makera firmware), `machine.helical_arcs` for ramps. `cam.CONTROLLERS` lists what each post's controller accepts (arc forms, helical arcs, line length) with its source; collinear moves are merged. **Lead-in/out**: tangential quarter arcs on contours
   (`lead=`), start mid-way along the longest straight edge. **Adaptive**: see above. **Rest machining**:
   `rest_from=` on `pocket` / `adaptive` (2.5D, morphological opening) and `parallel3d` (3D tip-map difference).
   **Feeds & speeds**: `feeds(tool, material, machine)` / `apply_feeds(...)`, 13 materials, spindle and feed
-  clamping, radial chip thinning; calculator in Settings ▸ Tools ("Apply to tool") and per operation in the CAM tab; agent tool `feeds_speeds`.
+  clamping, radial chip thinning; calculator in Settings ▸ Tools ("Apply to T*n*") and per operation in the CAM Inspector; agent tool `feeds_speeds`.
 - **Setups**: a program can have several `Setup`s (`orient="top" | "bottom" | "front" | "back" | "left" |
   "right"`), each with its own WCS (G54, G55, …). Moves are in the setup frame; `setup.view(part)` gives the part
   as the machine sees it for `section`/`holes`. Between setups the post stops the spindle, parks and pauses for the
@@ -223,22 +233,22 @@ Agent-native, like the CAD side: a second script per design, `cam.py`, written b
   measures the tool after each manual change), M3 only after a tool is active, G28 park, M600 between setups,
   9 work offsets, no arcs while A moves, and A-axis feeds computed the way the firmware interprets F on mixed
   linear + rotary moves. Collet size is checked (1/8" standard).
-- **Rendered simulation**: *Rendered* in the CAM bar plays the program as a studio render: metallic stock machined
+- **Rendered simulation**: *Rendered* on the CAM timeline plays the program as a studio render: metallic stock machined
   live in front of you (the viewer stamps the tool along every move), a chrome holder with a spinning fluted tool, the
   camera following the cut with depth of field (Settings ▸ General to turn it off), and a HUD with the step, tool
   changes and the speed factor.
 - **Voxel stock**: the stock you watch being machined is a signed-distance voxel solid in a Web Worker
   ([static/voxel_stock.js](static/voxel_stock.js)), stamped with every move and meshed with surface nets, so walls
   are smooth and floors exact; Settings ▸ General ▸ *Simulation stock* falls back to a lighter height map.
-- **Playback**: the CAM bar plays the program at the machine's real pace (1×) scaled by a speed control (¼× to 100×,
-  in the CAM tab's *Playback* section and the bar; the choice is remembered): moves take their
+- **Playback**: the CAM timeline plays the program at the machine's real pace (1×) scaled by a speed control (¼× to 100×,
+  on the timeline; the choice is remembered): moves take their
   real time at the programmed feed and the machine's rapid rate, the tool moves continuously, ⏮ / ⏭ jump between
-  operations, the operations list shows setup headers and the operation being run (▶ plays from any of them), and on
+  operations, the CAM tree shows setup headers (▶ *Play from here* / *Play this setup* in the Inspector), and on
   the Machine view a flipped setup turns the work over on the table.
 - **Entries**: pocket and contour passes ramp into the material at 3° (`ramp=`, 0 to plunge) — pockets along the
   innermost ring that is long enough (a helix on a small ring), contours along the profile with one entry per ring
   and no retract between passes — and face passes plunge clear of the stock; helical ramps post as G2/G3 arcs.
-- **Simulation**: `simulate_cam` (agent) or **Simulate** in the CAM bar runs a material-removal simulation of all
+- **Simulation**: `simulate_cam` (agent) or **Simulate** on the CAM timeline runs a material-removal simulation of all
   visible ops or one: a two-sided height map for top/bottom setups, a radial map for 4th-axis setups. The viewer
   shows the stock being cut in step with the slider, with gouges in red and material left in amber on the last
   frame; the summary reports removed volume, gouges (depth, area, which op), material left on the part, stock
@@ -247,7 +257,7 @@ Agent-native, like the CAD side: a second script per design, `cam.py`, written b
   kinematic 3D model built in build123d from published and measured numbers — Makera Z1 and Carvera Air (bed with the
   real hole grid, moving bed in Y under the rear bridge, head in X/Z, 4th-axis chuck and tailstock, enclosure), Haas
   VF-2 / VF-2SS / VF-4 / Mini Mill / TM-1 (table with the real T-slots, saddle, column, CAT40 + ER32 holder, nose-to-
-  table range) and a parametric gantry router for everything else. **Machine** in the ribbon (CAM tab, `A`) shows the
+  table range) and a parametric gantry router for everything else. **Machine** in the CAM toolbar (`A`) or the viewer's *Machine* toggle shows the
   program's machine around the stock and plays the simulation on it: head, table and chuck move as they would, the
   tool hangs from the spindle, and any part the simulator saw collide flashes red at that move. The simulation itself
   checks the whole stack above the flutes (shank, collet nut, nose, collar, head) against the remaining stock, the
@@ -260,9 +270,9 @@ Agent-native, like the CAD side: a second script per design, `cam.py`, written b
   pivot)`, `part(name, node, shape, material, collision)` and `machine(home, travel, clearance, nose, table, rotary,
   spoilboard, sources, notes)`, with helpers (`box`, `cyl_z/x/y`, `shell`, `bed_holes`, `import_step` for vendor CAD).
   The built-ins live in [machine_scripts/](machine_scripts/) and are the fallback for any machine without its own
-  script, so **Code tab ▸ machine.py** always has a starting point: edit, Run, and the machine has its own model.
-  The **CAM tab ▸ Machine view** section picks any library machine, shows or hides it (no program needed) and opens or
-  closes its doors; door nodes (`node(..., door="hinge"|"slide", ...)`) animate in the viewer. **Settings ▸ Machines ▸
+  script, so **Code ▸ machine.py** always has a starting point: edit, Run, and the machine has its own model.
+  The **Machine view** section of a setup's Inspector (CAM workspace) picks any library machine, shows or hides it and
+  opens or closes its doors; door nodes (`node(..., door="hinge"|"slide", ...)`) animate in the viewer. **Settings ▸ Machines ▸
   Model** has *Show in viewer* and *Edit as script…*; the agent's
   `get_machine_code` / `build_machine` do the same from chat ("add my Shapeoko 5 Pro to the library and model it"), and
   photos dropped into the chat are used as references: the built-in Z1, Carvera Air and Haas VF-4 models were made that
@@ -272,10 +282,10 @@ Agent-native, like the CAD side: a second script per design, `cam.py`, written b
   it around the stock and on the machine, and the simulator reports the tool or holder touching any fixture part as a
   collision. Built-ins: Makera low-profile vise, Carvera Air vise, 4" screwless vise, 6" Kurt-style vise, tooling
   plate, step clamps. Fixtures are scripts (`fixture_scripts/`, `workspace/fixtures/<slug>.fixture.py`) like machine
-  models: `part(...)` + `fixture(name, work_origin, clamp_axis, ...)`, editable in **Code tab ▸ fixture.py**, listed in
-  **Settings ▸ Fixtures**, picked per setup in the CAM tab, and written by the agent with `build_fixture`. Several
-  fixtures can be on the table at once (`fixtures=[{"name", "at", "rot", "params"}]` or the CAM tab's Fixtures
-  panel: pick, move, turn, add, remove); every one is drawn and collision-checked, and overlaps are warned about. The
+  models: `part(...)` + `fixture(name, work_origin, clamp_axis, ...)`, editable in **Code ▸ fixture.py**, listed in
+  **Settings ▸ Fixtures**, picked per setup in the setup Inspector's *Workholding*, and written by the agent with `build_fixture`. Several
+  fixtures can be on the table at once (`fixtures=[{"name", "at", "rot", "params"}]` or the setup Inspector's
+  *Workholding*: pick, move, turn, add, remove); every one is drawn and collision-checked, and overlaps are warned about. The
   Makera Z1 low-profile vise is modelled from Makera's dimensions (226 × 103 mm, jaws along X to 130 mm, thin stock
   on 20 mm ledges) and bolts to the bed with the spoilboard removed. The Z1's spindle head comes from Makera's own
   simplified CAD, and a machine's nose stack can describe an off-centre head as boxes about the spindle axis, so the
@@ -284,9 +294,13 @@ Agent-native, like the CAD side: a second script per design, `cam.py`, written b
 
 ## Machine control (Makera Z1 over Wi-Fi) — experimental
 
-The **Machine** tab (next to Extensions) connects to a networked machine: live status and positions, the machine's
-camera, Hold / STOP, homing, jogging, go-to, the probe laser, dust collector and light, tool changes and the auto Z
-probe. First driver: the Makera Z1 (TCP 2222 framed protocol, UDP 3333 discovery, camera on `ws://<ip>:82/ws_video`;
+The **Machine** workspace (Design · CAM · Machine in the top bar) connects to a networked machine: live status and
+positions, the machine's camera, Hold / STOP, homing, jogging, go-to, the probe laser, dust collector and light, tool
+changes and the auto Z probe. A status strip (state, position, tool, Control, Hold / Pause / Stop program, STOP) sits
+over the camera with the jog pad on it, and the Inspector takes you through four steps: **Prepare** (connect, home,
+tool change, accessories), **Zero** (what the setup wants next to what set the machine's origin, the 3D probe,
+*Find the block*), **Run** and **Manual**.
+First driver: the Makera Z1 (TCP 2222 framed protocol, UDP 3333 discovery, camera on `ws://<ip>:82/ws_video`;
 [machine_link.py](machine_link.py) documents what was read from the firmware and checked on a real machine). Other
 machines later.
 
@@ -314,22 +328,25 @@ Safety rules in `machine_link`:
 - **Home first** (Z goes up first), Idle, one move at a time; jogs of at most 10 mm (Z down 1 mm, slower); go-to
   moves XY only with Z at the top; every target inside the travel box and a Z floor in work coordinates.
 - **Never sent:** bare `M490` (on the Z1 it drives the Z motor's pins through a tool-changer routine the machine
-  doesn't have) and `M498.2` (erases the stored tool lengths and G54). No free-form G-code and no manual spindle
-  control.
-- **Running operations** (experimental; the upload is not yet tried on a real Z1 — start with an air cut): the Machine
-  tab's *Program panel* lists the CAM program's setups and operations; tick some (one setup at a time) and *Run*. The
+  doesn't have) and `M498.2` (erases the stored tool lengths and G54). No free-form G-code except one line at a time
+  from Machine ▸ Manual's console (each line confirmed; the commands above, machine settings, tool changes and probing
+  refused), and no spindle control buttons.
+- **Running operations** (experimental; tried on a real Z1 with air cuts and first jobs — always air-cut first, run one tool at a time and stay at the machine): Machine ▸
+  **Run** lists the CAM program's setups and operations under a readiness checklist (CAM's *Send to machine →* opens it
+  with the setup's operations ticked); tick some (one setup at a time) and *Run…*. The
   app builds those operations' G-code, removes comments, refuses lines over 62 characters (the Z1 plays lines from
   64-byte slots), relative moves, probing and offset changes, checks the program's X/Y reach against the travel from
   the machine's current work origin, then uploads it to the machine's SD the way MakeraStudio does (a pull protocol
   in 8 KB packets with an MD5) and starts it with `play`. Progress comes from the machine's status (`|P:` line,
   percent, time) and is shown per operation, on the phone too; tool changes inside the program stop for you and are
-  measured by the machine. *Air cut* runs it N mm higher first. Pause (`suspend`), Resume and *Stop program*
+  measured by the machine. *Air cut first* runs it N mm higher first. Pause (`suspend`), Resume and *Stop program*
   (`abort`, spindle off) stay available, as do Hold and STOP.
 - Alarms show their reason and the way out (Unlock, release the e-stop, reset, or power-cycle); positions are shown
   as unknown while held or in alarm (the Z1 then reports the planned position, not where the head stopped).
-- The agent can read the machine (`machine_status`: state, positions, a camera frame) but cannot command it.
+- The agent reads the machine (`machine_status`: state, positions, a camera frame) and asks before it acts on it: see
+  *assistant approval cards* below.
 
-**Phone control** (Settings ▸ Phone control, off by default): a phone page for the Machine tab — live camera, STOP,
+**Phone control** (Settings ▸ Phone control, off by default): a phone page for the Machine workspace — live camera, STOP,
 Hold / Resume / Unlock, Control, jog pad, tool change with a pinned Confirm bar while the machine waits, origin and
 auto Z probe, laser / dust / light. Turning it on starts a second listener on the local network (the desktop app stays
 on 127.0.0.1) that serves only that page and the machine endpoints, each call checked against a random key carried in
@@ -341,10 +358,39 @@ applies unchanged. Plain HTTP on the local network: turn it off when you don't n
 setter, a stock block and an optional pocket, the camera) used by `tests/test_machine_link.py`; like the real firmware it does not stop
 a jog past the end, so the tests prove the guard does.
 
+## New in 1.0 (CAM and machine) — experimental
+
+- **Add operation** (CAM tree ▸ *+ Add operation*, no chat or code): face, adaptive clearing, pocket (floors picked in
+  the viewer), contour, drill, 3D finish, **chamfer edges** and **V-carve**, each written as one `program.add(...)` line
+  in cam.py. *Chamfer edges* puts a chamfer of a given width on the top edges of picked faces or the part's outline,
+  with a V-bit or chamfer tool, the tip size included in the offset; bigger chamfers take several laps. *V-carve* cuts
+  letters or a logo along their centrelines, as deep as each stroke is wide, so the top edge follows the outline and
+  corners come out sharp; *Max depth* gives wide strokes a flat bottom; taken in levels, linked at depth.
+- **Settings ▸ Tools** is a list and an editor that describes each tool the way its packet does (V 30° · tip Ø0.1 ·
+  Ø3.175, ball R1, Ø2 · 6 mm flutes). A V-bit has its included angle, **Tip Ø**, body Ø and cutting height; a ball
+  nose its **Ball radius R**; a bull nose its corner radius. Type the packet's label (`0.1mm x 3.175mm 30deg`) and
+  **Fill** sets them; **Sharp point** marks a true zero tip. A V tool without a tip Ø warns instead of being treated as
+  sharp.
+- **Tool photos** (Settings ▸ Tools ▸ *Add photo…*, or drop / paste): crop each tool (or its packet) out of a photo;
+  the picture shows wherever you pick a tool up: the tool-change card, Prepare's *Change to*, the CAM tools list and
+  the phone.
+- **Find the block** (Machine ▸ Zero, Z1 3D probe): the front-left corner of a block in the L-bracket can't be probed,
+  so probe the other three outside corners, then *Set X0 Y0* puts X0 Y0 at the front-left corner at the measured
+  faces, with the block size checked against the setup.
+- **Manual** (Machine ▸ Manual): go to (Z goes up first), set the work origin at the head or by typing, any 3D-probe
+  routine, a one-line console (each line confirmed; blocked commands refused) and *Run a file* (any .nc) with the same
+  checks as a program.
+- **Assistant approval cards**: the assistant can work the machine (`machine_control`). Hold, pause, stop program and
+  STOP run at once; everything else is checked, then posted as a card in the chat and on the Machine page and runs
+  only when you click **Approve** (typed text never approves). It can also edit operations and workholding and add
+  operations (`cam_edit`).
+- **Spindle fan** on the Z1 (Prepare ▸ Accessories, the phone, the assistant), on/off with a speed; accessory states
+  are read back from the machine.
+
 ## 3D printing (external slicer)
 
 AgenticCAD does not bundle a slicer. If **OrcaSlicer** (or Bambu Studio, same CLI) is installed on the computer
-the ribbon gets a **Slice** button (`P`), ⚙ Settings gets a **3D printing** section and the agent gets two extra tools; otherwise none of them exist.
+the toolbar's Output menu gets **Slice** (`P`), ⚙ Settings gets a **3D printing** section and the agent gets two extra tools; otherwise none of them exist.
 
 - **Detection**: `/Applications/OrcaSlicer.app` (macOS), `Program Files\OrcaSlicer` (Windows), `orca-slicer` on PATH
   (Linux); override with `AGENTICCAD_SLICER=/path/to/exe[::/path/to/profiles]`. Printer, quality and filament
@@ -362,12 +408,12 @@ the ribbon gets a **Slice** button (`P`), ⚙ Settings gets a **3D printing** se
   weight/length, slicer warnings) and G-code / 3MF downloads; the model hides while previewing (toggle).
 - Not a slicer UI: for per-object settings, modifiers, painting or multi-plate work, open the 3MF in the slicer.
 
-## Settings (the Settings button next to File, or File ▸ Settings…)
+## Settings (the gear at the right of the top bar)
 
 Model (default Claude Opus 5.5; any Claude model id, or the Claude Code default), effort (low…max), max steps per turn, thinking
 summary on/off, web tools on/off, extra standing instructions, and **MCP servers** (stdio / http / sse
 configs as JSON, enable toggles, live connection status from the session). Saved to
-`workspace/settings.json`. Tabs: General, MCP servers, Drawings & printing, Machines, Tools (the CAM libraries). "Save & restart agent" starts a fresh session with the new options (the agent
+`workspace/settings.json`. Tabs: General, MCP servers, Extensions, Drawings & printing, Machines, Fixtures, Tools (the CAM libraries), Phone control. "Save & restart agent" starts a fresh session with the new options (the agent
 is told its earlier chat history is gone). API: `GET/POST /api/settings`, `GET /api/agent/status`,
 `POST /api/agent/restart`.
 
@@ -445,7 +491,7 @@ def check(ctx): ...
 
 Panels are declared, not coded: a JSON schema of sliders, numbers, selects, checkboxes, face/body pickers (click →
 next click in the viewer fills it), tables whose rows select the face they describe, key/values, badges, images and
-buttons. The browser renders them in an **Extensions** ribbon group with the app's own styling, so they keep working
+buttons. The browser renders them from the **Extensions** menu in the Design toolbar with the app's own styling, so they keep working
 across releases. Everything a panel or tool does to the model goes back through a result dict (`set_params`, `wrap`
 a body's expression, `append` / `edits`, `code`, `select`, `highlight`, `chat` to ask the agent, `ui` to show more),
 so extension code stays plain synchronous Python with read access to the model (`ctx.model`, `ctx.bodies`,
@@ -473,12 +519,13 @@ with real threads, as `exports/<design>-<name>.step` / `.stl`. The agent has the
 tool (list / set / delete / activate / export), and can write the dict directly. The active variant is remembered per
 workspace.
 
-### Modelling ribbon (Fusion-style, tabbed, no agent turn)
-Top of the viewer: **Create** Box `B` / Cylinder `C` / Sphere `O` / Sketch `K` / Revolve `R` / Loft `G` / Sweep `W`,
-**Modify** Press/Pull `Q` / Hole `H` / Fillet `F` / Chamfer `X` / Shell `L` / Move `V` / Mirror `M` / Pattern `N`,
-**Inspect** Measure `I` / Section `S` / Interference `J`. Hover for a tooltip
-with the shortcut and what to click. A tool opens a command dialog under the ViewCube that walks you
-through it: step indicator, a live prompt ("Click a face…"), chips for what you picked (× to drop),
+### Modelling toolbar (Fusion-style, no agent turn)
+One row above the viewer in the Design workspace: **Create** Box `B` / Cylinder `C` / Sphere `O` / Sketch `K` /
+Revolve `R` / Loft `G` / Sweep `W`, **Modify** Press/Pull `Q` / Hole `H` / Fillet `F` / Chamfer `X` / Shell `L` /
+Move `V` / Mirror `M` / Pattern `N`, **Assemble** Joint `T`, **Inspect** Measure `I` / Section `S` / Interference `J`;
+the less-used tools sit under each group's *More*, and **Output** (Render `E`, Drawings `D`, Slice `P`) and
+**Extensions** are menus. Hover for a tooltip with the shortcut and what to click. A tool opens its command in the
+Inspector (right column), which walks you through it: step indicator, a live prompt ("Click a face…"), chips for what you picked (× to drop),
 fields with units (↑↓ ±1, ⇧ ±10, ⌥ ±0.1), ↵ OK, ⌫ removes the last pick, Esc cancels. Every operation is written as code on the body's
 expression in `result` — e.g. `_bracket = bp.part` hoisted before `result`, then
 `"Bracket": _bracket + extrude(_bracket.faces().sort_by_distance((9, 0, 24))[0], amount=5, dir=(0, 0, 1))`
@@ -588,7 +635,7 @@ result = {"Motor": motor, "Stage": kit.place(stage, Pos(0, 0, 13)),
 
 ## Versioning
 
-`version.py` holds the version (shown as a badge in the header; click it for the changelog). Every
+`version.py` holds the version (shown next to the AgenticCAD name at the left of the top bar; click it for the changelog). Every
 feature or fix gets a line in `CHANGELOG.md` under the next version, and a release is a bump in
 `version.py` plus a git tag:
 
@@ -597,7 +644,7 @@ feature or fix gets a line in `CHANGELOG.md` under the next version, and a relea
 git commit -am "Release 0.10.0" && git tag v0.10.0
 ```
 
-Pre-1.0: minor bump for features, patch bump for fixes. `/api/version` serves both to the UI.
+Minor bump for features, patch bump for fixes, major bump when scripts or workspaces need changing. `/api/version` serves both to the UI.
 
 ## Tests and evals
 
@@ -628,11 +675,11 @@ Pre-1.0: minor bump for features, patch bump for fixes. `/api/version` serves bo
 
 ## Status, gaps and roadmap
 
-**Status (v0.17.x):** working end to end on a single machine for a single user — design by chat, by
-hand, or both; multi-body designs; sketches; threads; measurement; drawings; part library; CAM with a
-GRBL post; settings for model/effort/MCP servers; unit tests and graded agent evals. Treat it as a
-capable prototype, not a shipped product: the modelling kernel is exact and the toolpaths are checked,
-but nothing here has been run on a real machine yet by anyone but the author.
+**Status (v1.0):** working end to end on a single machine for a single user — design by chat, by
+hand, or both; multi-body designs and assemblies; constrained sketches; threads; measurement; drawings; part library;
+extensions; CAM with GRBL, Makera, Haas and LinuxCNC posts; Makera Z1 control; unit tests and graded agent evals. The
+modelling kernel is exact and the toolpaths are checked and simulated, but **CAM and machine control are
+experimental**: they have been run on a real machine only by the author so far.
 
 ### Known gaps
 - **One project, one session.** A single global design and one agent session per server; two browsers
@@ -644,8 +691,7 @@ but nothing here has been run on a real machine yet by anyone but the author.
   programs are simulated separately. Time estimates ignore acceleration.
 - **Adaptive corners rely on feed reduction**, not on geometry: the engagement still rises at sharp concave
   corners and around small islands, where the feed drops instead. No trochoidal slotting op, no rest for 3D, no Z-level (waterline) finishing.
-- **Sketches have no constraint solver**: dimensions apply when you place or drag a point and are not kept as
-  relationships; no sketch fillet, trim or offset.
+- **Sketches** have constraints and dimensions but no sketch fillet, trim or offset.
 - **Manual tools are typed, not dragged** (except Press/Pull): no drag handles for primitives,
   no mates/joints for positioning library parts. Patterns copy whole bodies (no feature or face patterns).
 - **Drawings** have overall dimensions and hole tables only; no section views, no feature

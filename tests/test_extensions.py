@@ -96,6 +96,10 @@ def test_workspace_save_validate_toggle_delete(tmp_path):
     # hooks and panels
     assert E.run_hooks(X.Ctx(ck.run_script("wall = 1\nresult = Box(10, 10, wall)"), tmp_path)) == ["thin_wall: wall is under 2 mm"]
     ui = E.render("my_tuner.wall_tuner", X.Ctx(m, tmp_path, state={"wall": 7}))
+    # a near-miss panel id in a module with one panel finds it (the agent named one 'x.x_panel'); a wrong module doesn't
+    assert E.panel("my_tuner.wall_tuner_panel").id == "my_tuner.wall_tuner"
+    with pytest.raises(X.ExtError, match="no panel"):
+        E.panel("nope.wall_tuner")
     assert ui["children"][0]["value"] == 7 and ui["children"][0]["call"] == "thicken"
     # a clash with another extension's names is refused; disable hides it from every lookup; delete removes the file
     with pytest.raises(X.ExtError, match="taken"):

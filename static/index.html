@@ -503,6 +503,7 @@
   #leftcol #tree .hd, #leftcol #params-card .hd { font-size:11px; font-weight:600; letter-spacing:.06em; color:var(--mut2); }
   /* viewer overlays now start at the viewer's own top */
   #cubewrap { top:12px; } #simhud .hud-tl, #simhud .hud-tr { top:14px; } #sketch-items { top:60px; }
+  #sketch-panel { left:12px; transform:none; max-width:calc(100% - 330px); }   /* the item list sits at the right: never under the bar's Finish */
   /* right column: Inspector · Assistant · Code (Library while open) */
   #side { background:var(--panel); }
   #tabs { padding:0 6px 0 8px; gap:2px; height:44px; flex:none; }
@@ -539,7 +540,8 @@
   /* status strip */
   #mstrip { display:none; flex:none; height:64px; align-items:center; gap:16px; padding:0 14px; background:var(--panel); border-bottom:1px solid var(--line); position:relative; z-index:6; }
   body[data-ws=machine] #mstrip { display:flex; }
-  .xp { display:inline-block; font-size:10px; font-weight:600; letter-spacing:.04em; text-transform:uppercase; color:#f0b44c; border:1px solid rgba(240,180,76,.45); border-radius:9px; padding:0 6px; line-height:16px; vertical-align:1px; margin-left:6px; }
+  details.retried { opacity:.45; } details.retried .args { display:none; }
+  .expbadge { display:inline-block; font-size:10px; font-weight:600; letter-spacing:.04em; text-transform:uppercase; color:#f0b44c; border:1px solid rgba(240,180,76,.45); border-radius:9px; padding:0 6px; line-height:16px; vertical-align:1px; margin-left:6px; }
   .xp-note { font-size:12px; color:var(--muted); border-left:2px solid rgba(240,180,76,.7); padding:4px 0 4px 10px; margin:0 0 10px; }
   .ms-badge { padding:5px 12px; border-radius:7px; font-weight:700; font-size:12px; letter-spacing:.06em; background:var(--s3); color:var(--muted); white-space:nowrap; display:flex; align-items:center; gap:7px; }
   .ms-badge::before { content:""; width:8px; height:8px; border-radius:50%; background:currentColor; }
@@ -654,6 +656,7 @@
   .ct-setup .wcs { font-size:10.5px; color:var(--accent2); border:1px solid rgba(78,161,255,.4); border-radius:8px; padding:0 6px; }
   .ct-setup .sub { grid-column:2 / 4; color:var(--muted); font-size:11.5px; }
   .ct-op { display:flex; align-items:center; gap:7px; padding:5px 8px 5px 24px; border-radius:7px; cursor:pointer; font-size:12.5px; }
+  .ct-op.cur .nm::before { content:'▶ '; color:var(--accent); font-size:10px; }
   .ct-op:hover { background:rgba(255,255,255,.03); } .ct-op.sel { background:rgba(78,161,255,.14); box-shadow:inset 2px 0 0 var(--accent2); }
   .ct-op .dot { width:9px; height:9px; border-radius:3px; flex:none; } .ct-op .nm { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .ct-op .ed { display:inline-block; width:6px; height:6px; border-radius:50%; background:var(--accent); margin-left:6px; vertical-align:2px; }
@@ -780,7 +783,7 @@
           <hr>
           <div data-act="library">Part library…</div>
     </div></div>
-  <nav id="ws" role="tablist"><button type="button" data-rtab="design" class="on">Design</button><button type="button" data-rtab="cam" title="CAM is experimental: check every program in the simulation and with an air cut">CAM<span class="xp">Experimental</span></button><button type="button" data-rtab="machine">Machine</button></nav>
+  <nav id="ws" role="tablist"><button type="button" data-rtab="design" class="on">Design</button><button type="button" data-rtab="cam" title="CAM is experimental: check every program in the simulation and with an air cut">CAM<span class="expbadge">Experimental</span></button><button type="button" data-rtab="machine">Machine</button></nav>
   <div class="tb-right">
     <button id="mpill" class="mpill off" title="The machine: click for the Machine workspace"><i class="d"></i><b id="mpill-name">No machine</b><span id="mpill-state">not connected</span></button>
     <button id="asst-btn" class="tb-asst" title="The assistant: chat with the agent (⌘B hides the right column)"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l2.2 6.6L21 11l-6.8 2.4L12 20l-2.2-6.6L3 11l6.8-2.4z"/></svg>Assistant</button>
@@ -829,7 +832,7 @@
       <div class="cl-acts"><button class="btn" id="gcode-dl" title="Download the program for the machine">Export G-code</button><button class="btn pri" id="cp-send" title="Machine ▸ Run with the selected setup's operations">Send to machine →</button></div>
       <div class="cl-sub"><a href="#" id="gcode-preview" title="Show the start of the G-code">G-code</a><span class="muted" id="cam-gcode-meta"></span><a href="#" data-open-libs="machines" style="margin-left:auto" title="Settings ▸ Machines and Tools">Machines &amp; tools</a></div>
       <pre id="gcode-pre" style="display:none"></pre></div>
-    <div id="cam-empty" class="cam-sec" style="color:var(--muted)"><span class="xp" style="margin:0 0 8px">Experimental</span><br>No CAM program yet. Ask the agent, e.g. <i>"Make a CAM program for the Generic 3018: face the stock, drill the holes, pocket the bore and cut the outline with 4 tabs."</i> The agent writes <code>cam.py</code> (see the Code tab) against your machine and tool libraries. <div style="margin-top:8px"><button class="btn small" data-open-libs="machines">Machines &amp; tools…</button></div></div>
+    <div id="cam-empty" class="cam-sec" style="color:var(--muted)"><span class="expbadge" style="margin:0 0 8px">Experimental</span><br>No CAM program yet. Ask the agent, e.g. <i>"Make a CAM program for the Generic 3018: face the stock, drill the holes, pocket the bore and cut the outline with 4 tabs."</i> The agent writes <code>cam.py</code> (see the Code tab) against your machine and tool libraries. <div style="margin-top:8px"><button class="btn small" data-open-libs="machines">Machines &amp; tools…</button></div></div>
     <div id="cam-tree"></div>
     <div id="cam-tools"></div>
   </div>
@@ -1173,7 +1176,7 @@ function renderStats() {
   const data = lastStatsData; if (!data) return; const emptyDesign = !data.bodies.length;
   const kinds = {}; for (const f of data.faces) kinds[f.kind] = (kinds[f.kind] || 0) + 1;
   const tris = data.bodies.reduce((n, b) => n + b.indices.length / 3, 0);
-  document.getElementById('stats').textContent = emptyDesign ? 'empty design — describe a part in the chat, use the ribbon (B for a box), or write build123d in the Code tab' : `exact B-rep: ${data.bodies.length} bod${data.bodies.length === 1 ? 'y' : 'ies'}, ${Object.entries(kinds).map(([k, n]) => `${n} ${k.toLowerCase()}`).join(', ')} · ${L1(bbox.max.x-bbox.min.x)} × ${L1(bbox.max.y-bbox.min.y)} × ${L1(bbox.max.z-bbox.min.z)} ${units} · display mesh ${data.quality || ''} ${tris} tris`;
+  document.getElementById('stats').textContent = emptyDesign ? 'empty design — describe a part in the chat, use the toolbar (B for a box), or write build123d in Code' : `exact B-rep: ${data.bodies.length} bod${data.bodies.length === 1 ? 'y' : 'ies'}, ${Object.entries(kinds).map(([k, n]) => `${n} ${k.toLowerCase()}`).join(', ')} · ${L1(bbox.max.x-bbox.min.x)} × ${L1(bbox.max.y-bbox.min.y)} × ${L1(bbox.max.z-bbox.min.z)} ${units} · display mesh ${data.quality || ''} ${tris} tris`;
   if (data.quality) document.getElementById('quality').value = data.quality;
   renderTree();
 }
@@ -1971,7 +1974,7 @@ function renderCamTab() {
     for (const [op, i] of mine) {
       const r = document.createElement('div'), vis = camOps[i] ? camOps[i].visible : true;
       const nov = Object.keys(opOverrideSet(op)).length;
-      r.className = 'ct-op' + (camSel.kind === 'op' && camSel.key === op.key ? ' sel' : '') + (vis ? '' : ' hid');
+      r.className = 'ct-op' + (camSel.kind === 'op' && camSel.key === op.key ? ' sel' : '') + (vis ? '' : ' hid') + (i === curOpIdx ? ' cur' : ''); r.dataset.op = i;
       r.innerHTML = `<span class="dot" style="background:${op.color}"></span><span class="nm">${esc(op.name)}${nov ? '<i class="ed" title="settings changed in the CAM tab"></i>' : ''}</span>
         <span class="eye" title="${vis ? 'Hide (not shown, not simulated)' : 'Show'}">${vis ? '◉' : '○'}</span><span class="kind">${esc(op.kind)}</span><span class="tchip">T${op.tool ? op.tool.number : '?'}</span><span class="tm">${op.time.toFixed(1)}m</span>`;
       r.title = Object.entries(op.params || {}).map(([k, v]) => `${k}=${Array.isArray(v) ? v.join('×') : (typeof v === 'number' ? +v.toFixed(3) : v)}`).join('  ');
@@ -2338,8 +2341,10 @@ function applySimAt(k, f) {
   if (simRes) showSimAt(k, f);
   hudUpdate(k, f);
 }
-function markCurrentOp(oi) {
-  document.querySelectorAll('#cam-setups .oprow[data-op]').forEach(r => r.classList.toggle('cur', +r.dataset.op === oi));
+var curOpIdx = -1;   // var: the CAM tree can render before this line runs
+function markCurrentOp(oi) {                    // the operation being played: marked in the CAM tree
+  curOpIdx = oi;
+  document.querySelectorAll('#cam-tree .ct-op[data-op]').forEach(r => r.classList.toggle('cur', +r.dataset.op === oi));
 }
 // flipped (bottom) setups on the machine: the work is turned over on the table, so the stage rotates 180° about X through the stock centre
 function stageFlip(on) {
@@ -4758,7 +4763,7 @@ function renderAnimPanel() {
       ${free.map(j => { const [a, b] = rng(j); return `<div class="ap-row j"><label>${j.name}</label><input type="range" data-j="${j.name}" min="${a}" max="${b}" step="${j.type === 'revolute' ? 0.5 : 0.05}" value="${vals[j.name] ?? 0}"><span class="v"><span data-jv="${j.name}">${(+(vals[j.name] ?? 0)).toFixed(1)}</span>${j.type === 'revolute' ? '°' : ' mm'}</span></div>`; }).join('')}
       ${mo.couplings.length ? `<div class="muted ap-note">${mo.couplings.length} coupled joint${mo.couplings.length > 1 ? 's' : ''} follow${mo.couplings.length > 1 ? '' : 's'}: ${mo.couplings.map(c => `${c.follower} = ${+c.ratio.toFixed(4)}×${c.leader}`).slice(0, 4).join(', ')}${mo.couplings.length > 4 ? ' …' : ''}</div>` : ''}
       <div id="ap-res">${motionRes ? motionRes : ''}</div>`
-      : `<div class="muted ap-note">Add joints with the Joint tool (ribbon ▸ Assemble), ask the agent ("make the gears turn"), or write <code>revolute(...)</code> in the script.</div>`}</div>
+      : `<div class="muted ap-note">Add joints with the Joint tool (toolbar ▸ Joint, T), ask the agent ("make the gears turn"), or write <code>revolute(...)</code> in the script.</div>`}</div>
     <div class="ap-sec"><div class="ap-t">Explode</div>
       <div class="ap-row"><input type="range" id="ap-ex" min="0" max="1" step="0.01" value="${explodeAmt}" style="flex:1"><span class="v">${Math.round(explodeAmt * 100)}%</span></div>
       <div class="ap-row"><select id="ap-exm">${[['auto', 'Auto' + (((lastStatsData || {}).explode || {}).auto ? ' (' + lastStatsData.explode.auto.axis + ')' : ' (Z)')], ['Z', 'Along Z'], ['X', 'Along X'], ['Y', 'Along Y'], ['radial', 'Radial']].map(([v, l]) => `<option value="${v}" ${v === explodeMode ? 'selected' : ''}>${l}</option>`).join('')}</select>
@@ -5280,13 +5285,13 @@ async function openSettings(tab) {
   </div>
   <div class="muted" style="margin-top:12px">Status: ${status.connected ? 'connected' : 'not connected'} · model ${status.model} · effort ${status.effort}${status.session_id ? ' · session ' + status.session_id.slice(0, 8) : ''}${status.mcp_error ? ' · ' + status.mcp_error : ''}</div></div>
   <div class="set-pane" data-pane="output">
-  <div class="set-h">Shop drawings<span class="muted">ribbon ▸ Drawings (D)</span></div>
+  <div class="set-h">Shop drawings<span class="muted">Output ▸ Drawings (D)</span></div>
   <div class="set-grid" style="margin-top:6px">
     <label>Material</label><input id="s-dmat" placeholder="e.g. Aluminium 6061 (sets the density in the title block)" value="${(st.drawings || {}).material || ''}">
     <label>Sheet</label><select id="s-dsheet"><option ${(st.drawings || {}).sheet !== 'A3' ? 'selected' : ''}>A4</option><option ${(st.drawings || {}).sheet === 'A3' ? 'selected' : ''}>A3</option></select>
   </div>
   <div id="s-print-sec">
-    <div class="set-h">3D printing<span class="muted">${slicerInfo ? slicerInfo.slicer.name + ' ' + (slicerInfo.slicer.version || '') + ' · ribbon ▸ Slice (P)' : 'no slicer found (install OrcaSlicer or Bambu Studio to slice from the app)'}</span></div>
+    <div class="set-h">3D printing<span class="muted">${slicerInfo ? slicerInfo.slicer.name + ' ' + (slicerInfo.slicer.version || '') + ' · Output ▸ Slice (P)' : 'no slicer found (install OrcaSlicer or Bambu Studio to slice from the app)'}</span></div>
     <div style="display:${slicerInfo ? '' : 'none'}">
     <div class="set-grid" style="margin-top:6px">
       <label>Printer</label><select id="s-pmach"><option value="">loading…</option></select>
@@ -5718,7 +5723,7 @@ function libraryEditor(mPane, tPane) {
     const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;');
     const tier = s => { const t = (String(s).split(':')[0] || '').trim(); const col = { verified: '#4caf7a', reference: '#e0a93a', estimated: '#8a94a3', user: '#4ea1ff' }[t] || '#8a94a3'; return `<span style="display:inline-block;padding:0 6px;border-radius:9px;font-size:10.5px;background:${col}22;color:${col};border:1px solid ${col}55">${esc(t)}</span>`; };
     const own = (library.scripts || []).includes(cur.m.name);
-    el.className = ''; el.innerHTML = `<div class="set-h">Machine model<span class="muted">${esc(d.name)} · ${own ? 'your own script (machines/' + esc(d.name.toLowerCase().replace(/[^a-z0-9\-_]+/g, '-')) + '.machine.py)' : 'built-in model'} · the Machine view (ribbon ▸ CAM) and the simulator's collision check</span></div>
+    el.className = ''; el.innerHTML = `<div class="set-h">Machine model<span class="muted">${esc(d.name)} · ${own ? 'your own script (machines/' + esc(d.name.toLowerCase().replace(/[^a-z0-9\-_]+/g, '-')) + '.machine.py)' : 'built-in model'} · the Machine view (the CAM viewer's Machine toggle) and the simulator's collision check</span></div>
       <div style="display:flex;gap:6px;margin:4px 0 8px;flex-wrap:wrap"><button class="btn small" data-a="show-machine">Show in viewer</button><button class="btn small" data-a="edit-machine">${own ? 'Edit script…' : 'Edit as script…'}</button><span class="muted" style="font-size:12px;align-self:center">or ask the agent: “model my machine…”</span></div>
       <div class="kv" style="font-size:12.5px">
         <div>Table</div><div>${d.table.x} × ${d.table.y} mm${d.spoilboard ? ` · spoilboard ${d.spoilboard} mm (cuts into it are allowed)` : ''}</div>
@@ -5897,6 +5902,8 @@ function connect() {
       case 'tool_use': { finishBubble(); const el = toolChip(m.id, m.name); el.querySelector('.args').textContent = summarizeInput(m.name, m.input);
         if (m.name === 'build_model') { const pre = document.createElement('pre'); pre.textContent = m.input.code || ''; el.appendChild(pre); } break; }
       case 'tool_result': { const el = toolChip(m.id, m.name); const st = el.querySelector('.state');
+        if (m.is_error && /No such tool available/i.test(m.text || '')) {   // the model misnamed a tool; it retries by itself
+          st.textContent = 'retried'; st.className = 'state'; el.classList.add('retried'); el.open = false; scroll(); break; }
         st.textContent = m.is_error ? 'error' : 'done'; st.className = 'state ' + (m.is_error ? 'err' : 'ok');
         if (m.text) { const pre = document.createElement('pre'); pre.textContent = m.text; el.appendChild(pre); }
         if (m.is_error) el.open = true; scroll(); break; }

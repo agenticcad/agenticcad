@@ -1959,16 +1959,19 @@ class CadAgent:
         return "\n".join(out)
 
     async def ext_render(self, pid: str, state: dict[str, Any] | None = None, event: str | None = None,
-                         selection: dict[str, Any] | None = None) -> None:
-        """Render a panel and send it to the browsers (replaces its content if open, opens it otherwise)."""
+                         selection: dict[str, Any] | None = None) -> str | None:
+        """Render a panel and send it to the browsers (replaces its content if open, opens it otherwise). Returns the
+        error shown in the panel, or None."""
         ctx = self.ext_ctx(state, event, selection)
         try:
             e = self.extensions.panel(pid)
             ui = await asyncio.to_thread(self.extensions.render, pid, ctx)
         except Exception as ex:  # noqa: BLE001
-            await self.emit({"type": "ext_panel", "id": pid, "error": f"{type(ex).__name__}: {ex}", "state": ctx.state})
-            return
+            err = f"{type(ex).__name__}: {ex}"
+            await self.emit({"type": "ext_panel", "id": pid, "error": err, "state": ctx.state})
+            return err
         await self.emit({"type": "ext_panel", "id": e.id, "title": e.title, "ui": ui, "state": ctx.state})
+        return None
 
     async def _after_build(self, model: ck.Model) -> None:
         """Run @on_build hooks; their warnings go to the chat and onto the model."""
@@ -2608,7 +2611,9 @@ class CadAgent:
                 if a == "call":
                     return ok(await agent.ext_call(args.get("name") or "", args.get("args") or {}))
                 if a == "open":
-                    await agent.ext_render(args.get("panel") or "", {})
+                    err = await agent.ext_render(args.get("panel") or "", {})
+                    if err:                         # the user sees this error in the panel: so must the agent
+                        return {"content": [{"type": "text", "text": f"the panel did not open: {err}"}], "is_error": True}
                     return ok("panel opened")
                 return {"content": [{"type": "text", "text": f"unknown extension action {a!r}"}], "is_error": True}
             except Exception as e:  # noqa: BLE001

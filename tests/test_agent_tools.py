@@ -280,3 +280,12 @@ async def test_agent_turn_builds_draft_threads_then_finalizes_real(ag):
     r = await ag.tool_handlers["build_model"]({"code": code})
     ag._agent_turn = False
     assert ok(r) and ag.model.draft_threads == 0
+
+
+async def test_extension_open_reports_a_panel_that_did_not_open(ag):
+    """The user sees a panel error in the viewer; the agent must get it too (it used to be told 'panel opened')."""
+    T = ag.tool_handlers
+    r = await T["extension"]({"action": "open", "panel": "nope.nope"})
+    assert not ok(r) and "did not open" in text(r) and "no panel" in text(r)
+    r = await T["extension"]({"action": "open", "panel": "hole_report.hole_report"})
+    assert ok(r) and "opened" in text(r)

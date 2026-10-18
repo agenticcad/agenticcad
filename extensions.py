@@ -521,6 +521,10 @@ class Extensions:
         for e in self.panels():
             if e.id == pid or e.name == pid or e.title == pid:
                 return e
+        mod = pid.split(".")[0]                       # a near-miss name in a module that has just one panel: that one
+        same = [e for e in self.panels() if e.id.split(".")[0] == mod]
+        if "." in pid and len(same) == 1:
+            return same[0]
         raise ExtError(f"no panel {pid!r}; panels: {', '.join(e.id for e in self.panels()) or 'none'}")
 
     def hooks(self) -> list[Entry]:
