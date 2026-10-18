@@ -1010,8 +1010,10 @@ class CadAgent:
                     + (f" · AIR CUT +{prep['air_cut']:g} mm" if prep["air_cut"] else "") + ". " + "; ".join(chk["notes"])
                     + ". The machine runs it on its own once started."), lambda: mc.run_program(label, prep, info)
         if action == "switch":
-            what, on = str(f("what", "")), bool(f("on"))
-            return f"Turn the {what} {'on' if on else 'off'}.", lambda: mc.switch(what, on)
+            what, on, pw = str(f("what", "")), bool(f("on")), f("power")
+            if what not in mc.profile.switches:
+                raise ml.Refused(f"switch: one of {', '.join(mc.profile.switches)}")
+            return (f"Turn the {what.replace('_', ' ')} {'on' if on else 'off'}" + (f" at {pw:g}%" if on and pw is not None else "") + "."), lambda: mc.switch(what, on, pw)
         if action == "console":
             line = str(f("line", "")).strip()
             return (f"Send this line to the machine exactly as written: {line}  (the app only checks it isn't blocked; "
@@ -2707,7 +2709,7 @@ class CadAgent:
               "the faces 3D-probe runs found: status lists them), lower_to {height above work Z0}, raise_z, goto {x,y,frame: "
               "work|machine; Z goes to the top first}, probe_3d {kind e.g. outside_back_right, x, y, depth, dia; 3D probe "
               "T9999 fitted}, run_ops {ops: 0-based indices in ONE setup, air: lift mm for an air cut}, switch {what: "
-              "dust|light, on}, console {line: one line of G-code, sent as written}. Rules: one step at a time; say what "
+              "dust|light|probe_laser|spindle_fan, on, power: fan speed 0-100 %}, console {line: one line of G-code, sent as written}. Rules: one step at a time; say what "
               "you will do and why before asking; every tool change is measured before moving with it; suggest an air "
               "cut the first time a program runs at an origin; never ask to run M490 or M498.2. If the user says stop, "
               "call halt (or hold) first, then talk.",

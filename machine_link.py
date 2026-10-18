@@ -401,7 +401,15 @@ def makera_live_config(path=None) -> dict:
 
 
 Z1 = Profile("Makera Z1", travel={"x": 200.0, "y": 200.0, "z": 100.0}, max_rate={"x": 1200.0, "y": 1200.0, "z": 600.0},
-             switches={"dust": ("M851", "M852"), "light": ("M821", "M822"), "probe_laser": ("M831", "M832")})
+             # MakeraStudio's own switch definitions (MacOS/config/interface_config.json): dust = "Extend output" M851/M852,
+             # light M821/M822, probe laser M831/M832, spindle fan M811 S<0..100 %> / M812
+             switches={"dust": ("M851", "M852"), "light": ("M821", "M822"), "probe_laser": ("M831", "M832"),
+                       "spindle_fan": ("M811S{power}", "M812")})
+# where each switch's state is in the machine's `diagnose` reply (as MakeraStudio reads it): (field, on index, power index)
+DIAG_SWITCHES = {"light": ("G", 0, None), "dust": ("G", 3, 4), "probe_laser": ("T", 0, None), "spindle_fan": ("F", 0, 1)}
+SWITCH_POWER_DEFAULT = {"spindle_fan": 20}                   # MakeraStudio's default fan speed (%)
+DIAG_EVERY_S = 10.0                                          # re-read the switches this often while Idle (the firmware runs
+                                                             # the spindle fan itself above 45 C and at play)
 
 JOG_MAX = {"xy": 10.0, "z_up": 10.0, "z_down": 1.0}          # mm per click
 GOTO_FEED_MAX = 600.0                                        # mm/min cap for go-to moves
@@ -521,6 +529,9 @@ class MachineControl:
         self.z_floor = 2.0                   # lowest work Z (mm) a jog may take the tool to
         self.last_action = 0.0
         self.switch_state: dict[str, bool] = {}
+        self.switch_power: dict[str, int] = {}   # % for switches with a speed (the spindle fan)
+        self._diag_t = 0.0
+        self._diag_task: asyncio.Task | None = None
         self.measured: dict | None = None    # {"tool": n, "touch_z": z, "t": ..}: the tool measured on the setter this session
         self.routine: dict | None = None     # a Makera routine being followed: {kind, command, stage, msg, ...}
         self.job: dict | None = None         # a program sent to the machine: {name, stage, ops, lines, line, percent, ...}
@@ -635,6 +646,12 @@ class MachineControl:
                     self._note("a jog did not finish where expected: Control off, check the machine")
                     self.jog_busy = None
                     self.armed = False
+                st_ = self._status() or {}
+                if (time.time() - self._diag_t > DIAG_EVERY_S and self.fresh() and st_.get("state") == "Idle" and not self.jog_busy
+                        and not self.job_active and not (self.routine and self.routine["stage"] in ("running", "awaiting"))
+                        and not (self._diag_task and not self._diag_task.done())):
+                    self._diag_t = time.time()
+                    self._diag_task = asyncio.create_task(self._refresh_switches())
                 if time.time() - last_push > 0.25:
                     last_push = time.time()
                     await self._push()
@@ -650,10 +667,10 @@ class MachineControl:
                 # in Hold / Pause / Alarm the Z1 reports its last planned position, not where the head stopped (seen on a
                 # real Z1 2026-10-17: held at about -57,-58 while the status said -1,-1): show it as unreliable
                 "position_reliable": bool(st) and st.get("state") not in ("Hold", "Pause", "Alarm"),
-                "z_floor": self.z_floor, "switches": dict(self.switch_state), "events": self.events[-20:],
+                "z_floor": self.z_floor, "switches": dict(self.switch_state), "switch_power": dict(self.switch_power), "events": self.events[-20:],
                 "measured": self.measured, "tool_ok": self.tool_ok(), "routine": self.routine,
                 "job": {k: v for k, v in self.job.items() if k != "text"} if self.job else None,
-                "log": [t for _, t in (self.link.log[-30:] if self.link else [])],
+                "log": [t for _, t in (self.link.log[-60:] if self.link else []) if t != "> diagnose" and not t.startswith("{S:")][-30:],
                 "limits": {"jog_max": JOG_MAX, "travel": self.profile.travel, "margin": self.profile.margin, "top": self.profile.top},
                 "profile": self.profile.name, "probe3d_tool": self.profile.probe3d_tool,
                 "anchor1": list(self.profile.anchor1), "bed_anchor": list(self.profile.bed_anchor),
@@ -1433,15 +1450,39 @@ class MachineControl:
         self._note("HALT sent: Control off; unlock and home before moving again")
         return self.payload()
 
-    async def switch(self, name: str, on: bool) -> dict:
+    async def switch(self, name: str, on: bool, power: float | None = None) -> dict:
+        """An accessory on / off (and the spindle fan's speed, 0..100 %). No motion: Control isn't needed."""
         if name not in self.profile.switches:
             raise Refused(f"unknown switch {name!r}")
         self._need(armed=False, idle=False)
         on_cmd, off_cmd = self.profile.switches[name]
+        if on and "{power}" in on_cmd:
+            p = self.switch_power.get(name, SWITCH_POWER_DEFAULT.get(name, 50)) if power is None else power
+            if not isinstance(p, (int, float)) or p != p or not (0 <= p <= 100):
+                raise Refused("speed: 0 .. 100 %")
+            p = int(round(p))
+            self.switch_power[name] = p
+            on_cmd = on_cmd.format(power=p)
         await self.link.line(on_cmd if on else off_cmd)
         self.switch_state[name] = bool(on)
-        self._note(f"{name} {'on' if on else 'off'}")
+        self._note(f"{name.replace('_', ' ')} {'on' if on else 'off'}" + (f" at {self.switch_power[name]}%" if on and name in self.switch_power else ""))
+        self._diag_t = time.time() - DIAG_EVERY_S + 0.6                  # read the real state back shortly
         return self.payload()
+
+    def _switches_from_diag(self, d: dict) -> None:
+        for name, (field_, i_on, i_pow) in DIAG_SWITCHES.items():
+            v = d.get(field_)
+            if name not in self.profile.switches or not isinstance(v, list) or len(v) <= i_on or not isinstance(v[i_on], int):
+                continue
+            self.switch_state[name] = bool(v[i_on])
+            if i_pow is not None and len(v) > i_pow and isinstance(v[i_pow], int) and v[i_pow] > 0:
+                self.switch_power[name] = v[i_pow]
+
+    async def _refresh_switches(self) -> None:
+        try:
+            self._switches_from_diag(await self.diagnose())
+        except Refused:
+            pass
 
     async def diagnose(self, timeout: float = 2.0) -> dict:
         """Read-only pin report (`diagnose`): |P:a,b = probe / tool-setter pins, |I:n = e-stop, |E: endstops, ..."""

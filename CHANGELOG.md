@@ -5,6 +5,15 @@ features, patch bumps fix things. The version shown in the UI header comes from 
 
 ## [Unreleased]
 
+## [0.48.1] — 2026-10-18 (local build of the v2-ui branch, not released)
+
+### Added
+- **Spindle fan** on the Makera Z1 (Machine ▸ Prepare ▸ Accessories, the phone page and the assistant): on / off and
+  its speed 0–100 %, with Makera's own commands (M811 S<speed> / M812, as MakeraStudio sends them).
+- The accessories show what the machine is actually doing: their states are read back from the machine (`diagnose`)
+  every 10 s while it is idle, so the fan shows on when the firmware runs it by itself (spindle above 45 °C, or while a
+  program plays) and the light / dust collector show changes made on the machine.
+
 ## [0.48.0] — 2026-10-18 (local build of the v2-ui branch, not released)
 
 ### Changed

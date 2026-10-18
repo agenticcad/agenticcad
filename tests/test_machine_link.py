@@ -20,6 +20,7 @@ async def _setup(**kw):
     port, cam = await emu.start()
     mc = ml.MachineControl()
     await mc.connect("127.0.0.1", port)
+    mc._diag_t = float("inf")              # no background switch-state reads: tests compare exact command sequences
     return emu, mc, cam
 
 
@@ -608,6 +609,35 @@ def test_program_pause_resume_and_abort():
             assert mc.job["stage"] == "aborted"
             await asyncio.sleep(1.0)
             assert mc.job["stage"] == "aborted" and emu.play is None
+        finally:
+            await mc.disconnect(); await emu.stop()
+    run(go())
+
+
+def test_spindle_fan_switch_and_states_read_back_from_diagnose(monkeypatch):
+    """Makera's spindle fan (M811 S<%> / M812, as MakeraStudio sends it), and every switch's real state read back from
+    `diagnose` while Idle - the firmware runs the fan by itself when the spindle is hot."""
+    monkeypatch.setattr(ml, "DIAG_EVERY_S", 0.3)
+    async def go():
+        emu, mc, _ = await _setup()
+        try:
+            mc._diag_t = 0.0                                       # this test wants the background reads
+            await mc.switch("spindle_fan", True, 40)               # no Control needed: nothing moves
+            await _until(lambda: emu.lines and emu.lines[-1] == "M811S40")
+            p = mc.payload()
+            assert p["switches"]["spindle_fan"] and p["switch_power"]["spindle_fan"] == 40
+            await mc.switch("spindle_fan", False)
+            await _until(lambda: emu.lines[-1] == "M812")
+            await mc.switch("spindle_fan", True)                    # back on at the last speed
+            await _until(lambda: emu.lines[-1] == "M811S40")
+            with pytest.raises(ml.Refused, match="0 .. 100"):
+                await mc.switch("spindle_fan", True, 150)
+            with pytest.raises(ml.Refused, match="unknown switch"):
+                await mc.switch("coolant", True)
+            # the machine changes it on its own: the next diagnose read shows it
+            emu.switches.update(spindle_fan=True, light=False); emu.fan_power = 80
+            await _until(lambda: mc.switch_power.get("spindle_fan") == 80 and mc.switch_state.get("light") is False, timeout=5)
+            assert "diagnose" in emu.lines and not any("diagnose" in t or t.startswith("{S:") for t in mc.payload()["log"])
         finally:
             await mc.disconnect(); await emu.stop()
     run(go())

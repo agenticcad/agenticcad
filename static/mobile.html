@@ -134,6 +134,7 @@
 
   <div class="card pane" data-p="more">
     <div class="row"><button class="btn" id="dust">Dust collector</button><button class="btn" id="light">Light</button></div>
+    <div class="row" style="margin-top:8px"><button class="btn" id="fan">Spindle fan</button></div>
     <div class="kv" style="margin-top:10px"><span>Spindle</span><span id="spin">–</span></div>
     <div class="kv"><span>Connection</span><span id="host2">–</span></div>
     <button class="btn" id="disconnect" style="width:100%;margin-top:10px">Disconnect machine</button>
@@ -213,7 +214,8 @@ function render(st) {
   }
   const sw = st.switches || {};
   $('laser').classList.toggle('on', !!sw.probe_laser); $('dust').classList.toggle('on', !!sw.dust); $('light').classList.toggle('on', !!sw.light);
-  ['laser', 'dust', 'light', 'disconnect'].forEach(id => $(id).disabled = !conn);
+  $('fan').classList.toggle('on', !!sw.spindle_fan); $('fan').textContent = sw.spindle_fan ? `Spindle fan · ${(ST.switch_power || {}).spindle_fan ?? 20}%` : 'Spindle fan';
+  ['laser', 'dust', 'light', 'fan', 'disconnect'].forEach(id => $(id).disabled = !conn);
   $('spin').textContent = s.spindle ? Math.round(s.spindle.rpm) + ' rpm' : '–';
   $('host2').textContent = conn ? st.host : 'not connected';
   setCam(conn && !document.hidden);
@@ -273,6 +275,7 @@ $('p3run').onclick = () => {
 $('laser').onclick = () => api({ action: 'switch', axis: 'probe_laser', on: !(ST.switches || {}).probe_laser });
 $('dust').onclick = () => api({ action: 'switch', axis: 'dust', on: !(ST.switches || {}).dust });
 $('light').onclick = () => api({ action: 'switch', axis: 'light', on: !(ST.switches || {}).light });
+$('fan').onclick = () => api({ action: 'switch', axis: 'spindle_fan', on: !(ST.switches || {}).spindle_fan });
 document.addEventListener('visibilitychange', () => { if (ST) setCam(ST.connected && !document.hidden); });
 (async function poll() { if (!document.hidden) await api(); setTimeout(poll, 500); })();
 </script>

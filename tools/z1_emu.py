@@ -36,7 +36,8 @@ class Z1Emu:
         self.wco = [-148.8, -125.4, -61.36]             # work offset: WPos = MPos - wco (as on the real Z1)
         self.state = "Idle"
         self.halted = False
-        self.switches = {"extendout": False, "light": True, "probe_laser": False}
+        self.switches = {"extendout": False, "light": True, "probe_laser": False, "spindle_fan": False}
+        self.fan_power = 0
         self.lines: list[str] = []                      # every console line received
         self.replies: list[str] = []                    # delayed console replies (probe results)
         self.realtime: list[bytes] = []
@@ -434,7 +435,10 @@ class Z1Emu:
             self._start(self._move_to([m + delta[a] for m, a in zip(self.mpos, "xyz")], rate))
             return None
         if u.startswith("DIAGNOSE"):
-            return "{S:0,10000,0,0,34,30|L:0,0|V:1,45|F:0,0|G:1,0,0,0,0|T:0|C:1|E:0,0,0,0,0,1,1,0|P:%d,0|I:0|RSSI:-40}" % int(self.mpos[2] <= self.setter_z + 1e-6)
+            sw = self.switches
+            return ("{S:0,10000,0,0,34,30|L:0,0|V:1,45|F:%d,%d|G:%d,0,0,%d,%d|T:%d|C:1|E:0,0,0,0,0,1,1,0|P:%d,0|I:0|RSSI:-40}"
+                    % (sw["spindle_fan"], self.fan_power if sw["spindle_fan"] else 0, sw["light"], sw["extendout"], 100 if sw["extendout"] else 0,
+                       sw["probe_laser"], int(self.mpos[2] <= self.setter_z + 1e-6)))
         if re.match(r"^M6\b", u) or (u.startswith("T") and " M6" in u):
             n = int(float(re.search(r"T(-?\d+)", u).group(1)))
             if n == self.tool:
@@ -522,6 +526,11 @@ class Z1Emu:
             return "ok"
         if u in ("M821", "M822"):
             self.switches["light"] = u == "M821"
+            return "ok"
+        if re.match(r"^M811(\s*S\d+)?$", u.replace(" ", "")) or u == "M812":     # spindle fan: M811 S<0..100> / M812
+            m = re.search(r"S(\d+)", u)
+            self.switches["spindle_fan"] = u != "M812"
+            self.fan_power = int(m.group(1)) if m and u != "M812" else (100 if u != "M812" else 0)
             return "ok"
         return "ok"
 

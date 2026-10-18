@@ -898,7 +898,10 @@
     <div class="row"><div id="mp-tool-chips" class="chips"></div></div>
     <div class="row"><span class="muted">Change to T</span><input type="number" id="mp-tc-num" min="0" max="9999" step="1" value="0" class="inp" style="width:72px"><button class="btn" id="mp-tc-go" data-act="tc" title="Makera's tool change (M6 Tn): Z up, park, wait for you, then the machine measures the tool on its setter. Same number: re-measure (M491). Every tool, the probes included.">Change tool…</button></div>
     <p class="muted sm">Every tool — the probes too — is measured on the setter before the machine moves with it.</p></div>
-  <div class="mcard"><div class="h">Accessories</div><div class="row"><label class="tgl"><input type="checkbox" id="mv-dust"><span class="sw"></span>Dust collector</label><label class="tgl"><input type="checkbox" id="mv-light"><span class="sw"></span>Light</label></div></div>
+  <div class="mcard"><div class="h">Accessories</div><div class="row"><label class="tgl"><input type="checkbox" id="mv-dust"><span class="sw"></span>Dust collector</label><label class="tgl"><input type="checkbox" id="mv-light"><span class="sw"></span>Light</label></div>
+    <div class="row"><label class="tgl" title="The spindle fan blows chips down through the bed (Makera's M811 S% / M812)"><input type="checkbox" id="mv-fan"><span class="sw"></span>Spindle fan</label>
+      <input type="range" id="mv-fan-pw" min="0" max="100" step="5" value="20" style="flex:1;min-width:90px" title="Fan speed"><span class="muted sm" id="mv-fan-v" style="width:34px;text-align:right">20%</span></div>
+    <p class="muted sm">The machine also runs the spindle fan by itself when the spindle is hot (above 45 °C) and while a program plays; this shows what it is doing.</p></div>
   <div class="next"><button class="btn" data-act="step" data-step="zero">Next: Zero →</button></div>
 </div>
 <div class="mstep" data-step="zero" id="mstep-zero" style="display:none">
@@ -6136,6 +6139,10 @@ function mvPrep(st) {
   const ready = conn && st.armed && st.homed && s.state === 'Idle' && !(st.routine && ['running', 'awaiting'].includes(st.routine.stage));
   mvEl('mp-tc-go').disabled = !ready;
   ['dust', 'light'].forEach(k => { const c = mvEl('mv-' + k); c.disabled = !conn; if (st.switches && k in st.switches) c.checked = st.switches[k]; });
+  const fan = mvEl('mv-fan'), fpw = mvEl('mv-fan-pw'), fon = !!(st.switches && st.switches.spindle_fan);
+  fan.disabled = !conn; fan.checked = fon; fpw.disabled = !conn;
+  if (document.activeElement !== fpw && st.switch_power && st.switch_power.spindle_fan != null) fpw.value = st.switch_power.spindle_fan;
+  mvEl('mv-fan-v').textContent = fpw.value + '%';
 }
 function mvZeroRender(st) {
   const stp = mvSetup(), z = mvZero(st, stp), s = st.status || {}, conn = st.connected, tl = s.tool ? s.tool.number : null;
@@ -6367,6 +6374,9 @@ async function mvRunFile(file) {
   });
   mvEl('mv-dust').onchange = e => mvPost({ action: 'switch', axis: 'dust', on: e.target.checked });
   mvEl('mv-light').onchange = e => mvPost({ action: 'switch', axis: 'light', on: e.target.checked });
+  mvEl('mv-fan').onchange = e => mvPost({ action: 'switch', axis: 'spindle_fan', on: e.target.checked, power: +mvEl('mv-fan-pw').value });
+  mvEl('mv-fan-pw').oninput = () => { mvEl('mv-fan-v').textContent = mvEl('mv-fan-pw').value + '%'; };
+  mvEl('mv-fan-pw').onchange = () => mvPost({ action: 'switch', axis: 'spindle_fan', on: true, power: +mvEl('mv-fan-pw').value });   // moving the speed runs it
   mvEl('mv-cam-on').onchange = e => { MV.camOn = e.target.checked; mvCamera(); };
   mvEl('mv-cam-img').onerror = () => { const img = mvEl('mv-cam-img'); delete img.dataset.on; setTimeout(mvCamera, 2000); };
   mvEl('mv-zfloor').onchange = e => mvPost({ action: 'z_floor', z: +e.target.value });

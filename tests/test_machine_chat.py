@@ -64,9 +64,10 @@ def test_moves_wait_for_approve_and_stops_do_not(ag):
             assert (await t).startswith("Approved and sent") and ag.machine.armed
             t = asyncio.create_task(ag.machine_action("home"))
             await _until(lambda: ag.machine_requests)
-            n = len(emu.lines)
+            cmds = lambda: [ln for ln in emu.lines if ln != "diagnose"]      # (the read-only switch-state query may run)
+            n = len(cmds())
             await asyncio.sleep(0.2)
-            assert len(emu.lines) == n                                       # nothing sent while waiting
+            assert len(cmds()) == n                                          # nothing sent while waiting
             ag.resolve_machine_request(next(iter(ag.machine_requests)), True)
             await t
             await _until(lambda: ag.machine.homed)

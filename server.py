@@ -786,6 +786,7 @@ class MachineBody(BaseModel):
     line: str | None = None          # console: one line as typed
     text: str | None = None          # run_file: the .nc file's contents
     name: str | None = None          # run_file: its name
+    power: float | None = None       # switch: speed in % (the spindle fan)
 
 
 def _program_for_ops(body: MachineBody) -> tuple[dict, dict, str]:
@@ -905,7 +906,7 @@ async def machine_post(body: MachineBody):
         elif a == "unlock":
             res = await machine.unlock()
         elif a == "switch":
-            res = await machine.switch(body.axis or "", bool(body.on))
+            res = await machine.switch(body.axis or "", bool(body.on), body.power)
         elif a == "z_floor":
             res = machine.set_z_floor(body.z if body.z is not None else -1)
         else:
