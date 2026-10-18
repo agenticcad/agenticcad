@@ -1,135 +1,65 @@
 # Changelog
 
-All notable changes to AgenticCAD. Versions follow [SemVer](https://semver.org): pre-1.0, minor bumps add
-features, patch bumps fix things. The version shown in the UI header comes from `version.py`.
+All notable changes to AgenticCAD. Versions follow [SemVer](https://semver.org): minor bumps add features,
+patch bumps fix things, a major bump changes something scripts or workspaces rely on. The version shown in the UI header comes from `version.py`.
 
 ## [Unreleased]
 
-## [0.48.8] — 2026-10-18 (local build of the v2-ui branch, not released)
+## [1.0.0] — 2026-10-19
 
-### Fixed
-- **A program could bring the spinning tool down onto the Z1's tool setter.** Every program started M3 then G0 Z(safe)
-  at whatever X/Y the head was parked at - and the Z1 parks (G28) at its clearance spot, right over the tool setter
-  (the tool already fitted makes the M6 a no-op, so nothing moved the head first). Every spindle start is now: lift in
-  machine coordinates (Makera G53 G0 Z-3, Fanuc family Z home, GRBL the setup clearance), G0 to the operation's first
-  X/Y, spindle on, then down to the safe height - the order MakeraStudio's own Z1 files use. Also after a re-clamp.
-
-## [0.48.7] — 2026-10-18 (local build of the v2-ui branch, not released)
-
-### Fixed
-- **The spindle ran during a tool change on the Z1.** A program began `M6 T2` then `M3 S13000` (stopped with the
-  e-stop). *Corrected in 0.48.8: the firmware does not read past M6 (it stops the spindle and pauses the file for the
-  change); T2 was already fitted, so M6 did nothing and `G0 Z5` came down over the tool setter, where G28 parks.* A program sent to the machine now never changes tools: a run uses one tool, which must
-  already be fitted and measured (Prepare ▸ Change tool), and its tool-change line goes to the machine as `M5`
-  (spindle off), so the spindle only starts once the tool is in and measured. Operations that use more than one tool
-  are refused with the reason; Run offers the program's tool runs in order (T2 · 1–5, T3 · 6–7, ...). Every tool
-  change from the app sends `M5` before it.
-
-## [0.48.6] — 2026-10-18 (local build of the v2-ui branch, not released)
-
-### Fixed
-- **A big program failed to start on the Z1 ("Control off").** The machine answers no status while a file comes in;
-  a few-second upload looked like a lost link, the watchdog switched Control off and the uploaded program was refused.
-  During the upload that silence is expected now, and before playing the app waits (up to 10 s) for the machine to
-  answer again, still refusing if it isn't Idle.
-- **"The X/Y offsets changed since they were set here" right after setting them.** The Z1 shows new offsets a moment
-  late; the origin record now keeps the offsets it commanded and waits for the machine to show them.
-
-## [0.48.5] — 2026-10-18 (local build of the v2-ui branch, not released)
-
-### Added
-- **Chamfer edges** (CAM ▸ Add operation, `chamfer_edges(...)` in cam.py, the assistant): a chamfer of a given width on
-  the top edges of the faces you pick (their outline and holes) or of the part's outline, with a V-bit or chamfer tool.
-  The tool's axis runs at the offset that puts its cone exactly on the chamfer - the tip size included - with its tip a
-  little below the chamfer for a clean edge; bigger chamfers take several laps. With no faces picked it finds the
-  part's top face along its outline (a plate's top, not the top of a raised feature).
-- **V-carve** (`vcarve(...)`): letters or a logo cut along their centrelines, as deep as each stroke is wide, so the
-  top edge follows the outline exactly and corners come out sharp. *Max depth* gives wide strokes a flat bottom; the
-  depth is taken in levels of the tool's stepdown; stretches that meet and nested rings are linked at depth, and
-  re-entries drop quickly through what the previous level cut (the plunge rate only for new depth).
-- `outline(part)` and `face_outline(face)` for scripts.
-
-## [0.48.4] — 2026-10-18 (local build of the v2-ui branch, not released)
-
-### Fixed
-- **Ball, bull-nose and V tools leave the floor the stepover promises.** Pocket, adaptive and face passes are planned
-  for the tool's full width, so with a ball nose the middle of a pocket and the corners of its rings were left higher
-  than said (an R1 ball at 0.6 mm stepover: 0.08 – 0.13 mm instead of 0.046; an adaptive's corners up to 0.9 mm). The
-  floor the passes miss is now found and short clean-up passes go over it, linked at the floor (one plunge), and the
-  operation says how much was left and what is left now. Checked in the material simulation.
-
-### Added
-- **Sharp point** for V-bits and chamfer tools (Settings ▸ Tools): a tip Ø of 0 that is right, not missing, so the
-  program stops warning about it.
-
-## [0.48.3] — 2026-10-18 (local build of the v2-ui branch, not released)
-
-### Added
-- **Tool photos.** Settings ▸ Tools ▸ a tool ▸ *Add photo…* (or drop / paste a picture): crop that tool's packet (or the
-  tool) out of the photo. One shot of a row of packets does for all of them: *From the last photo* crops the next tool
-  from the same picture. The photo shows where you pick the tool up: the Machine page's *Fit Tn* card at every tool
-  change (yours or the program's), Prepare's *Change to* and its confirmation, the CAM tools list, and the phone's
-  tool-change sheet.
-
-## [0.48.2] — 2026-10-18 (local build of the v2-ui branch, not released)
+A new layout and machine control you can run a job with: design, CAM and the Makera Z1 in one window. CAM and
+running programs on a machine are **experimental** - simulate, air-cut and stay at the machine.
 
 ### Changed
-- **Settings ▸ Tools** is a list and an editor. Each tool is described the way its packet gives it (V 30° · tip Ø0.1 ·
-  Ø3.175, ball R1, Ø2 · 6 mm flutes · shank Ø3.175), and its size fields are the ones its type has, named as on the
-  packet: a V-bit / engraver has its included angle, **tip Ø**, body Ø and cutting height; a ball nose its **radius R**;
-  a bull nose its corner radius. Type the packet's label ("0.1mm x 3.175mm 30deg", "R1.0mm x 3.175mm x 17mm 2F") and
-  *Fill* sets them. The to-scale drawing marks the tip, angle or radius and lists the groove a V cuts at 0.1 / 0.2 /
-  0.5 mm deep.
-
-### Fixed
-- A V-bit or chamfer tool without a tip Ø is no longer silently treated as a perfectly sharp point: the program
-  warns (a real tip cuts that much wider at every depth), and the tool list and the CAM inspector say so.
-- Feeds & speeds sized a V-bit by its 1/8" body: a 0.1 mm-tip engraver got the chip load and stepdown of a 3.175 mm
-  endmill. V-bits and chamfer tools (and ball tools when a depth is given) are now sized by their cutting width at the
-  cut depth; the calculator has a *Cut depth* field for them.
-- An engraving (contour on the line) with a V tool says how wide a groove it cuts.
-
-## [0.48.1] — 2026-10-18 (local build of the v2-ui branch, not released)
-
-### Added
-- **Spindle fan** on the Makera Z1 (Machine ▸ Prepare ▸ Accessories, the phone page and the assistant): on / off and
-  its speed 0–100 %, with Makera's own commands (M811 S<speed> / M812, as MakeraStudio sends them).
-- The accessories show what the machine is actually doing: their states are read back from the machine (`diagnose`)
-  every 10 s while it is idle, so the fan shows on when the firmware runs it by itself (spindle above 45 °C, or while a
-  program plays) and the light / dust collector show changes made on the machine.
-
-## [0.48.0] — 2026-10-18 (local build of the v2-ui branch, not released)
-
-### Changed
-- **New layout (v2).** One top bar with the file (its name is the File menu), the workspaces **Design · CAM · Machine**,
+- **New layout.** One top bar with the file (its name is the File menu), the workspaces **Design · CAM · Machine**,
   the machine's status, the Assistant and Settings. The right column is **Inspector · Assistant · Code** in every
-  workspace: the Inspector shows what you are working on (the active command or the selection in Design, the selected
-  operation or setup in CAM, the machine's steps in Machine). Design has a one-row toolbar (less-used tools under *More*,
-  Output and Extensions as menus) with the Browser and Parameters docked on the left, and shows the part alone.
+  workspace; the Inspector shows what you are working on (the active command or the selection in Design, the selected
+  operation or setup in CAM, the machine's steps in Machine). Design has a one-row toolbar (less-used tools under
+  *More*, Output and Extensions as menus) with the Browser and Parameters docked on the left.
 - **CAM workspace.** The program, its setups, operations and the tools they use are a tree on the left; the Inspector
   edits the selected operation (Tool & feeds · Cut · Display) or setup (stock, origin, workholding, machine view); the
   viewer has *Selected op / All* and *Toolpath / Stock / Machine* toggles and a timeline of op-coloured blocks with
   Simulate, play and speed. *Send to machine* opens Machine ▸ Run with the setup's operations.
-- **Machine workspace.** A status strip (state, position, tool, Control, Hold / Pause / Stop program, STOP) over the
-  camera with the jog pad on it, and four steps: **Prepare** (connect, home, tool change, accessories), **Zero** (what the
-  setup wants next to what set the machine's origin this session, a guided 3D-probe sequence, *Find the block* for a
-  block in the L-bracket), **Run** (a readiness checklist, air cut first, progress op by op) and **Manual**.
+- **Machine workspace** (Makera Z1). A status strip (state, position, tool, Control, Hold / Pause / Stop program,
+  STOP) over the camera with the jog pad on it, and four steps: **Prepare** (connect, home, tool change, accessories),
+  **Zero** (what the setup wants next to what set the machine's origin, a guided 3D-probe sequence, *Find the block*),
+  **Run** (a readiness checklist, air cut first, progress op by op) and **Manual**.
+- **Settings ▸ Tools** is a list and an editor that describes each tool the way its packet does (V 30° · tip Ø0.1 ·
+  Ø3.175, ball R1, Ø2 · 6 mm flutes). A V-bit has its included angle, **tip Ø**, body Ø and cutting height; a ball
+  nose its **radius R**; a bull nose its corner radius. Type the packet's label ("0.1mm x 3.175mm 30deg") and *Fill*
+  sets them; *Sharp point* marks a true zero tip.
 
 ### Added
-- **Add operation** in CAM: face, adaptive clearing, pocket (floors picked in the viewer), contour, drill and 3D finish,
-  each written as one `program.add(...)` line in cam.py (left as it was if the program doesn't build).
-- **Find the block**: probe back-right, back-left and front-right, then X0 Y0 goes to the front-left corner at the
-  measured faces; the measured block size is compared with the setup's. Or move X0 Y0 from a probed corner by the
-  block size. The probe's step-out is fitted to the room the travel leaves.
-- **Manual**: go to (Z goes up first), set the origin at the head or by typing, any 3D-probe routine, a one-line console
-  (each line confirmed; blocked commands refused) and *Run a file* for any .nc file with the same checks as a program.
-- **The assistant can work the machine**: stopping (hold, pause, stop program, STOP) at once; everything else as an
-  approval card in the chat and on the Machine page that runs only when you click Approve. It can also change an
-  operation's settings, the workholding and add operations, as the CAM page does.
+- **Add operation** in CAM without chat or code: face, adaptive clearing, pocket (floors picked in the viewer),
+  contour, drill, 3D finish, **chamfer edges** and **V-carve**, each written as one line in cam.py.
+- **Chamfer edges**: a chamfer of a given width on the top edges of picked faces or the part's outline, with a V-bit or
+  chamfer tool, the tip size included in the offset; bigger chamfers take several laps.
+- **V-carve**: letters or a logo cut along their centrelines, as deep as each stroke is wide, so the top edge follows
+  the outline and corners come out sharp; *Max depth* gives wide strokes a flat bottom; taken in levels, linked at depth.
+- **Tool photos**: crop each tool (or its packet) out of a photo; the picture shows wherever you pick a tool up - the
+  tool-change card, Prepare's *Change to*, the CAM tools list and the phone.
+- **Find the block** (Z1 3D probe): three outside corners, then X0 Y0 at the front-left corner at the measured faces,
+  with the block size checked against the setup.
+- **Manual** machine page: go to (Z goes up first), set the origin at the head or by typing, any 3D-probe routine, a
+  one-line console (each line confirmed; blocked commands refused) and *Run a file* with the same checks as a program.
+- **The assistant can work the machine**: hold, pause, stop program and STOP at once; everything else as an approval
+  card that runs only when you click Approve. It can also edit operations, workholding and add operations.
+- **Spindle fan** on the Z1 (Prepare ▸ Accessories, phone, assistant); accessory states are read back from the machine.
+- `outline(part)` and `face_outline(face)` for scripts.
 
 ### Fixed
-- An origin set before another setup's program ran is no longer shown as right for the next setup (re-zero after
-  re-clamping).
+- **Ball, bull-nose and V tools leave the floor the stepover promises**: the floor the passes miss is found and
+  cleaned up with short linked passes (an R1 ball at 0.6 mm stepover left 0.08 – 0.13 mm instead of 0.046).
+- Feeds & speeds sized V-bits by their shank; V-bits and chamfer tools (and ball tools at a given depth) are now sized
+  by their cutting width at the cut depth. A V tool without a tip Ø warns instead of being treated as sharp.
+- **Machine safety** (found running real jobs on a Z1):
+  - Every spindle start lifts in machine coordinates, moves over the operation's first point, starts the spindle and
+    only then comes down - the order MakeraStudio's own files use. Before, a program came straight down wherever the
+    head was parked, and the Z1 parks right over its tool setter.
+  - A run uses one tool, fitted and measured beforehand (Prepare ▸ Change tool); Run offers the program's tool runs in
+    order, and every tool change from the app stops the spindle first.
+  - A large program no longer drops Control while it uploads; a freshly set origin is no longer reported as changed.
+  - An origin set before another setup's program ran is no longer shown as right for the next setup.
 
 ## [0.47.0] — 2026-10-18
 

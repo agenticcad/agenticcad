@@ -539,6 +539,8 @@
   /* status strip */
   #mstrip { display:none; flex:none; height:64px; align-items:center; gap:16px; padding:0 14px; background:var(--panel); border-bottom:1px solid var(--line); position:relative; z-index:6; }
   body[data-ws=machine] #mstrip { display:flex; }
+  .xp { display:inline-block; font-size:10px; font-weight:600; letter-spacing:.04em; text-transform:uppercase; color:#f0b44c; border:1px solid rgba(240,180,76,.45); border-radius:9px; padding:0 6px; line-height:16px; vertical-align:1px; margin-left:6px; }
+  .xp-note { font-size:12px; color:var(--muted); border-left:2px solid rgba(240,180,76,.7); padding:4px 0 4px 10px; margin:0 0 10px; }
   .ms-badge { padding:5px 12px; border-radius:7px; font-weight:700; font-size:12px; letter-spacing:.06em; background:var(--s3); color:var(--muted); white-space:nowrap; display:flex; align-items:center; gap:7px; }
   .ms-badge::before { content:""; width:8px; height:8px; border-radius:50%; background:currentColor; }
   .ms-badge.s-Idle { background:rgba(62,207,122,.13); color:var(--ok); } .ms-badge.s-Running, .ms-badge.s-Run, .ms-badge.s-Jog, .ms-badge.s-Home { background:rgba(255,140,66,.14); color:var(--accent); }
@@ -778,7 +780,7 @@
           <hr>
           <div data-act="library">Part library…</div>
     </div></div>
-  <nav id="ws" role="tablist"><button type="button" data-rtab="design" class="on">Design</button><button type="button" data-rtab="cam">CAM</button><button type="button" data-rtab="machine">Machine</button></nav>
+  <nav id="ws" role="tablist"><button type="button" data-rtab="design" class="on">Design</button><button type="button" data-rtab="cam" title="CAM is experimental: check every program in the simulation and with an air cut">CAM<span class="xp">Experimental</span></button><button type="button" data-rtab="machine">Machine</button></nav>
   <div class="tb-right">
     <button id="mpill" class="mpill off" title="The machine: click for the Machine workspace"><i class="d"></i><b id="mpill-name">No machine</b><span id="mpill-state">not connected</span></button>
     <button id="asst-btn" class="tb-asst" title="The assistant: chat with the agent (⌘B hides the right column)"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l2.2 6.6L21 11l-6.8 2.4L12 20l-2.2-6.6L3 11l6.8-2.4z"/></svg>Assistant</button>
@@ -823,11 +825,11 @@
 <div id="app">
   <div id="leftcol">
   <div id="cam-left">
-    <div class="cl-prog" id="cam-prog" style="display:none"><div class="cl-t" id="cp-name"></div><div class="cl-m" id="cp-meta"></div><div id="cam-warn"></div>
+    <div class="cl-prog" id="cam-prog" style="display:none"><p class="xp-note"><b>Experimental.</b> Toolpaths are checked and simulated but not proven on every machine: read the warnings, simulate, and air-cut before you cut.</p><div class="cl-t" id="cp-name"></div><div class="cl-m" id="cp-meta"></div><div id="cam-warn"></div>
       <div class="cl-acts"><button class="btn" id="gcode-dl" title="Download the program for the machine">Export G-code</button><button class="btn pri" id="cp-send" title="Machine ▸ Run with the selected setup's operations">Send to machine →</button></div>
       <div class="cl-sub"><a href="#" id="gcode-preview" title="Show the start of the G-code">G-code</a><span class="muted" id="cam-gcode-meta"></span><a href="#" data-open-libs="machines" style="margin-left:auto" title="Settings ▸ Machines and Tools">Machines &amp; tools</a></div>
       <pre id="gcode-pre" style="display:none"></pre></div>
-    <div id="cam-empty" class="cam-sec" style="color:var(--muted)">No CAM program yet. Ask the agent, e.g. <i>"Make a CAM program for the Generic 3018: face the stock, drill the holes, pocket the bore and cut the outline with 4 tabs."</i> The agent writes <code>cam.py</code> (see the Code tab) against your machine and tool libraries. <div style="margin-top:8px"><button class="btn small" data-open-libs="machines">Machines &amp; tools…</button></div></div>
+    <div id="cam-empty" class="cam-sec" style="color:var(--muted)"><span class="xp" style="margin:0 0 8px">Experimental</span><br>No CAM program yet. Ask the agent, e.g. <i>"Make a CAM program for the Generic 3018: face the stock, drill the holes, pocket the bore and cut the outline with 4 tabs."</i> The agent writes <code>cam.py</code> (see the Code tab) against your machine and tool libraries. <div style="margin-top:8px"><button class="btn small" data-open-libs="machines">Machines &amp; tools…</button></div></div>
     <div id="cam-tree"></div>
     <div id="cam-tools"></div>
   </div>
@@ -967,6 +969,7 @@
   <div class="next"><button class="btn" data-act="step" data-step="run">Next: Run →</button></div>
 </div>
 <div class="mstep" data-step="run" id="mstep-run" style="display:none">
+  <p class="xp-note"><b>Experimental.</b> Running programs on the machine is new: air-cut first, stay at the machine with a hand near the stop button, and run one tool at a time.</p>
   <select class="msetup inp"></select>
   <div id="mr-job"></div>
   <div class="mcard" id="mr-ready-card"><div id="mr-ready"></div></div>
