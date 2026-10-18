@@ -11,7 +11,7 @@ so it can build geometry too. Each decorated function registers one entry:
   @tool(name, description)        an agent-callable function fn(ctx, **args); its JSON schema comes from the
                                   signature (annotations float/int/str/bool, defaults = optional) unless given.
                                   agent=False keeps it UI-only (buttons can still call it).
-  @panel(title, ...)              fn(ctx) -> a UI schema (see UI below). A ribbon button in the Extensions group opens
+  @panel(title, ...)              fn(ctx) -> a UI schema (see UI below). An item in the toolbar's Extensions menu opens
                                   it; the panel re-renders whenever one of its controls changes.
   @on_build                       fn(ctx) runs after every successful build; return a str or list[str] of warnings.
 

@@ -137,7 +137,7 @@ Rules
   tools you can call (@tool), UI panels with live controls, pickers and tables (@panel) and checks that run after
   every build (@on_build). Read `extension api` first. Use `show_panel` for a one-off table or report in the viewer;
   save an extension when the user will want it again (a calculator, a report, a custom check or export). Built-in
-  examples (Parameters, Hole report, Bolt pattern) are in the Extensions ribbon group; `extension read <module>`
+  examples (Parameters, Hole report, Bolt pattern) are in the toolbar's Extensions menu; `extension read <module>`
   shows their code.
   `from_library("part name", param=value)` instantiates a library part. The part library is a first-class source of
   geometry: before modelling a standard or previously made part (fasteners, bearings, brackets, anything reusable),
@@ -286,8 +286,8 @@ reports gouges into the part (with the op that caused them), material left on th
 material, and machine collisions: the collet nut / spindle nose / head against the remaining stock (narrow cuts deeper
 than the flutes), the tool through the spoilboard into the bed, and the holder against the chuck or tailstock on
 4th-axis jobs. Fix gouges, rapid hits and collisions before exporting (shorter tool stickout, a longer tool, a wider
-pocket, or shallower depth); the user can scrub the simulation in the CAM tab and watch it on the machine model
-(ribbon ▸ Machine).
+pocket, or shallower depth); the user can scrub the simulation in the CAM workspace and watch it on the machine model
+(the CAM viewer's Machine toggle).
 Makera Z1 / Carvera Air post (machine.post == "makera"): M6 Tn runs the whole manual change (moves to the change
 position, waits for the button, measures the tool length), lines ≤ 63 characters, no canned cycles or coolant,
 feeds on A moves are converted to the firmware's own rule. The Z1 is light (150 W, 1/8" collet): aluminium < 1 mm
@@ -301,7 +301,7 @@ shape, z, expand=tool.diameter) = what to clear at level z (expand lets the tool
 z_bottom below the stock bottom means cutting into the spoilboard (fine for through-cuts with a sacrificial
 board, warn otherwise). Tool numbers matter for tool changes (GRBL: machine.tool_change='pause' emits M6/M0; Haas and LinuxCNC posts emit Tn M06 + G43 Hn, so tool offsets must exist on the control). Built-in machines include the Makera Z1 and Carvera Air, Haas VF-2 / VF-2SS / VF-4 / Mini Mill / TM-1, and generic LinuxCNC mills.
 Prefer the tool library's feeds/stepdown; override per op only with a reason. The user's own per-op tweaks from
-the CAM tab live in one line at the top of cam.py, `overrides({"Pocket": {"feed": 500, "stepover": 0.3}, "Face#2": {...}})`
+the CAM workspace live in one line at the top of cam.py, `overrides({"Pocket": {"feed": 500, "stepover": 0.3}, "Face#2": {...}})`
 (keys = op names, "#2" for the second op with the same name; fields rpm, feed, plunge, stepdown, stepover as a
 fraction of Ø): always keep that line when you rewrite the script, and keep op names stable so it still matches. After build_cam, use `screenshot`
 to look at the toolpaths (they are drawn over the model; rapids red, cuts coloured per op).
@@ -319,8 +319,8 @@ Built-ins: "Makera low-profile vise" (Z1), "Carvera Air vise",
 '4" screwless vise', '6" Kurt-style vise' (Haas), "Tooling plate" (params size/thickness/pitch), "Step clamps" (bars
 overhanging the stock's ±X edges). When the user names a fixture, use it; otherwise RECOMMEND one (the machine's own
 vise for small parts, step clamps or a plate for large/thin stock), use it, and say so in one line — the user can
-change it from the CAM tab (it lands in a `fixtures({...})` line in cam.py: keep that line when you rewrite the script;
-the CAM tab's choice wins over Setup(fixture=...)). Jaws grip the stock's faces along the fixture's clamp axis (±X for
+change it from the CAM workspace (it lands in a `fixtures({...})` line in cam.py: keep that line when you rewrite the script;
+the CAM workspace's choice wins over Setup(fixture=...)). Jaws grip the stock's faces along the fixture's clamp axis (±X for
 the Z1 vise, ±Y for most others): keep outside contours, facing overruns and probing clear of them, or expect fixture
 collisions in simulate_cam. New fixtures: `get_fixture_code`
 for a starting point, `build_fixture(code)`: part(name, shape, material, collision=True) in the fixture frame (X right,
@@ -440,7 +440,7 @@ def _find_call(code: str, fname: str) -> tuple[dict, tuple[int, int] | None]:
             try:
                 table = ast.literal_eval(node.value.args[0])
             except ValueError:
-                raise cam.CamError(f"the {fname}({{...}}) line in cam.py is not a plain dict; edit it in the Code tab")
+                raise cam.CamError(f"the {fname}({{...}}) line in cam.py is not a plain dict; edit it in Code")
             return dict(table or {}), (node.lineno, node.end_lineno)
     return {}, None
 
@@ -843,7 +843,7 @@ class CadAgent:
             table[setup] = entry
         code = _write_fixtures(self.cam_code, table, span)
         prog = await self.set_cam_code(code, source="user")
-        self.notes.append(f"The user changed the fixture of setup '{setup}' in the CAM tab to {spec!r}. It lives in the `fixtures({{...}})` "
+        self.notes.append(f"The user changed the fixture of setup '{setup}' in the CAM workspace to {spec!r}. It lives in the `fixtures({{...}})` "
                           "line of cam.py; keep that line when you rewrite the script.")
         return prog
 
@@ -902,7 +902,7 @@ class CadAgent:
         code = _write_overrides(self.cam_code, table, span)
         prog = await self.set_cam_code(code, source="user")
         what = ", ".join(f"{k}={v:g}" if isinstance(v, float) else f"{k}={v!r}" for k, v in vals.items()) if vals else "cleared (script defaults)"
-        self.notes.append(f"The user set per-operation overrides in the CAM tab for '{key}': {what}. They live in the "
+        self.notes.append(f"The user set per-operation overrides in the CAM workspace for '{key}': {what}. They live in the "
                           "`overrides({...})` line of cam.py (tool values, cut settings, colour); keep that line when you rewrite the script.")
         return prog
 
@@ -923,7 +923,7 @@ class CadAgent:
             self.cam_code = before
             (self.workspace / "cam.py").write_text(before)
             raise
-        self.notes.append(f"The user added an operation in the CAM tab: `{line}` (appended to cam.py under the "
+        self.notes.append(f"The user added an operation in the CAM workspace: `{line}` (appended to cam.py under the "
                           "'operations added in the CAM tab' comment). Keep it when you rewrite the script.")
         return prog
 
@@ -932,7 +932,7 @@ class CadAgent:
         import machine_link
         prog = self.program
         if prog is None:
-            raise machine_link.Refused("no CAM program: build one in the CAM tab first")
+            raise machine_link.Refused("no CAM program: build one in the CAM workspace first")
         idx = sorted(set(int(i) for i in (ops or [])))
         if not idx:
             raise machine_link.Refused("pick the operations to run")
@@ -1549,7 +1549,7 @@ class CadAgent:
         else:
             raise ck.CadError(f"{what}: operation must be new | join | cut")
         await self.build(code, source="edit")
-        self.notes.append(f"The user added a {what} via the ribbon ({where}); the script was edited directly.")
+        self.notes.append(f"The user added a {what} via the toolbar ({where}); the script was edited directly.")
         await self.emit({"type": "info", "text": f"{what} · {where}"})
 
     async def op_mirror(self, body: str, origin: list[float], normal: list[float], mode: str = "join") -> None:
@@ -1580,7 +1580,7 @@ class CadAgent:
         if mode == "join":
             code = script_edit.wrap_body_expr(code, body, f"{call}({{body}}, {args})")
             await self.build(code, source="edit")
-            self.notes.append(f"The user patterned body '{body}' ({kind}) via the ribbon; the script was edited directly.")
+            self.notes.append(f"The user patterned body '{body}' ({kind}) via the toolbar; the script was edited directly.")
             await self.emit({"type": "info", "text": f"{kind} pattern of '{body}'"})
         elif mode == "new":
             await self._apply_feature(code, f"{call}({var}, {args}, include_original=False)", "new", None, "pattern", f"{body} pattern")
@@ -1642,7 +1642,7 @@ class CadAgent:
         if not name.strip() or not bodies:
             raise ck.CadError("joint: give a name and at least one body")
         if self.model.motion and any(j["name"] == name for j in self.model.motion["joints"]):
-            raise ck.CadError(f"joint '{name}' already exists; pick another name or edit it in the Code tab")
+            raise ck.CadError(f"joint '{name}' already exists; pick another name or edit it in Code")
         extra = (f", parent={parent!r}" if parent else "") + (f", limits=({float(limits[0]):g}, {float(limits[1]):g})" if limits else "")
         if kind == "slider":
             line = f"slider({name!r}, {list(bodies)!r}, direction={self._p(direction)}{extra})"
@@ -1651,7 +1651,7 @@ class CadAgent:
         lines = [line] + ([f"couple({name!r}, {couple_to!r}, ratio={float(ratio):g})"] if couple_to else [])
         code = self.model.code.rstrip("\n") + "\n" + "\n".join(lines) + "\n"
         await self.build(code, source="edit")
-        self.notes.append(f"The user added joint '{name}' ({kind}) via the ribbon: {'; '.join(lines)}")
+        self.notes.append(f"The user added joint '{name}' ({kind}) via the toolbar: {'; '.join(lines)}")
         await self.emit({"type": "info", "text": f"joint '{name}' added"})
 
     async def transform_body(self, path: str, move: list[float], rotate: list[float]) -> None:
@@ -2185,7 +2185,7 @@ class CadAgent:
               "compare with the part: gouges into the part (depth, area, which op), material left on the part, stock left "
               "outside it, rapids through material, and MACHINE COLLISIONS: the collet nut / spindle nose / head against the "
               "remaining stock (deep narrow cuts), the tool through the spoilboard into the bed, and the holder against the "
-              "4th-axis chuck or tailstock. Shows the result in the CAM tab (the Machine toggle plays it on the machine model). "
+              "4th-axis chuck or tailstock. Shows the result in the CAM workspace (the Machine toggle plays it on the machine model). "
               "Flat setups (top/flipped) and 4th-axis setups are simulated separately.",
               {"type": "object", "properties": {"ops": {"type": "array", "items": {"type": "integer"}},
                                                 "resolution": {"type": "number"}}, "required": []})
@@ -2602,7 +2602,7 @@ class CadAgent:
                     note = " New tools become first-class ext_<name> tools after a session restart; until then use `extension call`." if r["tools"] else ""
                     if r["panels"]:
                         ids = [e.id for e in agent.extensions.panels() if e.module == r["module"]]
-                        note += f" The panel is in the Extensions ribbon group; show it now with `extension open {ids[0] if ids else r['panels'][0]}`."
+                        note += f" The panel is in the toolbar's Extensions menu; show it now with `extension open {ids[0] if ids else r['panels'][0]}`."
                     return ok(f"saved extension {r['module']}: " + "; ".join(f"{k} {', '.join(v)}" for k, v in r.items() if k != "module" and v) + note)
                 if a == "delete":
                     await asyncio.to_thread(agent.extensions.delete, args.get("module") or "")
@@ -2701,7 +2701,7 @@ class CadAgent:
         async def machine_status(args: dict[str, Any]) -> dict[str, Any]:
             mc = agent.machine
             if mc is None or not mc.connected:
-                return {"content": [{"type": "text", "text": "No machine connected. The user connects one in the Machine tab."}]}
+                return {"content": [{"type": "text", "text": "No machine connected. The user connects one in the Machine workspace."}]}
             content = [{"type": "text", "text": mc.describe()}]
             if args.get("camera", True) and agent.camera is not None:
                 try:
