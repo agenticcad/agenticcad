@@ -5,6 +5,15 @@ features, patch bumps fix things. The version shown in the UI header comes from 
 
 ## [Unreleased]
 
+## [0.48.3] — 2026-10-18 (local build of the v2-ui branch, not released)
+
+### Added
+- **Tool photos.** Settings ▸ Tools ▸ a tool ▸ *Add photo…* (or drop / paste a picture): crop that tool's packet (or the
+  tool) out of the photo. One shot of a row of packets does for all of them: *From the last photo* crops the next tool
+  from the same picture. The photo shows where you pick the tool up: the Machine page's *Fit Tn* card at every tool
+  change (yours or the program's), Prepare's *Change to* and its confirmation, the CAM tools list, and the phone's
+  tool-change sheet.
+
 ## [0.48.2] — 2026-10-18 (local build of the v2-ui branch, not released)
 
 ### Changed

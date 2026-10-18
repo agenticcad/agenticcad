@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import re
 import time
 import uuid
 from contextlib import asynccontextmanager
@@ -315,6 +316,43 @@ async def cam_feeds_for(body: FeedsBody):
         return cam.feeds(t, body.material, m, body.aggressiveness, body.radial_engagement, body.depth)
     except (cam.CamError, ValueError, TypeError) as e:
         return JSONResponse({"error": str(e)}, status_code=400)
+
+
+# ---- tool photos: a picture of each tool (or its packet), cropped in Settings ▸ Tools, shown when the machine asks for it
+TOOL_PHOTOS = WORKSPACE / "tool_photos"
+_PHOTO_NAME = re.compile(r"^[0-9a-f]{16}\.(jpg|png)$")
+
+
+class ToolPhotoBody(BaseModel):
+    data: str                             # base64 JPEG or PNG (a data: URL is fine)
+
+
+@app.post("/api/cam/tool_photo")
+async def cam_tool_photo_save(body: ToolPhotoBody):
+    raw = body.data.split(",", 1)[1] if body.data.startswith("data:") else body.data
+    try:
+        img = base64.b64decode(raw, validate=True)
+    except Exception:  # noqa: BLE001
+        return JSONResponse({"error": "not base64"}, status_code=400)
+    ext = "jpg" if img[:3] == b"\xff\xd8\xff" else "png" if img[:8] == b"\x89PNG\r\n\x1a\n" else None
+    if ext is None or len(img) > 4_000_000:
+        return JSONResponse({"error": "a JPEG or PNG under 4 MB"}, status_code=400)
+    import hashlib
+    name = hashlib.sha1(img).hexdigest()[:16] + "." + ext
+    TOOL_PHOTOS.mkdir(parents=True, exist_ok=True)
+    (TOOL_PHOTOS / name).write_bytes(img)
+    return {"name": name}
+
+
+def _tool_photo(name: str):
+    if not _PHOTO_NAME.match(name or "") or not (TOOL_PHOTOS / name).is_file():
+        return JSONResponse({"error": "no such photo"}, status_code=404)
+    return FileResponse(TOOL_PHOTOS / name, headers={"Cache-Control": "max-age=31536000, immutable"})
+
+
+@app.get("/api/cam/tool_photo/{name}")
+async def cam_tool_photo(name: str):
+    return _tool_photo(name)
 
 
 class ToolShapeBody(BaseModel):
@@ -1020,6 +1058,13 @@ async def phone_machine_get():
 @phone.post("/m/api/machine")
 async def phone_machine_post(body: MachineBody):
     return await machine_post(body)
+
+
+@phone.get("/m/api/tool_photo/{number}")
+async def phone_tool_photo(number: int):
+    """The photo of library tool T<number> (the phone shows it when the machine asks for that tool)."""
+    t = next((x for x in agent.library.tools() if x.number == number), None)
+    return _tool_photo(t.photo if t else "")
 
 
 @phone.get("/m/api/camera")

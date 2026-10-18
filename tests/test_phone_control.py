@@ -21,6 +21,8 @@ def test_phone_listener_needs_the_key_and_exposes_only_the_machine(tmp_path, mon
     r = c.get("/m/api/machine", headers={"X-Key": cfg["token"]})
     assert r.status_code == 200 and r.json()["connected"] is False
     assert c.get(f"/m/api/machine?k={cfg['token']}").status_code == 200   # the camera <img> passes it in the URL
+    assert c.get("/m/api/tool_photo/1").status_code == 401                # tool photos need the key too
+    assert c.get(f"/m/api/tool_photo/1?k={cfg['token']}").status_code == 404   # T1 has no photo
     assert c.get("/api/settings", headers={"X-Key": cfg["token"]}).status_code in (401, 404)   # not the desktop app
     # a new link locks out the old key
     old = cfg["token"]

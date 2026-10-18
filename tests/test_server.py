@@ -253,3 +253,21 @@ def test_units_setting_and_params_units(client):
     assert "in · third angle" in svg
     r = client.post("/api/settings", json={"settings": {"units": ""}}).json()
     assert r["settings"]["units"] == "" and r["settings"]["units_resolved"] == r["settings"]["units_auto"]
+
+
+def test_tool_photo_upload_attach_and_serve(client):
+    """Settings ▸ Tools ▸ Photo: a cropped JPEG is stored once, attached to a tool, and served to the page."""
+    import base64
+    jpg = bytes.fromhex("ffd8ffe000104a46494600010100000100010000ffdb004300") + b"\x08" * 64 + bytes.fromhex("ffd9")
+    r = client.post("/api/cam/tool_photo", json={"data": "data:image/jpeg;base64," + base64.b64encode(jpg).decode()})
+    name = r.json()["name"]
+    assert r.status_code == 200 and name.endswith(".jpg")
+    assert client.post("/api/cam/tool_photo", json={"data": base64.b64encode(jpg).decode()}).json()["name"] == name   # same picture, same file
+    assert client.get(f"/api/cam/tool_photo/{name}").content == jpg
+    assert client.post("/api/cam/tool_photo", json={"data": base64.b64encode(b"<script>").decode()}).status_code == 400
+    assert client.get("/api/cam/tool_photo/..%2Fcam.py").status_code == 404
+    assert client.get("/api/cam/tool_photo/0123456789abcdef.jpg").status_code == 404
+    lib = client.get("/api/cam/library").json()
+    t = dict(lib["tools"][0]); t.pop("shape", None); t["photo"] = name
+    assert client.post("/api/cam/tool", json={"tool": t}).status_code == 200
+    assert next(x for x in client.get("/api/cam/library").json()["tools"] if x["number"] == t["number"])["photo"] == name

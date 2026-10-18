@@ -55,6 +55,7 @@ class Tool:
     neck_diameter: float = 0.0  # a relieved neck between the flutes and the shank (0 = none)
     reach: float = 0.0          # how far below the shank the tool stays thin (neck end); 0 = the flute length
     stickout: float = 0.0       # how far the tool projects from the collet / nut; 0 = estimated
+    photo: str = ""             # a picture of the tool / its packet (workspace/tool_photos/<name>): shown at tool changes
 
     @property
     def radius(self) -> float:

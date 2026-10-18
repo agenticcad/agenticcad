@@ -140,7 +140,7 @@
     <button class="btn" id="disconnect" style="width:100%;margin-top:10px">Disconnect machine</button>
   </div>
 
-  <div class="sheet" id="sheet"><div class="in"><div class="k" id="sheetk"></div><div class="m" id="sheetm"></div>
+  <div class="sheet" id="sheet"><div class="in"><img id="sheetimg" alt="" style="display:none;width:100%;max-height:150px;object-fit:contain;border-radius:12px;background:#07080a;margin-bottom:10px"><div class="k" id="sheetk"></div><div class="m" id="sheetm"></div>
     <div class="pbar" id="sheetpb" style="display:none"><div></div></div>
     <button class="btn primary" id="sheetok" style="width:100%">Confirm — same as the front button</button>
     <div class="row" id="sheetjob" style="display:none;margin-top:8px"><button class="btn" id="jpause">Pause</button><button class="btn primary" id="jresume">Resume</button><button class="btn" id="jstop" style="color:var(--err)">Stop program</button></div></div></div>
@@ -199,6 +199,11 @@ function render(st) {
   const live = rt && ['running', 'awaiting'].includes(rt.stage);
   const job = st.job, jlive = job && ['uploading', 'starting', 'running', 'awaiting', 'paused'].includes(job.stage);
   $('sheet').classList.toggle('show', !!(live || jlive)); document.body.classList.toggle('sheeted', !!(live || jlive));
+  // the photo of the tool the machine is waiting for (Settings ▸ Tools ▸ Photo on the computer)
+  const want = live && rt.stage === 'awaiting' ? rt.tool : jlive && job.stage === 'awaiting' ? job.want_tool : null, im = $('sheetimg');
+  if (want == null) { im.style.display = 'none'; im.removeAttribute('src'); delete im.dataset.t; }
+  else if (im.dataset.t !== String(want)) { im.dataset.t = String(want); im.style.display = 'none'; im.onload = () => { im.style.display = ''; }; im.onerror = () => { im.style.display = 'none'; };
+    im.src = `/m/api/tool_photo/${want}?k=${encodeURIComponent(KEY)}`; }
   $('sheetjob').style.display = jlive && !live ? '' : 'none'; $('sheetpb').style.display = jlive && !live ? '' : 'none';
   if (live) { $('sheetk').textContent = (rt.stage === 'awaiting' ? 'WAITING FOR YOU · ' : 'RUNNING · ') + rt.kind.toUpperCase();
     $('sheetm').textContent = rt.stage === 'awaiting' ? rt.msg : `${rt.command} — the machine is doing this itself; STOP aborts`;

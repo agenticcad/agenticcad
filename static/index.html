@@ -735,6 +735,23 @@
   .tl2-label { display:flex; gap:6px; } #modal .tl2-label input { flex:1; font-family:ui-monospace,Menlo,monospace; font-size:12px; }
   .tl2-said { font-size:11.5px; min-height:16px; margin:4px 0 6px; }
   .tl2-warn { margin:8px 0 2px; padding:8px 10px; border-radius:8px; border:1px solid rgba(242,201,76,.45); background:rgba(242,201,76,.07); color:#f3d98a; font-size:12px; line-height:1.45; }
+
+  /* tool photos */
+  .tl2-photo { width:100%; border:1px dashed var(--line2); border-radius:8px; padding:8px; display:flex; flex-direction:column; gap:6px; font-size:11.5px; line-height:1.4; }
+  .tl2-photo.over { border-color:var(--accent2); background:rgba(78,161,255,.08); } .tl2-photo img { width:100%; max-height:150px; object-fit:contain; border-radius:6px; background:#0b0d10; }
+  .tl2-pa { display:flex; gap:6px; flex-wrap:wrap; }
+  .tl2-th { display:block; width:34px; height:22px; object-fit:cover; border-radius:4px; margin-top:4px; }
+  .ct-th { width:30px; height:18px; object-fit:cover; border-radius:3px; flex:none; }
+  .tc-photo { display:block; width:100%; max-height:150px; object-fit:contain; border-radius:8px; background:#0b0d10; margin:0 0 10px; }
+  #mp-tc-photo:empty { display:none; } #mp-tc-photo .tc-photo { max-height:110px; margin:0 0 8px; }
+  .mvp-check .tc-photo { max-height:180px; }
+  .crop-ov { position:fixed; inset:0; z-index:60; background:rgba(0,0,0,.6); display:flex; align-items:center; justify-content:center; }
+  .crop-box { background:var(--panel); border:1px solid var(--line2); border-radius:12px; padding:14px; width:min(920px, 94vw); box-shadow:0 20px 60px rgba(0,0,0,.5); }
+  .crop-hd { display:flex; gap:10px; align-items:baseline; margin-bottom:10px; }
+  .crop-stage { position:relative; display:flex; justify-content:center; background:#0b0d10; border-radius:8px; cursor:crosshair; user-select:none; touch-action:none; }
+  .crop-stage img { max-width:100%; max-height:62vh; display:block; pointer-events:none; }
+  .crop-sel { position:absolute; border:2px solid var(--accent2); box-shadow:0 0 0 9999px rgba(0,0,0,.45); pointer-events:none; }
+  .crop-ft { display:flex; gap:8px; align-items:center; justify-content:flex-end; margin-top:10px; } .crop-ft .muted { margin-right:auto; }
 </style>
 </head>
 <body>
@@ -916,6 +933,7 @@
   <div class="mcard" id="mp-machine"></div>
   <div class="mcard"><div class="h">Tool</div>
     <div class="row"><div id="mp-tool-chips" class="chips"></div></div>
+    <div id="mp-tc-photo"></div>
     <div class="row"><span class="muted">Change to T</span><input type="number" id="mp-tc-num" min="0" max="9999" step="1" value="0" class="inp" style="width:72px"><button class="btn" id="mp-tc-go" data-act="tc" title="Makera's tool change (M6 Tn): Z up, park, wait for you, then the machine measures the tool on its setter. Same number: re-measure (M491). Every tool, the probes included.">Change tool…</button></div>
     <p class="muted sm">Every tool — the probes too — is measured on the setter before the machine moves with it.</p></div>
   <div class="mcard"><div class="h">Accessories</div><div class="row"><label class="tgl"><input type="checkbox" id="mv-dust"><span class="sw"></span>Dust collector</label><label class="tgl"><input type="checkbox" id="mv-light"><span class="sw"></span>Light</label></div>
@@ -1976,7 +1994,7 @@ function renderCamTools() {                       // the tools the selected setu
   }
   el.innerHTML = `<div class="ct-h">Tools · ${seq.map(n => 'T' + n).join(' → ')}</div>` + [...seen.values()].map(op => {
     const t = op.tool, lib = (library.tools || []).find(x => x.number === t.number && x.name === t.name), bad = t.shape && t.shape.error;
-    return `<div class="ct-tool" title="${esc(t.type)} Ø${t.diameter}${t.flutes ? ' · ' + t.flutes + ' flutes' : ''}${t.shank_diameter ? ' · shank Ø' + t.shank_diameter : ''} · ${lib ? 'in the tool library' : 'defined in cam.py'}${bad ? ' · shape: ' + esc(t.shape.error) : ''}">${toolSil(t.shape, 8, 20)}<div><b>T${t.number}</b> ${esc(t.name)}</div><small>${bad ? '<span class="wa">shape?</span>' : lib ? '✓' : 'cam.py'}</small></div>`;
+    return `<div class="ct-tool" title="${esc(t.type)} Ø${t.diameter}${t.flutes ? ' · ' + t.flutes + ' flutes' : ''}${t.shank_diameter ? ' · shank Ø' + t.shank_diameter : ''} · ${lib ? 'in the tool library' : 'defined in cam.py'}${bad ? ' · shape: ' + esc(t.shape.error) : ''}">${t.photo ? `<img class="ct-th" src="${toolPhotoUrl(t)}" alt="">` : toolSil(t.shape, 8, 20)}<div><b>T${t.number}</b> ${esc(t.name)}</div><small>${bad ? '<span class="wa">shape?</span>' : lib ? '✓' : 'cam.py'}</small></div>`;
   }).join('');
 }
 function camSelSetup() { return camSel.kind === 'setup' || camSel.kind === 'add' ? camSel.si : camSel.kind === 'op' ? ((program.ops.find(o => o.key === camSel.key) || {}).setup || 0) : 0; }
@@ -5385,8 +5403,43 @@ const MACHINE_FIELDS = [
   ['4th axis', 'rotary', 'rotary'], ['Start G-code', 'program_start', 'lines'], ['End G-code', 'program_end', 'lines'], ['Notes', 'notes', 'area']];
 const TOOL_TYPES = ['flat', 'ball', 'bull', 'vbit', 'chamfer', 'drill', 'taper_ball'];
 const TOOL_TYPE_LABEL = { flat: 'flat', ball: 'ball', bull: 'bull nose', vbit: 'V / engraver', chamfer: 'chamfer', drill: 'drill', taper_ball: 'tapered ball' };
-// a tool described the way its packet gives it (cam_kernel.Tool.spec)
-
+// a tool's photo (Settings ▸ Tools ▸ Photo): what to fit when the machine asks for T<n>
+function toolByNumber(n) {
+  const op = program && program.ops.find(o => o.tool && o.tool.number === n);
+  return (op && op.tool && op.tool.photo ? op.tool : null) || (library.tools || []).find(t => t.number === n) || (op && op.tool) || null;
+}
+function toolPhotoUrl(t) { return t && t.photo ? '/api/cam/tool_photo/' + encodeURIComponent(t.photo) : ''; }
+// crop part of a photo (one shot of several packets -> one picture per tool): resolves a JPEG data URL or null
+let lastToolPhoto = null;                          // the last photo opened, to crop the next tool from it too
+function cropPhoto(src) {
+  return new Promise(resolve => {
+    const ov = document.createElement('div'); ov.className = 'crop-ov';
+    ov.innerHTML = `<div class="crop-box"><div class="crop-hd"><b>Crop the tool</b><span class="muted">drag a box round this tool's packet (or the tool itself)</span></div>
+      <div class="crop-stage"><img alt=""><div class="crop-sel" style="display:none"></div></div>
+      <div class="crop-ft"><span class="muted" data-c="size"></span><button class="btn" data-c="all">Whole photo</button><button class="btn" data-c="cancel">Cancel</button><button class="btn primary" data-c="ok" disabled>Use this</button></div></div>`;
+    document.body.appendChild(ov);
+    const img = ov.querySelector('img'), sel = ov.querySelector('.crop-sel'), stage = ov.querySelector('.crop-stage');
+    let r = null, a = null;
+    const done = v => { ov.remove(); resolve(v); };
+    const out = rr => {                               // the crop at the photo's own resolution, at most 900 px wide
+      const k = img.naturalWidth / img.clientWidth, sx = rr.x * k, sy = rr.y * k, sw = rr.w * k, sh = rr.h * k;
+      const z = Math.min(1, 900 / sw), c = document.createElement('canvas'); c.width = Math.round(sw * z); c.height = Math.round(sh * z);
+      c.getContext('2d').drawImage(img, sx, sy, sw, sh, 0, 0, c.width, c.height); return c.toDataURL('image/jpeg', 0.86);
+    };
+    img.onload = () => { ov.querySelector('[data-c=size]').textContent = `${img.naturalWidth} × ${img.naturalHeight}`; };
+    img.onerror = () => done(null);
+    img.src = src;
+    stage.onpointerdown = e => { if (e.button) return; const b = img.getBoundingClientRect(); a = [Math.max(0, Math.min(b.width, e.clientX - b.left)), Math.max(0, Math.min(b.height, e.clientY - b.top))]; stage.setPointerCapture(e.pointerId); };
+    stage.onpointermove = e => { if (!a) return; const b = img.getBoundingClientRect(); const x = Math.max(0, Math.min(b.width, e.clientX - b.left)), y = Math.max(0, Math.min(b.height, e.clientY - b.top));
+      r = { x: Math.min(a[0], x), y: Math.min(a[1], y), w: Math.abs(x - a[0]), h: Math.abs(y - a[1]) };
+      Object.assign(sel.style, { display: '', left: (img.offsetLeft + r.x) + 'px', top: (img.offsetTop + r.y) + 'px', width: r.w + 'px', height: r.h + 'px' });
+      ov.querySelector('[data-c=ok]').disabled = r.w < 8 || r.h < 8; };
+    stage.onpointerup = () => { a = null; };
+    ov.querySelector('[data-c=cancel]').onclick = () => done(null);
+    ov.querySelector('[data-c=all]').onclick = () => done(out({ x: 0, y: 0, w: img.clientWidth, h: img.clientHeight }));
+    ov.querySelector('[data-c=ok]').onclick = () => done(r ? out(r) : null);
+  });
+}
 // a tool described the way its packet gives it (cam_kernel.Tool.spec)
 const gnum = v => +(+v).toFixed(4);   // a number as typed (no float noise)
 function toolSpec(t) {                          // the packet's description (cam_kernel.Tool.spec)
@@ -5516,7 +5569,7 @@ function libraryEditor(mPane, tPane) {
     const field = ([k, lab, unit]) => `<label>${lab}</label><div class="tf"><input type="number" step="any" min="0" data-s="${k}" value="${val(k)}"><span class="muted">${unit}</span></div>`;
     tPane.innerHTML = `<div class="set-h">Tool library<span class="muted">what every operation uses; per operation you can override the cutting values in CAM</span></div>
       <div class="tl2">
-        <div class="tl2-list">${ts.map((y, i) => `<div class="tl2-it ${i === tSel ? 'on' : ''} ${y.dirty ? 'dirty' : ''}" data-i="${i}"><b>T${y.t.number}</b><div><div class="nm">${esc(y.t.name || '(unnamed)')}</div>
+        <div class="tl2-list">${ts.map((y, i) => `<div class="tl2-it ${i === tSel ? 'on' : ''} ${y.dirty ? 'dirty' : ''}" data-i="${i}"><b>T${y.t.number}${y.t.photo ? `<img class="tl2-th" src="${toolPhotoUrl(y.t)}" alt="">` : ''}</b><div><div class="nm">${esc(y.t.name || '(unnamed)')}</div>
             <div class="sp">${esc(toolSpec(y.t))}${tipMissing(y.t) ? ' <span class="wa">· set the tip</span>' : ''}</div></div></div>`).join('')}
           <button class="btn small" data-a="tadd" style="margin:8px 4px">+ Add tool</button></div>
         <div class="tl2-ed">${!t ? '<div class="muted">No tools. Add one.</div>' : `
@@ -5538,7 +5591,10 @@ function libraryEditor(mPane, tPane) {
             <div class="tl2-sec">In the holder</div>
             <div class="tl2-grid">${HOLD.map(field).join('')}</div>
           </div>
-          <div class="tl2-side"><div data-s="svg" class="tl2-svg"></div><div class="muted" data-s="facts" style="font-size:11.5px"></div><div data-s="err" style="font-size:12px;color:var(--err)"></div></div></div>
+          <div class="tl2-side"><div class="tl2-photo" data-a="photo-drop">${t.photo ? `<img src="${toolPhotoUrl(t)}" alt="T${t.number}">` : '<div class="muted">No photo. Add one so the Machine page shows what to fit at a tool change: a photo of the packet or the tool (drop or paste it here, or choose a file), then crop this tool out of it.</div>'}
+              <div class="tl2-pa"><button class="btn small" data-a="photo-add">${t.photo ? 'Replace…' : 'Add photo…'}</button>${lastToolPhoto ? '<button class="btn small" data-a="photo-last" title="Crop this tool from the photo you used last">From the last photo</button>' : ''}${t.photo ? '<button class="btn small" data-a="photo-rm">Remove</button>' : ''}</div>
+              <input type="file" accept="image/*" data-a="photo-file" style="display:none"></div>
+            <div data-s="svg" class="tl2-svg"></div><div class="muted" data-s="facts" style="font-size:11.5px"></div><div data-s="err" style="font-size:12px;color:var(--err)"></div></div></div>
           <div class="fs-box"><div class="set-h" style="margin-top:0">Feeds &amp; speeds<span class="muted">for T${t.number}: fills its cutting values for a material</span></div>
             <div class="fs-row"><label>Material</label><select data-f="mat">${camMaterials.map(m => `<option ${m === 'aluminium' ? 'selected' : ''}>${m}</option>`).join('')}</select>
               <label>Machine</label><select data-f="mach">${ms.map(y => `<option ${program && y.m.name === program.machine ? 'selected' : ''}>${y.m.name}</option>`).join('')}</select>
@@ -5571,6 +5627,22 @@ function libraryEditor(mPane, tPane) {
     lab.oninput = () => { const r = parseLabel(lab.value, typ); said.textContent = lab.value.trim() ? (r.said.length ? 'reads as: ' + r.said.join(' · ') : 'nothing recognised') : ''; };
     const fill = () => { const r = parseLabel(lab.value, typ); if (!r.said.length) return; Object.assign(t, r.out); mark(); const keep = lab.value; renderTools(); const l2 = tPane.querySelector('[data-a=label]'); l2.value = keep; tPane.querySelector('[data-a=said]').textContent = 'filled: ' + r.said.join(' · '); };
     tPane.querySelector('[data-a=fill]').onclick = fill; lab.onkeydown = e => { if (e.key === 'Enter') fill(); };
+    // photo: pick / drop / paste an image, crop this tool out of it, store it (POST /api/cam/tool_photo) on the tool
+    const usePhoto = async src => {
+      lastToolPhoto = src;
+      const data = await cropPhoto(src); if (!data) { renderTools(); return; }
+      try { const r = await api('/api/cam/tool_photo', { data }); t.photo = r.name; mark(); } catch (e) { addMsg('error', 'tool photo: ' + e.message); }
+      renderTools();
+    };
+    const fromFile = f => { if (f && f.type.startsWith('image/')) { const rd = new FileReader(); rd.onload = () => usePhoto(rd.result); rd.readAsDataURL(f); } };
+    const pf = tPane.querySelector('[data-a=photo-file]'), drop = tPane.querySelector('[data-a=photo-drop]');
+    tPane.querySelector('[data-a=photo-add]').onclick = () => pf.click();
+    pf.onchange = () => { fromFile(pf.files[0]); pf.value = ''; };
+    const pl = tPane.querySelector('[data-a=photo-last]'); if (pl) pl.onclick = () => usePhoto(lastToolPhoto);
+    const prm = tPane.querySelector('[data-a=photo-rm]'); if (prm) prm.onclick = () => { t.photo = ''; mark(); renderTools(); };
+    drop.ondragover = e => { e.preventDefault(); drop.classList.add('over'); }; drop.ondragleave = () => drop.classList.remove('over');
+    drop.ondrop = e => { e.preventDefault(); drop.classList.remove('over'); fromFile(e.dataTransfer.files[0]); };
+    tPane.onpaste = e => { const f = [...((e.clipboardData || {}).files || [])].find(x => x.type.startsWith('image/')); if (f) { e.preventDefault(); fromFile(f); } };
     drawShape();
     const F = k => tPane.querySelector(`[data-f="${k}"]`); let res = null;
     const calc = async () => {
@@ -6103,6 +6175,10 @@ function mvToolShape(n) {
   const t = op ? op.tool : (library.tools || []).find(x => x.number === n);
   return t && t.shape && !t.shape.error ? t.shape : null;
 }
+function mvPhoto(n) {                            // the tool's photo, big enough to pick it out of the drawer
+  const t = toolByNumber(n), u = toolPhotoUrl(t);
+  return u ? `<img class="tc-photo" src="${u}" alt="T${n}" title="T${n} ${esc(t.name || '')} · ${esc(toolSpec(t))}">` : '';
+}
 function toolSil(shape, w = 14, h = 34) {        // the tool's silhouette from its profile (flutes orange, the rest steel)
   if (!shape || !shape.outline) return `<svg width="${w}" height="${h}"><rect x="${w / 2 - 2}" y="2" width="4" height="${h - 4}" rx="2" fill="#6f7782"/></svg>`;
   const pts = shape.outline, fl = shape.flute_length || 0, top = Math.min(shape.stickout || 20, Math.max(fl + 4, 12));
@@ -6219,13 +6295,13 @@ function mvToolCard(st) {                        // a tool change waiting for yo
   if (!MV.tcInit) { MV.tcInit = true; if (r && (r.stage === 'done' || r.stage === 'failed')) MV.tcSeen = r.kind + r.command + r.stage; }   // a result from before this page opened: not news
   if (job && job.stage === 'awaiting') {
     const n = job.want_tool;
-    html = `<div class="mcard tcwait">${toolSil(mvToolShape(n), 22, 70)}<div><div class="t">Fit T${n}${mvToolName(n) ? ' · ' + esc(mvToolName(n)) : ''}</div>
+    html = `<div class="mcard tcwait">${toolSil(mvToolShape(n), 22, 70)}<div>${mvPhoto(n)}<div class="t">Fit T${n}${mvToolName(n) ? ' · ' + esc(mvToolName(n)) : ''}</div>
       <p>The program stopped for the change. Swap the tool, then press the machine's front button or Confirm — the machine measures it before anything moves.</p>
       <div class="acts"><button class="btn acc" data-act="confirm_tool">Confirm — tool is in</button></div></div></div>`;
   } else if (r && (r.stage === 'running' || r.stage === 'awaiting' || MV.tcSeen !== r.kind + r.command + r.stage)) {
     const n = r.tool, awaiting = r.stage === 'awaiting';
     const title = awaiting ? `Fit T${n}${mvToolName(n) ? ' · ' + esc(mvToolName(n)) : ''}` : r.stage === 'running' ? `${r.kind[0].toUpperCase() + r.kind.slice(1)}…` : r.stage === 'done' ? `${r.kind}: done` : `${r.kind}: failed`;
-    html = `<div class="mcard tc ${r.stage}">${n != null ? toolSil(mvToolShape(n), 22, 70) : ''}<div><div class="t">${title}</div><p>${esc(r.msg)}</p>
+    html = `<div class="mcard tc ${r.stage}">${n != null ? toolSil(mvToolShape(n), 22, 70) : ''}<div>${awaiting ? mvPhoto(n) : ''}<div class="t">${title}</div><p>${esc(r.msg)}</p>
       <div class="acts">${awaiting ? '<button class="btn acc" data-act="confirm_tool">Confirm — tool is in</button><span class="muted">to cancel: STOP</span>' : ''}
       ${r.stage === 'done' || r.stage === 'failed' ? `<button class="btn ghost" data-act="tc-ok" data-k="${esc(r.kind + r.command + r.stage)}">OK</button>` : ''}</div></div></div>`;
   }
@@ -6245,6 +6321,7 @@ function mvPrep(st) {
   setHTML(mvEl('mp-tool-chips'), chips + (need.length ? `<span class="muted sm">this setup uses ${need.map(n => 'T' + n).join(' → ')}</span>` : ''));
   const ready = conn && st.armed && st.homed && s.state === 'Idle' && !(st.routine && ['running', 'awaiting'].includes(st.routine.stage));
   mvEl('mp-tc-go').disabled = !ready;
+  setHTML(mvEl('mp-tc-photo'), mvPhoto(Math.round(+mvEl('mp-tc-num').value)));
   ['dust', 'light'].forEach(k => { const c = mvEl('mv-' + k); c.disabled = !conn; if (st.switches && k in st.switches) c.checked = st.switches[k]; });
   const fan = mvEl('mv-fan'), fpw = mvEl('mv-fan-pw'), fon = !!(st.switches && st.switches.spindle_fan);
   fan.disabled = !conn; fan.checked = fon; fpw.disabled = !conn;
@@ -6503,10 +6580,10 @@ async function mvRunFile(file) {
     if (a === 'disconnect') return mvPost({ action: 'disconnect' });
     if (a === 'confirm_tool') return mvPost({ action: 'confirm_tool' });
     if (a === 'tc-ok') { MV.tcSeen = b.dataset.k; return mvRender(st); }
-    if (a === 'tcpick') { mvEl('mp-tc-num').value = b.dataset.n; return; }
+    if (a === 'tcpick') { mvEl('mp-tc-num').value = b.dataset.n; return mvRender(st); }
     if (a === 'tcpick-go' || a === 'tc') {
       const n = a === 'tc' ? Math.round(num('mp-tc-num')) : +b.dataset.n;
-      if (!await mvAsk('Change tool', `<div><b>Change to T${n}${mvToolName(n) ? ' · ' + esc(mvToolName(n)) : ''}</b></div><div>Makera's tool change (M6 T${n}, or M491 to re-measure the same tool): Z goes up, the head parks and waits for you; after Confirm the machine measures the tool on its setter.</div>`, 'Start the change')) return;
+      if (!await mvAsk('Change tool', `${mvPhoto(n)}<div><b>Change to T${n}${mvToolName(n) ? ' · ' + esc(mvToolName(n)) : ''}</b></div><div>Makera's tool change (M6 T${n}, or M491 to re-measure the same tool): Z goes up, the head parks and waits for you; after Confirm the machine measures the tool on its setter.</div>`, 'Start the change')) return;
       return mvPost({ action: 'change_tool', z: n });
     }
     if (a === 'goto-corner') { if (await mvAsk('Go to the corner', `<div>Move to machine X ${(+b.dataset.x).toFixed(2)} Y ${(+b.dataset.y).toFixed(2)} at 300 mm/min. Z goes up to the top of travel first if it isn't there.</div><div class="muted">This is where the CAM setup places the block. Check on the camera that the probe ends up over the block, 5 mm in from the corner.</div>`, 'Go')) mvPost({ action: 'goto_xy_raised', x: +b.dataset.x, y: +b.dataset.y, feed: 300 }); return; }
