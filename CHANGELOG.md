@@ -14,7 +14,9 @@ features, patch bumps fix things. The version shown in the UI header comes from 
   little below the chamfer for a clean edge; bigger chamfers take several laps. With no faces picked it finds the
   part's top face along its outline (a plate's top, not the top of a raised feature).
 - **V-carve** (`vcarve(...)`): letters or a logo cut along their centrelines, as deep as each stroke is wide, so the
-  top edge follows the outline exactly and corners come out sharp. *Max depth* gives wide strokes a flat bottom.
+  top edge follows the outline exactly and corners come out sharp. *Max depth* gives wide strokes a flat bottom; the
+  depth is taken in levels of the tool's stepdown; stretches that meet and nested rings are linked at depth, and
+  re-entries drop quickly through what the previous level cut (the plunge rate only for new depth).
 - `outline(part)` and `face_outline(face)` for scripts.
 
 ## [0.48.4] — 2026-10-18 (local build of the v2-ui branch, not released)

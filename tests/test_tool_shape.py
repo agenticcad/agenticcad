@@ -227,3 +227,5 @@ def test_vcarve_follows_the_centreline_as_deep_as_the_shape_is_wide(z1):
     assert abs(col[np.argmin(abs(Y - 1.1))]) < 1e-6 and abs(col[np.argmin(abs(Y + 1.1))]) < 1e-6   # nothing outside
     capped = cam.vcarve(st, v90, cam.rect(-8, -1, 8, 1), z_top=0, max_depth=0.4, name="V flat")
     assert capped.params["z_bottom"] == pytest.approx(-0.4) and capped.params["flat_rings"] > 0
+    stepped = cam.vcarve(st, v90, cam.rect(-8, -1, 8, 1), z_top=0, max_depth=0.4, stepdown=0.1, name="V stepped")
+    assert stepped.params["levels"] == 4                         # never more than a stepdown of new depth per level

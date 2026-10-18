@@ -1830,12 +1830,14 @@ def chamfer_edges(setup: Setup, tool: Tool, polys, z_top: float, width: float, s
 
 
 def vcarve(setup: Setup, tool: Tool, polys, z_top: float, max_depth: float | None = None,
-           flat_stepover: float | None = None, sample: float | None = None, name: str = "V-carve") -> Op:
+           flat_stepover: float | None = None, stepdown: float | None = None, sample: float | None = None,
+           name: str = "V-carve") -> Op:
     """V-carve shapes (letters, a logo) with a V-bit: the tool runs along each shape's centreline (medial axis), as deep
     as the shape is wide there - its cone touches both sides, so the top edge lands exactly on the outline, corners come
     out sharp and narrow strokes are shallow. The tip size is part of the depth (a 0.1 mm tip goes 0.05 mm less deep per
     side). max_depth: no deeper than this - where a stroke is wider the bottom is flat at max_depth and cleared with
-    rings `flat_stepover` apart (default: just under the tip's width)."""
+    rings `flat_stepover` apart (default: just under the tip's width). stepdown (default the tool's): the depth is taken
+    in levels no deeper than this - each level cuts only what is deeper than the one before."""
     from scipy.spatial import Voronoi
     from shapely.ops import linemerge
     import shapely
@@ -1891,41 +1893,86 @@ def vcarve(setup: Setup, tool: Tool, polys, z_top: float, max_depth: float | Non
             chains.append(np.column_stack([xy, z_top - depth]))
     if not chains:
         raise CamError("vcarve: found no centreline (are the shapes closed polygons?)")
-    # the flat-bottomed part where a stroke is wider than the V at max_depth: rings at max_depth
-    flat = P.buffer(-r_cap, join_style=1)
-    rings_flat = []
-    if not flat.is_empty:
-        fs = flat_stepover or (1.8 * tip_r if tip_r > 0.005 else 0.05)
+    fs = flat_stepover or (1.8 * tip_r if tip_r > 0.005 else 0.05)
+    sd = float(stepdown or tool.stepdown or cap)
+    need = min(cap, max(float((z_top - c[:, 2]).max()) for c in chains))     # as deep as the widest stroke asks
+    n_lv = max(1, math.ceil(need / sd - 1e-9))
+    levels = [need * (i + 1) / n_lv for i in range(n_lv)]
+    rings_flat = 0
+    todo_by_level = []
+    prev = 0.0
+    for lv in levels:
+        work = []
+        for c in chains:                                    # the stretches deeper than the previous level, clamped to this one
+            deep = (z_top - c[:, 2]) > prev + 1e-6
+            if not deep.any():
+                continue
+            idx = np.flatnonzero(deep)
+            for run in np.split(idx, np.flatnonzero(np.diff(idx) > 1) + 1):
+                lo, hi = max(run[0] - 1, 0), min(run[-1] + 1, len(c) - 1)    # one point either side: the run starts at the surface of that level
+                seg = c[lo:hi + 1].copy()
+                seg[:, 2] = np.maximum(seg[:, 2], z_top - lv)
+                if len(seg) >= 2:
+                    work.append(seg)
+        flat = P.buffer(-(tip_r + lv * k), join_style=1)      # strokes wider than the V at this level: flat at this level
         g, i = flat, 0
         while not g.is_empty and i < 2000:
             for q in _polys(g):
-                rings_flat += [list(q.exterior.coords)] + [list(h.coords) for h in q.interiors]
+                for rg in [q.exterior] + list(q.interiors):
+                    xy = np.array(rg.coords)[:, :2]
+                    work.append(np.column_stack([xy, np.full(len(xy), z_top - lv)])); rings_flat += 1
             g = flat.buffer(-fs * (i + 1), join_style=1); i += 1
-        if fs > 2 * tip_r + 1e-9:
-            op.warnings.append(f"vcarve: strokes wider than {2 * r_cap:.2f} mm get a flat bottom at {cap:g} mm; its rings are "
-                               f"{fs:.3f} mm apart but the tip is only Ø{2 * tip_r:.3f}, so ridges up to "
-                               f"{(fs / 2 - tip_r) / k:.3f} mm stay on that floor")
-    # cut: nearest chain next; feed limited so the descent never outruns the plunge rate
-    todo = chains + [np.column_stack([np.array(rg)[:, :2], np.full(len(rg), z_top - cap)]) for rg in rings_flat]
+        todo_by_level.append(work)
+        prev = lv
+    if rings_flat and fs > 2 * tip_r + 1e-9:
+        op.warnings.append(f"vcarve: strokes wider than the V get a flat bottom; its rings are {fs:.3f} mm apart but the tip is "
+                           f"only Ø{2 * tip_r:.3f}, so ridges up to {(fs / 2 - tip_r) / k:.3f} mm stay on that floor")
+    # cut: level by level, nearest stretch next, linked at depth where they meet (a junction, the next ring in), short hops
+    # just above the surface over the letters, and on entry down fast through what the previous level already cut - the
+    # plunge rate only for new depth; no descent ever outruns the plunge rate
+    link = max(2.5 * fs, 0.06)
+    hop_z = z_top + 0.3
+    near = P.buffer(0.5)
     at = (0.0, 0.0)
     deepest = z_top
-    while todo:
-        j = min(range(len(todo)), key=lambda q: min(math.dist(at, todo[q][0, :2]), math.dist(at, todo[q][-1, :2])))
-        c = todo.pop(j)
-        if math.dist(at, c[-1, :2]) < math.dist(at, c[0, :2]):
-            c = c[::-1]
-        pb.rapid_xy(c[0, 0], c[0, 1]); pb.plunge_to(c[0, 2], rapid_to=z_top, gap=0.5)
-        for p0, p1 in zip(c[:-1], c[1:]):
-            L = math.dist(p0[:2], p1[:2]); dz = abs(p1[2] - p0[2])
-            f = pb.feed if dz < 1e-9 else min(pb.feed, pb.plunge * math.hypot(L, dz) / dz)
-            pb.feed_to(p1[0], p1[1], p1[2], f)
-        deepest = min(deepest, float(c[:, 2].min()))
-        at = tuple(c[-1, :2])
-        pb.retract()
-    op.params = dict(z_top=z_top, z_bottom=deepest, max_depth=cap, centrelines=len(chains), flat_rings=len(rings_flat))
+    for li, todo in enumerate(todo_by_level):
+        pv = levels[li - 1] if li else 0.0
+        while todo:
+            j = min(range(len(todo)), key=lambda q: min(math.dist(at, todo[q][0, :2]), math.dist(at, todo[q][-1, :2])))
+            c = todo.pop(j)
+            closed = len(c) > 2 and math.dist(c[0, :2], c[-1, :2]) < 1e-9
+            if closed:                                      # a ring: start at its point nearest the tool
+                i0 = int(np.argmin(np.hypot(c[:-1, 0] - at[0], c[:-1, 1] - at[1])))
+                c = np.vstack([c[i0:-1], c[:i0 + 1]])
+            elif math.dist(at, c[-1, :2]) < math.dist(at, c[0, :2]):
+                c = c[::-1]
+            s = c[0]
+            down = pb.pos is not None and pb.pos[2] < z_top - 1e-9
+            if down and math.dist(pb.pos[:2], s[:2]) <= link:
+                L = math.dist(pb.pos[:2], s[:2]); dz = max(pb.pos[2] - s[2], 0.0)
+                pb.feed_to(s[0], s[1], s[2], pb.feed if dz < 1e-9 else min(pb.feed, pb.plunge * math.hypot(L, dz) / dz))
+            else:
+                if pb.pos is not None and near.covers(LineString([pb.pos[:2], s[:2]])):
+                    if pb.pos[2] < hop_z:
+                        pb._add(RAPID, pb.pos[0], pb.pos[1], hop_z)
+                    pb._add(RAPID, s[0], s[1], hop_z)
+                else:
+                    pb.rapid_xy(s[0], s[1]); pb._add(RAPID, s[0], s[1], hop_z)
+                gone = max(s[2], z_top - pv)                # the material is already cut away down to here
+                pb.feed_to(s[0], s[1], gone)
+                if s[2] < gone - 1e-9:
+                    pb._add(PLUNGE, s[0], s[1], s[2], pb.plunge)
+            for p0, p1 in zip(c[:-1], c[1:]):
+                L = math.dist(p0[:2], p1[:2]); dz = abs(p1[2] - p0[2])
+                f = pb.feed if dz < 1e-9 or p1[2] > p0[2] else min(pb.feed, pb.plunge * math.hypot(L, dz) / dz)
+                pb.feed_to(p1[0], p1[1], p1[2], f)
+            deepest = min(deepest, float(c[:, 2].min()))
+            at = tuple(c[-1, :2])
+    pb.retract()
+    op.params = dict(z_top=z_top, z_bottom=deepest, max_depth=cap, centrelines=len(chains), flat_rings=rings_flat, levels=len(levels))
     op.warnings.append(f"{tool.label()} ({tool.spec()}): V-carved {len(chains)} centreline stretch{'es' if len(chains) != 1 else ''}, "
-                       f"deepest {z_top - deepest:.3f} mm" + (f"; strokes wider than {2 * r_cap:.2f} mm have a flat bottom at "
-                                                             f"{cap:g} mm" if rings_flat else ""))
+                       f"deepest {z_top - deepest:.3f} mm in {len(levels)} level{'s' if len(levels) != 1 else ''}"
+                       + (f"; strokes wider than {2 * r_cap:.2f} mm have a flat bottom at {cap:g} mm" if rings_flat else ""))
     return op
 
 
@@ -2971,7 +3018,7 @@ OP_FIELDS = {"face": OVERRIDE_FIELDS, "pocket": OVERRIDE_FIELDS, "adaptive": OVE
              "contour": ("rpm", "feed", "plunge", "stepdown"), "drill": ("rpm", "plunge"),
              "parallel3d": ("rpm", "feed", "plunge", "stepover"), "rotary_rough": OVERRIDE_FIELDS,
              "rotary_finish": ("rpm", "feed", "plunge", "stepover"), "rotary_wrap": OVERRIDE_FIELDS,
-             "chamfer": ("rpm", "feed", "plunge", "stepdown"), "vcarve": ("rpm", "feed", "plunge")}
+             "chamfer": ("rpm", "feed", "plunge", "stepdown"), "vcarve": ("rpm", "feed", "plunge", "stepdown")}
 _OV: dict[str, Any] = {"table": {}, "seen": {}, "depth": 0, "used": set()}
 
 
