@@ -2196,10 +2196,11 @@ class CadAgent:
 
         @tool("feeds_speeds", "Feeds & speeds calculator: rpm, feed, plunge, stepdown, stepover for a tool in a material "
               "on a machine (spindle/feed limits applied, radial chip thinning if `radial_engagement` < 0.5). "
-              "`tool` is a tool number or name; `material` one of the known materials. Optionally `apply` to save into the tool library.",
+              "`tool` is a tool number or name; `material` one of the known materials. `depth`: the cut depth (V-bits, chamfer "
+              "and ball tools are sized by their cutting width there, e.g. an engraving depth). Optionally `apply` to save into the tool library.",
               {"type": "object", "properties": {"tool": {"type": "string"}, "material": {"type": "string"},
                                                 "machine": {"type": "string"}, "aggressiveness": {"type": "number", "default": 0.5},
-                                                "radial_engagement": {"type": "number"}, "apply": {"type": "boolean", "default": False}},
+                                                "radial_engagement": {"type": "number"}, "depth": {"type": "number"}, "apply": {"type": "boolean", "default": False}},
                "required": ["tool", "material"]})
         async def feeds_speeds(args: dict[str, Any]) -> dict[str, Any]:
             tm = agent.library.tool_map()
@@ -2212,13 +2213,13 @@ class CadAgent:
             machines = agent.library.machines()
             m = machines.get(args.get("machine") or "") or (agent.program.setup.machine if agent.program else next(iter(machines.values()), None))
             try:
-                f = cam.feeds(t, args["material"], m, float(args.get("aggressiveness") or 0.5), args.get("radial_engagement"))
+                f = cam.feeds(t, args["material"], m, float(args.get("aggressiveness") or 0.5), args.get("radial_engagement"), args.get("depth"))
             except cam.CamError as e:
                 return {"content": [{"type": "text", "text": str(e)}], "is_error": True}
             txt = json.dumps(f, indent=1)
             if args.get("apply"):
                 nt = cam.apply_feeds(t, args["material"], m, aggressiveness=float(args.get("aggressiveness") or 0.5),
-                                     radial_engagement=args.get("radial_engagement"))
+                                     radial_engagement=args.get("radial_engagement"), depth=args.get("depth"))
                 from dataclasses import asdict
                 agent.library.save_tool(asdict(nt))
                 await agent.emit({"type": "library", **agent.library_payload()})

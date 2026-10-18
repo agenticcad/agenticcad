@@ -5,6 +5,24 @@ features, patch bumps fix things. The version shown in the UI header comes from 
 
 ## [Unreleased]
 
+## [0.48.2] — 2026-10-18 (local build of the v2-ui branch, not released)
+
+### Changed
+- **Settings ▸ Tools** is a list and an editor. Each tool is described the way its packet gives it (V 30° · tip Ø0.1 ·
+  Ø3.175, ball R1, Ø2 · 6 mm flutes · shank Ø3.175), and its size fields are the ones its type has, named as on the
+  packet: a V-bit / engraver has its included angle, **tip Ø**, body Ø and cutting height; a ball nose its **radius R**;
+  a bull nose its corner radius. Type the packet's label ("0.1mm x 3.175mm 30deg", "R1.0mm x 3.175mm x 17mm 2F") and
+  *Fill* sets them. The to-scale drawing marks the tip, angle or radius and lists the groove a V cuts at 0.1 / 0.2 /
+  0.5 mm deep.
+
+### Fixed
+- A V-bit or chamfer tool without a tip Ø is no longer silently treated as a perfectly sharp point: the program
+  warns (a real tip cuts that much wider at every depth), and the tool list and the CAM inspector say so.
+- Feeds & speeds sized a V-bit by its 1/8" body: a 0.1 mm-tip engraver got the chip load and stepdown of a 3.175 mm
+  endmill. V-bits and chamfer tools (and ball tools when a depth is given) are now sized by their cutting width at the
+  cut depth; the calculator has a *Cut depth* field for them.
+- An engraving (contour on the line) with a V tool says how wide a groove it cuts.
+
 ## [0.48.1] — 2026-10-18 (local build of the v2-ui branch, not released)
 
 ### Added

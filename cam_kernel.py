@@ -69,6 +69,24 @@ class Tool:
     def label(self) -> str:
         return f"T{self.number} {self.name}"
 
+    def spec(self) -> str:
+        """The tool's size the way its packet gives it: what the cut depends on, by type."""
+        g = lambda v: f"{v:g}"
+        sh = f" · shank Ø{g(self.shank_diameter)}" if self.shank_diameter and self.shank_diameter != self.diameter else ""
+        fl = f" · flutes {g(self.flute_length)} mm"
+        if self.type == "ball":
+            return f"ball R{g(self.diameter / 2)} (Ø{g(self.diameter)}){fl}{sh}"
+        if self.type == "bull":
+            return f"bull nose Ø{g(self.diameter)} R{g(self.corner_radius)}{fl}{sh}"
+        if self.type in ("vbit", "chamfer"):
+            tip = f"tip Ø{g(self.tip_diameter)}" if self.tip_diameter else "sharp tip (no tip Ø set)"
+            return f"{'V' if self.type == 'vbit' else 'chamfer'} {g(self.angle)}° · {tip} · Ø{g(self.diameter)}{fl}{sh}"
+        if self.type == "taper_ball":
+            return f"tapered ball tip Ø{g(self.tip_diameter)} · {g(self.taper)}°/side · Ø{g(self.diameter)}{fl}{sh}"
+        if self.type == "drill":
+            return f"drill Ø{g(self.diameter)}" + (f" · {g(self.angle)}° point" if self.angle else "") + fl
+        return f"flat Ø{g(self.diameter)}{fl}{sh}"
+
 
 def tool_payload(tool: Tool) -> dict:
     """A tool as the UI gets it: its fields plus its shape (outline from the tip, flute length, stickout...)."""
@@ -1951,10 +1969,12 @@ def _interp_chipload(table: dict, d: float) -> float:
 
 
 def feeds(tool: Tool, material: str, machine: Machine | None = None, aggressiveness: float = 0.5,
-          radial_engagement: float | None = None) -> dict:
+          radial_engagement: float | None = None, depth: float | None = None) -> dict:
     """Feeds & speeds from surface speed and chip load. aggressiveness 0..1 picks within the vc range.
     radial_engagement (fraction of diameter) < 0.5 applies radial chip thinning. Spindle limits from the
-    machine clamp rpm (feed follows). Returns rpm, feed, plunge, stepdown, stepover, vc, chipload, notes."""
+    machine clamp rpm (feed follows). Returns rpm, feed, plunge, stepdown, stepover, vc, chipload, notes.
+    A tool that is not a flat endmill cuts with its width at the cut depth, not its body diameter: a V-bit / chamfer
+    (default depth 0.5 mm, or `depth`) and a ball / bull / tapered ball when `depth` is given are sized by that width."""
     key = MATERIAL_ALIASES.get(material.lower().strip(), material.lower().strip())
     if key not in MATERIALS:
         raise CamError(f"unknown material '{material}'. Known: {', '.join(MATERIALS)}")
@@ -1963,6 +1983,17 @@ def feeds(tool: Tool, material: str, machine: Machine | None = None, aggressiven
     a = min(max(aggressiveness, 0.0), 1.0)
     vc = mat["vc"][0] + (mat["vc"][1] - mat["vc"][0]) * a
     d = tool.diameter
+    if tool.type not in ("flat", "drill"):
+        dd = depth if depth is not None else (min(0.5, tool.flute_length) if tool.type in ("vbit", "chamfer") else None)
+        if dd is not None and dd > 0:
+            try:
+                w = tool.shape.width_at_depth(float(dd))
+            except Exception:  # noqa: BLE001 - a bad shape: fall back to the diameter (the shape error shows elsewhere)
+                w = d
+            if 0 < w < d - 1e-9:
+                notes.append(f"sized for its Ø{w:.3f} cutting width at {float(dd):g} mm deep (not the Ø{d:g} body)"
+                             + ("" if depth is not None else "; give the engraving depth for exact numbers"))
+                d = max(w, 0.05)
     rpm = 1000 * vc / (math.pi * d)
     if machine is not None:
         lo, hi = machine.spindle["min"], machine.spindle["max"]
@@ -2093,6 +2124,13 @@ class Program:
         self.assign_wcs()
         m = self.machine
         w += m.warnings()
+        seen = set()
+        for op in self.ops:
+            t = op.tool
+            if t.type in ("vbit", "chamfer") and not t.tip_diameter and t.label() not in seen:
+                seen.add(t.label())
+                w.append(f"{t.label()} ({t.spec()}): no tip Ø set, so it is modelled as a perfectly sharp point; a real tip "
+                         "cuts wider by that much at every depth. Set it in Settings ▸ Tools (e.g. 0.1 for a 0.1 mm V-bit)")
         for st in self.setups:
             tag = f"{st.name}: " if len(self.setups) > 1 else ""
             b = self.bounds(st)
@@ -2160,7 +2198,7 @@ class Program:
                 if op.uses_a:
                     av = [mv[5] for mv in op.moves if len(mv) > 5]
                     aa = f" A {min(av):.0f}..{max(av):.0f}°"
-                lines.append(f"  {i}. {op.name} [{op.kind}] {op.tool.label()} Ø{op.tool.diameter} — {len(op.moves)} moves, "
+                lines.append(f"  {i}. {op.name} [{op.kind}] {op.tool.label()} ({op.tool.spec()}) — {len(op.moves)} moves, "
                              f"cut {cut:.0f} mm, {op.time_minutes(self.machine):.1f} min, {zr}{aa} "
                              + " ".join(f"{k}={v}" for k, v in op.params.items()))
         w = self.check()
@@ -2825,6 +2863,9 @@ def _shape_plan(kind: str, args: dict, sig) -> list[str]:
     if tool.type == "flat":
         return notes
     w = sh.width_at_depth(depth) if depth is not None and depth > 0 else 2 * sh.cut_radius
+    if kind == "contour" and args.get("side", "outside") == "on" and depth:
+        notes.append(f"{tool.label()} ({tool.spec()}): on the line {depth:.3f} mm deep it cuts a groove {w:.3f} mm wide "
+                     f"at the top ({w / 2:.3f} each side of the line)")
     if kind != "contour" or args.get("side", "outside") != "on":
         if w < tool.diameter - 1e-6:
             args["tool"] = replace(tool, diameter=round(w, 6), type="flat")

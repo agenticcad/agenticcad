@@ -715,6 +715,26 @@
   .mreq.declined, .mreq.expired { border-color:var(--line); background:none; opacity:.75; } .mreq.refused, .mreq.failed { border-color:rgba(255,90,95,.5); background:rgba(255,90,95,.06); }
   #mi-req .mreq { margin:12px 12px 0; } #mi-req:empty { display:none; }
   .mpill.ask { border-color:var(--accent); animation:askpulse 1.4s ease-in-out infinite; } @keyframes askpulse { 50% { box-shadow:0 0 0 4px rgba(255,140,66,.18); } }
+
+  /* Settings ▸ Tools: list + detail, sizes as on the packet */
+  .tl2 { display:grid; grid-template-columns:260px 1fr; gap:14px; min-height:420px; }
+  .tl2-list { border-right:1px solid var(--line); padding-right:10px; max-height:62vh; overflow:auto; }
+  .tl2-it { display:grid; grid-template-columns:38px 1fr; gap:6px; padding:7px 8px; border-radius:7px; cursor:pointer; align-items:start; }
+  .tl2-it:hover { background:rgba(255,255,255,.04); } .tl2-it.on { background:rgba(78,161,255,.14); box-shadow:inset 2px 0 0 var(--accent2); }
+  .tl2-it b { color:var(--muted); font-weight:600; } .tl2-it .nm { font-size:12.5px; } .tl2-it .sp { color:var(--muted); font-size:11px; margin-top:1px; }
+  .tl2-it.dirty .nm::after { content:' ●'; color:var(--accent); font-size:10px; }
+  .tl2-ed { min-width:0; } .tl2-hd { display:flex; align-items:baseline; gap:10px; margin-bottom:10px; } .tl2-hd b { font-size:14px; }
+  .tl2-cols { display:grid; grid-template-columns:1fr 240px; gap:16px; } .tl2-side { display:flex; flex-direction:column; gap:6px; align-items:center; }
+  .tl2-svg { background:var(--bg); border:1px solid var(--line); border-radius:8px; }
+  .tl2-sec { font-size:10.5px; letter-spacing:.07em; text-transform:uppercase; color:var(--mut2); font-weight:600; margin:14px 0 6px; } .tl2-sec:first-child { margin-top:0; }
+  .tl2-sec .muted { text-transform:none; letter-spacing:0; font-weight:400; font-size:11px; }
+  .tl2-grid { display:grid; grid-template-columns:130px 1fr; gap:6px 10px; align-items:center; font-size:12.5px; } .tl2-grid > label { color:var(--muted); }
+  .tl2-grid .tf { display:flex; gap:8px; align-items:center; } .tl2-grid .tf .muted { font-size:11px; }
+  #modal .tl2 input, #modal .tl2 select { background:var(--bg); color:var(--text); border:1px solid var(--line2); border-radius:6px; padding:5px 7px; font:inherit; box-sizing:border-box; }
+  #modal .tl2-grid input[type=number] { width:96px; } #modal .tl2-grid select { width:160px; }
+  .tl2-label { display:flex; gap:6px; } #modal .tl2-label input { flex:1; font-family:ui-monospace,Menlo,monospace; font-size:12px; }
+  .tl2-said { font-size:11.5px; min-height:16px; margin:4px 0 6px; }
+  .tl2-warn { margin:8px 0 2px; padding:8px 10px; border-radius:8px; border:1px solid rgba(242,201,76,.45); background:rgba(242,201,76,.07); color:#f3d98a; font-size:12px; line-height:1.45; }
 </style>
 </head>
 <body>
@@ -2102,7 +2122,7 @@ function opEditor(op) {
   const draft = () => ({ ...d.tool, ...d.cut, ...(d.color ? { color: d.color } : {}) });
   const isChanged = () => JSON.stringify(Object.entries(draft()).sort()) !== JSON.stringify(Object.entries(opOverrideSet(op)).sort());
   const pane = () => {
-    if (cur === 'tool') return `<div class="ophd">T${t.number} ${esc(t.name)} · ${t.type} Ø${t.diameter} · ${t.flutes} fl${lib ? '' : ' · <i>set in the script</i>'} — blank uses the tool's value (greyed)</div>
+    if (cur === 'tool') return `<div class="ophd">T${t.number} ${esc(t.name)} · ${esc(toolSpec(t))} · ${t.flutes} fl${tipMissing(t) ? ' · <span class="wa">no tip Ø set (Settings ▸ Tools)</span>' : ''}${lib ? '' : ' · <i>set in the script</i>'} — blank uses the tool's value (greyed)</div>
       <div class="ovgrid">${Object.keys(def).map(k => `<label>${OV_META[k][0]}</label><input type="number" step="any" min="0" data-g="tool" data-k="${k}" placeholder="${ovShow(k, def[k])}" value="${k in d.tool ? ovShow(k, d.tool[k]) : ''}" class="${k in d.tool ? 'ov' : ''}"><span class="muted">${OV_META[k][1]}</span>`).join('')}</div>
       <div class="row"><span class="muted">Calculator</span><select data-mat>${camMaterials.map(m => `<option>${m}</option>`).join('')}</select><button class="btn small" data-a="calc" title="feeds & speeds for this tool in the material on ${esc(program.machine)}">Fill</button></div>`;
     if (cur === 'cut') return `<div class="ophd">The script's values are greyed; change one to override it for this operation (Z in the setup's frame).</div>
@@ -5365,6 +5385,22 @@ const MACHINE_FIELDS = [
   ['4th axis', 'rotary', 'rotary'], ['Start G-code', 'program_start', 'lines'], ['End G-code', 'program_end', 'lines'], ['Notes', 'notes', 'area']];
 const TOOL_TYPES = ['flat', 'ball', 'bull', 'vbit', 'chamfer', 'drill', 'taper_ball'];
 const TOOL_TYPE_LABEL = { flat: 'flat', ball: 'ball', bull: 'bull nose', vbit: 'V / engraver', chamfer: 'chamfer', drill: 'drill', taper_ball: 'tapered ball' };
+// a tool described the way its packet gives it (cam_kernel.Tool.spec)
+
+// a tool described the way its packet gives it (cam_kernel.Tool.spec)
+const gnum = v => +(+v).toFixed(4);   // a number as typed (no float noise)
+function toolSpec(t) {                          // the packet's description (cam_kernel.Tool.spec)
+  const sh = t.shank_diameter && t.shank_diameter !== t.diameter ? ` · shank Ø${gnum(t.shank_diameter)}` : '', fl = ` · ${gnum(t.flute_length)} mm flutes`;
+  switch (t.type) {
+    case 'ball': return `ball R${gnum(t.diameter / 2)}${fl}${sh}`;
+    case 'bull': return `Ø${gnum(t.diameter)} R${gnum(t.corner_radius || 0)} corners${fl}${sh}`;
+    case 'vbit': case 'chamfer': return `${t.type === 'vbit' ? 'V' : 'chamfer'} ${gnum(t.angle || 0)}° · ${t.tip_diameter ? 'tip Ø' + gnum(t.tip_diameter) : 'no tip Ø'} · Ø${gnum(t.diameter)}`;
+    case 'taper_ball': return `tapered ball Ø${gnum(t.tip_diameter || 0)} · ${gnum(t.taper || 0)}°/side`;
+    case 'drill': return `drill Ø${gnum(t.diameter)}${t.angle ? ` · ${gnum(t.angle)}°` : ''}`;
+    default: return `Ø${gnum(t.diameter)}${fl}${sh}`;
+  }
+}
+const tipMissing = t => ['vbit', 'chamfer'].includes(t.type) && !(+t.tip_diameter > 0);
 function libraryEditor(mPane, tPane) {
   const clone = o => JSON.parse(JSON.stringify(o));
   const ms = library.machines.map(m => ({ orig: m.name, m: clone(m), dirty: false })), delM = [];
@@ -5423,96 +5459,167 @@ function libraryEditor(mPane, tPane) {
         <label style="color:var(--text);display:flex;gap:6px;align-items:center;margin-top:6px"><input type="checkbox" data-p="rotary.installed" data-t="bool" ${v.installed !== false ? 'checked' : ''} style="width:auto"> module installed on the machine now</label>` : ''}</div>`;
     return `<label>${label}</label>${h}`;
   }
-  let tSel = -1;
-  // the shape of one tool: the fields its type uses, and its real profile drawn to scale (from /api/cam/tool_shape)
-  const SHAPE_FIELDS = {
-    corner_radius: ['Corner radius', 'mm', t => t === 'bull'], tip_diameter: ['Tip Ø', 'mm', t => ['vbit', 'chamfer'].includes(t)],
-    ball_tip: ['Ball Ø (at the tip)', 'mm', t => t === 'taper_ball'], taper: ['Taper per side', '°', t => t === 'taper_ball'],
-    shank_diameter: ['Shank Ø', 'mm (blank = same as Ø)', () => true], neck_diameter: ['Neck Ø', 'mm (blank = no neck)', () => true],
-    reach: ['Reach (neck length)', 'mm from the tip (blank = flute length)', () => true], stickout: ['Stickout', 'mm out of the collet (blank = estimate)', () => true] };
-  let shapeTimer = null;
-  function renderShapeEd() {
-    const el = tPane.querySelector('#tshape-ed'); if (!el) return;
-    const x = ts[tSel]; if (!x) { el.innerHTML = ''; return; }
-    const t = x.t, typ = t.type || 'flat';
-    const val = k => k === 'ball_tip' ? t.tip_diameter : t[k];
-    el.innerHTML = `<div class="tshape"><div class="tshape-f"><div class="set-h" style="margin:0 0 6px">T${t.number} ${esc(t.name || '')} · shape<span class="muted">${TOOL_TYPE_LABEL[typ] || typ} · Ø${t.diameter} · flutes ${t.flute_length} mm${['vbit', 'chamfer', 'drill'].includes(typ) ? ` · ${t.angle || (typ === 'drill' ? 118 : '?')}° included` : ''}</span></div>
-      <div class="kv tshape-kv">${Object.entries(SHAPE_FIELDS).filter(([, [, , on]]) => on(typ)).map(([k, [lab, unit]]) =>
-        `<div>${lab}</div><div><input type="number" step="any" min="0" data-s="${k}" value="${val(k) ? +val(k) : ''}"> <span class="muted">${unit}</span></div>`).join('')}</div>
-      <div class="muted" data-s="err" style="margin-top:6px"></div><div class="muted" data-s="facts" style="margin-top:4px;font-size:11.5px"></div></div>
-      <div class="tshape-svg" data-s="svg"></div></div>`;
-    el.querySelectorAll('input[data-s]').forEach(inp => inp.oninput = () => {
-      const k = inp.dataset.s, v = inp.value === '' ? 0 : num(inp.value);
-      t[k === 'ball_tip' ? 'tip_diameter' : k] = v; x.dirty = true;
-      const tr = tPane.querySelector(`tr[data-i="${tSel}"]`); if (tr) tr.classList.add('dirty');
-      clearTimeout(shapeTimer); shapeTimer = setTimeout(drawShape, 200);
-    });
-    drawShape();
+  let tSel = 0;
+  // Each type's size, named the way the tool's packet gives it (Adam's Bits: "R1.0mm x 3.175mm x 17mm 2F",
+  // "0.1mm x 3.175mm 30deg"). `r` is a ball's radius: it is stored as the diameter (2 R).
+  const TSIZE = {
+    flat: [['diameter', 'Cutting Ø', 'mm'], ['flute_length', 'Flute length', 'mm'], ['shank_diameter', 'Shank Ø', 'mm · blank = same as the cut']],
+    ball: [['r', 'Ball radius R', 'mm'], ['flute_length', 'Flute length', 'mm'], ['shank_diameter', 'Shank Ø', 'mm · blank = same as the ball']],
+    bull: [['diameter', 'Cutting Ø', 'mm'], ['corner_radius', 'Corner radius R', 'mm'], ['flute_length', 'Flute length', 'mm'], ['shank_diameter', 'Shank Ø', 'mm · blank = same as the cut']],
+    vbit: [['angle', 'Included angle', '°'], ['tip_diameter', 'Tip Ø', 'mm · the flat at the point (0 = perfectly sharp)'], ['diameter', 'Body Ø', 'mm · widest, usually the shank'],
+      ['flute_length', 'Cutting height', 'mm · how far up the V cuts'], ['shank_diameter', 'Shank Ø', 'mm · blank = same as the body']],
+    chamfer: [['angle', 'Included angle', '°'], ['tip_diameter', 'Tip Ø', 'mm · the flat at the point (0 = sharp)'], ['diameter', 'Largest Ø', 'mm'],
+      ['flute_length', 'Cutting height', 'mm'], ['shank_diameter', 'Shank Ø', 'mm · blank = same as the largest']],
+    drill: [['diameter', 'Drill Ø', 'mm'], ['angle', 'Point angle', '° (118, 135…; 0 = flat)'], ['flute_length', 'Flute length', 'mm']],
+    taper_ball: [['tip_diameter', 'Ball Ø at the tip', 'mm'], ['taper', 'Taper per side', '°'], ['diameter', 'Body Ø', 'mm · widest'],
+      ['flute_length', 'Flute length', 'mm'], ['shank_diameter', 'Shank Ø', 'mm · blank = same as the body']] };
+  const CUT = [['rpm', 'Spindle', 'rpm'], ['feed', 'Feed', 'mm/min'], ['plunge', 'Plunge', 'mm/min'], ['stepdown', 'Stepdown', 'mm'], ['stepover', 'Stepover', '% of Ø']];
+  const HOLD = [['stickout', 'Stickout', 'mm out of the collet · blank = estimate'], ['neck_diameter', 'Neck Ø', 'mm · blank = no neck'], ['reach', 'Reach', 'mm from the tip · blank = flute length']];
+  // "0.1mm x 3.175mm 30deg", "R1.0mm x 3.175mm x 17mm 2F", "Single Flute Engraving Bit 1/8" Shank 30° * 0.3mm" -> fields
+  function parseLabel(text, type) {
+    let s = ' ' + text.toLowerCase().replace(/[×*]/g, ' x ').replace(/[″”]/g, '"') + ' ';
+    const out = {}, said = [];
+    let kind = /ball/.test(s) ? 'ball' : /v[\s-]?bit|engrav/.test(s) ? 'vbit' : /chamfer/.test(s) ? 'chamfer' : /drill/.test(s) ? 'drill' : /corner|bull/.test(s) ? 'bull' : null;
+    let shank = null;
+    s = s.replace(/1\/8"?\s*(shank)?/g, () => { shank = 3.175; return ' '; }).replace(/1\/4"?\s*(shank)?/g, () => { shank = 6.35; return ' '; });
+    const ang = s.match(/(\d+(?:\.\d+)?)\s*(?:deg\b|°)/); if (ang) { out.angle = +ang[1]; s = s.replace(ang[0], ' '); }
+    const fl = s.match(/\b(\d+)\s*f\b/); if (fl) { out.flutes = +fl[1]; s = s.replace(fl[0], ' '); }
+    const rad = s.match(/\br\s*(\d+(?:\.\d+)?)/); if (rad) { s = s.replace(rad[0], ' '); }
+    // no type word: an "R" size is a ball nose, an angle on a plain endmill a V-bit (bull nose / chamfer / drill say so)
+    if (!kind && rad && !['ball', 'bull'].includes(type)) kind = 'ball';
+    if (!kind && ang && !['vbit', 'chamfer', 'drill', 'taper_ball'].includes(type)) kind = 'vbit';
+    if (kind && kind !== type) out.type = kind;
+    const T = out.type || type;
+    const nums = [...s.matchAll(/(\d+(?:\.\d+)?)\s*mm/g)].map(m => +m[1]);
+    if (T === 'ball') {
+      if (rad) out.diameter = 2 * +rad[1]; else if (nums.length) out.diameter = nums.shift();
+      if (nums.length >= 2) { out.shank_diameter = nums[0]; out.flute_length = nums[1]; } else if (nums.length === 1) { if (nums[0] > 4) out.flute_length = nums[0]; else out.shank_diameter = nums[0]; }
+    } else if (T === 'vbit' || T === 'chamfer') {
+      if (nums.length) out.tip_diameter = nums.shift();
+      if (nums.length) out.diameter = nums.shift();
+      if (nums.length) out.flute_length = nums.shift();
+    } else {
+      if (nums.length) out.diameter = nums.shift();
+      if (nums.length >= 2) { out.shank_diameter = nums[0]; out.flute_length = nums[1]; } else if (nums.length === 1) out.flute_length = nums[0];
+    }
+    if (shank != null) { if ((T === 'vbit' || T === 'chamfer') && out.diameter == null) out.diameter = shank; if (out.shank_diameter == null && Math.abs(shank - (out.diameter ?? 0)) > 1e-6) out.shank_diameter = shank; }
+    if (out.shank_diameter != null && out.diameter != null && Math.abs(out.shank_diameter - out.diameter) < 1e-6) delete out.shank_diameter;
+    const name = { type: 'type', diameter: T === 'ball' ? 'ball Ø' : T === 'vbit' || T === 'chamfer' ? 'body Ø' : 'Ø', tip_diameter: 'tip Ø', shank_diameter: 'shank Ø', flute_length: 'flute length', angle: 'angle', flutes: 'flutes' };
+    for (const [k, v] of Object.entries(out)) said.push(`${name[k] || k} ${k === 'type' ? TOOL_TYPE_LABEL[v] : v}`);
+    return { out, said };
   }
-  async function drawShape() {
-    const el = tPane.querySelector('#tshape-ed'); const x = ts[tSel]; if (!el || !x) return;
-    const box = el.querySelector('[data-s=svg]'), err = el.querySelector('[data-s=err]'), facts = el.querySelector('[data-s=facts]');
+  let shapeTimer = null;
+  function renderTools() {
+    if (tSel >= ts.length) tSel = ts.length - 1;
+    const x = ts[tSel], t = x && x.t, typ = t ? (t.type || 'flat') : 'flat';
+    const val = k => k === 'r' ? (t.diameter ? gnum(t.diameter / 2) : '') : k === 'stepover' ? gnum((t.stepover || 0) * 100) : (t[k] == null || (t[k] === 0 && !['angle', 'tip_diameter'].includes(k) && !['rpm', 'feed', 'plunge', 'stepdown'].includes(k)) ? '' : gnum(t[k]));
+    const field = ([k, lab, unit]) => `<label>${lab}</label><div class="tf"><input type="number" step="any" min="0" data-s="${k}" value="${val(k)}"><span class="muted">${unit}</span></div>`;
+    tPane.innerHTML = `<div class="set-h">Tool library<span class="muted">what every operation uses; per operation you can override the cutting values in CAM</span></div>
+      <div class="tl2">
+        <div class="tl2-list">${ts.map((y, i) => `<div class="tl2-it ${i === tSel ? 'on' : ''} ${y.dirty ? 'dirty' : ''}" data-i="${i}"><b>T${y.t.number}</b><div><div class="nm">${esc(y.t.name || '(unnamed)')}</div>
+            <div class="sp">${esc(toolSpec(y.t))}${tipMissing(y.t) ? ' <span class="wa">· set the tip</span>' : ''}</div></div></div>`).join('')}
+          <button class="btn small" data-a="tadd" style="margin:8px 4px">+ Add tool</button></div>
+        <div class="tl2-ed">${!t ? '<div class="muted">No tools. Add one.</div>' : `
+          <div class="tl2-hd"><b>T${t.number} · ${esc(t.name || '')}</b><span class="muted">${esc(toolSpec(t))}</span>
+            <span style="margin-left:auto;display:flex;gap:6px"><button class="btn small" data-a="tdup">Duplicate</button><button class="btn small" data-a="tdel">Delete</button></span></div>
+          <div class="tl2-cols"><div class="tl2-form">
+            <div class="tl2-sec">Tool</div>
+            <div class="tl2-grid"><label>Number</label><div class="tf"><input type="number" step="1" min="1" data-s="number" value="${t.number}"><span class="muted">T#</span></div>
+              <label>Name</label><div class="tf"><input data-s="name" value="${esc(t.name || '')}" style="width:100%"></div>
+              <label>Type</label><div class="tf"><select data-s="type">${TOOL_TYPES.map(o => `<option value="${o}" ${o === typ ? 'selected' : ''}>${TOOL_TYPE_LABEL[o]}</option>`).join('')}</select></div>
+              <label>Flutes</label><div class="tf"><input type="number" step="1" min="1" data-s="flutes" value="${t.flutes ?? ''}"><span class="muted">count</span></div></div>
+            <div class="tl2-sec">Size <span class="muted">as on the packet</span></div>
+            <div class="tl2-label"><input data-a="label" placeholder="type the packet's label, e.g. 0.1mm x 3.175mm 30deg  ·  R1.0mm x 3.175mm x 17mm 2F" spellcheck="false"><button class="btn small" data-a="fill">Fill</button></div>
+            <div class="muted tl2-said" data-a="said"></div>
+            <div class="tl2-grid">${TSIZE[typ].map(field).join('')}</div>
+            ${tipMissing(t) ? '<div class="tl2-warn">No tip Ø: the CAM treats this as a perfectly sharp point, so a real tip cuts that much wider at every depth than planned. Set it from the packet (0.1 for a "0.1mm x 3.175mm 30deg" V-bit).</div>' : ''}
+            <div class="tl2-sec">Cutting <span class="muted">defaults for every operation with this tool</span></div>
+            <div class="tl2-grid">${CUT.map(field).join('')}</div>
+            <div class="tl2-sec">In the holder</div>
+            <div class="tl2-grid">${HOLD.map(field).join('')}</div>
+          </div>
+          <div class="tl2-side"><div data-s="svg" class="tl2-svg"></div><div class="muted" data-s="facts" style="font-size:11.5px"></div><div data-s="err" style="font-size:12px;color:var(--err)"></div></div></div>
+          <div class="fs-box"><div class="set-h" style="margin-top:0">Feeds &amp; speeds<span class="muted">for T${t.number}: fills its cutting values for a material</span></div>
+            <div class="fs-row"><label>Material</label><select data-f="mat">${camMaterials.map(m => `<option ${m === 'aluminium' ? 'selected' : ''}>${m}</option>`).join('')}</select>
+              <label>Machine</label><select data-f="mach">${ms.map(y => `<option ${program && y.m.name === program.machine ? 'selected' : ''}>${y.m.name}</option>`).join('')}</select>
+              ${typ !== 'flat' && typ !== 'drill' ? `<label>Cut depth</label><input type="number" step="any" min="0" data-f="depth" placeholder="${['vbit', 'chamfer'].includes(typ) ? '0.5' : 'full Ø'}" style="width:70px"><span class="muted">mm</span>` : ''}</div>
+            <div class="fs-row" style="margin-top:8px"><label>Aggression</label><input type="range" data-f="aggr" min="0" max="1" step="0.05" value="0.5"><span class="muted" data-f="aggr-v">50%</span>
+              <label style="margin-left:10px">Engagement</label><input type="range" data-f="ae" min="0.05" max="1" step="0.05" value="0.4"><span class="muted" data-f="ae-v">40% of Ø</span></div>
+            <div class="kv" data-f="out" style="margin-top:8px;grid-template-columns:110px 1fr 110px 1fr"></div><div class="muted" data-f="notes" style="white-space:pre-wrap;margin-top:4px"></div>
+            <div style="margin-top:8px"><button class="btn small primary" data-a="fsapply" disabled>Apply to T${t.number}</button></div></div>`}
+        </div></div>`;
+    tPane.querySelectorAll('.tl2-it').forEach(e => e.onclick = () => { tSel = +e.dataset.i; renderTools(); });
+    tPane.querySelector('[data-a=tadd]').onclick = () => { const n = Math.max(0, ...ts.map(y => +y.t.number || 0)) + 1; ts.push({ orig: null, dirty: true, t: { number: n, name: 'new tool', type: 'flat', diameter: 3.175, flutes: 2, flute_length: 12, rpm: 12000, feed: 600, plunge: 200, stepdown: 0.5, stepover: 0.4, angle: 0, notes: '' } }); tSel = ts.length - 1; renderTools(); };
+    if (!t) return;
+    const mark = () => { x.dirty = true; const it = tPane.querySelector(`.tl2-it[data-i="${tSel}"]`); if (it) { it.classList.add('dirty'); it.querySelector('.sp').innerHTML = esc(toolSpec(t)) + (tipMissing(t) ? ' <span class="wa">· set the tip</span>' : ''); it.querySelector('.nm').textContent = t.name || '(unnamed)'; }
+      tPane.querySelector('.tl2-hd .muted').textContent = toolSpec(t); clearTimeout(shapeTimer); shapeTimer = setTimeout(drawShape, 200); };
+    tPane.querySelectorAll('[data-s]').forEach(inp => {
+      if (!['INPUT', 'SELECT'].includes(inp.tagName)) return;
+      inp.oninput = inp.onchange = e => {
+        const k = inp.dataset.s;
+        if (k === 'type') { t.type = inp.value; mark(); if (e.type === 'change') renderTools(); return; }
+        if (k === 'name') { t.name = inp.value; mark(); return; }
+        const v = inp.value === '' ? 0 : num(inp.value);
+        if (k === 'r') t.diameter = 2 * v; else if (k === 'stepover') t.stepover = v / 100; else t[k] = v;
+        mark();
+        if (k === 'tip_diameter' && e.type === 'change') renderTools();
+      };
+    });
+    tPane.querySelector('[data-a=tdel]').onclick = async e => { if (!await confirmInline(e.currentTarget, `delete T${t.number}`)) return; if (x.orig != null) delT.push(x.orig); ts.splice(tSel, 1); renderTools(); };
+    tPane.querySelector('[data-a=tdup]').onclick = () => { const c = clone(t); c.number = Math.max(0, ...ts.map(y => +y.t.number || 0)) + 1; c.name += ' copy'; ts.push({ orig: null, dirty: true, t: c }); tSel = ts.length - 1; renderTools(); };
+    const lab = tPane.querySelector('[data-a=label]'), said = tPane.querySelector('[data-a=said]');
+    lab.oninput = () => { const r = parseLabel(lab.value, typ); said.textContent = lab.value.trim() ? (r.said.length ? 'reads as: ' + r.said.join(' · ') : 'nothing recognised') : ''; };
+    const fill = () => { const r = parseLabel(lab.value, typ); if (!r.said.length) return; Object.assign(t, r.out); mark(); const keep = lab.value; renderTools(); const l2 = tPane.querySelector('[data-a=label]'); l2.value = keep; tPane.querySelector('[data-a=said]').textContent = 'filled: ' + r.said.join(' · '); };
+    tPane.querySelector('[data-a=fill]').onclick = fill; lab.onkeydown = e => { if (e.key === 'Enter') fill(); };
+    drawShape();
+    const F = k => tPane.querySelector(`[data-f="${k}"]`); let res = null;
+    const calc = async () => {
+      F('aggr-v').textContent = Math.round(F('aggr').value * 100) + '%'; F('ae-v').textContent = Math.round(F('ae').value * 100) + '% of Ø';
+      const dep = F('depth') && F('depth').value !== '' ? +F('depth').value : undefined;
+      try {
+        res = await api('/api/cam/feeds', { tool: t, material: F('mat').value, machine: F('mach').value, aggressiveness: +F('aggr').value, radial_engagement: +F('ae').value, depth: dep });
+        F('out').innerHTML = [['Surface speed', res.vc + ' m/min'], ['Spindle', res.rpm + ' rpm'], ['Chip load', res.chipload + ' mm/tooth'], ['Feed', res.feed + ' mm/min'], ['Plunge', res.plunge + ' mm/min'], ['Stepdown', res.stepdown + ' mm'], ['Stepover', Math.round(res.stepover * 100) + '% of Ø']].map(([a, b]) => `<div>${a}</div><div>${b}</div>`).join('');
+        F('notes').textContent = (res.notes || []).map(n => '· ' + n).join('\n'); tPane.querySelector('[data-a=fsapply]').disabled = false;
+      } catch (e) { res = null; F('out').innerHTML = ''; F('notes').textContent = e.message; tPane.querySelector('[data-a=fsapply]').disabled = true; }
+    };
+    for (const k of ['mat', 'mach']) F(k).onchange = calc; for (const k of ['aggr', 'ae']) F(k).oninput = calc; if (F('depth')) F('depth').onchange = calc;
+    tPane.querySelector('[data-a=fsapply]').onclick = () => {
+      if (!res) return;
+      Object.assign(t, { rpm: res.rpm, feed: res.feed, plunge: res.plunge, stepdown: res.stepdown, stepover: res.stepover, notes: ((t.notes || '').replace(/\s*\[.*?\]$/, '') + ` [${res.material}: vc ${res.vc} m/min, fz ${res.chipload} mm]`).trim() });
+      x.dirty = true; renderTools();
+    };
+    calc();
+  }
+  async function drawShape() {                   // the tool to scale, from its real profile (/api/cam/tool_shape), with its sizes marked
+    const x = ts[tSel]; const box = tPane.querySelector('[data-s=svg]'); if (!x || !box) return;
+    const err = tPane.querySelector('[data-s=err]'), facts = tPane.querySelector('[data-s=facts]'), t = x.t;
     let r;
-    try { r = await api('/api/cam/tool_shape', { tool: x.t }); } catch (e) { err.textContent = e.message; err.style.color = 'var(--err)'; return; }
-    if (r.error) { err.textContent = r.error; err.style.color = 'var(--err)'; return; }
+    try { r = await api('/api/cam/tool_shape', { tool: t }); } catch (e) { err.textContent = e.message; return; }
+    if (r.error) { err.textContent = r.error; box.innerHTML = ''; facts.textContent = ''; return; }
     err.textContent = ''; const sh = r.shape, pts = sh.outline, top = Math.min(sh.stickout, Math.max(sh.shank_start + 4, sh.flute_length + 2));
-    const W = 220, H = 300, pad = 16, rmax = Math.max(...pts.map(p => p[1])), sc = Math.min((W - 2 * pad) / (2 * rmax), (H - 2 * pad) / top);
-    const X = rr => W / 2 + rr * sc, Y = z => H - pad - z * sc;
+    const W = 230, H = 300, pad = 18, rmax = Math.max(...pts.map(p => p[1])), sc = Math.min((W - 2 * pad - 60) / (2 * rmax), (H - 2 * pad) / top);
+    const X = rr => (W - 60) / 2 + rr * sc, Y = z => H - pad - z * sc;
     const clip = pts.filter(p => p[0] <= top);
     const half = q => q.map(p => `${X(p[1]).toFixed(1)},${Y(p[0]).toFixed(1)}`).join(' ') + ' ' + q.slice().reverse().map(p => `${X(-p[1]).toFixed(1)},${Y(p[0]).toFixed(1)}`).join(' ');
     const rAt = z => { for (let i = 1; i < pts.length; i++) if (pts[i][0] >= z) { const a = pts[i - 1], b = pts[i]; return b[0] > a[0] ? a[1] + (b[1] - a[1]) * (z - a[0]) / (b[0] - a[0]) : b[1]; } return pts[pts.length - 1][1]; };
     const fl = sh.flute_length, cut = clip.filter(p => p[0] < fl).concat([[fl, rAt(fl)]]), body = [[fl, rAt(fl)]].concat(clip.filter(p => p[0] > fl), [[top, rAt(top)]]);
+    const tag = (y, txt, col) => `<text x="${W - 4}" y="${y}" fill="${col}" font-size="10" text-anchor="end">${txt}</text>`;
+    const marks = [];
+    if (['vbit', 'chamfer'].includes(t.type)) {
+      const tr = (+t.tip_diameter || 0) / 2;
+      marks.push(`<line x1="${X(-tr)}" x2="${X(tr)}" y1="${Y(0) + 6}" y2="${Y(0) + 6}" stroke="#4ea1ff" stroke-width="1.2"/>`, tag(Y(0) + 9, tr ? `tip Ø${gnum(2 * tr)}` : 'sharp tip', tr ? '#4ea1ff' : '#f2c94c'),
+                 tag(Y(Math.min(fl, top) * 0.5), `${gnum(t.angle || 0)}° incl.`, '#ff8c42'));
+    } else if (t.type === 'ball') marks.push(tag(Y(t.diameter / 2), `R${gnum(t.diameter / 2)}`, '#4ea1ff'));
+    else if (t.type === 'bull') marks.push(tag(Y(t.corner_radius || 0), `R${gnum(t.corner_radius || 0)} corners`, '#4ea1ff'));
     box.innerHTML = `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">
       <polygon points="${half(body)}" fill="#8d949c55" stroke="#8d949c" stroke-width="1"/>
       <polygon points="${half(cut)}" fill="#ff8c4255" stroke="#ff8c42" stroke-width="1.2"/>
-      <line x1="${pad / 2}" x2="${W - pad / 2}" y1="${Y(fl)}" y2="${Y(fl)}" stroke="#ff8c42" stroke-dasharray="3 3" stroke-width="0.8"/>
-      <text x="${W - pad / 2}" y="${Y(fl) - 3}" fill="#ff8c42" font-size="10" text-anchor="end">flutes ${fl} mm</text>
-      ${sh.shank_start < top ? `<line x1="${pad / 2}" x2="${W - pad / 2}" y1="${Y(sh.shank_start)}" y2="${Y(sh.shank_start)}" stroke="#8d949c" stroke-dasharray="2 3" stroke-width="0.8"/><text x="${pad / 2}" y="${Y(sh.shank_start) - 3}" fill="#8d949c" font-size="10">shank from ${sh.shank_start.toFixed(2)}</text>` : ''}
-      <text x="${W / 2}" y="${H - 3}" fill="#8b94a1" font-size="10" text-anchor="middle">tip · ${(sc).toFixed(1)} px/mm${top < sh.stickout ? ` · ${sh.stickout.toFixed(1)} mm out of the collet` : ''}</text></svg>`;
-    facts.textContent = `cuts Ø${(2 * sh.cut_radius).toFixed(3)} at most · widest Ø${(2 * sh.max_radius).toFixed(3)} · reach ${sh.reach.toFixed(2)} mm · stickout ${sh.stickout.toFixed(1)} mm${2 * sh.max_radius > 2 * sh.cut_radius + 1e-3 ? ' — wider above the cut: checked against walls in the simulation' : ''}`;
-  }
-  const TCOLS = [['T#', 'number', 'num', '40px'], ['Name', 'name', 'text', ''], ['Type', 'type', 'type', '74px'], ['Ø mm', 'diameter', 'num', '58px'], ['Flutes', 'flutes', 'num', '46px'], ['Flute len', 'flute_length', 'num', '58px'],
-    ['RPM', 'rpm', 'num', '66px'], ['Feed', 'feed', 'num', '58px'], ['Plunge', 'plunge', 'num', '58px'], ['Stepdown', 'stepdown', 'num', '62px'], ['Stepover %', 'stepover', 'pct', '66px'], ['Angle °', 'angle', 'num', '52px']];
-  function renderTools() {
-    tPane.innerHTML = `<div class="set-h">Tool library<span class="muted">defaults every operation uses; override them per operation in the CAM tab</span><button class="btn small" data-a="tadd" style="margin-left:auto">+ Add tool</button></div>
-      <table class="tool-tbl"><tr>${TCOLS.map(([l, , , w]) => `<th style="${w ? 'width:' + w : ''}">${l}</th>`).join('')}<th style="width:96px"></th></tr>
-      ${ts.map((x, i) => `<tr data-i="${i}" class="${x.dirty ? 'dirty' : ''}">${TCOLS.map(([, k, t]) => `<td>${t === 'type' ? `<select data-k="${k}">${TOOL_TYPES.map(o => `<option value="${o}" ${o === x.t.type ? 'selected' : ''}>${TOOL_TYPE_LABEL[o]}</option>`).join('')}</select>`
-        : `<input data-k="${k}" data-t="${t}" ${t === 'text' ? '' : 'type="number" step="any"'} value="${t === 'pct' ? +(x.t[k] * 100).toFixed(2) : (x.t[k] ?? '').toString().replace(/"/g, '&quot;')}">`}</td>`).join('')}<td style="white-space:nowrap"><button class="btn small ${tSel === i ? 'primary' : ''}" data-a="tshape" title="Shape: tip, corner, shank, neck, stickout — with a drawing">Shape</button> <button class="btn small" data-a="tdel" title="delete">✕</button></td></tr>`).join('')}</table>
-      <div id="tshape-ed"></div>
-      <div class="fs-box"><div class="set-h" style="margin-top:0">Feeds &amp; speeds calculator<span class="muted">fills a tool's rpm, feed, plunge, stepdown and stepover for a material</span></div>
-        <div class="fs-row"><label>Tool</label><select data-f="tool">${ts.map((x, i) => `<option value="${i}">T${x.t.number} ${x.t.name}</option>`).join('')}</select>
-          <label>Material</label><select data-f="mat">${camMaterials.map(m => `<option ${m === 'aluminium' ? 'selected' : ''}>${m}</option>`).join('')}</select>
-          <label>Machine</label><select data-f="mach">${ms.map(x => `<option ${program && x.m.name === program.machine ? 'selected' : ''}>${x.m.name}</option>`).join('')}</select></div>
-        <div class="fs-row" style="margin-top:8px"><label>Aggression</label><input type="range" data-f="aggr" min="0" max="1" step="0.05" value="0.5"><span class="muted" data-f="aggr-v">50%</span>
-          <label style="margin-left:10px">Engagement</label><input type="range" data-f="ae" min="0.05" max="1" step="0.05" value="0.4"><span class="muted" data-f="ae-v">40% of Ø</span></div>
-        <div class="kv" data-f="out" style="margin-top:8px;grid-template-columns:110px 1fr 110px 1fr"></div><div class="muted" data-f="notes" style="white-space:pre-wrap;margin-top:4px"></div>
-        <div style="margin-top:8px"><button class="btn small primary" data-a="fsapply" disabled>Apply to tool</button></div></div>`;
-    tPane.querySelector('[data-a=tadd]').onclick = () => { const n = Math.max(0, ...ts.map(x => +x.t.number || 0)) + 1; ts.push({ orig: null, dirty: true, t: { number: n, name: '4 mm flat endmill', type: 'flat', diameter: 4, flutes: 2, flute_length: 15, rpm: 12000, feed: 900, plunge: 250, stepdown: 1.5, stepover: 0.45, angle: 0, notes: '' } }); renderTools(); };
-    tPane.querySelectorAll('tr[data-i]').forEach(tr => {
-      const x = ts[+tr.dataset.i];
-      tr.querySelectorAll('[data-k]').forEach(e => e.oninput = e.onchange = () => { const t = e.dataset.t; x.t[e.dataset.k] = t === 'text' || !t ? e.value : t === 'pct' ? num(e.value) / 100 : num(e.value); x.dirty = true; tr.classList.add('dirty'); });
-      tr.querySelector('[data-a=tdel]').onclick = () => { if (x.orig != null) delT.push(x.orig); ts.splice(+tr.dataset.i, 1); renderTools(); };
-      tr.querySelector('[data-a=tshape]').onclick = () => { tSel = tSel === +tr.dataset.i ? -1 : +tr.dataset.i; renderTools(); };
-      tr.querySelector('select[data-k=type]').addEventListener('change', () => { if (tSel === +tr.dataset.i) renderShapeEd(); });
-    });
-    renderShapeEd();
-    const F = k => tPane.querySelector(`[data-f="${k}"]`); let res = null;
-    const calc = async () => {
-      F('aggr-v').textContent = Math.round(F('aggr').value * 100) + '%'; F('ae-v').textContent = Math.round(F('ae').value * 100) + '% of Ø';
-      const x = ts[+F('tool').value]; if (!x) return;
-      try {
-        res = await api('/api/cam/feeds', { tool: x.t, material: F('mat').value, machine: F('mach').value, aggressiveness: +F('aggr').value, radial_engagement: +F('ae').value });
-        F('out').innerHTML = [['Surface speed', res.vc + ' m/min'], ['Spindle', res.rpm + ' rpm'], ['Chip load', res.chipload + ' mm/tooth'], ['Feed', res.feed + ' mm/min'], ['Plunge', res.plunge + ' mm/min'], ['Stepdown', res.stepdown + ' mm'], ['Stepover', Math.round(res.stepover * 100) + '% of Ø']].map(([k, v]) => `<div>${k}</div><div>${v}</div>`).join('');
-        F('notes').textContent = (res.notes || []).map(n => '· ' + n).join('\n'); tPane.querySelector('[data-a=fsapply]').disabled = false;
-      } catch (e) { res = null; F('out').innerHTML = ''; F('notes').textContent = e.message; tPane.querySelector('[data-a=fsapply]').disabled = true; }
-    };
-    for (const k of ['tool', 'mat', 'mach']) F(k).onchange = calc; for (const k of ['aggr', 'ae']) F(k).oninput = calc;
-    tPane.querySelector('[data-a=fsapply]').onclick = () => {
-      const i = +F('tool').value, x = ts[i]; if (!res || !x) return;
-      Object.assign(x.t, { rpm: res.rpm, feed: res.feed, plunge: res.plunge, stepdown: res.stepdown, stepover: res.stepover, notes: ((x.t.notes || '').replace(/\s*\[.*?\]$/, '') + ` [${res.material}: vc ${res.vc} m/min, fz ${res.chipload} mm]`).trim() });
-      x.dirty = true; renderTools(); F('tool').value = i; calc();
-    };
-    if (ts.length) calc();
+      <line x1="${pad / 2}" x2="${W - 60}" y1="${Y(fl)}" y2="${Y(fl)}" stroke="#ff8c42" stroke-dasharray="3 3" stroke-width="0.8"/>${tag(Y(fl) + 12, `cuts to ${gnum(fl)}`, '#ff8c42')}
+      ${sh.shank_start < top ? `<line x1="${pad / 2}" x2="${W - 60}" y1="${Y(sh.shank_start)}" y2="${Y(sh.shank_start)}" stroke="#8d949c" stroke-dasharray="2 3" stroke-width="0.8"/>${tag(Y(sh.shank_start) - 4, `shank Ø${gnum(2 * rAt(top))}`, '#8d949c')}` : ''}
+      ${marks.join('')}
+      <text x="${(W - 60) / 2}" y="${H - 3}" fill="#8b94a1" font-size="10" text-anchor="middle">${sc.toFixed(1)} px/mm</text></svg>`;
+    const w02 = ['vbit', 'chamfer'].includes(t.type) ? (() => { const tr = (+t.tip_diameter || 0) / 2, k = Math.tan((+t.angle || 0) * Math.PI / 360); return [0.1, 0.2, 0.5].filter(d => d <= fl).map(d => `${d} deep → ${gnum(2 * (tr + d * k))} wide`).join(' · '); })() : '';
+    facts.innerHTML = `cuts up to Ø${(2 * sh.cut_radius).toFixed(3)} · widest Ø${(2 * sh.max_radius).toFixed(3)} · stickout ${sh.stickout.toFixed(1)} mm${w02 ? '<br>groove width: ' + w02 : ''}`;
   }
   async function renderMachineModel(pane, cur) {   // Settings ▸ Machines ▸ Model: the numbers the Machine view and the collision check use, with their sources
     const el = pane.querySelector('#m-model'); if (!el) return;

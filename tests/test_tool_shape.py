@@ -130,3 +130,27 @@ def test_simulator_reports_a_wide_shank_and_buried_flutes(z1):
     q.add(cam.contour(st, short, cam.rect(-10, -10, 10, 10), z_top=0, z_bottom=-3, stepdown=3, side="outside", ramp=0, lead=0, name="Deep"))
     hits = cam_sim.simulate(q).stats["collisions"]["hits"]
     assert any(h["part"].startswith("tool above its 2 mm flutes") for h in hits), hits
+
+
+def test_v_tip_counts_everywhere_and_its_absence_is_reported(z1):
+    """A V-bit's tip: the program says when it isn't set (modelled as a sharp point), an engraving on the line says how
+    wide a groove it cuts, and feeds & speeds size the tool by its cutting width, not its 1/8" body."""
+    stock = cam.Stock.block(40, 40, 6, top=0)
+    st = cam.Setup(z1, stock, origin="stock-top-left")
+    line = cam.rect(-10, -5, 10, 5)
+    sharp = T(number=5, name="0.1 mm 30° V-bit", type="vbit", diameter=3.175, angle=30, flute_length=3, stepdown=0.2)
+    tipped = T(number=6, name="0.1 mm 30° V-bit", type="vbit", diameter=3.175, angle=30, flute_length=3, tip_diameter=0.1, stepdown=0.2)
+    k = math.tan(math.radians(15))
+    for tool, w in ((sharp, 0.4 * k), (tipped, 0.1 + 0.4 * k)):
+        p = cam.Program(st)
+        p.add(cam.contour(st, tool, line, z_top=0, z_bottom=-0.2, side="on", ramp=0, lead=0, name="Engrave"))
+        note = next(x for x in p.ops[0].warnings if "groove" in x)
+        assert f"groove {w:.3f} mm wide" in note
+        tipless = [x for x in p.check() if "no tip" in x]
+        assert bool(tipless) == (tool is sharp)
+    assert tipped.spec() == "V 30° · tip Ø0.1 · Ø3.175 · flutes 3 mm" and "no tip Ø set" in sharp.spec()
+    assert T(type="ball", diameter=2, flute_length=17, shank_diameter=3.175).spec() == "ball R1 (Ø2) · flutes 17 mm · shank Ø3.175"
+    body = cam.feeds(T(type="flat", diameter=3.175, flutes=2), "aluminium", z1)
+    v = cam.feeds(tipped, "aluminium", z1, depth=0.2)
+    assert v["chipload"] < body["chipload"] and v["feed"] < body["feed"] and v["stepdown"] <= 0.2
+    assert any("Ø0.207 cutting width at 0.2 mm" in n for n in v["notes"])

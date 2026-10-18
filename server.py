@@ -285,14 +285,14 @@ async def cam_materials():
 
 @app.get("/api/cam/feeds")
 async def cam_feeds(tool: int, material: str, machine: str | None = None, aggressiveness: float = 0.5,
-                    radial_engagement: float | None = None):
+                    radial_engagement: float | None = None, depth: float | None = None):
     tm = agent.library.tool_map()
     t = tm.get(tool)
     if t is None:
         return JSONResponse({"error": "unknown tool"}, status_code=400)
     m = agent.library.machines().get(machine or "")
     try:
-        return cam.feeds(t, material, m, aggressiveness, radial_engagement)
+        return cam.feeds(t, material, m, aggressiveness, radial_engagement, depth)
     except cam.CamError as e:
         return JSONResponse({"error": str(e)}, status_code=400)
 
@@ -303,6 +303,7 @@ class FeedsBody(BaseModel):
     machine: str | None = None
     aggressiveness: float = 0.5
     radial_engagement: float | None = None
+    depth: float | None = None            # the cut depth (sizes V / ball tools by their width there)
 
 
 @app.post("/api/cam/feeds")
@@ -311,7 +312,7 @@ async def cam_feeds_for(body: FeedsBody):
     try:
         t = _tool_from({"number": 0, "name": "tool", **body.tool})
         m = agent.library.machines().get(body.machine or "")
-        return cam.feeds(t, body.material, m, body.aggressiveness, body.radial_engagement)
+        return cam.feeds(t, body.material, m, body.aggressiveness, body.radial_engagement, body.depth)
     except (cam.CamError, ValueError, TypeError) as e:
         return JSONResponse({"error": str(e)}, status_code=400)
 
