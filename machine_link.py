@@ -510,6 +510,15 @@ def prepare_program(gcode: str, op_names: list[str], air_cut: float = 0.0) -> di
             "extents": {a: v for a, v in ext.items() if v[0] <= v[1]}, "air_cut": air_cut}
 
 
+def strip_tool_changes(text: str) -> str:
+    """Every tool-change line (M6 Tn) becomes M5 (spindle off), keeping the line count: the program runs with the tool
+    that is already fitted and measured, and nothing can start the spindle while a tool change is still going on."""
+    out = []
+    for ln in text.splitlines():
+        out.append("M5" if re.search(r"\bM0?6\b", ln) else ln)
+    return "\n".join(out) + ("\n" if text.endswith("\n") else "")
+
+
 def program_filename(name: str) -> str:
     """An ASCII file name the Z1 plays safely (no spaces, no ' -' option marker)."""
     base = re.sub(r"[^A-Za-z0-9_.]+", "_", name).strip("_.")[:40] or "program"
@@ -986,6 +995,7 @@ class MachineControl:
         current = (st.get("tool") or {}).get("number")
         self.measured = None
         cmd = "M491" if current == number else f"M6 T{number}"
+        await self.link.line("M5")                    # the spindle is off for every tool change and measurement
         self._start_routine("re-measure" if cmd == "M491" else "tool change", cmd, 600.0, tool=number)
         await self.link.line(cmd)
         self._note(f"{cmd} sent")
@@ -1293,10 +1303,17 @@ class MachineControl:
         first = prep["tools"][0] if prep["tools"] else None
         if first is None:
             raise Refused("the program never selects a tool (no M6 Tn)")
-        if first == fitted and not self.tool_ok():
-            raise Refused(f"T{fitted} is fitted but hasn't been measured this session: Change tool → {fitted} first")
-        notes.append(f"starts with T{first}" + (" (fitted and measured)" if first == fitted else
-                                                f": the machine will stop for the change from T{fitted} and measure it"))
+        # One tool per run, fitted and measured beforehand (Prepare ▸ Change tool): a program file never changes tools.
+        # The Z1 reads ahead while it plays a file: on 2026-10-18 it ran the M3 after an M6 while it was still changing
+        # and measuring the tool, so the spindle turned at the tool setter.
+        if len(set(prep["tools"])) > 1:
+            raise Refused("these operations use " + " and ".join(f"T{t}" for t in dict.fromkeys(prep["tools"])) + ": run one "
+                          "tool at a time - change and measure each in Prepare ▸ Change tool, then run its operations "
+                          "(a program never changes tools itself: the Z1 starts the spindle while it is still changing them)")
+        if first != fitted or not self.tool_ok():
+            raise Refused(f"fit and measure T{first} first (Prepare ▸ Change tool → {first}): a program never changes tools itself"
+                          + (f"; the machine has T{fitted}" if first != fitted else f"; T{fitted} hasn't been measured this session"))
+        notes.append(f"uses T{first} (fitted and measured); the file has no tool change in it - the spindle starts after it")
         wco = [m - w for m, w in zip(st["mpos"], st["wpos"])]
         for ax, i in (("x", 0), ("y", 1)):
             e = prep["extents"].get(ax)
@@ -1316,8 +1333,11 @@ class MachineControl:
         return {"notes": notes, "work_origin": wco}
 
     async def run_program(self, name: str, prep: dict, info: dict | None = None) -> dict:
-        """Upload `prep["text"]` as /sd/gcodes/<name> and play it. `prep` comes from prepare_program()."""
+        """Upload `prep["text"]` as /sd/gcodes/<name> and play it. `prep` comes from prepare_program(). The tool is fitted
+        and measured already (check_job): its M6 line becomes M5 (spindle off), line for line, so nothing in the file
+        changes tools and the line numbers still map to the operations."""
         chk = self.check_job(prep)
+        prep = dict(prep, text=strip_tool_changes(prep["text"]))
         fname = program_filename(name)
         path = "/sd/gcodes/" + fname
         self.last_action = time.time()

@@ -595,6 +595,7 @@
   .chips { display:flex; gap:6px; flex-wrap:wrap; align-items:center; }
   .chipb { height:24px; padding:0 9px; border-radius:12px; border:1px solid var(--line2); background:var(--bg); color:var(--text); font:inherit; font-size:11.5px; cursor:pointer; } .chipb.on { border-color:var(--accent2); color:#8cc2ff; }
   .next { display:flex; justify-content:flex-end; }
+  .mblocks { display:flex; gap:6px; flex-wrap:wrap; align-items:center; margin:0 0 8px; }
   .msetup { width:100%; height:30px; }
   .zstate { margin-left:auto; text-transform:none; letter-spacing:0; font-size:11px; padding:1px 8px; border-radius:9px; background:var(--s3); color:var(--muted); }
   .zstate.ok { background:rgba(62,207,122,.14); color:var(--ok); } .zstate.warn { background:rgba(242,201,76,.14); color:var(--warn); }
@@ -6239,12 +6240,16 @@ function mvZero(st, stp) {                       // {state: ok|warn|none, rows, 
 function mvReady(st, stp) {                      // the Run checklist
   const s = (st && st.status) || {}, conn = st && st.connected, tl = s.tool ? s.tool.number : null;
   const z = mvZero(st, stp), first = program ? (program.ops.find(o => o.setup === MV.si && MVP.sel.has(program.ops.indexOf(o))) || {}).tool : null;
+  const selTools = program ? [...new Set(program.ops.filter((o, i) => MVP.sel.has(i) && o.tool).map(o => o.tool.number))] : [];
   const ackKey = stp ? stp.name + JSON.stringify((st && st.origin && st.origin.wco) || []) : '';
   return [
     { k: 'conn', ok: !!(conn && st.armed), txt: conn ? (st.armed ? 'Connected · Control on' : 'Turn Control on') : 'Connect the machine', go: 'prep' },
     { k: 'home', ok: !!(conn && st.homed), txt: st && st.homed ? 'Homed this session' : 'Home the machine', go: 'prep' },
     { k: 'zero', ok: z.state === 'ok' || MV.ack === ackKey, warn: z.state !== 'ok' && MV.ack === ackKey, txt: z.state === 'ok' ? `Work origin: ${REF_TEXT[z.w.xy]}, ${REF_TEXT[z.w.z]}` : `Work origin: ${z.why[0] || 'not set'}`, go: 'zero', ackKey },
-    { k: 'tool', ok: true, warn: !(first && tl === first.number && st.tool_ok), txt: !first ? 'Tick the operations to run' : (tl === first.number && st.tool_ok) ? `T${first.number} fitted and measured` : `Starts with T${first.number} (${esc(first.name)}): the machine stops for the change and measures it`, go: 'prep' },
+    // one tool per run, fitted and measured first: a program never changes tools (the Z1 starts the spindle mid-change)
+    { k: 'tool', ok: !!(first && selTools.length === 1 && tl === first.number && st.tool_ok),
+      txt: !first ? 'Tick the operations to run' : selTools.length > 1 ? `These use ${selTools.map(n => 'T' + n).join(' and ')}: run one tool at a time (the T buttons above the list pick one tool's operations)`
+        : (tl === first.number && st.tool_ok) ? `T${first.number} fitted and measured` : `Fit and measure T${first.number} (${esc(first.name)}) first: Prepare ▸ Change tool. Programs never change tools themselves`, go: 'prep' },
   ];
 }
 
@@ -6426,6 +6431,15 @@ function mvShiftOffer(st, stp, z) {
   return `<div class="shift"><div><b>Move X0 Y0 to the ${REF_TEXT[z.w.xy]}</b><small>${dx >= 0 ? '+' : ''}${dx}, ${dy >= 0 ? '+' : ''}${dy} mm from the probed ${REF_TEXT[z.xy.ref]}, using the setup's block size (${sx.toFixed(2)} × ${sy.toFixed(2)}). Only the offset changes; nothing moves. Right only if that size is the block's real size.</small></div>
     <button class="btn sm pri" data-act="shift" data-dx="${dx}" data-dy="${dy}" data-ref="${z.w.xy}" data-how="${esc(`${z.xy.ref} corner probed, moved by the block size ${sx.toFixed(2)} × ${sy.toFixed(2)}`)}" ${ok ? '' : 'disabled'}>Move X0 Y0</button></div>`;
 }
+function mvToolBlocks(ops) {                    // the setup's operations as runs of consecutive ops on one tool (the run order)
+  const out = [];
+  for (const o of ops) {
+    if (!o.tool) continue;
+    const last = out[out.length - 1];
+    if (last && last[last.length - 1].tool.number === o.tool.number && last[last.length - 1].i === o.i - 1) last.push(o); else out.push([o]);
+  }
+  return out;
+}
 function mvSetupSelects() {
   const n = program ? program.setups.length : 0;
   document.querySelectorAll('#insp-machine .msetup').forEach(sel => {
@@ -6439,7 +6453,7 @@ function mvRun(st) {
   mvSetupSelects();
   const ops = program ? program.ops.map((o, i) => ({ ...o, i })).filter(o => o.setup === MV.si) : [];
   const key = program ? program.name + MV.si + ops.map(o => o.key + o.time).join() : '';
-  if (key !== MVP.key) { MVP.key = key; MVP.sel = new Set(ops.map(o => o.i)); }
+  if (key !== MVP.key) { MVP.key = key; const b0 = mvToolBlocks(ops)[0] || []; MVP.sel = new Set(b0.map(o => o.i)); }
   const runIdx = job ? (job.ops_index || []) : [], jops = job ? (job.ops || []) : [];
   let cur = null;
   if (job && job.line) jops.forEach((o, k) => { if (job.line >= o.start && job.line <= o.end) cur = k; });
@@ -6482,7 +6496,9 @@ function mvRun(st) {
   const selT = ops.filter(o => MVP.sel.has(o.i)).reduce((a, o) => a + o.time, 0);
   setHTML(mvEl('mr-ops'), !program ? '<p class="muted">No CAM program yet: make one in CAM, then come back here to run it.</p>'
     : `<div class="h">${esc(stp.name)} · ${esc(stp.wcs)} <span class="muted" style="text-transform:none;letter-spacing:0;font-weight:400">${jobOn ? '' : `· ${MVP.sel.size} of ${ops.length} · ${fmtMin(selT)}`}</span>
-      ${jobOn ? '' : '<span style="margin-left:auto"><button class="btn ghost sm" data-act="opall">All</button><button class="btn ghost sm" data-act="opnone">None</button></span>'}</div>${ops.filter(o => !jobOn || runIdx.includes(o.i)).map(opRow).join('')}`);
+      ${jobOn ? '' : '<button class="btn ghost sm" data-act="opnone" style="margin-left:auto">None</button>'}</div>
+      ${jobOn ? '' : `<div class="mblocks">${mvToolBlocks(ops).map(b => `<button class="chipb ${b.every(o => MVP.sel.has(o.i)) && MVP.sel.size === b.length ? 'on' : ''}" data-act="opblock" data-ix="${b.map(o => o.i).join(',')}" data-n="${b[0].tool.number}" title="${esc(b.map(o => o.name).join(', '))}">T${b[0].tool.number} · ${b.length > 1 ? `${b[0].i + 1}–${b[b.length - 1].i + 1}` : b[0].i + 1}</button>`).join('')}<span class="muted sm">one tool per run, in program order</span></div>`}
+      ${ops.filter(o => !jobOn || runIdx.includes(o.i)).map(opRow).join('')}`);
   mvEl('mr-foot').style.display = jobOn || !program ? 'none' : '';
   const run = mvEl('mvp-run'); run.disabled = !canRun;
   run.textContent = mvEl('mvp-air').checked ? `Air cut ${MVP.sel.size} operation${MVP.sel.size === 1 ? '' : 's'} (+${+mvEl('mvp-air-mm').value} mm)…` : `Run ${MVP.sel.size} operation${MVP.sel.size === 1 ? '' : 's'}…`;
@@ -6626,6 +6642,7 @@ async function mvRunFile(file) {
     if (a === 'run') return mvRunOps();
     if (a === 'ack') { MV.ack = b.dataset.k; return mvRender(st); }
     if (a === 'opsel') { const i = +b.dataset.i; MVP.sel.has(i) ? MVP.sel.delete(i) : MVP.sel.add(i); return mvRender(st); }
+    if (a === 'opblock') { MVP.sel = new Set(b.dataset.ix.split(',').map(Number)); mvEl('mp-tc-num').value = b.dataset.n; return mvRender(st); }
     if (a === 'opall' || a === 'opnone') { MVP.sel = new Set(a === 'opall' && program ? program.ops.map((o, i) => o.setup === MV.si ? i : -1).filter(i => i >= 0) : []); return mvRender(st); }
   });
   document.querySelectorAll('#ws [data-rtab]').forEach(b => b.addEventListener('click', mvLayout));

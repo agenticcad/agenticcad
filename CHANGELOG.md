@@ -5,6 +5,17 @@ features, patch bumps fix things. The version shown in the UI header comes from 
 
 ## [Unreleased]
 
+## [0.48.7] — 2026-10-18 (local build of the v2-ui branch, not released)
+
+### Fixed
+- **The spindle ran during a tool change on the Z1.** A program began `M6 T2` then `M3 S13000`; the Z1 reads ahead
+  while it plays a file and started the spindle while it was still changing and measuring the tool on the setter
+  (stopped with the e-stop). A program sent to the machine now never changes tools: a run uses one tool, which must
+  already be fitted and measured (Prepare ▸ Change tool), and its tool-change line goes to the machine as `M5`
+  (spindle off), so the spindle only starts once the tool is in and measured. Operations that use more than one tool
+  are refused with the reason; Run offers the program's tool runs in order (T2 · 1–5, T3 · 6–7, ...). Every tool
+  change from the app sends `M5` before it.
+
 ## [0.48.6] — 2026-10-18 (local build of the v2-ui branch, not released)
 
 ### Fixed

@@ -251,7 +251,7 @@ def test_change_tool_uses_makeras_m6_and_only_then_allows_motion():
             n = len(emu.lines)
             await mc.change_tool(0)
             await _until(lambda: len(emu.lines) > n)
-            assert emu.lines[n:] == ["M6 T0"]
+            assert emu.lines[n:] == ["M5", "M6 T0"]                  # spindle off first, then Makera's change
             await _until(lambda: mc.routine["stage"] == "awaiting", timeout=15)       # the machine is in TOOL state
             assert emu.state == "Tool" and emu.mpos[:2] == [-11.6, -14.6]
             await mc.confirm_tool_change()
@@ -264,7 +264,7 @@ def test_change_tool_uses_makeras_m6_and_only_then_allows_motion():
             n = len(emu.lines)
             await mc.change_tool(0)
             await _until(lambda: len(emu.lines) > n)
-            assert emu.lines[n:] == ["M491"] and not mc.tool_ok()
+            assert emu.lines[n:] == ["M5", "M491"] and not mc.tool_ok()
             await _until(lambda: mc.routine["stage"] in ("done", "failed"), timeout=30)
             assert mc.routine["stage"] == "done" and mc.tool_ok()
         finally:
@@ -540,6 +540,9 @@ G53 G0 Z-1
 """
 
 
+PROG1 = PROG[:PROG.index("; Outline [contour]")] + "M5\nG53 G0 Z-1\n"      # Face only: one tool (T6)
+
+
 def test_prepare_program_strips_maps_ops_and_refuses_unsafe():
     prep = ml.prepare_program(PROG, ["Face", "Outline"])
     lines = prep["text"].splitlines()
@@ -559,7 +562,10 @@ def test_prepare_program_strips_maps_ops_and_refuses_unsafe():
     assert ml.program_filename("obsidian logo - ops 2..5") == "obsidian_logo_ops_2..5.nc"
 
 
-def test_run_program_uploads_plays_changes_tool_and_finishes():
+def test_run_program_one_tool_no_tool_change_in_the_file():
+    """A program never changes tools on the machine: on 2026-10-18 the Z1 read ahead past M6 T2 and started the spindle
+    (M3) while it was still changing and measuring the tool. One tool per run, fitted and measured beforehand; its M6
+    line goes to the machine as M5, so the file can't change tools and the line numbers still map to the operations."""
     async def go():
         emu, mc, _ = await _setup(speed=60.0)
         try:
@@ -567,21 +573,25 @@ def test_run_program_uploads_plays_changes_tool_and_finishes():
             _measured(mc, emu)                                       # T6 fitted and measured
             emu.wco = [-150.0, -150.0, -60.0]
             await asyncio.sleep(0.4)
-            prep = ml.prepare_program(PROG, ["Face", "Outline"])
-            far = ml.prepare_program(PROG.replace("X45", "X160"), ["Face", "Outline"])
+            both = ml.prepare_program(PROG, ["Face", "Outline"])
+            with pytest.raises(ml.Refused, match="T6 and T3: run one tool at a time"):
+                mc.check_job(both)
+            prep = ml.prepare_program(PROG1, ["Face"])
+            far = ml.prepare_program(PROG1.replace("X40", "X160"), ["Face"])
             with pytest.raises(ml.Refused, match="outside"):
-                mc.check_job(far)                                    # X 160 from a work origin at -150 runs past the top end (machine X 10)
+                mc.check_job(far)                                    # X 160 from a work origin at -150 runs past the top end
+            other = ml.prepare_program(PROG1.replace("M6 T6", "M6 T4"), ["Face"])
+            with pytest.raises(ml.Refused, match="fit and measure T4 first"):
+                mc.check_job(other)                                  # the machine has T6
             await mc.run_program("test job", prep)
-            await _until(lambda: mc.job["stage"] in ("running", "awaiting", "done", "failed"), timeout=20)
-            assert emu.sd["/sd/gcodes/test_job.nc"] == prep["text"].encode()
+            await _until(lambda: mc.job["stage"] in ("running", "done", "failed"), timeout=20)
+            sent = emu.sd["/sd/gcodes/test_job.nc"].decode()
+            assert "M6" not in sent and sent.splitlines()[2] == "M5" and len(sent.splitlines()) == prep["lines"]
+            assert sent.index("M5") < sent.index("M3 S10000")         # spindle off where the change was, on after it
             assert "play /sd/gcodes/test_job.nc" in emu.raw_lines            # sent without a newline
-            await _until(lambda: mc.job["stage"] in ("awaiting", "failed"), timeout=30)
-            assert mc.job["stage"] == "awaiting" and mc.job["want_tool"] == 3 and mc.job["op"] == 1, mc.job
-            await mc.confirm_tool_change()
             await _until(lambda: mc.job["stage"] in ("done", "failed"), timeout=60)
             assert mc.job["stage"] == "done", mc.job
-            assert emu.tool == 3 and mc.measured["tool"] == 3 and mc.tool_ok()
-            assert not emu.crashes
+            assert emu.tool == 6 and not emu.crashes                 # no tool change happened
         finally:
             await mc.disconnect(); await emu.stop()
     run(go())
@@ -595,7 +605,7 @@ def test_program_pause_resume_and_abort():
             _measured(mc, emu)
             emu.wco = [-150.0, -150.0, -60.0]
             await asyncio.sleep(0.4)
-            prep = ml.prepare_program(PROG, ["Face", "Outline"])
+            prep = ml.prepare_program(PROG1, ["Face"])
             await mc.run_program("pause test", prep)
             await _until(lambda: mc.job["stage"] == "running", timeout=20)
             await mc.job_pause()
@@ -655,8 +665,8 @@ def test_a_long_upload_does_not_switch_control_off():
             emu.wco = [-150.0, -150.0, -60.0]
             await asyncio.sleep(0.4)
             body = "\n".join(f"G1 X{10 + (i % 20)} Y{10 + (i % 7)} F600" for i in range(9000))
-            big = PROG.replace("G1 X40 F1200", "G1 X40 F1200\n" + body)
-            prep = ml.prepare_program(big, ["Face", "Outline"])
+            big = PROG1.replace("G1 X40 F1200", "G1 X40 F1200\n" + body)
+            prep = ml.prepare_program(big, ["Face"])
             emu.quiet_upload, emu.upload_packet_delay = True, 0.25
             assert len(prep["text"].encode()) / ml.PACKET * emu.upload_packet_delay > ml.STALE_S + 0.5   # longer than "stale"
             await mc.run_program("long upload", prep)
