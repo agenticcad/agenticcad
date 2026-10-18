@@ -634,7 +634,8 @@ class MachineControl:
                         self.jog_busy = None
                         await self._push()
                     break
-                if self.armed and not self.fresh():
+                uploading = bool(self.job and self.job.get("stage") in ("uploading", "starting"))   # starting waits ≤ 10 s for status
+                if self.armed and not self.fresh() and not uploading:   # the Z1 doesn't answer status while a file comes in
                     self.armed = False
                     self._note("no status from the machine: Control off")
                 if self.job_active:
@@ -681,13 +682,25 @@ class MachineControl:
         mp, wp = st.get("mpos"), st.get("wpos")
         return [m - w for m, w in zip(mp, wp)] if mp and wp else None
 
-    def _record_origin(self, xy: tuple[str, str] | None = None, z: tuple[str, str] | None = None) -> None:
-        """Remember what set the work origin (ref in a setup's words, how, when) - for "this setup wants / the machine has"."""
+    def _record_origin(self, xy: tuple[str, str] | None = None, z: tuple[str, str] | None = None,
+                       wco_xy: list[float] | None = None) -> None:
+        """Remember what set the work origin (ref in a setup's words, how, when) - for "this setup wants / the machine has".
+        wco_xy: the X/Y offsets just commanded (known exactly), so a status that hasn't caught up yet is never recorded."""
         wco, t = self._wco(), time.time()
         if xy:
-            self.origin["xy"] = {"ref": xy[0], "how": xy[1], "t": t, "wco": wco[:2] if wco else None}
+            self.origin["xy"] = {"ref": xy[0], "how": xy[1], "t": t, "wco": list(wco_xy) if wco_xy else (wco[:2] if wco else None)}
         if z:
             self.origin["z"] = {"ref": z[0], "how": z[1], "t": t}
+
+    async def _await_offsets(self, xy: list[float] | None, t_sent: float, timeout: float = 3.0) -> None:
+        """Wait until the machine reports the offsets just set (the real Z1 takes a moment), or `timeout`."""
+        while time.time() - t_sent < timeout:
+            await asyncio.sleep(0.1)
+            if self.link.status_t <= t_sent:
+                continue
+            w = self._wco()
+            if xy is None or (w and max(abs(a - b) for a, b in zip(w[:2], xy)) < 0.002):
+                return
 
     def origin_payload(self, st: dict | None = None) -> dict:
         out = {k: dict(v) for k, v in self.origin.items()}
@@ -997,10 +1010,11 @@ class MachineControl:
         """Work X/Y origin = Anchor 1 (the L-bracket's inside corner), as MakeraStudio does: G10 L2 P0 X Y. Z untouched."""
         self._need(armed=True, idle=True, homed=True)
         ax, ay = self.profile.anchor1
+        t_sent = time.time()
         await self.link.line(f"G10 L2 P0 X{ax:.3f} Y{ay:.3f}")
         self._note(f"work XY origin set to Anchor 1 (machine X{ax:.2f} Y{ay:.2f})")
-        await asyncio.sleep(0.4)                      # the next status carries the new offsets
-        self._record_origin(xy=("anchor1", "Origin = Anchor 1"))
+        await self._await_offsets([ax, ay], t_sent)
+        self._record_origin(xy=("anchor1", "Origin = Anchor 1"), wco_xy=[ax, ay])
         return self.payload()
 
     async def set_origin(self, x: float | None = None, y: float | None = None, z: float | None = None) -> dict:
@@ -1018,13 +1032,16 @@ class MachineControl:
         if self.jog_busy or self.job_active:
             raise Refused("wait for the machine to finish")
         cmd = "G10 L20 P0 " + " ".join(f"{a}{v:.3f}" for a, v in given.items())
+        mp, w0 = (self._status() or {}).get("mpos"), self._wco()
+        want = [mp[0] - given["X"] if "X" in given else w0[0], mp[1] - given["Y"] if "Y" in given else w0[1]] if mp and w0 else None
+        t_sent = time.time()
         await self.link.line(cmd)
         self.last_action = time.time()
         self._note(f"{cmd} sent: the head's position is now " + ", ".join(f"work {a} {v:g}" for a, v in given.items()))
-        await asyncio.sleep(0.4)
+        await self._await_offsets(want, t_sent)
         typed = ", ".join(f"{a}{v:g}" for a, v in given.items())
         self._record_origin(xy=("typed", f"set at the head ({typed})") if ("X" in given or "Y" in given) else None,
-                            z=("typed", f"set at the head ({typed})") if "Z" in given else None)
+                            z=("typed", f"set at the head ({typed})") if "Z" in given else None, wco_xy=want)
         return self.payload()
 
     async def origin_at(self, x: float, y: float, ref: str, how: str) -> dict:
@@ -1040,11 +1057,12 @@ class MachineControl:
             lo, hi = -self.profile.travel[ax], self.profile.top
             if not (lo - 1e-9 <= v <= hi + 1e-9):
                 raise Refused(f"machine {ax.upper()} {v:.2f} is outside the travel")
+        t_sent = time.time()
         await self.link.line(f"G10 L2 P0 X{x:.3f} Y{y:.3f}")
         self.last_action = time.time()
         self._note(f"work X0 Y0 set at machine X{x:.3f} Y{y:.3f} ({how})")
-        await asyncio.sleep(0.4)
-        self._record_origin(xy=(str(ref)[:40], str(how)[:120]))
+        await self._await_offsets([x, y], t_sent)
+        self._record_origin(xy=(str(ref)[:40], str(how)[:120]), wco_xy=[x, y])
         return self.payload()
 
     async def shift_origin(self, dx: float, dy: float, ref: str, how: str) -> dict:
@@ -1064,11 +1082,12 @@ class MachineControl:
             lo, hi = -self.profile.travel[ax], self.profile.top
             if not (lo - 1e-9 <= v <= hi + 1e-9):
                 raise Refused(f"that puts X0 Y0 at machine {ax.upper()} {v:.2f}, outside the travel")
+        t_sent = time.time()
         await self.link.line(f"G10 L2 P0 X{x:.3f} Y{y:.3f}")
         self.last_action = time.time()
         self._note(f"work X0 Y0 moved by {dx:+.3f}, {dy:+.3f} to machine X{x:.3f} Y{y:.3f} ({how})")
-        await asyncio.sleep(0.4)
-        self._record_origin(xy=(str(ref)[:40], str(how)[:120]))
+        await self._await_offsets([x, y], t_sent)
+        self._record_origin(xy=(str(ref)[:40], str(how)[:120]), wco_xy=[x, y])
         return self.payload()
 
     async def console(self, line: str) -> dict:
@@ -1316,6 +1335,11 @@ class MachineControl:
                 j["upload"] = round(f, 3)
             await self.link.upload(path, data, prog)
             j.update(stage="starting", msg="starting")
+            t_up = time.time()                                # the Z1 answers status again a moment after an upload
+            while not (self.link.status_t > t_up and self.fresh()):
+                if time.time() - t_up > 10.0:
+                    raise Refused("no status from the machine after the upload: the program was uploaded but not started")
+                await asyncio.sleep(0.1)
             st = self._status() or {}
             if st.get("state") != "Idle" or not self.armed:
                 raise Refused("the machine is no longer ready (Control off or not Idle): the program was uploaded but not started")

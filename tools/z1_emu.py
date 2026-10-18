@@ -54,6 +54,11 @@ class Z1Emu:
         self.probe_start_delay = 0.8                    # s of 'Idle' before a G38.6 starts moving (as seen on a real Z1)
         self.sd: dict[str, bytes] = {}                 # the machine's SD card (the ESP32 side): path -> file
         self._up: dict | None = None                    # an upload in progress {path, md5, count, size, got}
+        self.offset_lag = 0.0                           # s before the status shows new G10 offsets (the real Z1 lags a little)
+        self._shown_wco: list | None = None             # what the status reports while it lags
+        self._shown_until = 0.0
+        self.quiet_upload = False                       # as the real Z1 (2026-10-18): no status replies while a file comes in
+        self.upload_packet_delay = 0.0                  # s per data packet (a real 45-packet upload takes a few seconds)
         self.play: dict | None = None                   # the program being played {path, lines, i, t0, pct}
         self._play_task: asyncio.Task | None = None
         self.raw_lines: list[str] = []                  # console lines exactly as received (to check: no newline on play)
@@ -64,8 +69,15 @@ class Z1Emu:
         self.servers = []
 
     # ---- status
+    def _lag_offsets(self):
+        if self.offset_lag:
+            if time.time() >= self._shown_until:
+                self._shown_wco = list(self.wco)
+            self._shown_until = time.time() + self.offset_lag
+
     def status(self) -> str:
-        w = [m - o for m, o in zip(self.mpos, self.wco)]
+        wco = self._shown_wco if (self._shown_wco is not None and time.time() < self._shown_until) else self.wco
+        w = [m - o for m, o in zip(self.mpos, wco)]
         f = lambda v: ",".join(f"{a:.4f}" for a in v)
         return (f"<{self.state}|MPos:{f(self.mpos)},0.0000,0.0000|WPos:{f(w)},0.0000,0.0000|F:0.0,2000.0,100.0"
                 f"|S:0.0,10000.0,100.0,0,27.2,27.4,0,0,0,0|T:{self.tool},-17.297,-1|L:0, 0, 0, 0.0,100.0"
@@ -462,12 +474,14 @@ class Z1Emu:
             self._start(self._z_probe(w.get("X", 0) + w.get("O", 0), w.get("Y", 0) + w.get("F", 0)), "Run")
             return None
         if u.replace(" ", "").startswith("G10L20P0"):
+            self._lag_offsets()
             w = dict((t[0].upper(), float(t[1:])) for t in re.findall(r"[XYZ]-?[\d.]+", s.replace(" ", "")[8:]))
             for i, a_ in enumerate("XYZ"):
                 if a_ in w:
                     self._set_work(i, w[a_])
             return "ok"
         if u.startswith("G10 L2 P0") or u.replace(" ", "").startswith("G10L2P0"):
+            self._lag_offsets()
             w = dict((t[0].upper(), float(t[1:])) for t in re.findall(r"[XYZ]-?[\d.]+", s.replace(" ", "")))
             for i, a_ in enumerate("XYZ"):
                 if a_ in w:
@@ -569,7 +583,8 @@ class Z1Emu:
                 for t, p in parse_frames(buf):
                     if t == T_REALTIME:
                         if p == b"?":
-                            writer.write(frame(T_STATUS, self.status().encode()))
+                            if not (self.quiet_upload and self._up is not None):
+                                writer.write(frame(T_STATUS, self.status().encode()))
                         else:
                             self.on_realtime(p)
                     elif t == T_LINE:
@@ -577,6 +592,8 @@ class Z1Emu:
                         if reply:
                             writer.write(frame(T_TEXT, (reply + "\n").encode()))
                     elif 0xB0 <= t <= 0xB6:
+                        if t == T_FILE_DATA and self.upload_packet_delay:
+                            await asyncio.sleep(self.upload_packet_delay)
                         for t2, p2 in self.on_file(t, p):
                             writer.write(frame(t2, p2))
                 while self.replies:

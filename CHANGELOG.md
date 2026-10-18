@@ -5,6 +5,16 @@ features, patch bumps fix things. The version shown in the UI header comes from 
 
 ## [Unreleased]
 
+## [0.48.6] — 2026-10-18 (local build of the v2-ui branch, not released)
+
+### Fixed
+- **A big program failed to start on the Z1 ("Control off").** The machine answers no status while a file comes in;
+  a few-second upload looked like a lost link, the watchdog switched Control off and the uploaded program was refused.
+  During the upload that silence is expected now, and before playing the app waits (up to 10 s) for the machine to
+  answer again, still refusing if it isn't Idle.
+- **"The X/Y offsets changed since they were set here" right after setting them.** The Z1 shows new offsets a moment
+  late; the origin record now keeps the offsets it commanded and waits for the machine to show them.
+
 ## [0.48.5] — 2026-10-18 (local build of the v2-ui branch, not released)
 
 ### Added

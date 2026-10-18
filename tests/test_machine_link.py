@@ -641,3 +641,53 @@ def test_spindle_fan_switch_and_states_read_back_from_diagnose(monkeypatch):
         finally:
             await mc.disconnect(); await emu.stop()
     run(go())
+
+
+def test_a_long_upload_does_not_switch_control_off():
+    """The real Z1 (2026-10-18) answers no status while a file comes in: a 45-packet upload took a few seconds, the
+    watchdog called the link stale, switched Control off, and the uploaded program was refused at play. During an
+    upload the missing status is expected; after it the app waits for the machine to answer again, then plays."""
+    async def go():
+        emu, mc, _ = await _setup(speed=60.0)
+        try:
+            await mc.arm(True); await mc.home(); await _until(lambda: mc.homed)
+            _measured(mc, emu)
+            emu.wco = [-150.0, -150.0, -60.0]
+            await asyncio.sleep(0.4)
+            body = "\n".join(f"G1 X{10 + (i % 20)} Y{10 + (i % 7)} F600" for i in range(9000))
+            big = PROG.replace("G1 X40 F1200", "G1 X40 F1200\n" + body)
+            prep = ml.prepare_program(big, ["Face", "Outline"])
+            emu.quiet_upload, emu.upload_packet_delay = True, 0.25
+            assert len(prep["text"].encode()) / ml.PACKET * emu.upload_packet_delay > ml.STALE_S + 0.5   # longer than "stale"
+            await mc.run_program("long upload", prep)
+            await _until(lambda: mc.job["stage"] in ("running", "awaiting", "done", "failed"), timeout=30)
+            assert mc.job["stage"] != "failed", mc.job.get("msg")
+            assert mc.armed and "play /sd/gcodes/long_upload.nc" in emu.raw_lines
+            assert not any("Control off" in e for e in mc.events)
+            await mc.job_abort()
+        finally:
+            await mc.disconnect(); await emu.stop()
+    run(go())
+
+
+def test_origin_record_is_right_when_the_machine_reports_new_offsets_late():
+    """The real Z1 showed the old offsets for a moment after G10: the record caught those and then called the origin
+    "changed since it was set here". It now records what was commanded and waits for the machine to show it."""
+    async def go():
+        emu, mc, _ = await _setup()
+        try:
+            emu.offset_lag = 1.0
+            await mc.arm(True); await mc.home(); await _until(lambda: mc.homed)
+            _measured(mc, emu)
+            await mc.origin_at(-191.222, -194.211, "front-left", "front-left corner from 3 probed corners")
+            o = mc.payload()["origin"]["xy"]
+            assert o["wco"] == [-191.222, -194.211] and not o.get("changed")
+            await asyncio.sleep(1.2)
+            assert not mc.payload()["origin"]["xy"].get("changed")
+            await mc.set_origin(0, 0, None)                         # the head's position becomes X0 Y0
+            await asyncio.sleep(1.2)
+            o = mc.payload()["origin"]["xy"]
+            assert o["ref"] == "typed" and not o.get("changed") and abs(o["wco"][0] - emu.mpos[0]) < 1e-3
+        finally:
+            await mc.disconnect(); await emu.stop()
+    run(go())
