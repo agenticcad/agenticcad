@@ -61,10 +61,13 @@ def test_post_header_units_wcs_and_tool_changes(bracket, cam_setup):
     assert "G21 G90 G94 G17" in lines and "G54" in lines and lines[-1] == "M30"
     assert _count(g, "M6") == 2 and sum(1 for l in lines if l == "M0") == 2    # T1 -> T5 -> T1
     assert _count(g, "M3") == 3
-    # WCS origin is the stock top-left: the very first rapid is the (subtracted) safe height
+    # WCS origin is the stock top-left: up to the clearance first, over the first point, spindle on, then the
+    # (subtracted) safe height
     ox, oy, oz = setup.origin_point()
-    first_z = next(l for l in lines if l.startswith("G0 Z"))
-    assert close(float(first_z[4:]), setup.safe_z - oz)
+    zs = [l for l in lines if l.startswith("G0 Z")]
+    assert close(float(zs[0][4:]), setup.clearance_z - oz) and close(float(zs[1][4:]), setup.safe_z - oz)
+    i3 = lines.index(next(l for l in lines if l.startswith("M3")))
+    assert lines[i3 - 1].startswith("G0 X") and "Z" not in lines[i3 - 1] and lines[i3 + 1] == zs[1]
     assert "G0 X66" in g or "X66 " in g          # stock width 66 mm along X from the corner
 
 
@@ -259,3 +262,26 @@ def test_program_payload_and_time(bracket, cam_setup):
     p = prog.to_payload()
     assert p["ops"][0]["kind"] == "contour" and p["time"] > 0 and p["origin"][2] == setup.stock.top
     assert all(len(m) == 5 for m in p["ops"][0]["moves"])
+
+
+def test_makera_start_lifts_then_moves_over_the_part_before_the_spindle_and_any_descent(bracket, cam_setup):
+    """Real Z1 incident 2026-10-18: the file went M6 T2 (already fitted: no-op), M3, G0 Z5 at the parked X/Y - the
+    Z1 parks (G28) at its clearance spot right over the tool setter, so the spinning tool came down onto the setter.
+    MakeraStudio's own Z1 files move X/Y first (T1 M6 / G0 X Y / S M3 / G0 Z). Every spindle start must be:
+    G53 lift (machine Z, never down at an unknown X/Y) -> G0 X Y of the first point -> M3 -> G0 Z safe."""
+    setup, tools, machines = cam_setup
+    s2 = cam.Setup(machines["Makera Z1"], setup.stock)
+    prog = cam.Program(s2, name="t")
+    prog.add(cam.face(s2, tools[1], z_top=s2.stock.top, z_bottom=4))
+    prog.add(cam.drill(s2, tools[5], cam.holes(bracket, dmax=4), peck="auto"))
+    lines = [l for l in prog.gcode().splitlines() if l and not l.startswith(";")]
+    starts = [i for i, l in enumerate(lines) if l.split()[0] == "M3"]
+    assert len(starts) == 2
+    for i in starts:
+        assert lines[i - 2] == "G53 G0 Z-3", lines[i - 3:i + 2]
+        assert lines[i - 1].startswith("G0 X") and " Y" in lines[i - 1] and "Z" not in lines[i - 1]
+        assert lines[i + 1].startswith("G0 Z")
+    # no Z move in work coordinates before the first X/Y move of the program
+    first_xy = next(i for i, l in enumerate(lines) if l.startswith(("G0", "G1")) and "X" in l)
+    assert not any(l.startswith(("G0 Z", "G1 Z")) for l in lines[:first_xy])
+    assert "G28" in lines[-4:]

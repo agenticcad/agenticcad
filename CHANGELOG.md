@@ -5,6 +5,15 @@ features, patch bumps fix things. The version shown in the UI header comes from 
 
 ## [Unreleased]
 
+## [0.48.8] — 2026-10-18 (local build of the v2-ui branch, not released)
+
+### Fixed
+- **A program could bring the spinning tool down onto the Z1's tool setter.** Every program started M3 then G0 Z(safe)
+  at whatever X/Y the head was parked at - and the Z1 parks (G28) at its clearance spot, right over the tool setter
+  (the tool already fitted makes the M6 a no-op, so nothing moved the head first). Every spindle start is now: lift in
+  machine coordinates (Makera G53 G0 Z-3, Fanuc family Z home, GRBL the setup clearance), G0 to the operation's first
+  X/Y, spindle on, then down to the safe height - the order MakeraStudio's own Z1 files use. Also after a re-clamp.
+
 ## [0.48.7] — 2026-10-18 (local build of the v2-ui branch, not released)
 
 ### Fixed

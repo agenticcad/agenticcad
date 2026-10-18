@@ -2686,6 +2686,7 @@ def _fmt(v: float) -> str:
 #            M600 suspends the file. Feed for moves with A follows the firmware's own rule (_makera_feed).
 # =============================================================================
 MAKERA_MAX_LINE = CONTROLLERS["makera"]["max_line"]
+MAKERA_CLEAR_Z = -3.0       # machine Z of the firmware's clearance position (coordinate.clearance_z, Z1 and Carvera)
 
 
 def _makera_perimeter(y: float, z: float) -> float:
@@ -2741,6 +2742,30 @@ def _emit(prog: Program, dialect: str) -> str:
     def home_z():
         """Retract to the machine's Z home (Fanuc family) or the setup's clearance height."""
         return "G53 G0 Z0." if hs else "G53 G0 Z0"
+
+    def lift(clear_wcs: float):
+        """Go UP to a height that is safe anywhere on the table, without moving X/Y: machine coordinates where the
+        controller has them (Makera: the firmware's clearance Z, -3; Fanuc family: Z home), else the setup's clearance."""
+        if mk:
+            line(f"G53 G0 Z{_fmt(MAKERA_CLEAR_Z)}")
+        elif fan:
+            line(home_z())
+        else:
+            line(f"G0 Z{_fmt(clear_wcs)}")
+
+    def first_xy(op, ox, oy):
+        for mv in op.moves:
+            return mv[1] - ox, mv[2] - oy
+        return None
+
+    def approach(op, ox, oy, clear_wcs):
+        """Before the spindle starts: up first, then over the operation's first point. Nothing may come down in Z
+        while X/Y is wherever the head was parked - a Makera parks at its clearance spot right over the tool setter."""
+        lift(clear_wcs)
+        p = first_xy(op, ox, oy)
+        if p is not None:
+            line(f"G0 X{_fmt(p[0])} Y{_fmt(p[1])}")
+        return p
 
     if fan:
         line("%")
@@ -2812,7 +2837,7 @@ def _emit(prog: Program, dialect: str) -> str:
                     comment(f"{st.name}: zero {st.wcs} at {st.origin}" + (" on the rotary centreline" if st.rotary else ""))
                 line(st.wcs)
                 if prev_setup is not None:
-                    line(f"G0 Z{_fmt(clear)}")
+                    lift(clear)
             if st.rotary:
                 line(f"G0 {aw}{_fmt(st.a)}")
             prev_setup = st
@@ -2843,13 +2868,14 @@ def _emit(prog: Program, dialect: str) -> str:
                 elif m.tool_change == "none" and cur_tool is not None:
                     comment(f"tool change to T{t.number} required: machine has tool_change=none")
                 line(f"T{t.number} M6" if dialect == "linuxcnc" else f"T{t.number} M06")
+                p = approach(op, ox, oy, clear)
                 line(f"S{int(rpm)} M3")
                 spindle_on = True
                 line(f"G43 H{t.number} Z{_fmt(safe)}")          # length offset of this tool, applied on the first Z move
                 if m.coolant:
                     line("M8")
                 cur_tool = t.number
-                last = [None, None, safe, cur_a]
+                last = [p[0] if p else None, p[1] if p else None, safe, cur_a]
                 last_f = None
             else:
                 if cur_tool is not None:
@@ -2867,19 +2893,21 @@ def _emit(prog: Program, dialect: str) -> str:
                 else:
                     line(f"T{t.number}")
             if not fan:
+                p = approach(op, ox, oy, clear)
                 line(f"M3 S{int(rpm)}")
                 spindle_on = True
                 if m.coolant and not mk:
                     line("M8")
                 line(f"G0 Z{_fmt(safe)}")
                 cur_tool = t.number
-                last = [None, None, safe, cur_a]
+                last = [p[0] if p else None, p[1] if p else None, safe, cur_a]
                 last_f = None
         elif not spindle_on:                              # same tool after an operator pause: restart the spindle
+            p = approach(op, ox, oy, clear)
             line(f"M3 S{int(rpm)}")
             spindle_on = True
             line(f"G0 Z{_fmt(safe)}")
-            last = [None, None, safe, cur_a]
+            last = [p[0] if p else None, p[1] if p else None, safe, cur_a]
             last_f = None
         use_arcs = caps["arcs"] and not op.uses_a
         moves = op.moves
