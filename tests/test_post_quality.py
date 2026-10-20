@@ -43,12 +43,13 @@ def test_straight_runs_with_rounding_noise_post_as_lines_not_huge_arcs(cam_setup
 def test_finishing_ops_post_to_a_fine_tolerance(cam_setup, bracket):
     """C2: the machine's 0.05 mm arc tolerance is for roughing; a 3D finish or V-bit cut is posted to 0.005."""
     setup, tools, _ = cam_setup
-    prog = cam.Program(setup, [cam.parallel3d(setup, ball(), bracket, stepover=0.5)])
-    g = prog.gcode()
-    # the posted path never leaves the raw moves by more than ~0.005 (sample: every emitted point is a raw point)
-    raw = {(round(m[1] - setup.origin_point()[0], 3), round(m[2] - setup.origin_point()[1], 3)) for m in prog.ops[0].moves}
-    pts = [(float(a), float(b)) for a, b in re.findall(r"^G1 X(-?\d+\.?\d*) Y(-?\d+\.?\d*)", g, re.M)]
-    assert pts and sum(1 for p in pts if p in raw) / len(pts) > 0.9
+    import cad_kernel as ck
+    dome = ck.run_script("result = {'D': Pos(33, 23, 0) * Sphere(12)}").shape      # a curved surface: the tolerance decides the chords
+    prog = cam.Program(setup, [cam.parallel3d(setup, ball(), dome, stepover=0.5)])
+    fine = prog.gcode().count("\n")
+    prog.ops[0].post_tol = 0.05                                   # the roughing tolerance, forced: far fewer, coarser lines
+    coarse = prog.gcode().count("\n")
+    assert fine > coarse * 1.15, (fine, coarse)
     assert cam.FINE_POST_TOL == 0.005 and "parallel3d" in cam.FINE_POST_KINDS
 
 
@@ -82,3 +83,48 @@ def test_adaptive_lift_links_come_down_to_the_cleared_level(cam_setup, bracket):
     link_plunges = [(op.moves[i - 1][3] - m[3]) for i, m in enumerate(op.moves)
                     if m[0] == 2 and i and op.moves[i - 1][3] < top + cam.ENTRY_GAP - 1e-6]    # not the entries from above the stock
     assert link_plunges and max(link_plunges) <= 1.0 + 0.06, f"link plunge of {max(link_plunges):.2f} mm (stepdown 1.0)"
+
+
+def test_finish_lay_options_one_way_radial_spiral_and_face_angle(cam_setup, bracket):
+    """Finishing is presentation: one uniform lay (one-way), radial or spiral patterns, and a face at an angle."""
+    setup, tools, _ = cam_setup
+    b = ball()
+    zz = cam.parallel3d(setup, b, bracket, stepover=0.6)
+    ow = cam.parallel3d(setup, b, bracket, stepover=0.6, one_way=True)
+    # one-way: every cutting pass runs the same way (+X here); the zigzag alternates
+    def pass_dirs(op):                                                 # passes = feed moves sharing one Y (rows along X)
+        d = []; run = []
+        for m in op.moves:
+            if m[0] == 1 and (not run or abs(m[2] - run[-1][2]) < 1e-6):
+                run.append(m); continue
+            if len(run) > 3: d.append(1 if run[-1][1] > run[0][1] else -1)
+            run = [m] if m[0] == 1 else []
+        if len(run) > 3: d.append(1 if run[-1][1] > run[0][1] else -1)
+        return d
+    assert len(set(pass_dirs(ow))) == 1 and len(set(pass_dirs(zz))) == 2
+    assert ow.params["one_way"] and not zz.params["one_way"]
+    # the one-way returns are rapids above the surface, never feed moves across it
+    for i, m in enumerate(ow.moves[1:], 1):
+        p = ow.moves[i - 1]
+        if m[0] == 0 and abs(m[1] - p[1]) > 1.0:                  # a sideways rapid
+            assert m[3] >= max(p[3], m[3]) - 1e-9 and m[3] >= ow.params["z_bottom"] + 0.3 - 1e-6
+    rad = cam.parallel3d(setup, b, bracket, stepover=1.0, pattern="radial")
+    spi = cam.parallel3d(setup, b, bracket, stepover=1.0, pattern="spiral")
+    assert rad.params["pattern"] == "radial" and len(rad.moves) > 50
+    assert spi.params["pattern"] == "spiral" and len(spi.moves) > 50
+    # spiral: one continuous pass (clipped only where it leaves the region) - far fewer plunges than a row raster
+    assert sum(1 for m in spi.moves if m[0] == 2) <= len(pass_dirs(ow))
+    # face at 45 degrees: the rows run along the diagonal
+    zz0 = cam.face(setup, tools[1], z_top=setup.stock.top, z_bottom=setup.stock.top - 0.5)
+    f45 = cam.face(setup, tools[1], z_top=setup.stock.top, z_bottom=setup.stock.top - 0.5, angle=45)
+    cuts = [(p, m) for p, m in zip(f45.moves, f45.moves[1:]) if m[0] == 1 and p[0] == 1 and abs(m[3] - p[3]) < 1e-9]
+    long_ = [(p, m) for p, m in cuts if math.dist(p[1:3], m[1:3]) > 5]
+    assert long_ and all(abs(abs(math.degrees(math.atan2(m[2] - p[2], m[1] - p[1]))) - 45) < 1.0 or
+                         abs(abs(math.degrees(math.atan2(m[2] - p[2], m[1] - p[1]))) - 135) < 1.0 for p, m in long_)
+    f1 = cam.face(setup, tools[1], z_top=setup.stock.top, z_bottom=setup.stock.top - 0.5, one_way=True)
+    rows1 = {1 if m[1] > p[1] else -1 for p, m in zip(f1.moves, f1.moves[1:]) if m[0] == 1 and abs(m[1] - p[1]) > 5}
+    rows0 = {1 if m[1] > p[1] else -1 for p, m in zip(zz0.moves, zz0.moves[1:]) if m[0] == 1 and abs(m[1] - p[1]) > 5}
+    assert rows1 == {1} and rows0 == {1, -1}
+    # two levels: the second starts where the first ended (no retract-and-return across the face)
+    f2 = cam.face(setup, tools[1], z_top=setup.stock.top, z_bottom=setup.stock.top - 1.0, stepdown=0.5)
+    assert f2.params["z_bottom"] == setup.stock.top - 1.0

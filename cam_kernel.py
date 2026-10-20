@@ -960,23 +960,40 @@ COLORS = {"face": "#7fd1ff", "contour": "#4ea1ff", "pocket": "#4cd37a", "drill":
 
 
 def face(setup: Setup, tool: Tool, z_top: float | None = None, z_bottom: float | None = None, region=None,
-         stepover: float | None = None, stepdown: float | None = None, angle: float = 0.0, name: str = "Face") -> Op:
-    """Surface the stock top down to z_bottom with parallel zigzag passes over `region` (default: stock)."""
+         stepover: float | None = None, stepdown: float | None = None, angle: float = 0.0, one_way: bool = False,
+         name: str = "Face") -> Op:
+    """Surface the stock top down to z_bottom with parallel passes over `region` (default: stock), at `angle` degrees
+    from X. Zigzag by default; one_way=True cuts every row in the same direction (climb throughout, one uniform lay on
+    a finished face) and rapids back just above the face. Rows start and end with the tool clear of the region."""
+    from shapely import affinity
     op = Op(name, "face", tool, color=COLORS["face"])
     pb = PathBuilder(setup, tool, op)
     z_top = setup.stock.top if z_top is None else z_top
     z_bottom = z_top - (stepdown or tool.stepdown) if z_bottom is None else z_bottom
     so = (stepover or tool.stepover) * tool.diameter
     polys = _polys(region) or [setup.stock.rect()]
-    reg = unary_union(polys).buffer(tool.radius * 0.9, join_style=2)   # let the tool run past the edges (square corners: full-width rows)
+    reg0 = unary_union(polys).buffer(tool.radius * 0.9, join_style=2)   # let the tool run past the edges (square corners: full-width rows)
+    piv = (reg0.centroid.x, reg0.centroid.y)
+    reg = affinity.rotate(reg0, -angle, origin=piv) if angle else reg0  # rows along X in a frame turned by -angle
+    def back(x, y):
+        if not angle:
+            return x, y
+        q = affinity.rotate(Point(x, y), angle, origin=piv)
+        return q.x, q.y
     minx, miny, maxx, maxy = reg.bounds
     ext = tool.radius * 0.1 + 1.0                        # rows start and end with the tool clear of the stock: plunges in air
-    op.params = dict(z_top=z_top, z_bottom=z_bottom, stepover=so)
-    for z in _levels(z_top, z_bottom, stepdown or tool.stepdown):
+    op.params = dict(z_top=z_top, z_bottom=z_bottom, stepover=so, angle=angle, one_way=one_way)
+    levels = _levels(z_top, z_bottom, stepdown or tool.stepdown)
+    for li, z in enumerate(levels):
+        rows = []
         y = miny
+        while y <= maxy + 1e-9:
+            rows.append(y); y += so
+        if li % 2 and not one_way:
+            rows.reverse()                                 # the next level starts where this one ended
         direction = 1
         first = True
-        while y <= maxy + 1e-9:
+        for y in rows:
             line = LineString([(minx - 1, y), (maxx + 1, y)]).intersection(reg)
             segs = [line] if isinstance(line, LineString) else list(getattr(line, "geoms", []))
             segs = [s for s in segs if isinstance(s, LineString) and s.length > 0]
@@ -988,16 +1005,25 @@ def face(setup: Setup, tool: Tool, z_top: float | None = None, z_bottom: float |
                 (ax, ay), (bx, by) = c[0], c[-1]
                 ln = math.hypot(bx - ax, by - ay) or 1.0
                 ux, uy = (bx - ax) / ln, (by - ay) / ln
-                c = [(ax - ux * ext, ay - uy * ext)] + c[1:-1] + [(bx + ux * ext, by + uy * ext)]
-                if first or pb.pos is None or pb.pos[2] > z + 1e-6:
+                c = [back(ax - ux * ext, ay - uy * ext)] + [back(*q) for q in c[1:-1]] + [back(bx + ux * ext, by + uy * ext)]
+                if first or pb.pos is None:
                     pb.rapid_xy(*c[0]); pb.plunge_to(z); first = False
+                elif pb.pos[2] > z + 1e-6:                 # a new level, starting where the last one ended
+                    pb.rapid_xy(*c[0])
+                    if region is None:                     # facing the whole stock: the row ends are in the air, come down to the last level
+                        pb.plunge_to(z, rapid_to=levels[li - 1], gap=0.3)
+                    else:                                  # a region inside the stock: its row ends may be in solid, approach from the top
+                        pb.plunge_to(z)
+                elif one_way:                              # back over the face just above it (the row ends are in the air)
+                    pb._add(RAPID, pb.pos[0], pb.pos[1], z + 0.3)
+                    pb._add(RAPID, c[0][0], c[0][1], z + 0.3)
+                    pb._add(PLUNGE, c[0][0], c[0][1], z, pb.plunge)
                 else:
                     pb.feed_to(c[0][0], c[0][1], z)
                 for q in c[1:]:
                     pb.feed_to(q[0], q[1], z)
-            y += so
-            direction *= -1
-        pb.retract()
+            if not one_way:
+                direction *= -1
     pb.retract()
     return op
 
@@ -2023,11 +2049,18 @@ def _drop_tip(zmap: np.ndarray, tool: Tool, res: float, depth: float) -> np.ndar
 def parallel3d(setup: Setup, tool: Tool, shape: Shape | None = None, model: ck.Model | None = None,
                z_top: float | None = None, z_bottom: float | None = None, region=None,
                stepover: float | None = None, angle: float = 0.0, resolution: float | None = None,
-               rest_from: Tool | None = None, name: str = "Parallel 3D") -> Op:
-    """3D finishing: parallel raster passes following the surface (heightmap from the exact shape's
-    triangulation, offset by the tool's whole profile: any type — flat, ball, bull nose, V, tapered ball — with its
-    neck and shank kept out of the surface too). Cuts down to z_bottom outside the part.
-    rest_from=<bigger tool>: only where that tool left material (its tip map sits higher)."""
+               rest_from: Tool | None = None, pattern: str = "parallel", one_way: bool = False,
+               center: tuple | None = None, name: str = "Parallel 3D") -> Op:
+    """3D finishing: raster passes following the surface (heightmap from the exact shape's triangulation, offset by the
+    tool's whole profile: any type — flat, ball, bull nose, V, tapered ball — with its neck and shank kept out of the
+    surface too). Cuts down to z_bottom outside the part. rest_from=<bigger tool>: only where that tool left material.
+    The lay is part of the finish: pattern "parallel" (straight passes at `angle`), "radial" (rays from `center`, the
+    region's centre by default) or "spiral" (one continuous spiral out from `center`); one_way=True cuts every pass in
+    the same direction (climb throughout, one uniform lay) and rapids back just over the surface instead of zig-zagging.
+    Links between passes never drag across the finished surface: they step over at the higher of the two heights, or
+    hop above the taller of the two passes and come down to within 0.05 mm of the surface before feeding."""
+    if pattern not in ("parallel", "radial", "spiral"):
+        raise CamError("parallel3d: pattern must be parallel | radial | spiral")
     if shape is None and model is None:
         raise CamError("parallel3d: give shape= or model=")
     shape = shape or model.shape
@@ -2066,26 +2099,49 @@ def parallel3d(setup: Setup, tool: Tool, shape: Shape | None = None, model: ck.M
         if not mask.any():
             op.warnings.append(f"rest: nothing left for {tool.label()} after {rest_from.label()}")
             return op
-    # raster passes (angle 0 = along X)
+    # the passes, as point sequences in XY (then clipped to the region / rest mask into runs)
     ca, sa = math.cos(math.radians(angle)), math.sin(math.radians(angle))
     diag = math.hypot(maxx - minx, maxy - miny)
     cx, cy = (minx + maxx) / 2, (miny + maxy) / 2
-    n_lines = int(diag / so) + 1
+    if center is not None:
+        cx, cy = float(center[0]), float(center[1])
+    paths: list[tuple[np.ndarray, np.ndarray]] = []
+    if pattern == "parallel":
+        n_lines = int(diag / so) + 1
+        for li in range(-n_lines // 2, n_lines // 2 + 1):
+            ox, oy = cx - sa * li * so, cy + ca * li * so           # line li: c + u*t + v*li*so, u=(ca,sa), v=(-sa,ca)
+            ts = np.arange(-diag / 2, diag / 2 + res, res)
+            paths.append((ox + ca * ts, oy + sa * ts))
+    elif pattern == "radial":
+        R = max(math.hypot(x - cx, y - cy) for x, y in ((minx, miny), (maxx, miny), (minx, maxy), (maxx, maxy))) + res
+        n_rays = max(8, int(math.ceil(2 * math.pi * R / so)))     # the outer ends are one stepover apart
+        ts = np.arange(0.0, R + res, res)
+        for k in range(n_rays):
+            th = 2 * math.pi * k / n_rays
+            paths.append((cx + math.cos(th) * ts, cy + math.sin(th) * ts))
+    else:                                                          # spiral: r = so * theta / 2pi, sampled every `res` along it
+        R = max(math.hypot(x - cx, y - cy) for x, y in ((minx, miny), (maxx, miny), (minx, maxy), (maxx, maxy))) + res
+        b_ = so / (2 * math.pi)
+        th = [0.0]
+        while b_ * th[-1] < R:
+            r_ = max(b_ * th[-1], res)
+            th.append(th[-1] + res / r_)
+        th = np.array(th)
+        paths.append((cx + b_ * th * np.cos(th), cy + b_ * th * np.sin(th)))
     direction = 1
     first = True
-    for li in range(-n_lines // 2, n_lines // 2 + 1):
-        # line li: points c + u*t + v*li*so, u=(ca,sa), v=(-sa,ca)
-        ox, oy = cx - sa * li * so, cy + ca * li * so
-        ts = np.arange(-diag / 2, diag / 2 + res, res) * direction
-        xs = ox + ca * ts; ys = oy + sa * ts
+    prev_top = None                                                # the highest tip Z on the previous pass (for one-way hops)
+    for xs0, ys0 in paths:
+        xs, ys = (xs0, ys0) if direction > 0 else (xs0[::-1], ys0[::-1])
         inside = (xs >= minx) & (xs <= maxx) & (ys >= miny) & (ys <= maxy)
         if not inside.any():
-            direction *= -1
+            if not one_way: direction *= -1
             continue
-        line = LineString([(xs[inside][0], ys[inside][0]), (xs[inside][-1], ys[inside][-1])])
-        if region is not None and not regp.intersects(line):
-            direction *= -1
-            continue
+        if region is not None and pattern == "parallel":
+            line = LineString([(xs[inside][0], ys[inside][0]), (xs[inside][-1], ys[inside][-1])])
+            if not regp.intersects(line):
+                if not one_way: direction *= -1
+                continue
         runs: list[list] = [[]]
         for x, y, ok in zip(xs, ys, inside):
             if not ok or (region is not None and not regp.covers(Point(x, y))):
@@ -2098,21 +2154,36 @@ def parallel3d(setup: Setup, tool: Tool, shape: Shape | None = None, model: ck.M
             runs[-1].append((float(x), float(y), float(tip[iy, ix])))
         runs = [r for r in runs if len(r) >= 2]
         if not runs:
-            direction *= -1
+            if not one_way: direction *= -1
             continue
         for ri, pts in enumerate(runs):
             pts = _simplify_z(pts)
-            if first or pb.pos is None or mask is not None and ri == 0 and len(runs) > 0 and False:
+            top = max(p[2] for p in pts)
+            if first or pb.pos is None:
                 pb.rapid_xy(pts[0][0], pts[0][1]); pb.plunge_to(pts[0][2]); first = False
-            elif mask is not None or ri > 0:
-                pb.rapid_xy(pts[0][0], pts[0][1]); pb.plunge_to(pts[0][2])   # separate patches: retract between
+            elif mask is not None or ri > 0 or one_way or pattern != "parallel":
+                # a separate patch, or a one-way return: hop just above the taller of the two passes (the surface
+                # between neighbouring passes is no higher), rapid back, come down to 0.05 above the surface, feed the rest
+                hop_z = min(max(top, prev_top if prev_top is not None else top, pb.pos[2]) + 0.3, setup.safe_z)
+                if math.dist(pb.pos[:2], pts[0][:2]) > 3 * so or mask is not None:
+                    pb._add(RAPID, pb.pos[0], pb.pos[1], hop_z)
+                    pb._add(RAPID, pts[0][0], pts[0][1], hop_z)
+                    if pts[0][2] + 0.05 < hop_z - 1e-6:
+                        pb._add(RAPID, pts[0][0], pts[0][1], pts[0][2] + 0.05)
+                    pb._add(PLUNGE, pts[0][0], pts[0][1], pts[0][2], pb.plunge)
+                else:
+                    pb.feed_to(pts[0][0], pts[0][1], max(pts[0][2], pb.pos[2]))
+                    pb.feed_to(pts[0][0], pts[0][1], pts[0][2], pb.plunge)
             else:
                 pb.feed_to(pts[0][0], pts[0][1], max(pts[0][2], pb.pos[2]))   # step over at the higher of the two
                 pb.feed_to(pts[0][0], pts[0][1], pts[0][2], pb.plunge)
             pb.feed_path(pts[1:])
-        direction *= -1
+            prev_top = top
+        if not one_way:
+            direction *= -1
     pb.retract()
-    op.params = dict(stepover=so, resolution=res, z_top=z_top, z_bottom=z_bottom, grid=[nx, ny])
+    op.params = dict(stepover=so, resolution=res, z_top=z_top, z_bottom=z_bottom, grid=[nx, ny], pattern=pattern,
+                     one_way=one_way, angle=angle)
     return op
 
 
