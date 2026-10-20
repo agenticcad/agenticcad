@@ -219,6 +219,8 @@ class Library:
                          + (f", angle {t.angle}°" if t.angle else "")
                          + (f", corner R{t.corner_radius}" if t.corner_radius else "") + (f", tip Ø{t.tip_diameter}" if t.tip_diameter else "")
                          + (f", taper {t.taper}°/side" if t.taper else "") + (f", shank Ø{t.shank_diameter}" if t.shank_diameter else "")
+                         + (f", gear cutter: module {t.module}, PA {t.pressure_angle}°, cutter_teeth_min {t.cutter_teeth_min}"
+                            + (f", width {t.thickness}" if t.thickness else "") + f", nut Ø{t.nut_diameter} x {t.nut_height}" if t.type == "gear_cutter" else "")
                          + (f", neck Ø{t.neck_diameter} to {t.reach} mm" if t.neck_diameter else (f", reach {t.reach}" if t.reach else ""))
                          + (f", stickout {t.stickout}" if t.stickout else "") + (f" — {t.notes}" if t.notes else ""))
         return "\n".join(lines)

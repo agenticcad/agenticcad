@@ -774,11 +774,16 @@ def _stamp_r(r, P, K, I, tool, res_x, res_a, x0, rapid_hits, op_name):
         _stamp_r_run(r, P[a:b], K[a:b], I[a:b], tool, res_x, res_a, x0, rapid_hits, op_name)
 
 
+SIDE_FORM_TYPES = {"gear_cutter"}      # tools whose radius varies with height both ways and that cut from beside the axis
+
+
 def _stamp_r_run(r, P, K, I, tool, res_x, res_a, x0, rapid_hits, op_name):
     """P: (n, 4) samples (x, y, z, a) in the setup frame at A = a. Cut each (x, angle) ray the tool covers."""
     na, nx = r.shape
     if len(P) == 0:
         return
+    if tool.type in SIDE_FORM_TYPES:
+        return _stamp_r_profile(r, P, K, I, tool, res_x, res_a, x0, rapid_hits, op_name)
     R = tool.radius
     kx = int(math.ceil(R / res_x)) + 1
     dxs = np.arange(-kx, kx + 2) * res_x
@@ -857,6 +862,122 @@ def _stamp_r_run(r, P, K, I, tool, res_x, res_a, x0, rapid_hits, op_name):
             np.minimum.at(r, (IA[cut], IX[cut]), S1[cut])
             keep = ~cut
             IA, IX, S1, SH, rap, owner = IA[keep], IX[keep], S1[keep], SH[keep], rap[keep], owner[keep]
+
+
+def _ray_table(H0, H1, RHO, yt, zt, si, co, dxg, budget=3_000_000):
+    """Entry and exit distance along each ray (machine angle given by sin, cos; the ray is s (sin, cos) in the setup's
+    (y, z) at the X offset dx from the tool axis) through a stack of cylinders (heights h0..h1 above the tool tip at
+    (yt, zt), radius rho). inf / -inf where the ray misses the tool. The union of the slabs' intervals is taken as one
+    (entry = first entry, exit = last exit): anything between would be floating material."""
+    A, X = len(si), len(dxg)
+    S1 = np.full((A, X), np.inf)
+    SH = np.full((A, X), -np.inf)
+    eps = 1e-9
+    zA_all, zB_all = zt + H0, zt + H1
+    horiz = np.abs(co) < eps
+    vert = (np.abs(si) < eps)[None, :, None]
+    kchunk = max(1, budget // (A * X))
+    for k0 in range(0, len(RHO), kchunk):
+        zA = zA_all[k0:k0 + kchunk, None]; zB = zB_all[k0:k0 + kchunk, None]; rho = RHO[k0:k0 + kchunk]
+        with np.errstate(divide="ignore", invalid="ignore"):
+            t1 = zA / co[None, :]; t2 = zB / co[None, :]
+        in_z = (zA <= 0) & (zB >= 0)                                  # a horizontal ray is in the slab or not at all
+        zlo = np.where(horiz[None, :], np.where(in_z, -np.inf, np.inf), np.minimum(t1, t2))
+        zhi = np.where(horiz[None, :], np.where(in_z, np.inf, -np.inf), np.maximum(t1, t2))
+        w2 = rho[:, None] ** 2 - dxg[None, :] ** 2                   # (K, X): half chord of the cylinder at this dx
+        okw = w2 > 0
+        w = np.sqrt(np.maximum(w2, 0.0))
+        ylo_y = (yt - w)[:, None, :]; yhi_y = (yt + w)[:, None, :]
+        with np.errstate(divide="ignore", invalid="ignore"):
+            u1 = ylo_y / si[None, :, None]; u2 = yhi_y / si[None, :, None]
+        through = (ylo_y <= 0) & (yhi_y >= 0)
+        ylo = np.where(vert, np.where(through, -np.inf, np.inf), np.minimum(u1, u2))
+        yhi = np.where(vert, np.where(through, np.inf, -np.inf), np.maximum(u1, u2))
+        lo = np.maximum(np.maximum(zlo[:, :, None], ylo), 0.0)
+        hi = np.minimum(zhi[:, :, None], yhi)
+        ok = (lo < hi) & okw[:, None, :]
+        np.minimum(S1, np.where(ok, lo, np.inf).min(axis=0), out=S1)
+        np.maximum(SH, np.where(ok, hi, -np.inf).max(axis=0), out=SH)
+    return S1, SH
+
+
+def _stamp_r_profile(r, P, K, I, tool, res_x, res_a, x0, rapid_hits, op_name):
+    """Stamp a tool of any profile (tool_shape.cut_slabs: the cutting part as a stack of cylinders, each within 0.02 mm
+    of the real radius) at any position: beside the axis (a gear cutter at Y = r + R, Z = 0) as well as above it, with
+    rays near horizontal. Samples that share (y, z, A) (a pass along X) share one table of ray entries / exits over
+    (angle, X offset); A is grouped to res_a / 10 (a helical pass makes more, smaller groups); X offsets are snapped
+    to the sampling step. Only the cutting part cuts."""
+    na, nx = r.shape
+    sh = tool.shape
+    H0, H1, RHO = sh.cut_slabs(0.02)
+    if len(RHO) == 0:
+        return
+    rho_max = float(RHO.max())
+    step = min(res_x / 2, 0.25)                                       # _samples' step: the dx grid of the tables
+    aq = res_a / 10.0
+    key = np.stack([np.round(P[:, 1], 4), np.round(P[:, 2], 4), np.round(P[:, 3] / aq)], axis=1)
+    _, inv = np.unique(key, axis=0, return_inverse=True)
+    inv = np.asarray(inv).ravel()
+    x_last = x0 + (nx - 1) * res_x
+    for g in range(int(inv.max()) + 1):
+        idx = np.where(inv == g)[0]
+        yt, zt = float(P[idx[0], 1]), float(P[idx[0], 2])
+        a_rep = float(np.round(P[idx[0], 3] / aq) * aq)
+        rmax_now = float(r.max())
+        rho_t = math.hypot(yt, zt)
+        gap = rho_t - rmax_now
+        if gap >= rho_max:
+            continue                                                  # the tool is clear of all the material
+        x_reach = math.sqrt(max(rho_max ** 2 - max(gap, 0.0) ** 2, 0.0)) + step
+        xs = P[idx, 0]
+        keep = (xs + x_reach >= x0) & (xs - x_reach <= x_last)
+        if not keep.any():
+            continue
+        idx = idx[keep]; xs = xs[keep]
+        if rho_t <= rho_max + 1e-9:
+            half = 180.0
+        else:
+            half = math.degrees(math.asin(min(1.0, rho_max / rho_t)))
+            if abs(rho_t - rmax_now) < rho_max < rho_t + rmax_now:      # rays must meet the material where they meet the tool
+                c = (rho_t ** 2 + rmax_now ** 2 - rho_max ** 2) / (2 * rho_t * rmax_now)
+                half = min(half, math.degrees(math.acos(max(-1.0, min(1.0, c)))))
+        ka = min(int(math.ceil(half / res_a)) + 1, na // 2)
+        das = np.arange(-ka, ka + 1)
+        psi_c = math.degrees(math.atan2(yt, zt)) + a_rep              # part angle of the ray through the tool axis
+        rows_abs = int(np.rint(psi_c / res_a)) + das
+        rows = rows_abs % na
+        phi = np.radians(rows_abs * res_a - a_rep)                     # machine angle of each ray
+        kx = int(math.ceil(x_reach / step)) + 1
+        dxg = np.arange(-kx, kx + 1) * step
+        S1, SH = _ray_table(H0, H1, RHO, yt, zt, np.sin(phi), np.cos(phi), dxg)
+        if not np.isfinite(S1).any():
+            continue
+        kw = int(math.ceil(x_reach / res_x)) + 1
+        ixc = np.floor((xs - x0) / res_x).astype(np.int64)
+        cols = ixc[:, None] + np.arange(-kw, kw + 2)[None, :]         # (n, W)
+        dx = (x0 + cols * res_x) - xs[:, None]
+        dj = np.rint(dx / step).astype(np.int64) + kx
+        okx = (cols >= 0) & (cols < nx) & (dj >= 0) & (dj < len(dxg))
+        djc = np.clip(dj, 0, len(dxg) - 1)
+        s1 = np.transpose(S1[:, djc], (1, 0, 2))                       # (n, A, W)
+        shi = np.transpose(SH[:, djc], (1, 0, 2))
+        valid = np.isfinite(s1) & okx[:, None, :]
+        if not valid.any():
+            continue
+        IA = np.broadcast_to(rows[None, :, None], valid.shape)[valid]
+        IX = np.broadcast_to(np.clip(cols, 0, nx - 1)[:, None, :], valid.shape)[valid]
+        S1v = s1[valid]; SHv = shi[valid]
+        cur = r[IA, IX]
+        cut = (SHv >= cur - 1e-3) & (S1v < cur)
+        rap = np.broadcast_to((K[idx] == cam.RAPID)[:, None, None], valid.shape)[valid]
+        hit = cut & rap & (cur - S1v > 0.05)
+        if hit.any() and len(rapid_hits) < 50:
+            owner = np.broadcast_to(I[idx][:, None, None], valid.shape)[valid][hit]
+            depth = (cur - S1v)[hit]
+            j = int(np.argmax(depth))
+            rapid_hits.append({"op": op_name, "move": int(owner[j]) + 1, "depth": round(float(depth[j]), 3)})
+        if cut.any():
+            np.minimum.at(r, (IA[cut], IX[cut]), S1v[cut])
 
 
 # ----------------------------------------------------------------------------- machine collisions (holder / nose / head / table)

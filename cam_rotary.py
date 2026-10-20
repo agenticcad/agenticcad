@@ -10,6 +10,8 @@ ball, with its real footprint across neighbouring angles) touches but never cuts
     rotary_rough(setup, tool, part, stepdown=1, stepover=None, mode="rings"|"lines", leave=0.3)
     rotary_finish(setup, tool, part, stepover=None, mode="lines"|"rings"|"spiral")
     rotary_wrap(setup, tool, polys, radius, z_bottom, kind="pocket"|"contour", ...)   flat 2D geometry wrapped on a cylinder
+    rotary_profile(setup, tool, profile, ...)      any polar cross-section (cams, hex / square from round, lobes) as rings
+    gear_teeth(setup, tool, module, teeth, ...)    involute gear teeth with a disc cutter from the side, A indexed per space
 """
 from __future__ import annotations
 
@@ -21,7 +23,9 @@ import cad_kernel as ck
 import cam_kernel as cam
 from cam_kernel import FEED, PLUNGE, RAPID, CamError, Op, PathBuilder, Setup, Tool
 
-COLORS = {"rotary_rough": "#ff9f43", "rotary_finish": "#c58cff", "rotary_wrap": "#ff9f7a"}
+COLORS = {"rotary_rough": "#ff9f43", "rotary_finish": "#c58cff", "rotary_wrap": "#ff9f7a", "rotary_profile": "#7bd88f",
+          "gear_teeth": "#ffd166"}
+GEAR_CUTTER_MAX_VC = 80.0          # m/min: about the most an HSS involute cutter likes in brass / aluminium / plastics
 
 
 def _need_rotary(setup: Setup, what: str) -> None:
@@ -426,4 +430,287 @@ def rotary_wrap(setup: Setup, tool: Tool, polys, radius: float | None = None, z_
     if tool.type == "flat" and tool.radius / r > 0.15:
         op.warnings.append(f"flat Ø{tool.diameter} on a {2 * r:.1f} mm cylinder cuts {r - math.sqrt(max(r * r - tool.radius ** 2, 0)):.2f} mm "
                            "deeper at its edges: consider a ball or V tool, or a smaller cutter")
+    return op
+
+
+# ----------------------------------------------------------------------------- arbitrary polar cross-section
+def _profile_tip_map(tool: Tool, poly, res_a: float, seg: float = 0.05):
+    """Lowest tool-tip Z at each A (tool radial at Y = 0) that keeps the whole tool clear of the cross-section `poly`
+    (shapely, in the setup's Y-Z plane) turned by A. Exact for the sampled boundary: a material point at (y, z)
+    turned by A sits at (r sin(b - A), r cos(b - A)) under the tool, and the tool's profile says how high the tip
+    must be above it at that lateral offset."""
+    import shapely
+    sh = tool.shape
+    bound = shapely.segmentize(poly.boundary, seg)
+    P = shapely.get_coordinates(bound)
+    r = np.hypot(P[:, 0], P[:, 1])
+    beta = np.arctan2(P[:, 0], P[:, 1])
+    na = max(8, int(round(360.0 / res_a)))
+    res_a = 360.0 / na
+    angles = np.arange(na) * res_a
+    rt = max(tool.radius, sh.max_radius)
+    T = np.full(na, -np.inf)
+    for i0 in range(0, na, 32):                      # (angles x points) in blocks
+        A = np.radians(angles[i0:i0 + 32])[:, None]
+        y = r[None, :] * np.sin(beta[None, :] - A)
+        z = r[None, :] * np.cos(beta[None, :] - A)
+        d = np.abs(y)
+        inside = d <= rt + 1e-9
+        prof = sh.height(np.where(inside, d, 0.0))
+        cand = np.where(inside & np.isfinite(prof), z - prof, -np.inf)
+        T[i0:i0 + 32] = cand.max(axis=1)
+    return angles, np.maximum(T, 0.0)
+
+
+def _profile_unreachable(tool: Tool, poly, T: np.ndarray, angles: np.ndarray, top: float):
+    """Material of the stock the rings leave on the part: the stock disc minus the union of the tool's cross-sections at
+    every A (concave corners tighter than the tool, slots narrower than it). Returns (area_mm2, max_thickness)."""
+    import shapely
+    from shapely.geometry import Polygon
+    from shapely.ops import unary_union
+    sh = tool.shape
+    out = sh.outline()
+    cap = max(top - float(T.min()) + 1.0, 0.5)
+    right = [(rr, zz) for zz, rr in out if zz <= cap]
+    if not right or right[-1][1] < cap:
+        rc = float(sh.radius_at(np.array([cap]))[0])
+        right.append((rc, cap))
+    if right[0][0] > 0:
+        right.insert(0, (0.0, right[0][1]))
+    half = right + [(right[-1][0], cap + 1.0)]
+    base = half + [(-x, z) for x, z in reversed(half)]
+    shapes = []
+    for i in range(len(angles)):
+        A = math.radians(float(angles[i])); zt = float(T[i])
+        ca, sa = math.cos(A), math.sin(A)
+        pts = [(yp * ca + (zp + zt) * sa, (zp + zt) * ca - yp * sa) for yp, zp in base]
+        pg = Polygon(pts).buffer(0)
+        if not pg.is_empty and pg.area > 0:
+            shapes.append(pg)
+    if not shapes:
+        return 0.0, 0.0
+    removed = unary_union(shapes)
+    disc = shapely.Point(0, 0).buffer(top, 64)
+    sliver = 0.04                                    # the discrete sweep leaves slivers thinner than this along faces: not real
+    left = disc.difference(removed).difference(poly.buffer(0.02)).buffer(-sliver).buffer(sliver)
+    if left.is_empty or left.area < 0.05:
+        return 0.0, 0.0
+    pieces = list(getattr(left, "geoms", [left]))
+    thick = 2 * max((shapely.maximum_inscribed_circle(g, 0.01).length for g in pieces if g.area > 0), default=0.0)
+    return round(float(left.area), 2), round(float(thick), 2)
+
+
+def rotary_profile(setup: Setup, tool: Tool, profile, x_range: tuple[float, float] | None = None, stepdown: float | None = None,
+                   leave: float = 0.0, res_a: float = 1.0, stepover: float | None = None, name: str = "Rotary profile") -> Op:
+    """Machine an arbitrary polar cross-section (a cam, a hex or square from round, splines, lobes) along the 4th axis:
+    `profile` is a shapely Polygon in the setup's Y-Z plane (the section perpendicular to the axis, the same at every X
+    in x_range, default the stock's length). The tool points at the axis from Y = 0; for every A its tip sits at the
+    lowest Z that keeps the whole tool (real profile: flat, ball, bull, V...) clear of the turned section. Cut as rings
+    (one revolution per X station, X stepover `stepover` x D from the tool, ring direction alternating so A never winds
+    up) from the stock radius down `stepdown` per level, each level only where the one above left material; radial
+    plunge entries; retract to safe Z at the end. Warns about material the tool cannot reach (concave corners tighter
+    than the tool, slots narrower than it)."""
+    _need_rotary(setup, "rotary_profile")
+    polys = cam._polys(profile)
+    if not polys:
+        raise CamError("rotary_profile: give the cross-section as a shapely Polygon in the setup's Y-Z plane")
+    from shapely.ops import unary_union
+    poly = unary_union(polys)
+    if poly.geom_type != "Polygon":
+        raise CamError("rotary_profile: the cross-section must be one polygon (one piece of material round the axis)")
+    if res_a <= 0 or res_a > 15:
+        raise CamError("rotary_profile: res_a is the A step in degrees (0 < res_a <= 15)")
+    top = setup.max_radius
+    far = max(math.hypot(*c) for c in poly.exterior.coords)
+    angles, T = _profile_tip_map(tool, poly, res_a)
+    res_a = float(angles[1] - angles[0])
+    T = T + leave
+    x0, x1 = _x_limits(setup, tool, x_range)
+    so = (stepover or (0.15 if tool.type == "ball" else tool.stepover)) * tool.diameter
+    sd = stepdown or tool.stepdown
+    floor = float(T.min())
+    levels = []
+    z = top - sd
+    while z > floor + 1e-6:
+        levels.append(z)
+        z -= sd
+    levels.append(floor)
+    op = Op(name, "rotary_profile", tool, color=COLORS["rotary_profile"])
+    if far > top + 1e-6:
+        op.warnings.append(f"the profile reaches {far:.2f} mm from the axis, outside the Ø{2 * top:.1f} stock (r {top:.2f})")
+    pb = _rb(setup, tool, op)
+    n_x = max(1, int(math.ceil((x1 - x0) / so)) + 1)
+    xs = np.linspace(x0, x1, n_x)
+    na = len(angles)
+    fwd = np.arange(na + 1) * res_a                  # 0 .. 360 (absolute A of the ring's points)
+    prev = top
+    direction = 1
+    rings = 0
+    for L in levels:
+        Z = np.maximum(T, L)
+        lift = prev + 0.5                            # clear of what the level above left
+        for xc in xs:
+            if (Z >= prev - 1e-3).all():
+                continue                             # nothing left at this level
+            aa = fwd if direction > 0 else fwd[::-1]
+            zz = Z[(np.rint(aa / res_a).astype(int)) % na]
+            if pb.pos is None:
+                _rapid_to(pb, float(xc), float(aa[0]))
+            else:
+                _feed(pb, pb.pos[0], lift, pb.cur_a)
+                pb._add(RAPID, float(xc), 0.0, lift, 0.0, float(aa[0]))
+                pb.cur_a = float(aa[0])
+            _feed(pb, float(xc), float(zz[0]), float(aa[0]), pb.plunge, PLUNGE)
+            for a, zv in zip(aa[1:], zz[1:]):
+                _feed(pb, float(xc), float(zv), float(a))
+            direction *= -1
+            rings += 1
+        prev = L
+    if pb.pos is not None:
+        pb._add(RAPID, pb.pos[0], 0.0, setup.safe_z, 0.0, pb.cur_a)
+    area, thick = _profile_unreachable(tool, poly, T, angles, top)
+    if area > 0:
+        op.warnings.append(f"{tool.label()} cannot reach {area:g} mm² of the section (up to {thick:g} mm thick, left on the part): "
+                           "concave corners tighter than the tool or gaps narrower than it; use a smaller tool or a ball")
+    op.params = dict(levels=len(levels), rings=rings, stepdown=round(sd, 3), stepover=round(so, 3), leave=leave, res_a=res_a,
+                     r_min=round(floor - leave, 3), unreachable_mm2=area)
+    return op
+
+
+# ----------------------------------------------------------------------------- gear teeth with a disc cutter
+def gear_teeth(setup: Setup, tool: Tool, module: float, teeth: int, width: float | None = None, x0: float | None = None,
+               pressure_angle: float = 20.0, side: str = "+y", stepdown: float | None = None, leave: float = 0.0,
+               helix: float = 0.0, climb: bool = True, backlash: float = 0.0, a0: float = 0.0, name: str = "Gear teeth") -> Op:
+    """Cut involute spur (or helical) gear teeth into a round blank on the 4th axis with a disc-type module cutter
+    (tool type gear_cutter) from the SIDE of the blank, indexing A between tooth spaces. The cutter's axis is vertical;
+    its disc is centred on the axis height (Z = 0) at Y = ±(r + R_cutter) on `side` ("+y" | "-y"), so the form cuts the
+    space at the 3 o'clock position with the gear's tangent along the cutter axis. Depth passes are Y moves toward the
+    axis (`stepdown` mm of radial depth each, default the tool's; the last to the root radius m(N/2 - 1.25) + `leave`
+    - `backlash`), each feeding along X across the face (x0 .. x0 + width, default the stock) with R_cutter + 2 mm
+    lead-in/out beyond both faces, in one X direction only (climb: the cutter's edge runs with the feed at the cut;
+    the return is made with the cutter retracted clear of the blank). A is indexed by 360/N from `a0` and kept in
+    [0, 360). `helix` (deg, + = right hand) turns A with X: dA = -dx tan(helix) / r_pitch."""
+    import tool_shape
+    _need_rotary(setup, "gear_teeth")
+    if tool.type != "gear_cutter":
+        raise CamError(f"gear_teeth needs a gear cutter (tool type gear_cutter); {tool.label()} is a {tool.type}")
+    try:
+        sh = tool.shape
+    except tool_shape.ToolShapeError as e:
+        raise CamError(f"gear_teeth: {tool.label()}: {e}") from e
+    m = float(module)
+    N = int(teeth)
+    if m <= 0 or N < 4:
+        raise CamError("gear_teeth: module must be > 0 and teeth >= 4")
+    if abs(float(tool.module) - m) > 1e-6:
+        raise CamError(f"gear_teeth: {tool.label()} is a module {tool.module:g} cutter; the gear is module {m:g} "
+                       "(a module cutter only cuts its own module)")
+    if side not in ("+y", "-y"):
+        raise CamError("gear_teeth: side must be '+y' or '-y'")
+    sgn = 1.0 if side == "+y" else -1.0
+    r_p = m * N / 2
+    r_tip = r_p + m
+    r_root = r_p - 1.25 * m
+    R = tool.radius
+    D = tool.diameter
+    t = float(sh.p["thickness"])
+    z_tip = -(sh.cut_from + t / 2)                   # tool tip (nut underside) with the disc's mid-plane on the axis
+    r_blank = setup.max_radius
+    stock = setup.stock
+    x_lo = float(x0) if x0 is not None else float(stock.xmin)
+    w = float(width) if width is not None else float(stock.xmax) - x_lo
+    if w <= 0:
+        raise CamError("gear_teeth: the face width must be > 0")
+    x_hi = x_lo + w
+    lead = R + 2.0
+    xa, xb = x_lo - lead, x_hi + lead
+    dirx = -1 if (bool(climb) == (sgn > 0)) else 1      # M3 (clockwise from above): the edge at the cut runs -X on the +Y side
+    x_start, x_end = (xa, xb) if dirx > 0 else (xb, xa)
+    r_final = r_root + float(leave) - float(backlash)
+    depth = r_blank - r_final
+    if depth <= 0:
+        raise CamError(f"gear_teeth: the Ø{2 * r_blank:g} blank is already inside the gear's root Ø{2 * r_root:.2f}")
+    sd = float(stepdown or tool.stepdown)
+    if sd <= 0:
+        raise CamError("gear_teeth: stepdown must be > 0")
+    n_pass = max(1, int(math.ceil(depth / sd - 1e-9)))
+    radii = [r_blank - depth * (k + 1) / n_pass for k in range(n_pass)]
+    y_safe = sgn * (r_blank + R + 2.0)
+    pitch_a = 360.0 / N
+    k_helix = math.degrees(math.tan(math.radians(helix)) / r_p)      # degrees of A per mm of X (right hand: A falls with +X)
+    op = Op(name, "gear_teeth", tool, color=COLORS["gear_teeth"])
+    pb = _rb(setup, tool, op)
+    # ---- warnings
+    if abs(float(tool.pressure_angle or 20.0) - float(pressure_angle)) > 0.5:
+        op.warnings.append(f"{tool.label()} is a {tool.pressure_angle:g}° cutter; the gear asks for {pressure_angle:g}°: the flanks will be wrong")
+    rng = tool_shape.cutter_number(tool.cutter_teeth_min) if tool.cutter_teeth_min else None
+    if rng and not (rng[1] <= N <= rng[2]):
+        want = tool_shape.cutter_range_for(N)
+        op.warnings.append(f"{tool.label()} is cutter No.{rng[0]} ({rng[1]}–{rng[2]}T); a {N}-tooth gear wants No.{want[0]} "
+                           f"({want[1]}–{want[2]}T): the tooth form will be off")
+    elif not rng and tool.cutter_teeth_min and tool.cutter_teeth_min != N:
+        op.warnings.append(f"{tool.label()} is cut for {tool.cutter_teeth_min} teeth exactly; the gear has {N}: the tooth form will be off")
+    vc = math.pi * D * tool.rpm / 1000.0
+    if vc > GEAR_CUTTER_MAX_VC:
+        ok_rpm = int(GEAR_CUTTER_MAX_VC * 1000.0 / (math.pi * D))
+        sp = setup.machine.spindle or {}
+        low = sp.get("min", 0)
+        op.warnings.append(f"{vc:.0f} m/min surface speed at {tool.rpm:g} rpm on the Ø{D:g} cutter: too fast for an HSS gear cutter "
+                           f"(≤ {GEAR_CUTTER_MAX_VC:g} m/min): run it at ≤ {ok_rpm} rpm"
+                           + (f" ({setup.machine.name}'s spindle goes down to {low:g} rpm)" if low and low > ok_rpm else ""))
+    if sh.p["thickness"] < sh.p["form_width"] - 0.02:
+        op.warnings.append(f"the disc is {t:.2f} mm wide but the {tool.cutter_teeth_min}-tooth space is {sh.p['form_width']:.2f} at the "
+                           "tip line: the flanks near the tooth tips are left uncut")
+    if r_blank > r_tip + 0.02:
+        op.warnings.append(f"the blank (Ø{2 * r_blank:g}) is bigger than the gear's tip Ø{2 * r_tip:.2f}: the first "
+                           f"{r_blank - r_tip:.2f} mm is cut with the disc's flat sides; turn the blank to Ø{2 * r_tip:.2f} first (rotary_finish)")
+    elif r_blank < r_tip - 0.02:
+        op.warnings.append(f"the blank (Ø{2 * r_blank:g}) is smaller than the gear's tip Ø{2 * r_tip:.2f}: the teeth come out "
+                           f"{r_tip - r_blank:.2f} mm short")
+    if x_lo < stock.xmin - 1e-6 or x_hi > stock.xmax + 1e-6:
+        op.warnings.append(f"the face width X {x_lo:g}..{x_hi:g} runs beyond the blank (X {stock.xmin:g}..{stock.xmax:g})")
+    rot = setup.machine.rotary or {}
+    chuck_x = rot.get("chuck_face_x")
+    tail_x = rot.get("tail_x")
+    if xa < stock.xmin - 1e-6:
+        op.warnings.append(f"the lead-in/out runs {stock.xmin - xa:.1f} mm past the stock's end at X {stock.xmin:g} (the Ø{D:g} disc must clear "
+                           "the face): make sure the chuck jaws are clear of the cutter there"
+                           + (f" — it reaches {chuck_x - xa:.1f} mm into the chuck face at X {chuck_x:g}" if chuck_x is not None and xa < chuck_x else ""))
+    if xb > stock.xmax + 1e-6:
+        op.warnings.append(f"the lead-in/out runs {xb - stock.xmax:.1f} mm past the stock's end at X {stock.xmax:g}: make sure the tailstock "
+                           "/ live centre is clear of the cutter there"
+                           + (f" — it reaches {xb - tail_x:.1f} mm into the tailstock at X {tail_x:g}" if tail_x is not None and xb > tail_x else ""))
+    # ---- moves (every move carries A)
+    def go(kind, x, y, a, f=0.0):
+        pb._add(kind, x, y, z_tip, f, a)
+        pb.cur_a = a
+
+    def a_at(a_space: float, x: float) -> float:
+        return a_space - k_helix * (x - x_lo)
+
+    first = True
+    for k in range(N):
+        a_space = (float(a0) + k * pitch_a) % 360.0
+        a_s = a_at(a_space, x_start) % 360.0             # each pass starts in [0, 360); a helical pass may run on past it
+        a_e = a_s + (a_at(a_space, x_end) - a_at(a_space, x_start))
+        if first:
+            pb._add(RAPID, x_start, y_safe, setup.safe_z, 0.0, a_s)
+            pb.cur_a = a_s
+            go(RAPID, x_start, y_safe, a_s)              # down beside the blank, the disc clear of it
+            first = False
+        else:
+            go(RAPID, x_start, y_safe, a_s)              # index with the cutter retracted
+        for rk in radii:
+            yk = sgn * (rk + R)
+            go(RAPID, x_start, yk, a_s)                  # depth: a Y move at the lead-in, the disc clear of the face
+            go(FEED, x_end, yk, a_e, pb.feed)            # one cut across the face (+ lead-in / lead-out)
+            go(RAPID, x_end, y_safe, a_e)                # retract clear of the blank
+            go(RAPID, x_start, y_safe, a_s)              # back for the next pass (never cut both ways)
+    pb._add(RAPID, x_start, y_safe, setup.safe_z, 0.0, pb.cur_a)
+    pb._add(RAPID, x_start, 0.0, setup.safe_z, 0.0, pb.cur_a)
+    op.params = dict(module=m, teeth=N, pressure_angle=float(pressure_angle), r_pitch=round(r_p, 4), r_root=round(r_root, 4),
+                     r_tip=round(r_tip, 4), passes=n_pass, spaces=N, helix=float(helix), side=side, stepdown=round(depth / n_pass, 3),
+                     leave=float(leave), backlash=float(backlash), width=round(w, 3), x0=round(x_lo, 3), lead=round(lead, 2),
+                     climb=bool(climb), feed_dir="-X" if dirx < 0 else "+X", y_cut=round(sgn * (r_final + R), 3),
+                     surface_speed=round(vc, 1), a0=float(a0))
     return op

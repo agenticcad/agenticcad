@@ -27,12 +27,78 @@ TYPES = {
     "chamfer": "Chamfer mill",
     "drill": "Drill",
     "taper_ball": "Tapered ball endmill",
+    "gear_cutter": "Gear cutter (involute module cutter on an arbor)",
 }
 TRANSITION_HALF_ANGLE = 30.0          # degrees: the taper from a neck to a bigger shank (typical of reduced-neck tools)
+# Involute module cutters come in sets of 8, each cut for a range of tooth counts (DIN / metric numbering: No.1 is the
+# 12–13 tooth cutter; the Brown & Sharpe inch sets number the same ranges the other way round).
+CUTTER_RANGES = [(1, 12, 13), (2, 14, 16), (3, 17, 20), (4, 21, 25), (5, 26, 34), (6, 35, 54), (7, 55, 134), (8, 135, 10 ** 6)]
 
 
 class ToolShapeError(ValueError):
     pass
+
+
+def cutter_number(teeth_min: int) -> tuple[int, int, int] | None:
+    """(number, lowest, highest tooth count) of the set cutter whose range starts at `teeth_min`, else None (a cutter
+    made for one exact tooth count)."""
+    for n, lo, hi in CUTTER_RANGES:
+        if lo == int(teeth_min):
+            return n, lo, hi
+    return None
+
+
+def cutter_range_for(teeth: int) -> tuple[int, int, int]:
+    """The set cutter (number, lo, hi) that cuts a gear of `teeth` teeth."""
+    for n, lo, hi in CUTTER_RANGES:
+        if lo <= teeth <= hi:
+            return n, lo, hi
+    return CUTTER_RANGES[0]
+
+
+def _inv(a: float) -> float:
+    return math.tan(a) - a
+
+
+def gear_space_form(module: float, teeth: int, pressure_angle: float = 20.0, clearance: float = 0.25, n: int = 200):
+    """The tooth SPACE of a standard involute gear in the transverse plane, as (depth, half_width) pairs from the root
+    (depth 0, the narrow end) up to the tip line (depth 2.25 m, the wide end), measured along the space's centre line
+    and across it. A disc cutter that has this form around its periphery (periphery = the root) cuts the space.
+    Also returns the root flat's half width (the cutter's periphery is a cylinder, not the root arc; the difference
+    is a few microns). Returns (depth, half_width, root_half)."""
+    if module <= 0:
+        raise ToolShapeError("a gear cutter needs its module (mm)")
+    N = int(teeth)
+    if N < 4:
+        raise ToolShapeError("a gear cutter needs the tooth count it is cut for (cutter_teeth_min: the lowest count of its "
+                             "range, e.g. 12 for a No.1 12–13T cutter)")
+    if not (0 < pressure_angle < 45):
+        raise ToolShapeError("the pressure angle must be between 0 and 45 degrees")
+    m = module
+    r_p = m * N / 2
+    r_b = r_p * math.cos(math.radians(pressure_angle))
+    r_a = r_p + m
+    r_f = r_p - (1.0 + clearance) * m
+    half_base = math.pi / (2 * N) + _inv(math.radians(pressure_angle))
+
+    def half_space(r: float) -> float:                  # half angle of the space at radius r
+        half_tooth = half_base - (_inv(math.acos(min(1.0, r_b / r))) if r > r_b else 0.0)
+        return math.pi / N - half_tooth
+
+    rs = np.linspace(r_f, r_a, n)
+    th = np.array([half_space(float(r)) for r in rs])
+    depth = rs * np.cos(th) - r_f                       # along the centre line from the root flat
+    half = rs * np.sin(th)
+    # the flank is monotone in both (depth and width grow towards the tip); clean numerical noise at the root
+    depth = np.maximum.accumulate(np.maximum(depth, 0.0))
+    half = np.maximum.accumulate(half)
+    return depth, half, float(half[0])
+
+
+def gear_form_width(module: float, teeth: int, pressure_angle: float = 20.0) -> float:
+    """The natural width of a module cutter's form: the space width at the gear's tip line."""
+    _, half, _ = gear_space_form(module, teeth, pressure_angle)
+    return 2 * float(half[-1])
 
 
 def _g(tool, k, default=0.0):
@@ -49,6 +115,8 @@ def params(tool) -> dict:
     if D <= 0:
         raise ToolShapeError("tool diameter must be > 0")
     R = D / 2
+    if typ == "gear_cutter":
+        return _gear_params(tool, R)
     fl = max(float(_g(tool, "flute_length", 10.0)), 0.01)
     angle = float(_g(tool, "angle", 0.0))
     tip = float(_g(tool, "tip_diameter", 0.0))
@@ -73,7 +141,7 @@ def params(tool) -> dict:
     if neck and neck > D + 1e-9:
         raise ToolShapeError("the neck must not be wider than the cutting diameter")
     p = {"type": typ, "R": R, "fl": fl, "angle": angle, "tip": tip, "rc": min(rc, R), "taper": taper,
-         "shank_r": shank / 2, "neck_r": neck / 2, "reach": reach}
+         "shank_r": shank / 2, "neck_r": neck / 2, "reach": reach, "cut_z0": 0.0}
     p["form_top"] = _form_top(p)                     # where the type's shape reaches its full diameter
     p["reach"] = max(reach, fl, p["form_top"] if not neck else fl)
     stick = float(_g(tool, "stickout", 0.0))
@@ -81,6 +149,54 @@ def params(tool) -> dict:
     p["stickout"] = max(stick, shank_start + 1.0) if stick else shank_start + 6.0
     p["shank_start"] = shank_start
     return p
+
+
+def _gear_params(tool, R: float) -> dict:
+    """A disc-type involute gear cutter on an arbor, from the tip (the retaining nut's underside) up: the nut, the disc
+    (its radius following the tooth-space form: the periphery cuts the gear's root, the form narrows the disc towards
+    its edges down to the gullet radius at the gear's tip line), then the arbor's shank up to the stickout."""
+    m = float(_g(tool, "module", 0.0))
+    pa = float(_g(tool, "pressure_angle", 20.0)) or 20.0
+    N = int(_g(tool, "cutter_teeth_min", 0) or 0)
+    depth, half, root_half = gear_space_form(m, N, pa)           # validates module / teeth / angle
+    t_nat = 2 * float(half[-1])
+    t = float(_g(tool, "thickness", 0.0)) or t_nat
+    if t < 2 * root_half + 0.05:
+        raise ToolShapeError(f"a {t:g} mm thick disc is narrower than the root of a module {m:g} tooth space "
+                             f"({2 * root_half:.2f} mm): it cannot cut this module")
+    gullet = R - float(np.interp(t / 2, half, depth, left=0.0, right=float(depth[-1])))   # disc radius at its faces
+    nut_h = float(_g(tool, "nut_height", 4.0))
+    nut_d = float(_g(tool, "nut_diameter", 10.0))
+    shank = float(_g(tool, "shank_diameter", 0.0))
+    if shank <= 0:
+        raise ToolShapeError("a gear cutter needs its arbor's shank diameter (what goes in the collet: 3.175, 6 or 6.35)")
+    if nut_h < 0 or nut_d <= 0:
+        raise ToolShapeError("the retaining nut needs a height and a diameter")
+    if nut_d < shank - 1e-9:
+        raise ToolShapeError(f"the Ø{nut_d:g} nut is smaller than the Ø{shank:g} arbor shank")
+    if gullet <= nut_d / 2 + 0.5:
+        raise ToolShapeError(f"a Ø{2 * R:g} disc is too small for module {m:g}: its gullet (Ø{2 * gullet:.1f}) would be "
+                             f"inside the Ø{nut_d:g} nut")
+    fl = nut_h + t
+    stick = float(_g(tool, "stickout", 0.0))
+    p = {"type": "gear_cutter", "R": R, "fl": fl, "angle": pa, "tip": 0.0, "rc": 0.0, "taper": 0.0, "shank_r": shank / 2,
+         "neck_r": 0.0, "reach": fl, "cut_z0": nut_h, "form_top": fl, "shank_start": fl,
+         "module": m, "teeth": N, "thickness": t, "nut_h": nut_h, "nut_r": nut_d / 2, "gullet": gullet,
+         "form_width": t_nat}
+    p["stickout"] = max(stick, fl + 1.0) if stick else fl + 10.0
+    return p
+
+
+def _gear_form(p, z: np.ndarray) -> np.ndarray:
+    """Radius of the gear cutter at height z above its tip (nut, disc form, shank)."""
+    depth, half, _ = gear_space_form(p["module"], p["teeth"], p["angle"])
+    nut_h, t, R = p["nut_h"], p["thickness"], p["R"]
+    h = np.abs(z - (nut_h + t / 2))                                  # distance from the disc's mid-plane
+    # the form: half width `half` at radial depth `depth` below the periphery -> radius R - depth at height h = half
+    rho = R - np.interp(h, half, depth, left=0.0, right=float(depth[-1]))
+    rho = np.where(h > t / 2, p["shank_r"], rho)                     # above / below the disc: nut or shank (set below)
+    r = np.where(z < nut_h, p["nut_r"], rho)
+    return r
 
 
 def _form_top(p) -> float:
@@ -129,6 +245,8 @@ def _transition(p) -> float:
 def radius_at(p, z: np.ndarray) -> np.ndarray:
     """The tool's radius at height z above the tip (all three parts)."""
     z = np.asarray(z, dtype=float)
+    if p["type"] == "gear_cutter":
+        return _gear_form(p, z)
     fl, reach = p["fl"], p["reach"]
     r = _form(p, z)
     if p["neck_r"]:
@@ -148,8 +266,8 @@ def _table(key: tuple) -> dict:
     near = min(top, max(p["fl"], p["form_top"], p["reach"]) + 0.5)
     z = np.concatenate([np.arange(0.0, near, 0.002), np.arange(near, top + 0.05, 0.05)])
     r = radius_at(p, z)
-    cut = z <= p["fl"] + 1e-9
-    return {"z": z, "r": r, "cum": np.maximum.accumulate(r), "zc": z[cut], "cumc": np.maximum.accumulate(r[cut])}
+    cut = (z <= p["fl"] + 1e-9) & (z >= p.get("cut_z0", 0.0) - 1e-9)
+    return {"z": z, "r": r, "cum": np.maximum.accumulate(r), "zc": z[cut], "rc": r[cut], "cumc": np.maximum.accumulate(r[cut])}
 
 
 def _key(p) -> tuple:
@@ -207,6 +325,18 @@ class ToolShape:
     def radius_at(self, z) -> np.ndarray:
         return radius_at(self.p, np.asarray(z, dtype=float))
 
+    @property
+    def cut_from(self) -> float:
+        """Height above the tip where the cutting part starts (0 for endmills; a gear cutter's nut sits under its disc)."""
+        return float(self.p.get("cut_z0", 0.0))
+
+    def cut_slabs(self, dr: float = 0.02) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """The cutting part as horizontal slabs (bottom, top, radius) from the tip up: each slab's radius is the largest in
+        it and slabs are split so the radius varies by at most `dr` within one, so the stack of cylinders never
+        under-states the tool (and over-states it by at most dr plus the radius change over one 2 µm sample, which matters
+        only where the profile runs almost radially). For any profile, monotone or not."""
+        return _slabs(_key(self.p), round(dr, 4))
+
     def width_at_depth(self, depth: float) -> float:
         """Widest the cutting part is within `depth` of the tip (what a cut that deep is as wide as at the top)."""
         z = self._t["zc"]
@@ -253,9 +383,36 @@ class ToolShape:
         return pts
 
     def payload(self) -> dict:
-        return {"outline": self.outline(), "flute_length": self.p["fl"], "stickout": round(self.p["stickout"], 3),
-                "cut_radius": round(self.cut_radius, 4), "max_radius": round(self.max_radius, 4),
-                "reach": round(self.p["reach"], 3), "shank_start": round(self.p["shank_start"], 3)}
+        out = {"outline": self.outline(), "flute_length": self.p["fl"], "stickout": round(self.p["stickout"], 3),
+               "cut_radius": round(self.cut_radius, 4), "max_radius": round(self.max_radius, 4),
+               "reach": round(self.p["reach"], 3), "shank_start": round(self.p["shank_start"], 3),
+               "cut_from": round(self.cut_from, 3)}
+        if self.p["type"] == "gear_cutter":
+            out["gear"] = {"thickness": round(self.p["thickness"], 3), "form_width": round(self.p["form_width"], 3),
+                           "gullet_diameter": round(2 * self.p["gullet"], 3)}
+        return out
+
+
+@lru_cache(maxsize=256)
+def _slabs(key: tuple, dr: float):
+    t = _table(key)
+    z, r = t["zc"], t["rc"]
+    if len(z) < 2:
+        return np.zeros(0), np.zeros(0), np.zeros(0)
+    b0, b1, rad = [], [], []
+    i0 = 0
+    lo = hi = float(r[0])
+    for i in range(1, len(z)):
+        v = float(r[i])
+        lo2, hi2 = min(lo, v), max(hi, v)
+        if hi2 - lo2 > dr:
+            b0.append(float(z[i0])); b1.append(float(z[i])); rad.append(hi2)     # the slab runs up to sample i: include it
+            i0 = i
+            lo = hi = v
+        else:
+            lo, hi = lo2, hi2
+    b0.append(float(z[i0])); b1.append(float(z[-1]) + 1e-9); rad.append(hi)
+    return np.array(b0), np.array(b1), np.array(rad)
 
 
 def shape(tool) -> ToolShape:

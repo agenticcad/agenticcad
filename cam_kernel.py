@@ -57,6 +57,14 @@ class Tool:
     reach: float = 0.0          # how far below the shank the tool stays thin (neck end); 0 = the flute length
     stickout: float = 0.0       # how far the tool projects from the collet / nut; 0 = estimated
     photo: str = ""             # a picture of the tool / its packet (workspace/tool_photos/<name>): shown at tool changes
+    # gear cutter (type "gear_cutter": a disc-type involute module cutter on an arbor; `diameter` is the disc's outer Ø,
+    # `shank_diameter` the arbor's shank in the collet, `stickout` from the collet to the nut's underside)
+    module: float = 0.0         # gear module the cutter is made for (mm)
+    pressure_angle: float = 20.0
+    cutter_teeth_min: int = 0   # lowest tooth count of the cutter's range (No.1 = 12–13T -> 12); an exact-count cutter: that count
+    thickness: float = 0.0      # disc width at the gear's tip line (the widest part of the form); 0 = from module and teeth
+    nut_height: float = 4.0     # retaining nut under the disc
+    nut_diameter: float = 10.0
 
     @property
     def radius(self) -> float:
@@ -87,6 +95,19 @@ class Tool:
             return f"tapered ball tip Ø{g(self.tip_diameter)} · {g(self.taper)}°/side · Ø{g(self.diameter)}{fl}{sh}"
         if self.type == "drill":
             return f"drill Ø{g(self.diameter)}" + (f" · {g(self.angle)}° point" if self.angle else "") + fl
+        if self.type == "gear_cutter":
+            import tool_shape
+            n = tool_shape.cutter_number(self.cutter_teeth_min) if self.cutter_teeth_min else None
+            who = (f"No.{n[0]} ({n[1]}–{n[2]}T)" if n and n[2] < 10 ** 5 else f"No.{n[0]} ({n[1]}T–rack)" if n
+                   else f"{self.cutter_teeth_min}T cutter" if self.cutter_teeth_min else "teeth?")
+            t = self.thickness
+            if not t and self.module and self.cutter_teeth_min:
+                try:
+                    t = tool_shape.gear_form_width(self.module, self.cutter_teeth_min, self.pressure_angle or 20.0)
+                except tool_shape.ToolShapeError:
+                    t = 0.0
+            return (f"m{g(self.module)} · {g(self.pressure_angle or 20)}° · {who} · Ø{g(self.diameter)} x {t:.2f}"
+                    + (f" · arbor Ø{g(self.shank_diameter)}" if self.shank_diameter else ""))
         return f"flat Ø{g(self.diameter)}{fl}{sh}"
 
 
@@ -2236,7 +2257,8 @@ def _raster_triangles(P: np.ndarray, I: np.ndarray, zmap: np.ndarray, minx: floa
 
 PUBLIC_API = ["Stock.from_model", "Stock.block", "Stock.cylinder", "Setup", "Setup.view", "Program", "face", "contour", "pocket",
               "adaptive", "drill", "parallel3d", "chamfer_edges", "vcarve", "rest_region", "section", "silhouette", "outline", "face_outline", "stock_minus", "holes", "face_polygon",
-              "circle", "rect", "feeds", "apply_feeds", "rotary_rough", "rotary_finish", "rotary_wrap", "radial_map"]
+              "circle", "rect", "feeds", "apply_feeds", "rotary_rough", "rotary_finish", "rotary_wrap", "rotary_profile",
+              "gear_teeth", "radial_map"]
 
 
 def api_reference() -> str:
@@ -3179,7 +3201,7 @@ def post_makera(prog: Program) -> str:
 
 
 # 4th-axis toolpaths live in cam_rotary (imported last: it builds on everything above)
-from cam_rotary import radial_map, rotary_finish, rotary_rough, rotary_wrap  # noqa: E402,F401
+from cam_rotary import gear_teeth, radial_map, rotary_finish, rotary_profile, rotary_rough, rotary_wrap  # noqa: E402,F401
 
 
 # ---------------------------------------------------------------- per-operation overrides
@@ -3206,12 +3228,18 @@ CUT_FIELDS = {
     "parallel3d": {**_Z, "angle": ("Pass angle", "°", "num", None), "resolution": ("Resolution", "mm", "num", None)},
     "chamfer": {"width": ("Chamfer width", "mm", "num", None), "tip_below": ("Tip below the chamfer", "mm", "num", None), **_CLIMB},
     "vcarve": {"max_depth": ("Max depth", "mm", "num", None), "flat_stepover": ("Flat-bottom stepover", "mm", "num", None)},
+    "rotary_profile": {"leave": ("Stock to leave", "mm", "num", None), "res_a": ("A step", "°", "num", None)},
+    "gear_teeth": {"module": ("Module", "mm", "num", None), "teeth": ("Teeth", "", "int", None), "width": ("Face width", "mm", "num", None),
+                   "leave": ("Stock to leave (root)", "mm", "num", None), "helix": ("Helix angle", "°", "num", None),
+                   "side": ("Cutter side", "", "choice", ["+y", "-y"]), "backlash": ("Backlash (extra depth)", "mm", "num", None),
+                   **_CLIMB},
 }
 COLOR_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
 OP_FIELDS = {"face": OVERRIDE_FIELDS, "pocket": OVERRIDE_FIELDS, "adaptive": OVERRIDE_FIELDS,
              "contour": ("rpm", "feed", "plunge", "stepdown"), "drill": ("rpm", "plunge"),
              "parallel3d": ("rpm", "feed", "plunge", "stepover"), "rotary_rough": OVERRIDE_FIELDS,
              "rotary_finish": ("rpm", "feed", "plunge", "stepover"), "rotary_wrap": OVERRIDE_FIELDS,
+             "rotary_profile": OVERRIDE_FIELDS, "gear_teeth": ("rpm", "feed", "plunge", "stepdown"),
              "chamfer": ("rpm", "feed", "plunge", "stepdown"), "vcarve": ("rpm", "feed", "plunge", "stepdown")}
 _OV: dict[str, Any] = {"table": {}, "seen": {}, "depth": 0, "used": set()}
 
@@ -3221,7 +3249,13 @@ def overrides(table: dict | None = None) -> None:
     {"Pocket": {"rpm": 11000, "feed": 600, "plunge": 150, "stepdown": 0.8, "stepover": 0.3}} (stepover = fraction of Ø).
     Written by the CAM tab; put it before the operations. Values not given come from the tool / the script."""
     bad = []
-    cut_all = {f_: m for d in CUT_FIELDS.values() for f_, m in d.items()}
+    cut_all: dict[str, tuple] = {}
+    for d in CUT_FIELDS.values():
+        for f_, m in d.items():
+            if f_ in cut_all and m[2] == "choice" and cut_all[f_][2] == "choice":     # a field several kinds share (contour /
+                cut_all[f_] = (*cut_all[f_][:3], list(cut_all[f_][3]) + [c for c in m[3] if c not in cut_all[f_][3]])   # gear side)
+            else:
+                cut_all.setdefault(f_, m)
     for k, v in (table or {}).items():
         if not isinstance(v, dict):
             raise CamError(f"overrides: '{k}' must map to a dict of {OVERRIDE_FIELDS}, cut settings or color")
@@ -3455,7 +3489,7 @@ def _op_defaults(kind: str, tool: Tool, a: dict) -> dict:
             sd = max(min(tool.flute_length * 0.9, a["z_top"] - a["z_bottom"]), 0.1)
     elif kind == "parallel3d":
         so = so or min(tool.stepover, 0.2)
-    elif kind == "rotary_finish":
+    elif kind in ("rotary_finish", "rotary_profile"):
         so = so or (0.15 if tool.type == "ball" else tool.stepover)
     d = {"rpm": tool.rpm, "feed": tool.feed, "plunge": tool.plunge, "stepdown": sd or tool.stepdown, "stepover": so or tool.stepover}
     return {k: round(float(d[k]), 4) for k in OP_FIELDS.get(kind, OVERRIDE_FIELDS)}
@@ -3526,4 +3560,6 @@ vcarve = _overridable(vcarve, "vcarve")
 rotary_rough = _overridable(rotary_rough, "rotary_rough")
 rotary_finish = _overridable(rotary_finish, "rotary_finish")
 rotary_wrap = _overridable(rotary_wrap, "rotary_wrap")
+rotary_profile = _overridable(rotary_profile, "rotary_profile")
+gear_teeth = _overridable(gear_teeth, "gear_teeth")
 PUBLIC_API.append("overrides")

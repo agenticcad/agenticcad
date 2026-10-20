@@ -227,8 +227,8 @@ There is a second script per design, the CAM script, built with `build_cam`. It 
   model (the built design: model.shape = all bodies, model.bodies, model.get_face(id), model.bbox_min/max),
   part (= model.shape), bodies (dict name -> shape), tools (dict: by number, by name, by 'T1'),
   machines (dict name -> Machine), and everything from cam_kernel: Stock, Setup, Program, face, contour, pocket,
-  drill, parallel3d, adaptive, rotary_rough, rotary_finish, rotary_wrap, section, silhouette, stock_minus, holes,
-  face_polygon, circle, rect, feeds, apply_feeds.
+  drill, parallel3d, adaptive, rotary_rough, rotary_finish, rotary_wrap, rotary_profile, gear_teeth, section, silhouette,
+  stock_minus, holes, face_polygon, circle, rect, feeds, apply_feeds.
 It must assign `program` (a Program). Call `cam_context` first to see the machines/tools/model facts.
 ```
 stock = Stock.from_model(model, margin=3, top=1.0)          # also accepts a body shape; or Stock.block(80, 50, 12, top=8)
@@ -270,6 +270,18 @@ program = Program(st, name="shaft")
 program.add(rotary_rough(st, tools[3], part, stepdown=1.0, mode="rings"))          # 1/8" flat; continuous A, leaves 0.3 mm
 program.add(rotary_finish(st, ball, part, mode="spiral", stepover=0.1))             # helix advancing 0.1×D per turn; or lines|rings
 program.add(rotary_wrap(st, vbit, text_or_polys, depth=0.4, kind="contour", side="on"))   # 2D (u = X, v = around) wrapped on the bar
+program.add(rotary_profile(st, tools[3], hex_poly, x_range=(10, 40), stepdown=1.0))   # any cross-section (shapely Polygon in the
+   # setup's Y-Z plane: a hex / square from round, a cam, lobes) cut as continuous-A rings from the stock radius down; warns
+   # about concave corners tighter than the tool. Build the polygon from the part: section(st.view(part), x) is in X-Y, so use
+   # shapely.Polygon([(y, z) ...]) of the cross-section perpendicular to the axis (or the gear/hex dimensions directly).
+program.add(gear_teeth(st, tools["m1 cutter"], module=1, teeth=20, width=8, x0=0, a0=9))   # involute teeth with a disc-type module
+   # cutter (tool type gear_cutter: module, cutter No./teeth range, disc Ø x width, arbor shank) from the SIDE of the blank at
+   # Y = r + R_cutter, Z = 0 (3 o'clock), A indexed 360/N per space from a0, depth passes in Y, one X feed direction, lead-in /
+   # lead-out R + 2 beyond both faces (keep the chuck / tailstock clear). helix=15 for a helical gear (+ = right hand),
+   # side="-y" for the other side, backlash= extra depth. The blank must already be turned to the tip Ø (m (N + 2)); the stock
+   # should be just the blank's width (the lead-in runs past its ends). HSS cutter: keep π·D·rpm/1000 ≤ 80 m/min (Ø40: ≤ 630 rpm).
+   # a0: the A at which the first space is cut (a modelled gear's space must face +Y at A = a0: tooth 0 of spur_gear is on its
+   # own +X; after Rot(0, 90, 0) a 20-tooth gear's spaces are at A = 9 + 18 k).
 for a in (0, 90, 180, 270):                                  # 3+1 indexed: ordinary ops on a rotary setup at an A angle
     sa = Setup(st.machine, st.model_stock, rotary=True, a=a, name=f"A{a}")          # same mounting -> just G0 A<a>, no pause
     v = sa.view(part)                                        # the part as the tool sees it at this A
