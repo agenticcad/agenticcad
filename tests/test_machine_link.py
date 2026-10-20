@@ -93,8 +93,10 @@ def test_limits_steps_and_z_floor_are_enforced_before_anything_is_sent():
                 await mc.jog("y", -10.5)
             with pytest.raises(ml.Refused, match="step limit for Z down"):
                 await mc.jog("z", -2)                      # Z down is 1 mm per click at most
+            with pytest.raises(ml.Refused, match="no 4th axis"):
+                await mc.jog("a", 1)                       # A exists on the Z1 but this machine has no module
             with pytest.raises(ml.Refused, match="unknown axis"):
-                await mc.jog("a", 1)
+                await mc.jog("b", 1)
             assert len(emu.lines) == n                     # nothing reached the machine
             # walk X to the far end in 10 mm steps: the last step that would leave the box is refused
             for _ in range(30):
@@ -698,6 +700,231 @@ def test_origin_record_is_right_when_the_machine_reports_new_offsets_late():
             await asyncio.sleep(1.2)
             o = mc.payload()["origin"]["xy"]
             assert o["ref"] == "typed" and not o.get("changed") and abs(o["wco"][0] - emu.mpos[0]) < 1e-3
+        finally:
+            await mc.disconnect(); await emu.stop()
+    run(go())
+
+
+# ---------------------------------------------------------------- the 4th axis (A)
+def test_a_axis_parsed_shown_only_when_known_and_jogged_in_degrees():
+    """A comes from the status's 4th coordinate. It is shown (and may be jogged) only when the machine is known to have
+    a 4th axis: the machine record says so, or the status shows a non-zero A - a bare Z1 reports 0.0 for both."""
+    st = ml.parse_status("<Idle|MPos:-1.0000,-1.0000,-1.0000,0.0000,0.0000|WPos:147.8000,124.4000,60.3600,-180.0000,0.0000|F:0.0,2000.0,100.0>")
+    assert st["mpos_ab"] == [0.0, 0.0] and st["wpos_ab"] == [-180.0, 0.0]
+
+    async def go():
+        emu, mc, _ = await _setup()                       # no module: A is 0.0 / 0.0
+        try:
+            p = mc.payload()
+            assert p["fourth"] is False and p["a"] == {"machine": 0.0, "work": 0.0}
+            assert "4th axis" not in mc.describe()
+            await mc.arm(True); await mc.home(); await _until(lambda: mc.homed); _measured(mc, emu)
+            with pytest.raises(ml.Refused, match="no 4th axis"):
+                await mc.jog("a", 10)
+            # the saved machine says a 4th axis is fitted: A is shown and jogged like X/Y, in degrees
+            mc.set_machine_record({"name": "Makera Z1 + 4th axis", "rotary": {"axis": "A", "about": "x", "installed": True}})
+            assert mc.payload()["fourth"] is True and "4th axis A 0.000°" in mc.describe()
+            with pytest.raises(ml.Refused, match="90° step limit"):
+                await mc.jog("a", 91)
+            n = len(emu.lines)
+            await mc.jog("a", 45)
+            await _until(lambda: len(emu.lines) > n)
+            assert emu.lines[n] == "$J A45.000 F0.5"
+            await _until(lambda: not mc.jog_busy, timeout=10)
+            assert abs(emu.a - 45.0) < 1e-6 and emu.mpos == [-1.0, -1.0, -1.0]      # the chuck turned, the head didn't
+            await asyncio.sleep(0.3)
+            assert abs(mc.payload()["a"]["machine"] - 45.0) < 1e-3
+            mc.set_machine_record({"name": "Makera Z1", "rotary": None})
+            assert mc.payload()["fourth"] is True                                    # a non-zero A latches it for the session
+            # "installed: false" alone doesn't count
+            mc2 = ml.MachineControl(); mc2.set_machine_record({"name": "x", "rotary": {"axis": "A", "installed": False}})
+            assert mc2.rotary_module is None
+        finally:
+            await mc.disconnect(); await emu.stop()
+    run(go())
+
+
+def test_emulator_with_the_module_reports_a_and_shrinks_and_zeroes_it():
+    """With the module fitted the (emulated) Z1 reports WPos A -180 at MPos A 0 like the user's machine: A is shown at
+    once. A0 here = G92.4 A0 + G10 L20 P0 A0 (work A reads 0 whatever the G54 A offset was); shrink = G92.4 A0 S0."""
+    async def go():
+        emu, mc, _ = await _setup(fourth=True)
+        try:
+            assert mc.payload()["fourth"] is True and mc.payload()["a"] == {"machine": 0.0, "work": -180.0}
+            await mc.arm(True); await mc.home(); await _until(lambda: mc.homed); _measured(mc, emu)
+            emu.a = 800.0
+            await asyncio.sleep(0.3)
+            n = len(emu.lines)
+            await mc.shrink_a()
+            await _until(lambda: len(emu.lines) > n)
+            assert emu.lines[n] == "G92.4 A0 S0"
+            assert abs((emu.a - emu.wco_a) - 260.0) < 1e-6          # work A 620 -> 260 (whole turns dropped)
+            await mc.zero_a()
+            await _until(lambda: len(emu.lines) > n + 2)
+            assert emu.lines[n + 1:] == ["G92.4 A0", "G10 L20 P0 A0"] and emu.a == 0.0 and emu.wco_a == 0.0
+            await asyncio.sleep(0.3)
+            assert mc.payload()["a"] == {"machine": 0.0, "work": 0.0} and mc.payload()["origin"]["a"]["ref"] == "here"
+            # G0 with A in a console line turns the chuck (work degrees); G91 moves it relatively
+            await mc.console("G0 A90")
+            await _until(lambda: abs(emu.a - 90.0) < 1e-6, timeout=10)
+            await _until(lambda: emu.state == "Idle", timeout=10)
+            await mc.console("G91 G0 A-30")
+            await _until(lambda: abs(emu.a - 60.0) < 1e-6, timeout=10)
+            await _until(lambda: emu.state == "Idle", timeout=10)
+            await mc.console("G90")
+        finally:
+            await mc.disconnect(); await emu.stop()
+    run(go())
+
+
+def test_rotation_offsets_from_the_controller_and_y0_on_the_axis():
+    """`config-get sd coordinate.rotation_offset_*` reads the module's position from the controller itself (read-only, no
+    Control needed); Y0 on the centreline is G10 L2 P0 Y at anchor1_y + rotation_offset_y, recorded as ref 'axis'."""
+    async def go():
+        emu, mc, _ = await _setup(fourth=True)
+        try:
+            mc.profile.anchor1 = (-191.28, -194.45)
+            mc.profile.rotation_offset = None
+            assert mc.axis_machine_y() is None
+            await mc.arm(True); await mc.home(); await _until(lambda: mc.homed)
+            with pytest.raises(ml.Refused, match="unknown"):
+                await mc.set_origin_axis_y()
+            await mc.read_rotation_offset()
+            assert mc.rotation_offset == {"x": -7.5, "y": 69.0, "z": 17.0, "source": "controller"}
+            assert [l for l in emu.lines if l.startswith("config-get sd coordinate.rotation_offset_")]
+            assert abs(mc.axis_machine_y() - (-194.45 + 69.0)) < 1e-9 and abs(mc.payload()["rotary"]["axis_my"] + 125.45) < 1e-9
+            n = len(emu.lines)
+            await mc.set_origin_axis_y()
+            assert emu.lines[n] == "G10 L2 P0 Y-125.450" and abs(emu.wco[1] + 125.45) < 1e-9 and emu.wco[0] == -148.8
+            o = mc.payload()["origin"]
+            assert o["y"]["ref"] == "axis" and not o["y"].get("changed") and o["xy"]["ref"] == "axis" and not o["xy"].get("changed")
+            assert abs(mc.rotary_found["axis_my"] + 125.45) < 1e-9
+            with pytest.raises(ml.Refused, match="outside"):
+                await mc.set_origin_axis_y(-400.0)
+            await mc.set_origin_axis_y(-120.0)                      # a typed axis Y
+            assert emu.lines[-1] == "G10 L2 P0 Y-120.000" and "typed" in mc.payload()["origin"]["y"]["how"]
+            # X0 at the chuck face + offset, nothing moves
+            mp = list(emu.mpos)
+            await mc.origin_x_at(-150.0, "chuck", "chuck face at machine X -170 + 20 mm")
+            assert emu.lines[-1] == "G10 L2 P0 X-150.000" and emu.mpos == mp and emu.wco[0] == -150.0
+            o = mc.payload()["origin"]
+            assert o["x"]["ref"] == "chuck" and o["y"]["ref"] == "axis" and not o["xy"].get("changed")
+        finally:
+            await mc.disconnect(); await emu.stop()
+    run(go())
+
+
+def test_makeras_4th_axis_z_probe_m495_o_without_f_puts_z0_on_the_centreline():
+    """The 4-axis variant of M495 is `M495 X0 Y0 O0` - O without F (ATCHandler: zprobe_abs). The firmware goes to the
+    module's reference pad, touches it with the wired probe and sets work Z0 rotation_offset_z below the pad: the chuck
+    centreline. Wrapped like auto Z: T0 fitted and measured, watched, the axis position recorded for the machine model."""
+    async def go():
+        emu, mc, _ = await _setup(fourth=True)
+        saved = []
+        try:
+            mc.profile.anchor1 = (-191.28, -194.45)
+            mc.profile.rotation_offset = {"x": -7.5, "y": 69.0, "z": 17.0, "source": "live config"}
+            mc.on_rotary_found = lambda f: saved.append(f)
+            await mc.arm(True); await mc.home(); await _until(lambda: mc.homed); _measured(mc, emu)
+            with pytest.raises(ml.Refused, match="probe \\(T0\\)"):
+                await mc.rotary_z_probe()                              # T6 fitted
+            await mc.change_tool(0)
+            await _until(lambda: mc.routine["stage"] == "awaiting", timeout=15)
+            await mc.confirm_tool_change()
+            await _until(lambda: mc.routine["stage"] in ("done", "failed"), timeout=30)
+            info = mc.check_rotary_z_probe()
+            assert info["command"] == "M495 X0 Y0 O0" and abs(info["pad"][0] - (-191.28 - 7.5 - 3)) < 1e-9 and abs(info["pad"][1] + 125.45) < 1e-9
+            n = len(emu.lines)
+            await mc.rotary_z_probe()
+            await _until(lambda: len(emu.lines) > n)
+            assert emu.lines[n] == "M495 X0 Y0 O0"
+            await _until(lambda: mc.routine["stage"] in ("done", "failed"), timeout=30)
+            assert mc.routine["stage"] == "done", mc.routine
+            assert abs(emu.mpos[0] - (-201.78)) < 1e-6 and abs(emu.mpos[1] + 125.45) < 1e-6        # at the pad
+            assert abs(emu.wco[2] - (emu.pad_z - 17.0)) < 1e-6                                     # Z0 = pad - 17 = centreline
+            assert "centreline" in mc.routine["msg"] and abs(mc.routine["found"]["axis_mz"] - (-62.0)) < 1e-6
+            assert mc.payload()["origin"]["z"]["ref"] == "axis"
+            assert saved and abs(saved[0]["axis_my"] + 125.45) < 1e-9 and abs(saved[0]["pad_mz"] + 45.0) < 1e-6
+            assert not emu.crashes
+        finally:
+            await mc.disconnect(); await emu.stop()
+    run(go())
+
+
+def test_4th_axis_z_probe_is_held_if_nothing_touches_before_the_floor():
+    async def go():
+        emu, mc, _ = await _setup(fourth=True)
+        try:
+            mc.profile.anchor1 = (-191.28, -194.45)
+            mc.profile.rotation_offset = {"x": -7.5, "y": 69.0, "z": 17.0}
+            await mc.arm(True); await mc.home(); await _until(lambda: mc.homed)
+            emu.tool = 0
+            await asyncio.sleep(0.3)
+            _measured(mc, emu)
+            emu.pad_z = -95.0                                   # no pad where expected: the probe would run to the bed
+            await mc.rotary_z_probe(max_drop=30)                # the floor: 30 mm below the clearance height
+            await _until(lambda: mc.routine["stage"] in ("done", "failed"), timeout=30)
+            assert mc.routine["stage"] == "failed" and "nothing touched" in mc.routine["msg"], mc.routine
+            await _until(lambda: b"!" in emu.realtime, timeout=3)
+            assert not mc.armed
+        finally:
+            await mc.disconnect(); await emu.stop()
+    run(go())
+
+
+ROT_PROG = """; AgenticCAD makera post: rotary
+G21 G90 G17
+; Rough [rotary_rough] T6 flat D3.175
+M6 T6
+M3 S10000
+G0 Z25
+G0 X5 Y0 A0
+G1 Z18 F300
+G1 X40 A360 F600
+G1 X5 A720
+G0 Z25
+M5
+G53 G0 Z-1
+"""
+
+
+def test_rotary_programs_collect_a_and_need_the_origin_on_the_axis():
+    prep = ml.prepare_program(ROT_PROG, ["Rough"])
+    assert prep["uses_a"] and prep["extents"]["a"] == [0.0, 720.0] and prep["extents"]["z"] == [18.0, 25.0]
+    assert not ml.prepare_program(PROG1, ["Face"])["uses_a"]
+
+    async def go():
+        emu, mc, _ = await _setup(speed=60.0, fourth=True)
+        try:
+            mc.profile.anchor1 = (-191.28, -194.45)
+            mc.profile.rotation_offset = {"x": -7.5, "y": 69.0, "z": 17.0}
+            mc.set_machine_record({"name": "Z1+4", "rotary": {"axis": "A", "installed": True, "y_reach": 30.0}})
+            await mc.arm(True); await mc.home(); await _until(lambda: mc.homed); _measured(mc, emu)
+            emu.wco = [-150.0, -125.45, -62.0]
+            await asyncio.sleep(0.4)
+            with pytest.raises(ml.Refused, match="Y, Z not zeroed on the axis"):
+                mc.check_job(prep)                                  # nothing zeroed on the axis this session
+            chk = mc.check_job(prep, ack=True)                       # the user vouches for it
+            assert any("acknowledged" in n for n in chk["notes"])
+            await mc.set_origin_axis_y()
+            await mc.origin_x_at(-150.0, "chuck", "typed")
+            mc._record_origin(z=("axis", "test"))
+            with pytest.raises(ml.Refused, match="A0 hasn't been set"):
+                mc.check_job(prep)
+            await mc.zero_a()
+            chk = mc.check_job(prep)
+            assert any("4th axis: Y0 and Z0 on the chuck centreline, A 0.0 .. 720.0°" in n for n in chk["notes"])
+            air = ml.prepare_program(ROT_PROG, ["Rough"], air_cut=10)
+            assert any("radial" in n for n in mc.check_job(air)["notes"])
+            wide = ml.prepare_program(ROT_PROG.replace("X5 Y0 A0", "X5 Y35 A0"), ["Rough"])
+            with pytest.raises(ml.Refused, match="30 mm reach"):
+                mc.check_job(wide)
+            # a flat program is unaffected by the rotary rules
+            mc.check_job(ml.prepare_program(PROG1, ["Face"]))
+            await mc.run_program("rot", prep, rotary=True)
+            await _until(lambda: mc.job["stage"] in ("done", "failed"), timeout=60)
+            assert mc.job["stage"] == "done" and mc.job["rotary"], mc.job
+            assert abs((emu.a - emu.wco_a) - 720.0) < 1e-6 and not emu.crashes       # the program turned the chuck twice
         finally:
             await mc.disconnect(); await emu.stop()
     run(go())

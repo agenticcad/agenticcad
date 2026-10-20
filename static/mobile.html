@@ -54,6 +54,8 @@
   .pad button:active:not(:disabled), .zcol button:active:not(:disabled) { background:#2b3340; border-color:var(--blue); }
   .pad .c { background:none; border:0; display:flex; align-items:center; justify-content:center; color:var(--muted); font-size:11px; text-align:center; }
   .zcol { display:grid; grid-template-rows:repeat(2,97px); gap:6px; } .zcol button { width:72px; }
+  .arow { display:flex; gap:6px; justify-content:center; margin-top:8px; } .arow button { height:52px; width:64px; background:var(--card2); border:1px solid var(--line); border-radius:14px; font-weight:800; font-size:17px; }
+  .arow .astep { width:84px; background:none; color:var(--muted); font-weight:600; font-size:14px; } .arow button:active:not(:disabled) { background:#2b3340; border-color:var(--blue); }
   .why { color:var(--muted); font-size:12.5px; text-align:center; margin-top:10px; min-height:17px; }
   .kv { display:flex; justify-content:space-between; padding:6px 0; border-bottom:1px solid var(--line); font-size:14px; } .kv:last-child { border:0; }
   .kv span:first-child { color:var(--muted); }
@@ -80,7 +82,7 @@
   <div class="top"><div class="brand">Agentic<b>CAD</b></div><span class="muted small" id="who"></span><div class="badge" id="badge">…</div></div>
 
   <div class="cam"><img id="cam" alt=""><div class="off" id="camoff">Camera off</div>
-    <div class="pos"><div><small>X</small><span id="px">–</span></div><div><small>Y</small><span id="py">–</span></div><div><small>Z</small><span id="pz">–</span></div></div></div>
+    <div class="pos"><div><small>X</small><span id="px">–</span></div><div><small>Y</small><span id="py">–</span></div><div><small>Z</small><span id="pz">–</span></div><div id="pa-box" style="display:none"><small>A°</small><span id="pa">–</span></div></div></div>
 
   <div id="conn" class="connect" style="display:none"><input id="host" placeholder="machine address" inputmode="decimal" autocomplete="off"><button class="btn primary" id="connect">Connect</button></div>
 
@@ -101,6 +103,7 @@
       </div>
       <div class="zcol"><button data-j="z+">Z+</button><button data-j="z-">Z−</button></div>
     </div>
+    <div class="arow" id="arow" style="display:none"><button data-j="a-">A−</button><button class="astep" id="astep">10°</button><button data-j="a+">A+</button></div>
     <div class="row" style="margin-top:12px"><button class="btn" id="home">⌂ Home</button><button class="btn" id="raise">Raise Z</button></div>
     <div class="why" id="why"></div>
   </div>
@@ -150,7 +153,8 @@
 const KEY = (() => { const q = new URLSearchParams(location.search).get('k'); try { if (q) localStorage.setItem('ac_key', q); return q || localStorage.getItem('ac_key') || ''; } catch (e) { return q || ''; } })();
 if (new URLSearchParams(location.search).get('k')) history.replaceState(null, '', '/m');     // keep the key out of screenshots
 const $ = id => document.getElementById(id);
-let ST = null, step = 1, tnum = 0, busy = false, camOn = false;
+let ST = null, step = 1, tnum = 0, busy = false, camOn = false, stepA = 10;
+const A_STEPS = [1, 10, 45, 90];                 // degrees per tap on A+ / A− (90 is the server's limit)
 function toast(t, ok) { const e = $('toast'); e.textContent = t; e.classList.toggle('ok', !!ok); e.classList.add('show'); clearTimeout(toast.t); toast.t = setTimeout(() => e.classList.remove('show'), ok ? 2200 : 4200); }
 async function api(body) {
   if (busy && body && !['halt', 'hold'].includes(body.action)) return;
@@ -174,6 +178,9 @@ function render(st) {
   if (!conn && st.saved && st.saved.host && !$('host').value) $('host').value = st.saved.host;
   const rel = st.position_reliable !== false, w = s.wpos || [];
   $('px').textContent = rel ? f(w[0]) : '?'; $('py').textContent = rel ? f(w[1]) : '?'; $('pz').textContent = rel ? f(w[2]) : '?';
+  // the 4th axis: only on a machine known to have one (st.fourth)
+  $('pa-box').style.display = st.fourth ? '' : 'none'; $('arow').style.display = st.fourth ? '' : 'none';
+  $('pa').textContent = rel ? f((st.a || {}).work) : '?'; $('astep').textContent = stepA + '°';
   $('who').textContent = conn ? (st.profile || '') : '';
   $('stop').disabled = !conn; $('hold').disabled = !conn;
   $('resume').disabled = !(conn && st.armed && ['Hold', 'Pause'].includes(s.state));
@@ -245,9 +252,11 @@ $('raise').onclick = () => api({ action: 'raise_z', feed: 500 });
 $('connect').onclick = () => api({ action: 'connect', host: $('host').value.trim() });
 $('disconnect').onclick = () => api({ action: 'disconnect' });
 document.querySelectorAll('#steps button').forEach(b => b.onclick = () => { step = +b.dataset.s; document.querySelectorAll('#steps button').forEach(x => x.classList.toggle('on', x === b)); $('stepc').textContent = step + ' mm'; });
+$('astep').onclick = () => { stepA = A_STEPS[(A_STEPS.indexOf(stepA) + 1) % A_STEPS.length]; $('astep').textContent = stepA + '°'; };
 document.querySelectorAll('[data-j]').forEach(b => b.onclick = () => {
   const ax = b.dataset.j[0], sg = b.dataset.j[1] === '+' ? 1 : -1;
   let d = step * sg; if (ax === 'z' && sg < 0) d = -Math.min(step, 1);
+  if (ax === 'a') d = stepA * sg;                 // the 4th axis: degrees
   api({ action: 'jog', axis: ax, dist: d });
 });
 document.querySelectorAll('.tabs button').forEach(b => b.onclick = () => {

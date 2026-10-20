@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import dataclasses
 import json
 import re
 import time
@@ -100,8 +101,49 @@ if "coordinate.anchor1_x" in _live and "coordinate.anchor1_y" in _live:
     machine.profile.anchor1 = (_live["coordinate.anchor1_x"], _live["coordinate.anchor1_y"])
 if "coordinate.clearance_x" in _live and "coordinate.clearance_y" in _live:
     machine.profile.change_xy = (_live["coordinate.clearance_x"], _live["coordinate.clearance_y"])
+if all(k in _live for k in machine_link.ROTATION_KEYS):    # the rotary module's reference pad / centreline offsets
+    machine.profile.rotation_offset = {k[-1]: float(_live[k]) for k in machine_link.ROTATION_KEYS} | {"source": "live config"}
 camera = machine_link.CameraRelay()
 agent.machine, agent.camera = machine, camera
+
+
+def _rotary_machine() -> "cam.Machine | None":
+    """The machine record a 4th-axis zeroing belongs to: the CAM program's machine if it has a rotary, else the first
+    library machine on the Makera post with one."""
+    m = agent.program.setup.machine if agent.program is not None else None
+    if m is not None and m.rotary:
+        return m
+    return next((x for x in agent.library.machines().values() if x.rotary and x.post == "makera"), None)
+
+
+def _sync_machine_record() -> None:
+    """Keep MachineControl's idea of the machine record (its `rotary`, `model.rotary`) in step with the CAM program."""
+    try:
+        m = agent.program.setup.machine if agent.program is not None else None
+        machine.set_machine_record(dataclasses.asdict(m) if m is not None else None)
+    except Exception:  # noqa: BLE001
+        machine.set_machine_record(None)
+
+
+async def _rotary_found(found: dict) -> None:
+    """The 4th-axis Z probe found the chuck centreline: write it into the saved machine record (model.rotary.axis_my /
+    axis_mz, machine coordinates with the wired probe) so the machine model and the simulation can place the module."""
+    m = _rotary_machine()
+    if m is None:
+        machine._note("axis position found but no machine record has a 4th axis to save it to (Settings ▸ Machines)")
+        return
+    rec = dataclasses.asdict(m)
+    model = dict(rec.get("model") or {})
+    model["rotary"] = {**(model.get("rotary") or {}), **{k: found[k] for k in ("axis_my", "axis_mz", "pad_mz") if found.get(k) is not None},
+                       "found": time.strftime("%Y-%m-%d %H:%M")}
+    rec["model"] = model
+    agent.library.save_machine(rec)
+    machine._note(f"axis position saved to machine '{m.name}' (model.rotary: Y {found.get('axis_my')}, Z {found.get('axis_mz')})")
+    _sync_machine_record()
+    await bus.emit({"type": "library", **agent.library_payload()})
+
+
+machine.on_rotary_found = _rotary_found
 
 
 _loader: asyncio.Task | None = None
@@ -826,16 +868,22 @@ class MachineBody(BaseModel):
     text: str | None = None          # run_file: the .nc file's contents
     name: str | None = None          # run_file: its name
     power: float | None = None       # switch: speed in % (the spindle fan)
+    ack: bool | None = None          # check_ops / run_ops: the user vouches for a rotary setup's origin ("I checked it")
 
 
 def _program_for_ops(body: MachineBody) -> tuple[dict, dict, str]:
-    """The CAM program's chosen operations (one setup) as the Z1 will play them: (prepared program, info, file label)."""
-    return agent.program_for_ops(body.ops or [], body.air or 0.0)
+    """The CAM program's chosen operations (one setup) as the Z1 will play them: (prepared program, info, file label).
+    `info["rotary"]`: the setup is on the 4th axis (its origin must be zeroed on the axis)."""
+    prep, info, label = agent.program_for_ops(body.ops or [], body.air or 0.0)
+    st = next((s for s in agent.program.setups if s.name == info.get("setup")), None) if agent.program is not None else None
+    info["rotary"] = bool(st is not None and st.rotary)
+    return prep, info, label
 
 
 @app.get("/api/machine")
 async def machine_get():
     saved = json.loads(MACHINE_FILE.read_text()) if MACHINE_FILE.exists() else {}
+    _sync_machine_record()
     return {**machine.payload(), "saved": saved, "camera_error": camera.error}
 
 
@@ -851,6 +899,7 @@ async def machine_discover():
 @app.post("/api/machine")
 async def machine_post(body: MachineBody):
     a = body.action
+    _sync_machine_record()
     try:
         if a == "connect":
             if not body.host:
@@ -888,13 +937,13 @@ async def machine_post(body: MachineBody):
                                          body.y if body.y is not None else 20.0, body.depth or 2.0, body.dia or 2.0)
         elif a == "check_ops":                            # what running these operations would do (nothing is sent)
             prep, info, label = await asyncio.to_thread(_program_for_ops, body)   # big programs: keep the loop (and status) running
-            chk = machine.check_job(prep)
+            chk = machine.check_job(prep, rotary=info["rotary"], ack=bool(body.ack))
             return {**machine.payload(), "check": {"label": machine_link.program_filename(label), "lines": prep["lines"],
                                                    "ops": prep["ops"], "tools": prep["tools"], "extents": prep["extents"],
-                                                   "notes": chk["notes"], **info}}
+                                                   "notes": chk["notes"], "uses_a": prep["uses_a"], **info}}
         elif a == "run_ops":                              # upload the chosen operations to the machine and play them
             prep, info, label = await asyncio.to_thread(_program_for_ops, body)   # big programs: keep the loop (and status) running
-            res = await machine.run_program(label, prep, info)
+            res = await machine.run_program(label, prep, info, rotary=info["rotary"], ack=bool(body.ack))
         elif a in ("check_file", "run_file"):              # any .nc file, through the same checks as CAM operations
             if not body.text:
                 raise machine_link.Refused("no file")
@@ -904,11 +953,24 @@ async def machine_post(body: MachineBody):
             prep = machine_link.prepare_program(body.text, [], air_cut=air)
             label = Path(body.name or "file").stem + ("_air" if air else "")
             if a == "check_file":
-                chk = machine.check_job(prep)
+                chk = machine.check_job(prep, ack=bool(body.ack))      # a file with A words is a 4th-axis program
                 return {**machine.payload(), "check": {"label": machine_link.program_filename(label), "lines": prep["lines"],
                                                        "ops": [], "tools": prep["tools"], "extents": prep["extents"],
-                                                       "notes": chk["notes"], "program": body.name or "file"}}
-            res = await machine.run_program(label, prep, {"program": body.name or "file", "file": True})
+                                                       "notes": chk["notes"], "uses_a": prep["uses_a"], "program": body.name or "file"}}
+            res = await machine.run_program(label, prep, {"program": body.name or "file", "file": True}, ack=bool(body.ack))
+        # -- the 4th axis: Makera's own commands, nothing moves X/Y/Z except the firmware's 4th-axis Z probe (watched)
+        elif a == "rotary_z_probe":                        # M495 X0 Y0 O0: Z0 on the chuck centreline (wired probe T0)
+            res = await machine.rotary_z_probe(body.depth)  # depth: optional Z search limit below the clearance height
+        elif a == "origin_axis_y":                         # G10 L2 P0 Y at anchor1_y + rotation_offset_y (or typed machine Y)
+            res = await machine.set_origin_axis_y(body.y)
+        elif a == "origin_x_at":                           # G10 L2 P0 X at machine x (e.g. chuck face + offset)
+            res = await machine.origin_x_at(body.x if body.x is not None else float('nan'), body.kind or "typed", body.name or "set")
+        elif a == "zero_a":                                # G92.4 A0 + G10 L20 P0 A0
+            res = await machine.zero_a()
+        elif a == "shrink_a":                              # G92.4 A0 S0
+            res = await machine.shrink_a()
+        elif a == "read_rotation_offset":                  # config-get sd coordinate.rotation_offset_* (read-only)
+            res = await machine.read_rotation_offset()
         elif a == "set_origin":                            # the head's position becomes these work coordinates (G10 L20)
             res = await machine.set_origin(body.x, body.y, body.z)
         elif a == "origin_at":                             # X0 Y0 at machine x, y (e.g. the block corner from 3 probed corners)
