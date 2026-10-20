@@ -592,6 +592,7 @@ class Op:
     defaults: dict = field(default_factory=dict)              # what those values are without the overrides
     cut_defaults: dict = field(default_factory=dict)          # the script's cut settings (CUT_FIELDS of this kind)
     cut_overrides: dict = field(default_factory=dict)         # cut settings changed in the CAM tab
+    post_tol: float | None = None                              # arc-fit / line-merge tolerance for the post (None: by kind)
     color_override: bool = False                              # the colour comes from the CAM tab
 
     @property
@@ -1075,7 +1076,8 @@ def contour(setup: Setup, tool: Tool, polys, z_top: float, z_bottom: float, side
             for j in range(i + 1, n + 1):
                 s = sum(segl[:j]); x, y = path[j % n]
                 zz = levels[-1] if zmod is None else zmod(s % total, levels[-1])
-                pb.feed_to(x, y, zz, pb.plunge if abs(zz - pb.pos[2]) > 1e-9 else None)
+                dz = abs(zz - pb.pos[2]); L3 = math.dist(pb.pos, (x, y, zz))
+                pb.feed_to(x, y, zz, None if dz < 1e-9 else min(pb.feed, pb.plunge * L3 / dz))   # descent never outruns the plunge rate
         for x, y in lead_out:
             pb.feed_to(x, y, pb.pos[2])
         pb.retract()
@@ -1529,7 +1531,7 @@ def adaptive(setup: Setup, tool: Tool, polys, z_top: float, z_bottom: float, ste
                 return [q]
         return None
 
-    def link_to(pos, target, z, z_lift, Kc, Kr, back=None):
+    def link_to(pos, target, z, z_lift, Kc, Kr, back=None, z_open=None):
         """Move from pos to target at level z: through cleared ground (feed if short, else a low rapid hop), else
         lift-and-rapid inside the pocket, else retract. Kc is where the cutter centre can feed through cleared ground
         (its edge may graze the walls by 0.02 mm), Kr the stricter version for rapids (0.005 mm at most, the polygon model's own error):
@@ -1558,6 +1560,8 @@ def adaptive(setup: Setup, tool: Tool, polys, z_top: float, z_bottom: float, ste
                 pb._add(RAPID, wx, wy, z_lift)
             if clear and z_lift - z > 0.35:
                 pb._add(RAPID, target[0], target[1], z + 0.3)
+            elif z_open is not None and z_open + 0.05 < z_lift - 1e-6 and z_open + 0.05 > z + 1e-6:
+                pb._add(RAPID, target[0], target[1], z_open + 0.05)   # the previous level cleared everything above z_open
             pb._add(PLUNGE, target[0], target[1], z, pb.plunge)
             return "lift"
         pb.rapid_xy(target[0], target[1]); pb.plunge_to(z)
@@ -1641,7 +1645,8 @@ def adaptive(setup: Setup, tool: Tool, polys, z_top: float, z_bottom: float, ste
                 Kc_live = prep(Klive.buffer(-r + 0.02, join_style=1).intersection(C_link))
                 Kr_live = prep(Klive.buffer(-r + 0.005, join_style=1).intersection(C_link))
                 lead = lead_in(dense, Kc_live)
-                kind_ = link_to(pos, lead[0] if lead else dense[0], z, z_lift, Kc_live, Kr_live, last_pass)
+                kind_ = link_to(pos, lead[0] if lead else dense[0], z, z_lift, Kc_live, Kr_live, last_pass,
+                                z_open=(z_prev if z_prev is not None else z_top))
                 if kind_ == "stay":
                     links += 1
                 elif kind_ == "hop":
@@ -1660,6 +1665,8 @@ def adaptive(setup: Setup, tool: Tool, polys, z_top: float, z_bottom: float, ste
                     e = eng_angle(mat_prep, x, y, hx / ln, hy / ln)
                     max_eng_seen = max(max_eng_seen, e)
                     f = feed if e <= phi * 1.15 else max(feed * 0.3, feed * phi / e)
+                    if f < feed:
+                        f = max(feed * 0.3, math.floor(f / (feed * 0.14)) * feed * 0.14)   # 5 steps between 30 % and 100 %
                     pb.feed_to(x, y, z, f)
                     px_, py_ = x, y
                 pos = dense[-1]
@@ -1841,7 +1848,7 @@ def chamfer_edges(setup: Setup, tool: Tool, polys, z_top: float, width: float, s
     return op
 
 
-def vcarve(setup: Setup, tool: Tool, polys, z_top: float, max_depth: float | None = None,
+def vcarve(setup: Setup, tool: Tool, polys, z_top: float, max_depth: float | None = None, hop_region=None,
            flat_stepover: float | None = None, stepdown: float | None = None, sample: float | None = None,
            name: str = "V-carve") -> Op:
     """V-carve shapes (letters, a logo) with a V-bit: the tool runs along each shape's centreline (medial axis), as deep
@@ -1944,7 +1951,9 @@ def vcarve(setup: Setup, tool: Tool, polys, z_top: float, max_depth: float | Non
     # plunge rate only for new depth; no descent ever outruns the plunge rate
     link = max(2.5 * fs, 0.06)
     hop_z = z_top + 0.3
-    near = P.buffer(0.5)
+    # links between strokes hop 0.3 mm over the face the text sits on: by default anywhere within the text block (its
+    # convex hull, 1 mm out), which the caller can widen or narrow with hop_region (a polygon in setup XY)
+    near = unary_union(_polys(hop_region)) if hop_region is not None else P.convex_hull.buffer(1.0)
     at = (0.0, 0.0)
     deepest = z_top
     for li, todo in enumerate(todo_by_level):
@@ -1981,7 +1990,8 @@ def vcarve(setup: Setup, tool: Tool, polys, z_top: float, max_depth: float | Non
             deepest = min(deepest, float(c[:, 2].min()))
             at = tuple(c[-1, :2])
     pb.retract()
-    op.params = dict(z_top=z_top, z_bottom=deepest, max_depth=cap, centrelines=len(chains), flat_rings=rings_flat, levels=len(levels))
+    op.params = dict(z_top=z_top, z_bottom=deepest, max_depth=cap, centrelines=len(chains), flat_rings=rings_flat, levels=len(levels),
+                     hop_z=round(hop_z, 3))
     op.warnings.append(f"{tool.label()} ({tool.spec()}): V-carved {len(chains)} centreline stretch{'es' if len(chains) != 1 else ''}, "
                        f"deepest {z_top - deepest:.3f} mm in {len(levels)} level{'s' if len(levels) != 1 else ''}"
                        + (f"; strokes wider than {2 * r_cap:.2f} mm have a flat bottom at {cap:g} mm" if rings_flat else ""))
@@ -2581,24 +2591,48 @@ def _arc_ok(pts, tol, max_sweep: float = math.pi):
     return cx, cy, sign < 0      # cw = clockwise (negative cross) in G17
 
 
+def _arc_is_noise(pts, r, tol) -> bool:
+    """A fitted 'arc' that is really a straight run with rounding noise: its radius dwarfs its chord, or every point is
+    within a tenth of the tolerance of the chord. Judged on the finished candidate, never on a 3-point seed (a true arc's
+    first few points are nearly straight too)."""
+    chord = math.dist(pts[0], pts[-1])
+    if chord < 1e-9:
+        return False
+    if r > 50.0 * chord:
+        return True
+    ux, uy = pts[-1][0] - pts[0][0], pts[-1][1] - pts[0][1]
+    return all(abs((p[0] - pts[0][0]) * uy - (p[1] - pts[0][1]) * ux) / chord <= tol / 10 for p in pts)
+
+
 def _merge_collinear(pts, tol):
-    """Drop interior points that lie on the straight line between their neighbours (within tol)."""
+    """Drop interior points that the straight move replacing them passes within tol of - every dropped point is tested
+    against the chord that is actually emitted (anchor -> candidate end), so the error never creeps along a run; points
+    must also lie between the chord's ends (no reversal)."""
+    return _merge_chord(pts, tol, 2)
+
+
+def _merge_chord(pts, tol, dims):
     if len(pts) < 3:
-        return pts
+        return list(pts)
     out = [pts[0]]
-    anchor = pts[0]
-    for k in range(1, len(pts) - 1):
-        a, b, c = anchor, pts[k], pts[k + 1]
-        vx, vy = c[0] - a[0], c[1] - a[1]
-        ln = math.hypot(vx, vy)
-        if ln < 1e-12:
-            continue
-        dev = abs((b[0] - a[0]) * vy - (b[1] - a[1]) * vx) / ln
-        # also require b to lie between a and c along the line (no reversal)
-        along = ((b[0] - a[0]) * vx + (b[1] - a[1]) * vy) / ln
-        if dev <= tol and 0 <= along <= ln:
-            continue
-        out.append(b); anchor = b
+    a = 0
+    i = 2
+    while i < len(pts):
+        A, C = pts[a], pts[i]
+        v = [C[d] - A[d] for d in range(dims)]
+        ln = math.sqrt(sum(x * x for x in v))
+        ok = ln >= 1e-12
+        if ok:
+            for b in pts[a + 1:i]:
+                w = [b[d] - A[d] for d in range(dims)]
+                along = sum(x * y for x, y in zip(w, v)) / ln
+                perp = math.sqrt(max(sum(x * x for x in w) - along * along, 0.0))
+                if perp > tol or along < -1e-9 or along > ln + 1e-9:
+                    ok = False; break
+        if not ok:
+            a = i - 1
+            out.append(pts[a])
+        i += 1
     out.append(pts[-1])
     return out
 
@@ -2615,26 +2649,8 @@ def _z_linear(pts3, tol):
 
 
 def _merge_collinear3(pts, tol):
-    """Drop interior XYZ points that lie on the straight line between their neighbours (ramps stay one line)."""
-    if len(pts) < 3:
-        return pts
-    out = [pts[0]]
-    anchor = pts[0]
-    for k in range(1, len(pts) - 1):
-        a, b, c = anchor, pts[k], pts[k + 1]
-        v = (c[0] - a[0], c[1] - a[1], c[2] - a[2])
-        ln = math.sqrt(v[0] ** 2 + v[1] ** 2 + v[2] ** 2)
-        if ln < 1e-12:
-            continue
-        w = (b[0] - a[0], b[1] - a[1], b[2] - a[2])
-        cr = (w[1] * v[2] - w[2] * v[1], w[2] * v[0] - w[0] * v[2], w[0] * v[1] - w[1] * v[0])
-        dev = math.sqrt(cr[0] ** 2 + cr[1] ** 2 + cr[2] ** 2) / ln
-        along = (w[0] * v[0] + w[1] * v[1] + w[2] * v[2]) / ln
-        if dev <= tol and 0 <= along <= ln:
-            continue
-        out.append(b); anchor = b
-    out.append(pts[-1])
-    return out
+    """XYZ version of _merge_collinear: ramps stay one line, a tab top plus its exit ramp never merge into one slope."""
+    return _merge_chord(pts, tol, 3)
 
 
 def _with_arcs(moves, tol, max_sweep: float = math.pi, helical: bool = True):
@@ -2670,6 +2686,11 @@ def _with_arcs(moves, tol, max_sweep: float = math.pi, helical: bool = True):
                     break
                 best = (e, res)
                 e += 1
+            if best is not None:
+                e_, (cx_, cy_, _) = best
+                r_ = math.hypot(run[k][0] - cx_, run[k][1] - cy_)
+                if _arc_is_noise([q[:2] for q in run[k:e_]], r_, tol):
+                    best = None                                            # a straight run: merged into a line below
             if best is not None:
                 e, (cx, cy, cw) = best
                 x, y, z = run[e - 1]
@@ -2716,6 +2737,9 @@ def _fmt(v: float) -> str:
 #            M600 suspends the file. Feed for moves with A follows the firmware's own rule (_makera_feed).
 # =============================================================================
 MAKERA_MAX_LINE = CONTROLLERS["makera"]["max_line"]
+# finishing cuts (and anything with a V tool) are posted to this tolerance; roughing to the machine's arc_tolerance
+FINE_POST_TOL = 0.005
+FINE_POST_KINDS = {"parallel3d", "vcarve", "chamfer", "rotary_finish", "rotary_profile", "gear_teeth"}
 MAKERA_CLEAR_Z = -3.0       # machine Z of the firmware's clearance position (coordinate.clearance_z, Z1 and Carvera)
 
 
@@ -2978,7 +3002,9 @@ def _emit(prog: Program, dialect: str) -> str:
             last_f = None
         use_arcs = caps["arcs"] and not op.uses_a
         moves = op.moves
-        for item in _with_arcs(moves, m.arc_tolerance if use_arcs else None, math.radians(caps["max_arc_sweep"]),
+        tol_op = op.post_tol if op.post_tol else (FINE_POST_TOL if op.kind in FINE_POST_KINDS or t.type in ("vbit", "chamfer")
+                                                  else m.arc_tolerance)
+        for item in _with_arcs(moves, tol_op if use_arcs else None, math.radians(caps["max_arc_sweep"]),
                                caps["helical_arcs"]):
             if item[0] == "arc":
                 _, x, y, z, f, cx, cy, cw = item
