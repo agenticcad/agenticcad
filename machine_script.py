@@ -18,16 +18,26 @@ A script runs in the design-script namespace (build123d, `import_step`, maths) p
     machine(home=(x, y, nose_z), travel=(x, y, z), clearance=mm, nose=[{name, r, h}...], table={x, y, t, ...},
             (a level that is not round about the spindle — an off-centre head — is {name, box: [x0, x1, y0, y1], h} in
              the machine's X / Y about the spindle axis, or boxes: [[...], [...]] for a union, e.g. a head + a probe on its side)
-            rotary=None | {axis_y, axis_z, chuck_face_x, chuck_r, tail_x, tail_r, max_diameter, max_length},
+            rotary=None | {axis_y, axis_z, chuck_face_x, chuck_r, [chuck_gap=5, jaw_reach=0, jaw_r=chuck_r, jaw_w, jaw_count=4,
+                           tail=True, tail_x, tail_r, tail_gap=0, tail_cone={half_angle: 30, length}, tail_barrel=0,
+                           tail_block={half_w, z0, z1, length} (bed-frame z), max_diameter, max_length, source]},
             spoilboard=0, stickout=None, sources={number: "verified|reference|estimated: where"}, notes="", key=None)
+        rotary: the simulator's solids. chuck_face_x = the chuck BODY face; the jaws stand jaw_reach proud of it (a ring of
+        radius jaw_r); the stock's end face sits chuck_gap in front of the body face (inside the jaws). The tailstock's live
+        centre: tip at tail_x (cone of half_angle opening to length), then a barrel of radius tail_r for tail_barrel, then
+        the block. The viewer and the simulator put the tip at the program's stock end + tail_gap.
     helpers: box(x, y, z, at=(cx, cy, cz), zmin=None), cyl_z(r, h, at=(x, y), zmin), cyl_x(r, length, y, z, xmin),
              cyl_y(r, length, x, z, ymin), shell(outer, inner, at, zmin, inner_zmin, opening=("front", w, h)),
              bed_holes(key), import_step("file.step") (workspace/imports/), IN = 25.4, HAAS (spec table),
-             machine_record (the library Machine this model is for), fourth (its 4th axis is installed).
+             machine_record (the library Machine this model is for), fourth (its 4th axis is installed),
+             rotary_cfg(clearance=nose_z, axis_y=.., axis_z=.., chuck_gap=.., jaw_reach=.., tail=.., tail_gap=.., stock_length=..)
+               → the same numbers with machine.model["rotary"] applied (axis probed / from the config / set by hand), plus
+               `source` and `source_text` for the sources table (machine_models.rotary_geometry).
 """
 from __future__ import annotations
 
 import json
+import math
 import re
 from pathlib import Path
 from typing import Any
@@ -69,6 +79,68 @@ def normalize_level(lvl: dict, i: int = 0) -> dict:
 
 class MachineScriptError(Exception):
     pass
+
+
+ROTARY_REQUIRED = ("axis_y", "axis_z", "chuck_face_x", "chuck_r")
+
+
+def normalize_rotary(rot: dict) -> dict:
+    """The rotary dict a script gives machine(), validated, with defaults for the keys older scripts don't have so the
+    simulator and the viewer can rely on every key being there."""
+    if not isinstance(rot, dict):
+        raise MachineScriptError("machine(): rotary is a dict (see the module docstring)")
+    missing = [k for k in ROTARY_REQUIRED if k not in rot]
+    if missing:
+        raise MachineScriptError(f"machine(): rotary needs {list(ROTARY_REQUIRED)} (missing {missing})")
+    out = dict(rot)
+
+    def num(k, default=None, lo=None):
+        v = out.get(k, default)
+        if v is None:
+            return None
+        try:
+            v = float(v)
+        except (TypeError, ValueError):
+            raise MachineScriptError(f"machine(): rotary.{k} must be a number (got {v!r})") from None
+        if lo is not None and v < lo:
+            raise MachineScriptError(f"machine(): rotary.{k} must be ≥ {lo} (got {v})")
+        return v
+
+    for k in ROTARY_REQUIRED:
+        out[k] = num(k)
+    if out["chuck_r"] <= 0:
+        raise MachineScriptError("machine(): rotary.chuck_r must be > 0")
+    out["chuck_gap"] = num("chuck_gap", 5.0, 0.0)
+    out["jaw_reach"] = num("jaw_reach", 0.0, 0.0)
+    out["jaw_r"] = num("jaw_r", out["chuck_r"], 0.0)
+    out["jaw_w"] = num("jaw_w", None, 0.0)
+    out["jaw_count"] = int(out.get("jaw_count") or 4)
+    tail = out.get("tail")
+    out["tail"] = bool(tail) if tail is not None else out.get("tail_x") is not None
+    out["tail_x"] = num("tail_x") if out["tail"] else None
+    out["tail_r"] = num("tail_r", 7.0, 0.0)
+    out["tail_gap"] = num("tail_gap", 0.0)
+    if out["tail"] and out["tail_x"] is None:
+        raise MachineScriptError("machine(): rotary.tail is on but tail_x (the live centre's tip X) is missing")
+    cone = out.get("tail_cone") or {}
+    if not isinstance(cone, dict):
+        raise MachineScriptError("machine(): rotary.tail_cone is {half_angle: deg, length: mm}")
+    half = float(cone.get("half_angle", 30.0))
+    if not 1.0 <= half < 90.0:
+        raise MachineScriptError("machine(): rotary.tail_cone.half_angle must be between 1 and 90 degrees")
+    length = float(cone.get("length") or (out["tail_r"] / math.tan(math.radians(half))))
+    out["tail_cone"] = {"half_angle": half, "length": max(length, 0.0)}
+    out["tail_barrel"] = num("tail_barrel", 0.0, 0.0)
+    blk = out.get("tail_block")
+    if blk is not None:
+        try:
+            out["tail_block"] = {"half_w": float(blk["half_w"]), "z0": float(blk["z0"]), "z1": float(blk["z1"]), "length": float(blk.get("length", 40.0))}
+        except (KeyError, TypeError, ValueError):
+            raise MachineScriptError("machine(): rotary.tail_block is {half_w, z0, z1, [length]} (bed-frame z)") from None
+    else:
+        out["tail_block"] = None
+    out["source"] = str(out.get("source") or "reference")
+    return out
 
 
 def slug(name: str) -> str:
@@ -161,10 +233,13 @@ def run(code: str, machine, workspace: Path | None = None, filename: str = "mach
     def machine_meta(**kw):
         meta.update(kw)
 
+    def rotary_cfg(clearance, anchors=None, **defaults):
+        return mm.rotary_geometry(machine, float(clearance), anchors, **defaults)
+
     ns = ck.script_namespace()
     ns.update({"node": node, "part": part, "machine": machine_meta, "box": mm._box, "cyl_z": mm._cyl_z, "cyl_x": mm._cyl_x,
                "cyl_y": mm._cyl_y, "shell": mm._shell, "bed_holes": mm._bed_holes, "MATERIALS": list(mm.MATERIALS), "HAAS": mm.HAAS,
-               "machine_record": machine, "fourth": _has_fourth(machine), "IN": mm.IN})
+               "machine_record": machine, "fourth": _has_fourth(machine), "IN": mm.IN, "rotary_cfg": rotary_cfg})
     token = ck._CTX_WORKSPACE.set(Path(workspace) if workspace else None)
     try:
         exec(compile(code, filename, "exec"), ns)
@@ -221,9 +296,7 @@ def _assemble(machine, nodes, parts, meta) -> mm.MachineModel:
         raise MachineScriptError("machine(): table needs x and y (the table top extents, centred on the origin)")
     rotary = meta.get("rotary")
     if rotary is not None:
-        need = {"axis_y", "axis_z", "chuck_face_x", "chuck_r", "tail_x", "tail_r"}
-        if not need <= set(rotary):
-            raise MachineScriptError(f"machine(): rotary needs {sorted(need)}")
+        rotary = normalize_rotary(rotary)
         if not any(n.axis == "a" for n in nodes):
             raise MachineScriptError("machine(): rotary given but no node has axis='a'")
     warnings: list[str] = []
@@ -258,7 +331,9 @@ def summary(model: mm.MachineModel) -> str:
                  + (f" · stickout {model.stickout}" if model.stickout else " · stickout = flute length + 6"))
     if model.rotary:
         r = model.rotary
-        lines.append(f"4th axis: axis at y {r['axis_y']}, z {r['axis_z']}; chuck face x {r['chuck_face_x']} (r {r['chuck_r']}); tailstock x {r['tail_x']}")
+        lines.append(f"4th axis: axis at y {r['axis_y']}, z {r['axis_z']} ({r.get('source', 'reference')}); chuck body face x {r['chuck_face_x']} "
+                     f"(r {r['chuck_r']}), jaws {r.get('jaw_reach', 0):g} proud (r {r.get('jaw_r', r['chuck_r']):g}), stock {r.get('chuck_gap', 5):g} in front of the face; "
+                     + (f"tailstock tip x {r['tail_x']} (cone {r['tail_cone']['half_angle']:g}°, r {r['tail_r']})" if r.get("tail", True) else "no tailstock"))
     coll = [p.name for p in model.parts if p.collision]
     lines.append(f"collision parts: {', '.join(coll) or 'none (mark the table, spindle and anything near the work with collision=True)'}")
     for w in getattr(model, "warnings", []):

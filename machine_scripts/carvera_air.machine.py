@@ -147,24 +147,48 @@ part("dust hose", "spindle", hose, "paint_white")
 
 # ---------------- 4th axis ----------------
 rotary = None
+rotary_source = None
 if fourth:
-    ay, az = 0.0, 46.0
+    # harmonic-drive module, Ø92 × 200; the axis position is per machine — machine.model["rotary"] overrides these reference
+    # numbers (the Air's anchor offsets are not in machine_link yet: give axis_y/axis_z in the bed frame, or anchor1_y + bed_anchor_y)
+    rg = rotary_cfg(clearance=nose_z, axis_y=0.0, axis_z=46.0, chuck_gap=5.0, jaw_reach=16.0, tail=True, tail_gap=0.0)
+    ay, az = rg["axis_y"], rg["axis_z"]
+    chuck_face = -21.0                                                               # the chuck BODY face
+    jaw_reach, chuck_gap = rg["jaw_reach"], rg["chuck_gap"]
     node("chuck", "bed", axis="a", mode="table", stock=True, pivot=(0.0, ay, az))
     part("4th axis rail", "bed", box(300, 52, 8.5, at=(0, ay, 0), zmin=0), "anodised", collision=True)
     part("4th axis housing", "bed", box(100, 76, 100, at=(-110, ay, 0), zmin=8.5), "anodised", collision=True)
     part("4th axis motor cap", "bed", box(40, 70, 85, at=(-180, ay, 0), zmin=8.5), "acrylic")
-    part("chuck", "chuck", cyl_x(26, 6, ay, az, -60) + cyl_x(24.35, 11, ay, az, -54) + cyl_x(15, 20, ay, az, -43), "steel", collision=True)
+    part("chuck", "chuck", cyl_x(26, 6, ay, az, chuck_face - 39) + cyl_x(24.35, 11, ay, az, chuck_face - 33) + cyl_x(15, 20, ay, az, chuck_face - 20),
+         "steel", collision=True)
+    jaw_r_in, jaw_r_out, jaw_w = 6.0, 22.0, 10.4
     jaws = None
     for k in range(4):
         a = math.radians(90 * k)
-        jaw = Pos(-36 + 15.5, ay + 13.2 * math.cos(a), az + 13.2 * math.sin(a)) * Box(31, 10.4 if k % 2 == 0 else 25.5, 25.5 if k % 2 == 0 else 10.4)
+        rc = (jaw_r_in + jaw_r_out) / 2
+        jaw = (Pos(chuck_face - 15 + (jaw_reach + 15) / 2, ay + rc * math.cos(a), az + rc * math.sin(a)) * Rot(90 * k, 0, 0)
+               * Box(jaw_reach + 15, jaw_r_out - jaw_r_in, jaw_w))
         jaws = jaw if jaws is None else jaws + jaw
     part("chuck jaws", "chuck", jaws, "anodised", collision=True)
-    tail = (box(40, 76, 100, at=(125, ay, 0), zmin=8.5) + cyl_x(7.5, 4, ay, az, 101) + cyl_x(7, 5, ay, az, 96)
-            + Plane(origin=(96, ay, az), z_dir=(-1, 0, 0)) * Cone(7, 0, 8, align=(Align.CENTER, Align.CENTER, Align.MIN)))
-    part("tailstock", "bed", tail, "anodised", collision=True)
-    part("tailstock knob", "bed", cyl_x(9, 8, ay, 72, 145), "anodised")
-    rotary = {"axis_y": ay, "axis_z": az, "chuck_face_x": -21.0, "chuck_r": 26.0, "tail_x": 88.0, "tail_r": 7.5, "max_diameter": 92, "max_length": 200}
+    tail_cone_len, tail_barrel, tail_r = 12.0, 9.0, 7.5
+    if rg["tail"]:
+        bar = rg["stock_length"] if rg["stock_length"] is not None else 100.0
+        tail_tip = chuck_face + chuck_gap + bar + rg["tail_gap"]
+        xb = tail_tip + tail_cone_len + tail_barrel
+        tail = (box(40, 76, 100, at=(xb + 20, ay, 0), zmin=8.5) + cyl_x(7.5, 4, ay, az, xb - 4) + cyl_x(7, tail_barrel - 4, ay, az, tail_tip + tail_cone_len)
+                + Plane(origin=(tail_tip + tail_cone_len, ay, az), z_dir=(-1, 0, 0))
+                * Cone(tail_cone_len * math.tan(math.radians(30)), 0, tail_cone_len, align=(Align.CENTER, Align.CENTER, Align.MIN)))
+        part("tailstock", "bed", tail, "anodised", collision=True)
+        part("tailstock knob", "bed", cyl_x(9, 8, ay, 72, xb + 40), "anodised")
+    else:
+        tail_tip = None
+    rotary = {"axis_y": ay, "axis_z": az, "chuck_face_x": chuck_face, "chuck_r": 26.0, "chuck_gap": chuck_gap,
+              "jaw_reach": jaw_reach, "jaw_r": math.hypot(jaw_r_out, jaw_w / 2), "jaw_w": jaw_w, "jaw_count": 4,
+              "tail": rg["tail"], "tail_x": tail_tip, "tail_r": tail_r, "tail_gap": rg["tail_gap"],
+              "tail_cone": {"half_angle": 30.0, "length": tail_cone_len}, "tail_barrel": tail_barrel,
+              "tail_block": {"half_w": 38.0, "z0": 8.5, "z1": 108.5, "length": 40.0},
+              "max_diameter": 92, "max_length": 200, "source": rg["source"]}
+    rotary_source = rg["source_text"]
 
 machine(key="air_4axis" if fourth else "air", home=(hx, hy, nose_z), travel=(300, 200, 130), clearance=nose_z,
         nose=[{"name": "collet / nose", "r": 8.0, "h": 21.0}, {"name": "collar", "r": 16.8, "h": 8.0}, {"name": "head", "r": 55.0, "h": 200.0}],
@@ -176,5 +200,6 @@ machine(key="air_4axis" if fourth else "air", home=(hx, hy, nose_z), travel=(300
                  "enclosure 500×450×450": "verified: makera.com footprint (W 500 × D 450 × H 450); top at +356 / 456 overall so the head clears the canopy",
                  "canopy, panels, frame, chamfers, lean": "estimated: Makera product photos (chamfers 35×70 plan, 50×55 front-top, front pane leans back 90 over its height, 4 mm acrylic)",
                  "pendant, hose, cable chains, LED bar, setter, probe, feet": "estimated: Makera product photos",
-                 "4th axis": "reference: chuck parts from the community model; Ø92×200 verified: makera.com"},
+                 "4th axis": "reference: chuck parts from the community model; Ø92×200 verified: makera.com",
+                 **({"4th axis position": rotary_source} if rotary_source else {})},
         notes="Moving bed in Y under a fixed rear bridge; the head moves X along the bridge rods and Z. Canopy hinged at the rear bar (shown closed). Cable chains and hose are drawn at the home pose.")
