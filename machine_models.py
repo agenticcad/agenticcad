@@ -208,11 +208,16 @@ def rotary_geometry(machine, clearance: float, anchors: tuple[float, float] | No
             notes.append(f"machine Y {float(ov['axis_my']):.2f} → bed Y {out['axis_y']:+.2f} (anchor1 Y {a1y}, bed anchor {bay})")
     elif ov.get("axis_y") is not None:
         out["axis_y"] = float(ov["axis_y"]); src = "manual"
-    if ov.get("axis_mz") is not None:
+    if ov.get("axis_mz") is not None and ov.get("bed_mz") is not None:
+        # both touched with the same probe: the tool length cancels, this is exact
+        out["axis_z"] = round(float(ov["axis_mz"]) - float(ov["bed_mz"]), 3); src = "probed"
+        notes.append(f"axis at machine Z {float(ov['axis_mz']):.2f}, bed at {float(ov['bed_mz']):.2f} with the same probe → {out['axis_z']:.2f} above the bed")
+    elif ov.get("axis_mz") is not None:
         stick = float(ov.get("probe_stickout") or 0.0)
         out["axis_z"] = round(float(ov["axis_mz"]) + float(clearance) - stick, 3); src = "config" if src == "reference" else src
         notes.append(f"machine Z {float(ov['axis_mz']):.2f} → {out['axis_z']:.2f} above the bed (nose {clearance} above the bed at Z 0"
-                     + (f", probe tip {stick} below the nose" if stick else "") + ")")
+                     + (f", probe tip {stick} below the nose" if stick else ", the probe's own length not allowed for: touch the bare bed "
+                        "with it (Zero ▸ Bed height) for the exact height") + ")")
     elif ov.get("axis_z") is not None:
         out["axis_z"] = float(ov["axis_z"]); src = "manual" if src == "reference" else src
     if ov.get("source") in ("config", "probed", "manual") and src != "reference":

@@ -912,6 +912,17 @@ def _polys(x) -> list[Polygon]:
     raise CamError(f"cannot interpret {type(x).__name__} as polygon(s)")
 
 
+def regular_polygon(sides: int, across_flats: float, center=(0.0, 0.0), rotation: float = 0.0) -> Polygon:
+    """A regular polygon (hex, square, ...) by its across-flats size - e.g. the cross-section rotary_profile turns a
+    round bar into. `rotation` in degrees; with 0 a flat faces +Y (sits on top at A = 0)."""
+    n = int(sides)
+    if n < 3 or across_flats <= 0:
+        raise CamError("regular_polygon: sides >= 3 and across_flats > 0")
+    rc = across_flats / 2 / math.cos(math.pi / n)
+    a0 = math.radians(rotation) + math.pi / 2 + math.pi / n
+    return Polygon([(center[0] + rc * math.cos(a0 + 2 * math.pi * k / n), center[1] + rc * math.sin(a0 + 2 * math.pi * k / n)) for k in range(n)])
+
+
 def circle(x: float, y: float, diameter: float) -> Polygon:
     return Point(x, y).buffer(diameter / 2, 64)
 
@@ -1401,7 +1412,7 @@ def adaptive(setup: Setup, tool: Tool, polys, z_top: float, z_bottom: float, ste
     rct = 1.0 / math.sqrt(1.0 - (1.0 - 2.0 * stepover) ** 2) if (chip_thinning and stepover < 0.5) else 1.0
     feed = min(pb.feed * rct, min(setup.machine.max_feed.get("x", 1e9), setup.machine.max_feed.get("y", 1e9)))
     phi = math.degrees(math.acos(max(-1.0, min(1.0, 1 - ae / r))))
-    op.params = dict(z_top=z_top, z_bottom=z_bottom, engagement=round(ae, 3), engagement_angle=round(phi, 1),
+    op.params = dict(z_top=z_top, z_bottom=z_bottom, engagement=round(ae, 3), engagement_angle=round(phi, 1), stock_to_leave=stock_to_leave,
                      stepdown=round(sd, 3), passes=len(levels), feed=int(feed))
     sign = 1.0 if climb else -1.0
     # engagement-aware feed: in corners the contact arc rises above the target even though the radial
@@ -1602,14 +1613,29 @@ def adaptive(setup: Setup, tool: Tool, polys, z_top: float, z_bottom: float, ste
             return "hop"
         path = lifted_path(pos, target)
         if path is not None:
+            # a pass start sits on the wall: the lifted rapid stops where its footprint is still 0.02 mm clear of the
+            # wall (uncut stock - or the skin a previous band left - stands there up to the stock top), comes down,
+            # and the last fraction of a millimetre is a feed move at depth
+            q = path[-1]; p_ = path[-2] if len(path) > 1 else pos
+            stop = q
+            if not C_in.covers(Point(q)):
+                L_ = math.dist(p_, q)
+                for t in np.arange(0.02, min(0.6, L_), 0.02):
+                    cand = (q[0] + (p_[0] - q[0]) * t / L_, q[1] + (p_[1] - q[1]) * t / L_)
+                    if C_in.covers(Point(cand)):
+                        stop = cand; break
             pb._add(RAPID, pos[0], pos[1], z_lift)
-            for wx, wy in path:
+            for wx, wy in path[:-1]:
                 pb._add(RAPID, wx, wy, z_lift)
-            if clear and z_lift - z > 0.35:
-                pb._add(RAPID, target[0], target[1], z + 0.3)
+            pb._add(RAPID, stop[0], stop[1], z_lift)
+            clear_stop = clear if stop is q else Kr.covers(Point(stop))
+            if clear_stop and z_lift - z > 0.35:
+                pb._add(RAPID, stop[0], stop[1], z + 0.3)
             elif z_open is not None and z_open + 0.05 < z_lift - 1e-6 and z_open + 0.05 > z + 1e-6:
-                pb._add(RAPID, target[0], target[1], z_open + 0.05)   # the previous level cleared everything above z_open
-            pb._add(PLUNGE, target[0], target[1], z, pb.plunge)
+                pb._add(RAPID, stop[0], stop[1], z_open + 0.05)      # the previous level cleared everything above z_open
+            pb._add(PLUNGE, stop[0], stop[1], z, pb.plunge)
+            if stop is not q:
+                pb.feed_to(q[0], q[1], z, feed)
             return "lift"
         pb.rapid_xy(target[0], target[1]); pb.plunge_to(z)
         return "retract"
@@ -2126,20 +2152,20 @@ def parallel3d(setup: Setup, tool: Tool, shape: Shape | None = None, model: ck.M
     cx, cy = (minx + maxx) / 2, (miny + maxy) / 2
     if center is not None:
         cx, cy = float(center[0]), float(center[1])
-    paths: list[tuple[np.ndarray, np.ndarray]] = []
+    paths: list = []                                               # each: f(direction) -> (xs, ys)
     if pattern == "parallel":
         n_lines = int(diag / so) + 1
+        ts0 = np.arange(-diag / 2, diag / 2 + res, res)
         for li in range(-n_lines // 2, n_lines // 2 + 1):
             ox, oy = cx - sa * li * so, cy + ca * li * so           # line li: c + u*t + v*li*so, u=(ca,sa), v=(-sa,ca)
-            ts = np.arange(-diag / 2, diag / 2 + res, res)
-            paths.append((ox + ca * ts, oy + sa * ts))
+            paths.append((lambda d, ox=ox, oy=oy: (ox + ca * ts0 * d, oy + sa * ts0 * d)))   # the sign flips the sampling, as before
     elif pattern == "radial":
         R = max(math.hypot(x - cx, y - cy) for x, y in ((minx, miny), (maxx, miny), (minx, maxy), (maxx, maxy))) + res
         n_rays = max(8, int(math.ceil(2 * math.pi * R / so)))     # the outer ends are one stepover apart
         ts = np.arange(0.0, R + res, res)
         for k in range(n_rays):
             th = 2 * math.pi * k / n_rays
-            paths.append((cx + math.cos(th) * ts, cy + math.sin(th) * ts))
+            paths.append((lambda d, th=th: ((cx + math.cos(th) * ts)[::d], (cy + math.sin(th) * ts)[::d])))
     else:                                                          # spiral: r = so * theta / 2pi, sampled every `res` along it
         R = max(math.hypot(x - cx, y - cy) for x, y in ((minx, miny), (maxx, miny), (minx, maxy), (maxx, maxy))) + res
         b_ = so / (2 * math.pi)
@@ -2148,12 +2174,12 @@ def parallel3d(setup: Setup, tool: Tool, shape: Shape | None = None, model: ck.M
             r_ = max(b_ * th[-1], res)
             th.append(th[-1] + res / r_)
         th = np.array(th)
-        paths.append((cx + b_ * th * np.cos(th), cy + b_ * th * np.sin(th)))
+        paths.append((lambda d: ((cx + b_ * th * np.cos(th))[::d], (cy + b_ * th * np.sin(th))[::d])))
     direction = 1
     first = True
     prev_top = None                                                # the highest tip Z on the previous pass (for one-way hops)
-    for xs0, ys0 in paths:
-        xs, ys = (xs0, ys0) if direction > 0 else (xs0[::-1], ys0[::-1])
+    for path_fn in paths:
+        xs, ys = path_fn(direction)
         inside = (xs >= minx) & (xs <= maxx) & (ys >= miny) & (ys <= maxy)
         if not inside.any():
             if not one_way: direction *= -1
@@ -2255,7 +2281,8 @@ def _raster_triangles(P: np.ndarray, I: np.ndarray, zmap: np.ndarray, minx: floa
         np.maximum(sub, np.where(m, Z, -np.inf), out=sub)
 
 
-PUBLIC_API = ["Stock.from_model", "Stock.block", "Stock.cylinder", "Setup", "Setup.view", "Program", "face", "contour", "pocket",
+PUBLIC_API = [
+    "regular_polygon","Stock.from_model", "Stock.block", "Stock.cylinder", "Setup", "Setup.view", "Program", "face", "contour", "pocket",
               "adaptive", "drill", "parallel3d", "chamfer_edges", "vcarve", "rest_region", "section", "silhouette", "outline", "face_outline", "stock_minus", "holes", "face_polygon",
               "circle", "rect", "feeds", "apply_feeds", "rotary_rough", "rotary_finish", "rotary_wrap", "rotary_profile",
               "gear_teeth", "radial_map"]
@@ -2545,6 +2572,16 @@ class Program:
             if not (m.spindle["min"] <= t.rpm <= m.spindle["max"]):
                 w.append(f"{op.name}: {t.label()} rpm {t.rpm} outside spindle range {m.spindle}")
             w += [f"{op.name}: {x}" for x in op.warnings]
+        # stacked roughing bands that leave different skins on their walls: a later band with less leave has the
+        # earlier bands' skin standing inside its region above its top, where its lifted links run
+        ad = [(op, self.setup_of(op)) for op in self.ops if op.kind == "adaptive" and "stock_to_leave" in op.params]
+        for i, (op, st) in enumerate(ad):
+            for op0, st0 in ad[:i]:
+                if st0 is st and op0.params["z_bottom"] >= op.params["z_top"] - 1e-6 and op0.params["stock_to_leave"] > op.params["stock_to_leave"] + 1e-6:
+                    w.append(f"{op.name}: leaves {op.params['stock_to_leave']:g} mm on its walls where {op0.name} above it left "
+                             f"{op0.params['stock_to_leave']:g}: that skin stands inside {op.name}'s region above its top, so its "
+                             "lifted links can brush it - use the same stock_to_leave on every band and finish the wall with a contour")
+                    break
         for k in getattr(self, "unused_overrides", []):
             w.append(f"override for '{k}' matches no operation (renamed or removed?)")
         tools = {op.tool.number for op in self.ops}
@@ -3216,7 +3253,7 @@ _Z = {"z_top": ("Top Z", "mm", "num", None), "z_bottom": ("Bottom Z", "mm", "num
 _LEAVE = {"stock_to_leave": ("Stock to leave", "mm", "num", None)}
 _CLIMB = {"climb": ("Climb milling", "", "bool", None)}
 CUT_FIELDS = {
-    "face": {**_Z, "angle": ("Pass angle", "°", "num", None)},
+    "face": {**_Z, "angle": ("Pass angle", "°", "num", None), "one_way": ("One way (uniform lay)", "", "bool", None)},
     "contour": {**_Z, "side": ("Side", "", "choice", ["outside", "inside", "on"]), **_LEAVE, "tabs": ("Tabs", "", "int", None),
                 "tab_height": ("Tab height", "mm", "num", None), "tab_width": ("Tab width", "mm", "num", None), **_CLIMB,
                 "lead": ("Lead-in radius", "mm", "num", None), "ramp": ("Ramp angle", "°", "num", None)},
@@ -3225,7 +3262,8 @@ CUT_FIELDS = {
                  "stay_down": ("Stay down between areas", "", "bool", None), "lift": ("Lift for linking", "mm", "num", None),
                  "hop": ("Hop height", "mm", "num", None), "chip_thinning": ("Chip-thinning feed", "", "bool", None)},
     "drill": {**_Z, "peck": ("Peck depth", "mm", "num", None), "retract": ("Retract", "mm", "num", None)},
-    "parallel3d": {**_Z, "angle": ("Pass angle", "°", "num", None), "resolution": ("Resolution", "mm", "num", None)},
+    "parallel3d": {**_Z, "angle": ("Pass angle", "°", "num", None), "resolution": ("Resolution", "mm", "num", None),
+                   "pattern": ("Pattern", "", "choice", ["parallel", "radial", "spiral"]), "one_way": ("One way (uniform lay)", "", "bool", None)},
     "chamfer": {"width": ("Chamfer width", "mm", "num", None), "tip_below": ("Tip below the chamfer", "mm", "num", None), **_CLIMB},
     "vcarve": {"max_depth": ("Max depth", "mm", "num", None), "flat_stepover": ("Flat-bottom stepover", "mm", "num", None)},
     "rotary_profile": {"leave": ("Stock to leave", "mm", "num", None), "res_a": ("A step", "°", "num", None)},

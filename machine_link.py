@@ -1003,6 +1003,25 @@ class MachineControl:
                    f"Z0 will be {info['offset']['z']:g} mm below it, on the centreline)")
         return self.payload()
 
+    async def record_bed_z(self) -> dict:
+        """After Makera's auto Z probe on the BARE bed with the same probe that found the centreline: the work Z0 now
+        sits on the bed, so its machine Z is the bed in the probe's own reference - the axis height above the bed is
+        then axis_mz - bed_mz exactly, whatever the probe's length. Nothing moves."""
+        st = self._need(armed=False, idle=True, homed=True)
+        oz = (self.origin or {}).get("z")
+        if not oz or "auto Z" not in str(oz.get("how", "")):
+            raise Refused("run Makera's auto Z probe over the bare bed first (Zero ▸ Auto Z), then use that as the bed height")
+        if (st.get("tool") or {}).get("number") != 0:
+            raise Refused("the bed height must be touched with the same wired probe (T0) that found the centreline")
+        wco = [m - w for m, w in zip(st["mpos"], st["wpos"])]
+        self.rotary_found = {**(self.rotary_found or {}), "bed_mz": round(wco[2], 3), "t": time.time()}
+        self._note(f"bed touched at machine Z {wco[2]:.3f} with the probe: the axis height can now be computed exactly")
+        if self.on_rotary_found:
+            res = self.on_rotary_found(dict(self.rotary_found))
+            if asyncio.iscoroutine(res):
+                await res
+        return self.payload()
+
     async def set_origin_axis_y(self, my: float | None = None) -> dict:
         """Work Y0 on the chuck centreline: machine Y = anchor1_y + rotation_offset_y (the controller's own numbers), or
         a typed machine Y when the offsets are unknown. G10 L2 P0 Y only; X, Z and A untouched; nothing moves."""

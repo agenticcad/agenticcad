@@ -2049,7 +2049,7 @@ function renderCamInsp() {
       <div class="insp-sec"><div class="insp-h">Workholding</div><div class="ci-fx"></div></div>
       <div class="insp-sec"><div class="insp-h">Machine view</div><div class="ci-mv"></div></div>`;
     renderFixturePanel(el.querySelector('.ci-fx'), si);
-    el.querySelector('.ci-mv').appendChild(document.getElementById('cam-machine'));
+    { const mv = document.getElementById('cam-machine'); if (mv) el.querySelector('.ci-mv').appendChild(mv); }   // moved here on first render
     el.querySelector('[data-a=send]').onclick = () => camSendToMachine(si);
     el.querySelector('[data-a=play]').onclick = () => { const o = program.ops.findIndex(x => (x.setup || 0) === si); if (o >= 0 && sim.opStart[o] >= 0) simSeek(sim.t[sim.opStart[o]], true); if (!sim.playing) document.getElementById('sim-play').click(); };
   }
@@ -2085,14 +2085,23 @@ const ADD_KINDS = [
   ['drill', 'Drill', 'The model\'s vertical holes', ['drill', 'flat']],
   ['parallel3d', '3D finish', 'Raster over the part surface', ['ball', 'bull', 'taper_ball', 'flat']],
   ['chamfer', 'Chamfer edges', 'Bevel the top edges of faces you pick, or the outline', ['chamfer', 'vbit']],
-  ['vcarve', 'V-carve', 'Letters or a logo, as deep as they are wide', ['vbit', 'chamfer']]];
+  ['vcarve', 'V-carve', 'Letters or a logo, as deep as they are wide', ['vbit', 'chamfer']],
+  ['rotary_rough', 'Rotary rough', '4th axis: rough the bar down to the part', ['flat', 'bull'], true],
+  ['rotary_finish', 'Rotary finish', '4th axis: finish the part surface (spiral, rings or lines)', ['ball', 'bull', 'flat'], true],
+  ['rotary_profile', 'Rotary profile', '4th axis: a hex, square... from round stock', ['flat', 'ball'], true],
+  ['gear_teeth', 'Gear teeth', '4th axis: involute teeth with a module cutter from the side', ['gear_cutter'], true]];
 const ADD_FIELDS = {
-  face: [['depth', 'Depth', 'mm below the stock top', 0.3]],
+  face: [['depth', 'Depth', 'mm below the stock top', 0.3], ['angle', 'Angle', '° (0 = along X)', 0], ['one_way', 'One way', 'every row the same direction: one uniform lay', false]],
   adaptive: [['z_bottom', 'Down to Z', 'mm (model) · blank = the part bottom', ''], ['stepover', 'Stepover', 'fraction of Ø', 0.15], ['leave', 'Stock to leave', 'mm', 0.2]],
   pocket: [['leave', 'Stock to leave', 'mm (walls)', 0]],
   contour: [['z_bottom', 'Down to Z', 'mm (model) · blank = the part bottom', ''], ['tabs', 'Tabs', 'holding tabs', 0]],
   drill: [['dmin', 'Holes from Ø', 'mm', 0], ['dmax', 'to Ø', 'mm', 1000]],
-  parallel3d: [['stepover', 'Stepover', 'fraction of Ø', 0.1], ['angle', 'Angle', '° (0 = along X)', 0]],
+  parallel3d: [['stepover', 'Stepover', 'fraction of Ø', 0.1], ['angle', 'Angle', '° (0 = along X)', 0], ['pattern', 'Pattern', 'the lay of the finish', 'parallel', ['parallel', 'radial', 'spiral']],
+    ['one_way', 'One way', 'every pass the same direction: one uniform lay', false]],
+  rotary_rough: [['stepdown', 'Stepdown', 'mm (radial)', 1.0], ['leave', 'Stock to leave', 'mm', 0.3], ['mode', 'Mode', 'rings turn A continuously; lines index it', 'rings', ['rings', 'lines']]],
+  rotary_finish: [['stepover', 'Stepover', 'fraction of Ø', 0.15], ['mode', 'Mode', 'spiral = one continuous pass', 'spiral', ['spiral', 'rings', 'lines']]],
+  rotary_profile: [['sides', 'Sides', 'of the polygon', 6], ['af', 'Across flats', 'mm', 16], ['leave', 'Stock to leave', 'mm', 0]],
+  gear_teeth: [['module', 'Module', 'mm (must match the cutter)', 1], ['teeth', 'Teeth', '', 20], ['width', 'Face width', 'mm · blank = the stock', ''], ['helix', 'Helix', '° (0 = spur)', 0], ['side', 'Cutter side', 'of the blank', '+y', ['+y', '-y']]],
   chamfer: [['width', 'Chamfer width', 'mm, on the top face', 0.5], ['tip_below', 'Tip below the chamfer', 'mm (a clean bottom edge)', 0.2],
     ['z_top', 'Top Z', 'mm (model) · blank = the picked faces / part top', '']],
   vcarve: [['z_top', 'Top Z', 'mm (model) · the surface the shapes start at · blank = the picked faces', ''], ['max_depth', 'Max depth', 'mm · blank = as deep as the V goes (flat bottom beyond)', '']] };
@@ -2104,13 +2113,20 @@ function renderAddOp(el, si) {
   if (addOp.tool == null || addOp.kindFor !== k) { addOp.tool = pick(); addOp.kindFor = k; }
   const floors = ['pocket', 'chamfer', 'vcarve'].includes(k) ? [...selFaces].map(f => ({ id: f, ...(model && model.faces.get(f) || {}) })) : [];
   const flat = floors.filter(f => f.kind === 'plane' || f.kind === 'PLANE');
+  const rot = !!(program.setups[si] && program.setups[si].rotary);
+  const kinds = ADD_KINDS.filter(x => rot ? x[0] !== 'adaptive' : !x[4]);          // rotary kinds only on a 4th-axis setup
+  const fieldHtml = ([f, l, u, d, opts]) => opts
+    ? `<label>${l}</label><select class="inp" data-f="${f}">${opts.map(o => `<option value="${o}" ${(addOp.vals[f] ?? d) === o ? 'selected' : ''}>${o}</option>`).join('')}</select><span class="u">${u}</span>`
+    : typeof d === 'boolean'
+      ? `<label>${l}</label><label class="tgl"><input type="checkbox" data-f="${f}" ${(addOp.vals[f] ?? d) ? 'checked' : ''}><span class="sw"></span></label><span class="u">${u}</span>`
+      : `<label>${l}</label><input class="inp" type="number" step="any" data-f="${f}" placeholder="${d === '' ? 'auto' : d}" value="${addOp.vals[f] ?? ''}"><span class="u">${u}</span>`;
   el.innerHTML = `<div class="ci-head"><div class="ci-t">Add an operation<span class="chip blue">Setup ${si + 1}</span></div>
       <div class="ci-m">Writes one <code>program.add(...)</code> line at the end of cam.py. For anything else, ask the assistant or edit cam.py.</div></div>
-    <div class="insp-sec"><div class="addk">${ADD_KINDS.map(([kk, l, d]) => `<button data-k="${kk}" class="${kk === k ? 'on' : ''}"><b>${l}</b><small>${d}</small></button>`).join('')}</div></div>
+    <div class="insp-sec"><div class="addk">${kinds.map(([kk, l, d]) => `<button data-k="${kk}" class="${kk === k ? 'on' : ''}"><b>${l}</b><small>${d}</small></button>`).join('')}</div></div>
     <div class="insp-sec"><div class="addf">
       <label>Tool</label><select class="inp" data-f="tool">${tools.map(t => `<option value="${t.number}" ${t.number === addOp.tool ? 'selected' : ''}>T${t.number} · ${esc(t.name)}</option>`).join('')}</select><span></span>
       <label>Name</label><input class="inp" data-f="name" placeholder="${esc(meta[1])}" value="${esc(addOp.vals.name || '')}"><span></span>
-      ${ADD_FIELDS[k].map(([f, l, u, d]) => `<label>${l}</label><input class="inp" type="number" step="any" data-f="${f}" placeholder="${d === '' ? 'auto' : d}" value="${addOp.vals[f] ?? ''}"><span class="u">${u}</span>`).join('')}</div>
+      ${ADD_FIELDS[k].map(fieldHtml).join('')}</div>
       ${['pocket', 'chamfer', 'vcarve'].includes(k) ? `<p class="${flat.length || k === 'chamfer' ? 'muted' : 'wa'}" style="font-size:12px;margin:10px 0 0">${flat.length ? `Faces: ${flat.map(f => `face ${f.id} (Z ${(+f.center[2]).toFixed(2)})`).join(', ')}` : {
         pocket: 'Click the pocket\'s flat floor in the viewer (shift-click for more floors at the same height).',
         chamfer: 'No faces picked: the part\'s outline is chamfered. Click flat faces (shift-click for more) to chamfer their edges and holes instead.',
@@ -2119,11 +2135,11 @@ function renderAddOp(el, si) {
       <div class="insp-acts"><button class="btn pri" data-a="add" ${(k === 'pocket' || k === 'vcarve') && !flat.length ? 'disabled' : ''}>Add ${esc(meta[1])}</button><button class="btn ghost" data-a="cancel">Cancel</button></div>
       <p class="muted" id="add-msg" style="font-size:12px"></p></div>`;
   el.querySelectorAll('.addk button').forEach(b => b.onclick = () => { addOp.kind = b.dataset.k; addOp.vals = { name: addOp.vals.name }; renderCamInsp(); });
-  el.querySelectorAll('[data-f]').forEach(i => i.oninput = i.onchange = () => { if (i.dataset.f === 'tool') addOp.tool = +i.value; else addOp.vals[i.dataset.f] = i.value; });
+  el.querySelectorAll('[data-f]').forEach(i => i.oninput = i.onchange = () => { if (i.dataset.f === 'tool') addOp.tool = +i.value; else addOp.vals[i.dataset.f] = i.type === 'checkbox' ? i.checked : i.value; });
   el.querySelector('[data-a=cancel]').onclick = () => { camSel = { kind: 'setup', si }; renderCamTab(); };
   el.querySelector('[data-a=add]').onclick = () => {
     const spec = { kind: k, setup: si, tool: addOp.tool, name: addOp.vals.name || meta[1] };
-    for (const [f] of ADD_FIELDS[k]) if (addOp.vals[f] !== undefined && addOp.vals[f] !== '') spec[f] = +addOp.vals[f];
+    for (const [f, , , d, opts] of ADD_FIELDS[k]) if (addOp.vals[f] !== undefined && addOp.vals[f] !== '') spec[f] = opts || typeof d === 'boolean' ? addOp.vals[f] : +addOp.vals[f];
     if (['pocket', 'chamfer', 'vcarve'].includes(k)) spec.faces = flat.map(f => f.id);
     camAddPending = spec.name; el.querySelector('#add-msg').textContent = 'adding and rebuilding…';
     send({ type: 'add_op', spec });
@@ -6550,6 +6566,8 @@ function mvRotaryCard(st, stp, z) {
       <button class="btn ghost sm" data-act="rotoff" ${conn ? '' : 'disabled'} title="config-get sd coordinate.rotation_offset_* from the controller (read-only)">Read from the controller</button></p>
     ${row(1, z.okZ, 'Z0 on the centreline · Makera\'s 4th-axis Z probe', `M495 X0 Y0 O0 with the wired probe (T0): Z goes up, the head goes to the module's reference pad (anchor 1 + rotation offset), touches it and sets Z0 ${off ? (+off.z).toFixed(1) : '…'} mm below the pad — the chuck centreline. ${probe ? 'T0 fitted and measured.' : `the machine has T${tl ?? '–'}: fit the wired probe first.`}`,
       `${probe ? '' : `<button class="btn sm" data-act="tcpick-go" data-n="0" ${dis(ready)}>Change tool → T0</button>`}<button class="btn sm pri" data-act="rotz" ${dis(ready && fourth && probe && off)}>Probe</button>`)}
+    ${row('·', !!(rt.found && rt.found.bed_mz), 'Bed height (for the machine model and the simulation)', `Auto Z over the bare bed with the same probe, then use it: the axis height above the bed is then exact (axis Z − bed Z, the probe's length cancels).${rt.found && rt.found.bed_mz != null ? ` Bed at machine Z ${(+rt.found.bed_mz).toFixed(3)}.` : ''}`,
+      `<button class="btn sm" data-act="autoz" ${dis(ready && probe)}>Auto Z here</button><button class="btn sm" data-act="rotbed" ${dis(conn && probe)}>Use as bed height</button>`)}
     ${row(2, z.okY, 'Y0 on the centreline', my != null ? `machine Y ${(+my).toFixed(3)} = anchor1_y + rotation_offset_y (G10 L2 P0 Y). Nothing moves.` : 'needs the rotation offset (read it from the controller) or a typed machine Y',
       `<button class="btn sm pri" data-act="roty" ${dis(ready && fourth && my != null)}>Set Y0 on the axis</button><span class="muted sm">or machine Y</span><span class="inp" style="width:92px"><input type="number" id="mz-rot-y" step="0.01" placeholder="${my != null ? (+my).toFixed(2) : '–'}"></span><button class="btn sm" data-act="roty-typed" ${dis(ready && fourth)}>Set</button>`)}
     ${row(3, z.okA, 'A0 here', 'the chuck\'s current angle becomes A0 (G92.4 A0, then G10 L20 P0 A0 so work A reads 0). Turn the chuck with A+ / A− on the jog pad first if you want a feature up. Nothing moves.',
@@ -6821,6 +6839,7 @@ async function mvRunFile(file) {
       if (a === 'roty-typed' && typed == null) return mvMsg('type the centreline\'s machine Y');
       if (await mvAsk('Y0 on the 4th axis', `<div>Work Y0 on the chuck centreline: <b>machine Y ${(+my).toFixed(3)}</b>${typed != null ? ' (typed)' : ' = anchor1_y + rotation_offset_y, the controller\'s own numbers'} (G10 L2 P0 Y). X, Z and A stay. Nothing moves.</div>`, 'Set Y0'))
         mvPost(typed != null ? { action: 'origin_axis_y', y: typed } : { action: 'origin_axis_y' }); return; }
+    if (a === 'rotbed') { if (await mvAsk('Bed height', '<div>The work Z0 set by the last Auto Z (on the bare bed, with the wired probe) is recorded as the bed\'s machine Z. With the centreline Z from the 4th-axis probe this gives the axis height above the bed exactly. Nothing moves.</div>', 'Use it')) mvPost({ action: 'bed_z_record' }); return; }
     if (a === 'rota') { if (await mvAsk('A0 here', '<div>The chuck\'s current angle becomes <b>A0</b>: G92.4 A0 (machine A := 0), then G10 L20 P0 A0 so work A reads 0 too. Nothing moves.</div>', 'Set A0')) mvPost({ action: 'zero_a' }); return; }
     if (a === 'rotshrink') { if (await mvAsk('Shrink A', '<div>G92.4 A0 S0: whole turns are dropped from the A count (modulo 360) so it doesn\'t grow forever. Nothing moves.</div>', 'Shrink')) mvPost({ action: 'shrink_a' }); return; }
     if (a === 'rotx-here') { if (await mvAsk('X0 here', '<div>The head\'s current X becomes <b>work X0</b> (G10 L20 P0 X0). Y, Z and A stay. Nothing moves.</div>', 'Set X0')) mvPost({ action: 'set_origin', x: 0 }); return; }

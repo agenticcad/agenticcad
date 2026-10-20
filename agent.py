@@ -465,7 +465,8 @@ def _add_op_line(spec: dict, program, tools: dict, model) -> str:
     kinds: face, adaptive (around the part), pocket (picked flat floor faces), contour (part outline), drill (detected
     holes), parallel3d (3D finish over the part)."""
     kind = spec.get("kind")
-    if kind not in ("face", "adaptive", "pocket", "contour", "drill", "parallel3d", "chamfer", "vcarve"):
+    ROTARY_KINDS = ("rotary_rough", "rotary_finish", "rotary_profile", "gear_teeth")
+    if kind not in ("face", "adaptive", "pocket", "contour", "drill", "parallel3d", "chamfer", "vcarve") + ROTARY_KINDS:
         raise cam.CamError(f"unknown operation kind {kind!r}")
     def num(k, lo, hi, default=None):
         v = spec.get(k)
@@ -491,8 +492,19 @@ def _add_op_line(spec: dict, program, tools: dict, model) -> str:
         name, k = f"{base} {k}", k + 1
     S, T = f"program.setups[{si}]", f"tools[{n}]"
     bottom = round(float(model.bbox_min[2]), 4)
+    def flag(k):
+        v = spec.get(k)
+        return v in (True, 1, "1", "true", "True", "on", "yes")
+    def choice(k, opts, default):
+        v = spec.get(k) or default
+        if v not in opts:
+            raise cam.CamError(f"{k}: one of {', '.join(opts)}")
+        return v
+    if kind in ROTARY_KINDS and not getattr(program.setups[si], "rotary", False):
+        raise cam.CamError(f"{kind} needs a 4th-axis setup (Setup(rotary=True)): setup {si + 1} is a flat setup")
     if kind == "face":
-        call = f"face({S}, {T}, z_bottom={S}.stock.top - {num('depth', 0.01, 20, 0.3)!r}"
+        call = (f"face({S}, {T}, z_bottom={S}.stock.top - {num('depth', 0.01, 20, 0.3)!r}, angle={num('angle', -180, 180, 0)!r}"
+                + (", one_way=True" if flag("one_way") else ""))
     elif kind == "adaptive":
         call = (f"adaptive({S}, {T}, {S}.stock.rect({T}.diameter).difference(silhouette(part)), z_top={S}.stock.top, "
                 f"z_bottom={num('z_bottom', -1000, 1000, bottom)!r}, stepover={num('stepover', 0.03, 0.6, 0.15)!r}, "
@@ -550,8 +562,27 @@ def _add_op_line(spec: dict, program, tools: dict, model) -> str:
         else:
             md = spec.get("max_depth")
             call = f"vcarve({S}, {T}, {polys}, z_top={z_top!r}" + (f", max_depth={num('max_depth', 0.01, 50)!r}" if md not in (None, "") else "")
-    else:
-        call = f"parallel3d({S}, {T}, shape=part, stepover={num('stepover', 0.02, 0.6, 0.1)!r}, angle={num('angle', -180, 180, 0)!r}"
+    elif kind == "parallel3d":
+        pat = choice("pattern", ("parallel", "radial", "spiral"), "parallel")
+        call = (f"parallel3d({S}, {T}, shape=part, stepover={num('stepover', 0.02, 0.6, 0.1)!r}, angle={num('angle', -180, 180, 0)!r}"
+                + (f", pattern={pat!r}" if pat != "parallel" else "") + (", one_way=True" if flag("one_way") else ""))
+    elif kind == "rotary_rough":
+        call = (f"rotary_rough({S}, {T}, part, stepdown={num('stepdown', 0.05, 10, 1.0)!r}, mode={choice('mode', ('rings', 'lines'), 'rings')!r}, "
+                f"leave={num('leave', 0, 5, 0.3)!r}")
+    elif kind == "rotary_finish":
+        call = (f"rotary_finish({S}, {T}, part, mode={choice('mode', ('lines', 'rings', 'spiral'), 'spiral')!r}, "
+                f"stepover={num('stepover', 0.02, 0.6, 0.15)!r}")
+    elif kind == "rotary_profile":
+        call = (f"rotary_profile({S}, {T}, regular_polygon({int(num('sides', 3, 24, 6))}, {num('af', 0.5, 200)!r}), "
+                f"leave={num('leave', 0, 5, 0.0)!r}")
+    else:                                                     # gear_teeth
+        t = tools[n]
+        if t.type != "gear_cutter":
+            raise cam.CamError(f"cutting gear teeth needs a gear cutter (a module cutter on an arbor): T{n} is {t.type}")
+        w = spec.get("width")
+        call = (f"gear_teeth({S}, {T}, module={num('module', 0.2, 10)!r}, teeth={int(num('teeth', 6, 400))}"
+                + (f", width={num('width', 0.1, 200)!r}" if w not in (None, "") else "")
+                + f", helix={num('helix', -45, 45, 0)!r}, side={choice('side', ('+y', '-y'), '+y')!r}")
     return f"program.add({call}, name={name!r}))"
 
 

@@ -134,8 +134,8 @@ async def _rotary_found(found: dict) -> None:
         return
     rec = dataclasses.asdict(m)
     model = dict(rec.get("model") or {})
-    model["rotary"] = {**(model.get("rotary") or {}), **{k: found[k] for k in ("axis_my", "axis_mz", "pad_mz") if found.get(k) is not None},
-                       "found": time.strftime("%Y-%m-%d %H:%M")}
+    model["rotary"] = {**(model.get("rotary") or {}), **{k: found[k] for k in ("axis_my", "axis_mz", "pad_mz", "bed_mz") if found.get(k) is not None},
+                       "found": time.strftime("%Y-%m-%d %H:%M"), "probed": time.strftime("%Y-%m-%d")}
     rec["model"] = model
     agent.library.save_machine(rec)
     machine._note(f"axis position saved to machine '{m.name}' (model.rotary: Y {found.get('axis_my')}, Z {found.get('axis_mz')})")
@@ -967,6 +967,8 @@ async def machine_post(body: MachineBody):
             res = await machine.origin_x_at(body.x if body.x is not None else float('nan'), body.kind or "typed", body.name or "set")
         elif a == "zero_a":                                # G92.4 A0 + G10 L20 P0 A0
             res = await machine.zero_a()
+        elif a == "bed_z_record":                          # the bed, touched with the same probe: exact axis height
+            res = await machine.record_bed_z()
         elif a == "shrink_a":                              # G92.4 A0 S0
             res = await machine.shrink_a()
         elif a == "read_rotation_offset":                  # config-get sd coordinate.rotation_offset_* (read-only)
