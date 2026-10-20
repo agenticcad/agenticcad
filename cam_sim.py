@@ -8,7 +8,9 @@ Two representations, picked by the setups of the simulated ops:
          a ray where it covers it out to the current surface.
 Tools cut with their real profile (tool_shape: flat, ball, bull nose, V, chamfer, drill, tapered ball) up to their flute
 length; the parts above it (the body over the flutes, a neck, a wider shank) do not cut: material they meet is a
-collision ("deeper than the flutes", "T9 shank"), as is the holder stack above them.
+collision ("deeper than the flutes", "T9 shank"), as is the holder stack above them. On the 4th axis the whole stack is
+also checked against the chuck body, the jaw ring and the tailstock (cone, barrel, block) placed from the machine model's
+rotary dict and the setup's stock, for every move including rapids.
 The result keeps compressed snapshots for the viewer and compares the final stock with the part: gouges (cut into
 the part), material left on the part, and rapids that hit material.
 """
@@ -117,9 +119,11 @@ def _part_mesh(model_or_shape):
 
 
 def simulate(program: cam.Program, ops: list[int] | None = None, part=None, resolution: float | None = None,
-             frames: int = 48, tol: float = 0.05, machine_model=None, placement=None) -> SimResult:
+             frames: int = 48, tol: float = 0.05, machine_model=None, placement=None, res_a: float = 1.0) -> SimResult:
     """Simulate the given ops (indices into program.ops, default all) in order. `part` (model or shape) enables the
-    gouge / left-material comparison. Returns a SimResult (summary(), frame_payload(k))."""
+    gouge / left-material comparison. `resolution` = cell size along X/Y (mm; default from the stock size, 0.2 mm on
+    the 4th axis), `res_a` = the angular cell on the 4th axis (degrees, default 1°). `placement` (4th axis: chuck_gap,
+    tail_gap in mm) overrides the machine model's mounting numbers. Returns a SimResult (summary(), frame_payload(k))."""
     sel = list(range(len(program.ops))) if ops is None else [i for i in ops if 0 <= i < len(program.ops)]
     if not sel:
         raise cam.CamError("simulate: no operations selected")
@@ -134,10 +138,7 @@ def simulate(program: cam.Program, ops: list[int] | None = None, part=None, reso
         except Exception:  # noqa: BLE001 - the machine model never stops a simulation
             machine_model = None
     if all(rot):
-        out = _sim_radial(program, sel, part, resolution, frames, tol)
-        if machine_model is not None:
-            _collide_rotary(out, program, sel, machine_model, placement or {})
-        return out
+        return _sim_radial(program, sel, part, resolution, frames, tol, machine_model, placement or {}, res_a)
     out = _sim_zmap(program, sel, part, resolution, frames, tol, machine_model, placement or {})
     return out
 
@@ -441,12 +442,22 @@ def _compare_zmap(out, pmaps, zhi, zlo, res, x0, y0, nx, tol, has_bottom):
 
 
 # ----------------------------------------------------------------------------- radial
-def _sim_radial(program, sel, part, resolution, frames, tol) -> SimResult:
-    st = program.setup_of(program.ops[sel[0]])
+def _sim_radial(program, sel, part, resolution, frames, tol, machine_model=None, placement=None, res_a=1.0) -> SimResult:
+    """4th-axis material removal on a (angle, x) radius map, plus what the height map can't see: the holder stack and the
+    body above the flutes against the remaining bar (contact, not cutting), and the whole tool stack against the chuck,
+    its jaws and the tailstock (from the machine model's rotary dict and the setup's stock) for every move."""
+    placement = placement or {}
+    setups = [program.setup_of(program.ops[i]) for i in sel]
+    st = setups[0]
+    for i, s_ in zip(sel[1:], setups[1:]):
+        if s_ is not st and not cam.Program.same_mounting(st, s_):
+            raise cam.CamError(f"simulate: '{program.ops[sel[0]].name}' ({st.name}) and '{program.ops[i].name}' ({s_.name}) are on "
+                               "different 4th-axis mountings (the stock, the rotary axis, the origin or the machine differ): "
+                               "simulate the setups separately")
     x0, x1 = st.stock.xmin, st.stock.xmax
     res_x = resolution or max(0.2, (x1 - x0) / 400.0)
     nx = int(math.ceil((x1 - x0) / res_x)) + 1
-    na = 360
+    na = max(36, int(round(360.0 / max(float(res_a or 1.0), 0.05))))
     res_a = 360.0 / na
     psi = np.radians(np.arange(na) * res_a)
     # initial radius per angle: cylinder, or the stock box's cross-section seen from the axis
@@ -473,39 +484,16 @@ def _sim_radial(program, sel, part, resolution, frames, tol) -> SimResult:
     mark_i = 0
     done = 0
     rapid_hits = []
+    hits: list[dict] = []
+    mount = _rotary_mounting(st, machine_model, placement)
+    spacing = min(res_x / 2, 0.25)
 
     def snap(upto):
         q = np.clip(np.round(r / max(rmax, 1e-9) * 65534), 0, 65534).astype(np.uint16)
         out.frames.append((upto, {"r": zlib.compress(q.tobytes(), 6)}))
 
-    snap(0)
-    for i in sel:
-        op = program.ops[i]; s_ = program.setup_of(op)
-        if not op.moves:
-            continue
-        tool = op.tool
-        mv = [list(m[:5]) + [m[5] if len(m) > 5 else s_.a] for m in op.moves]
-        pts, idx, kinds = _samples(mv, min(res_x / 2, 0.25), True)
-        start = 0
-        while start < len(pts):
-            next_mark = marks[mark_i] if mark_i < len(marks) else None
-            if next_mark is not None and next_mark - done <= len(op.moves):
-                end = int(np.searchsorted(idx, next_mark - done - 1, side="right"))
-            else:
-                end = len(pts)
-            if end <= start:
-                end = start + 1
-            _stamp_r(r, pts[start:end], kinds[start:end], idx[start:end], tool, res_x, res_a, x0, rapid_hits, op.name)
-            start = end
-            if next_mark is not None and end_move_done(idx, end, done, next_mark):
-                snap(next_mark); mark_i += 1
-        done += len(op.moves)
-        while mark_i < len(marks) and marks[mark_i] <= done:
-            snap(marks[mark_i]); mark_i += 1
-    if not out.frames or out.frames[-1][0] != total:
-        snap(total)
-    remaining = 0.5 * (r ** 2).sum() * math.radians(res_a) * res_x
-    out.stats = {"moves": total, "ops": len(sel), "removed_cm3": round((initial - remaining) / 1000.0, 3), "rapid_hits": rapid_hits[:50]}
+    # the part's radius map (for the gouge test after every op: which op cut into the part, and where)
+    R = core = None
     if part is not None:
         shape = part.shape if isinstance(part, ck.Model) else part
         xs, angles, R = cam.radial_map(st, shape, res_x, res_a, (x0, x0 + (nx - 1) * res_x))
@@ -523,11 +511,65 @@ def _sim_radial(program, sel, part, resolution, frames, tol) -> SimResult:
                 else:
                     nb[:, -1] = R[:, -1]
             core &= np.abs(nb - R) <= jump
+    cell_a = np.radians(res_a) * res_x                   # cell area = cell_a · R
+    gouged = np.zeros((na, nx), dtype=bool)
+    gouge_ops: list[str] = []
+    gouge_by_op: list[dict] = []
+
+    snap(0)
+    for i in sel:
+        op = program.ops[i]; s_ = program.setup_of(op)
+        if not op.moves:
+            continue
+        tool = op.tool
+        mv = [list(m[:5]) + [m[5] if len(m) > 5 else s_.a] for m in op.moves]
+        pts, idx, kinds = _samples(mv, spacing, True)
+        start = 0
+        while start < len(pts):
+            next_mark = marks[mark_i] if mark_i < len(marks) else None
+            if next_mark is not None and next_mark - done <= len(op.moves):
+                end = int(np.searchsorted(idx, next_mark - done - 1, side="right"))
+            else:
+                end = len(pts)
+            if end <= start:
+                end = start + 1
+            P, K, I = pts[start:end], kinds[start:end], idx[start:end]
+            _stamp_r(r, P, K, I, tool, res_x, res_a, x0, rapid_hits, op.name)
+            _contact_r(hits, r, P, I, tool, machine_model, res_x, res_a, x0, spacing, op.name)
+            if mount is not None:
+                _collide_mount_r(hits, mount, P, K, I, tool, machine_model, spacing, op.name)
+            start = end
+            if next_mark is not None and end_move_done(idx, end, done, next_mark):
+                snap(next_mark); mark_i += 1
+        done += len(op.moves)
+        if R is not None:                                # per-op gouge attribution: cells this op first cut below the part
+            g = core & (r < R - tol)
+            new = g & ~gouged
+            if new.any() and float((cell_a * R)[new].sum()) > 0.5:
+                d = np.where(new, R - r, -1.0); j = int(np.argmax(d)); ia, ix = divmod(j, nx)
+                gouge_ops.append(op.name)
+                gouge_by_op.append({"op": op.name, "cells": int(new.sum()), "area_mm2": round(float((cell_a * R)[new].sum()), 2),
+                                    "max_depth": round(float(d.flat[j]), 3), "worst": {"x": round(x0 + ix * res_x, 2), "angle": round(ia * res_a, 1)}})
+            gouged |= g
+        while mark_i < len(marks) and marks[mark_i] <= done:
+            snap(marks[mark_i]); mark_i += 1
+    if not out.frames or out.frames[-1][0] != total:
+        snap(total)
+    remaining = 0.5 * (r ** 2).sum() * math.radians(res_a) * res_x
+    out.stats = {"moves": total, "ops": len(sel), "removed_cm3": round((initial - remaining) / 1000.0, 3), "rapid_hits": rapid_hits[:50]}
+    if machine_model is not None or hits:
+        out.stats["collisions"] = _collision_stats(hits)
+    if machine_model is not None:
+        out.stats["machine"] = {"key": machine_model.key, "name": machine_model.name, "placement": placement}
+    if mount is not None:
+        out.stats["mounting"] = {k: mount[k] for k in ("chuck_face_x", "jaw_tip_x", "jaw_ring_r", "tail_tip_x", "tail", "chuck_gap", "tail_gap")}
+    if R is not None:
         gouge = core & (r < R - tol)
         left = core & (r > R + tol)                     # material in a corner shows up beside the step, not on it
         cell = np.outer(np.full(na, 1.0), np.full(nx, res_x)) * np.radians(res_a)
         g = {"cells": int(gouge.sum()), "area_mm2": round(float((cell * R)[gouge].sum()), 2),
-             "max_depth": round(float((R - r)[gouge].max()), 3) if gouge.any() else 0.0, "worst": None, "ops": []}
+             "max_depth": round(float((R - r)[gouge].max()), 3) if gouge.any() else 0.0, "worst": None,
+             "ops": gouge_ops, "by_op": gouge_by_op}
         if gouge.any():
             j = int(np.argmax(np.where(gouge, R - r, -1))); ia, ix = divmod(j, nx)
             g["worst"] = {"x": round(x0 + ix * res_x, 2), "angle": round(ia * res_a, 1)}
@@ -539,6 +581,193 @@ def _sim_radial(program, sel, part, resolution, frames, tol) -> SimResult:
     out.final = {"r": r}
     return out
 
+
+def _rotary_mounting(st, mm, placement) -> dict | None:
+    """Where the chuck, its jaws and the tailstock are in the SETUP frame (x along the rotary axis, y = z = 0 on it), from
+    the machine model's rotary dict and the setup's stock: the chuck body face sits chuck_gap behind the stock's near end,
+    the jaws reach jaw_reach past the face (a full ring of radius jaw_ring_r: the jaws' tips, or the stock plus a 6 mm jaw
+    wall when the stock is bigger), the live centre's tip sits tail_gap past the stock's far end."""
+    rot = getattr(mm, "rotary", None) if mm is not None else None
+    if not rot:
+        return None
+    stock = st.stock                                     # setup frame: xmin..xmax along the axis, radius = swing
+    r_st = float(getattr(stock, "radius", None) or st.max_radius)
+    gap = float(placement.get("chuck_gap", rot.get("chuck_gap", 5.0)))
+    tgap = float(placement.get("tail_gap", rot.get("tail_gap", 0.0)))
+    face = float(stock.xmin) - gap
+    reach = float(rot.get("jaw_reach", 0.0))
+    jaw_r = max(float(rot.get("jaw_r", rot["chuck_r"])), r_st + 6.0)
+    tail = bool(rot.get("tail", rot.get("tail_x") is not None))
+    cone = rot.get("tail_cone") or {"half_angle": 30.0, "length": float(rot.get("tail_r", 7.0)) / math.tan(math.radians(30.0))}
+    blk = rot.get("tail_block")
+    az = float(rot.get("axis_z", 0.0))
+    return {"chuck_face_x": round(face, 3), "chuck_r": float(rot["chuck_r"]), "chuck_gap": gap,
+            "jaw_tip_x": round(face + reach, 3), "jaw_reach": reach, "jaw_ring_r": round(jaw_r, 3),
+            "tail": tail, "tail_gap": tgap, "tail_tip_x": round(float(stock.xmax) + tgap, 3) if tail else None,
+            "tail_r": float(rot.get("tail_r", 7.0)), "tail_half": float(cone.get("half_angle", 30.0)), "tail_len": float(cone.get("length", 0.0)),
+            "tail_barrel": float(rot.get("tail_barrel", 0.0)),
+            "tail_block": ({"half_w": float(blk["half_w"]), "z0": float(blk["z0"]) - az, "z1": float(blk["z1"]) - az,
+                            "length": float(blk.get("length", 40.0))} if blk else None)}
+
+
+def _levels_above_flutes(mm, tool):
+    """Everything above the cutting part as (name, radius, bottom above the tip, height, box): the tool's own bands over the
+    flutes (named 'tool above its N mm flutes' where they are no wider than the flutes), then the machine's nose stack."""
+    sh = tool.shape
+    fl, cut_r = float(sh.flute_length), float(sh.cut_radius)
+    if mm is not None:
+        levels = holder_levels(mm, tool)
+    else:
+        stick = tool_stickout(tool)
+        levels = [("tool shank" if rr >= sh.max_radius - 1e-6 else "tool neck", rr, b, t - b, None) for b, t, rr in sh.bands(fl) if b < stick] \
+            or [("tool shank", tool.radius, fl, max(stick - fl, 0.0), None)]
+    out = []
+    for name, rr, zb, h, box in levels:
+        if h <= 0:
+            continue
+        if name in ("tool shank", "tool neck") and rr <= cut_r + 1e-6:
+            name = f"tool above its {fl:g} mm flutes"
+        out.append((name, rr, zb, h, box))
+    return out
+
+
+def _thin(n: int, step: int, I) -> np.ndarray:
+    """Sample indices every `step`, always including the last sample of every move (a straight move is deepest at an end)."""
+    ends = np.flatnonzero(np.diff(I)) if len(I) > 1 else np.zeros(0, int)
+    return np.unique(np.concatenate([np.arange(0, n, max(1, step)), ends, [n - 1]]).astype(np.int64))
+
+
+def _ray_interval(sp, cp, ylo, yhi, zlo, zhi):
+    """For rays s·(sin φ, cos φ) (arrays broadcast together): the s-interval inside the rectangle y ∈ [ylo, yhi],
+    z ∈ [zlo, zhi] (s_lo ≥ 0; empty where s_lo ≥ s_hi)."""
+    # a ray parallel to a slab is inside it for every s (−inf, +inf) or never (+inf, +inf: an empty interval after min/max)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        in_y = (ylo <= 0) & (yhi >= 0); in_z = (zlo <= 0) & (zhi >= 0)
+        ty1 = np.where(np.abs(sp) > 1e-9, ylo / sp, np.where(in_y, -np.inf, np.inf))
+        ty2 = np.where(np.abs(sp) > 1e-9, yhi / sp, np.inf)
+        tz1 = np.where(np.abs(cp) > 1e-9, zlo / cp, np.where(in_z, -np.inf, np.inf))
+        tz2 = np.where(np.abs(cp) > 1e-9, zhi / cp, np.inf)
+    s_lo = np.maximum(np.maximum(np.minimum(ty1, ty2), np.minimum(tz1, tz2)), 0.0)
+    s_hi = np.minimum(np.maximum(ty1, ty2), np.maximum(tz1, tz2))
+    return s_lo, s_hi
+
+
+def _contact_r(hits, r, P, I, tool, mm, res_x, res_a, x0, spacing, op_name):
+    """After a piece is stamped: does anything above the flutes (the tool body over them, a neck, the shank, the nose
+    stack) stand inside the bar that is left? Each level is a vertical cylinder (or box) over the tool tip; a ray of the
+    radius map (part angle ψ → machine angle φ = ψ − A) carries material out to r[ψ, x]: contact where the ray enters the
+    level before it leaves the material. Sampled every max(level radius / 2, cell) along the path."""
+    if len(P) == 0:
+        return
+    na, nx = r.shape
+    for name, rl, zb, h, box in _levels_above_flutes(mm, tool):
+        pick = _thin(len(P), int(max(rl / 2, res_x) / spacing), I)
+        Q = P[pick]; IQ = I[pick]
+        xt, yt, zt, at = Q[:, 0], Q[:, 1], Q[:, 2], Q[:, 3]
+        if box is not None:
+            lx0, lx1 = min(b[0] for b in box), max(b[1] for b in box)
+            ly0, ly1 = min(b[2] for b in box), max(b[3] for b in box)
+        else:
+            lx0, lx1, ly0, ly1 = -rl, rl, -rl, rl
+        ixa = np.clip(np.floor((xt + lx0 - x0) / res_x).astype(np.int64), 0, nx - 1)
+        ixb = np.clip(np.ceil((xt + lx1 - x0) / res_x).astype(np.int64), 0, nx - 1)
+        z_c = zt + zb
+        worst = None
+        for k in range(len(Q)):
+            if ixb[k] < ixa[k]:
+                continue
+            sub = r[:, ixa[k]:ixb[k] + 1]                         # (na, w)
+            if sub.max() <= z_c[k] + 0.02:                       # material is never higher than its radius: nothing reaches the level
+                continue
+            phi = np.radians(np.arange(na) * res_a - at[k])[:, None]
+            sp, cp = np.sin(phi), np.cos(phi)
+            if box is None:                                      # round level: half-width shrinks with the X offset of the cell
+                dx = x0 + np.arange(ixa[k], ixb[k] + 1) * res_x - xt[k]
+                rho = np.sqrt(np.maximum(rl * rl - dx * dx, 0.0))[None, :]
+                ok_x = (np.abs(dx) < rl)[None, :]
+                ylo, yhi = yt[k] - rho, yt[k] + rho
+            else:
+                ok_x = np.ones((1, sub.shape[1]), dtype=bool)
+                ylo, yhi = yt[k] + ly0, yt[k] + ly1
+            s_lo, s_hi = _ray_interval(sp, cp, ylo, yhi, z_c[k], z_c[k] + h)
+            m = ok_x & (s_lo < s_hi) & (s_lo < sub - 0.02)
+            if m.any():
+                depth = float((sub - s_lo)[m].max())
+                if worst is None or depth > worst["depth"]:
+                    worst = {"op": op_name, "move": int(IQ[k]), "pos": [round(float(v), 2) for v in Q[k, :3]], "a": round(float(at[k]), 2),
+                             "part": name, "what": "stock", "depth": round(depth, 2)}
+        if worst is not None:
+            hits.append(worst)
+
+
+def _collide_mount_r(hits, mount, P, K, I, tool, mm, spacing, op_name):
+    """Every level of the tool stack — the flutes, the body above them, the nose stack — against the chuck body (a cylinder
+    behind the chuck face), the jaw ring and the tailstock (cone, barrel, block), all solids about the rotary axis in the
+    setup frame, for every sample of every move (rapids too). One hit per level and solid per piece: the deepest."""
+    if len(P) == 0:
+        return
+    sh = tool.shape
+    fl = float(sh.flute_length)
+    levels = [("tool", rr, b, t - b, None) for b, t, rr in sh.bands(0.0) if t <= fl + 1e-6] or [("tool", float(sh.cut_radius), 0.0, fl, None)]
+    levels += _levels_above_flutes(mm, tool)
+    face, chuck_r = mount["chuck_face_x"], mount["chuck_r"]
+    jaw_tip, jaw_r = mount["jaw_tip_x"], mount["jaw_ring_r"]
+    for name, rl, zb, h, box in levels:
+        if h <= 0:
+            continue
+        pick = _thin(len(P), int(max(rl / 2, 0.25) / spacing), I)
+        Q = P[pick]; IQ = I[pick]; KQ = K[pick]
+        xt, yt, zt = Q[:, 0], Q[:, 1], Q[:, 2]
+        if box is not None:
+            lx0, lx1 = min(b[0] for b in box), max(b[1] for b in box)
+            ly0, ly1 = min(b[2] for b in box), max(b[3] for b in box)
+        else:
+            lx0, lx1, ly0, ly1 = -rl, rl, -rl, rl
+        xlo, xhi = xt + lx0, xt + lx1
+        ylo, yhi = yt + ly0, yt + ly1
+        zlo, zhi = zt + zb, zt + zb + h
+        # distance from the axis (y = z = 0) to the level's cross-section rectangle
+        dy = np.maximum(0.0, np.maximum(ylo, -yhi)); dz = np.maximum(0.0, np.maximum(zlo, -zhi))
+        dist = np.hypot(dy, dz)
+        found = []
+        # chuck body: an X cylinder of radius chuck_r for x < face
+        m = (xlo < face - 0.02) & (dist < chuck_r - 0.02)
+        if m.any():
+            found.append(("chuck", np.where(m, np.minimum(chuck_r - dist, face - xlo), -1.0)))
+        # jaws: a ring (full disc) of radius jaw_r from the face to the jaw tips
+        if jaw_tip > face:
+            m = (xlo < jaw_tip - 0.02) & (xhi > face + 0.02) & (dist < jaw_r - 0.02)
+            if m.any():
+                found.append(("chuck jaws", np.where(m, np.minimum(jaw_r - dist, np.minimum(jaw_tip - xlo, xhi - face)), -1.0)))
+        if mount["tail"]:
+            tip, half, L = mount["tail_tip_x"], math.radians(mount["tail_half"]), mount["tail_len"]
+            # the live centre's cone: radius grows from 0 at the tip to L·tan(half) at its base
+            ov0, ov1 = np.maximum(xlo, tip), np.minimum(xhi, tip + L)
+            rc = (ov1 - tip) * math.tan(half)                  # the widest the cone is within the overlap
+            m = (ov1 > ov0 + 1e-6) & (dist < rc - 0.02)
+            if m.any():
+                found.append(("tailstock", np.where(m, np.minimum(rc - dist, ov1 - ov0), -1.0)))
+            # the barrel behind the cone
+            b0, b1 = tip + L, tip + L + mount["tail_barrel"]
+            if b1 > b0:
+                m = (xlo < b1 - 0.02) & (xhi > b0 + 0.02) & (dist < mount["tail_r"] - 0.02)
+                if m.any():
+                    found.append(("tailstock", np.where(m, np.minimum(mount["tail_r"] - dist, xhi - b0), -1.0)))
+            blk = mount["tail_block"]
+            if blk:
+                k0, k1 = b1, b1 + blk["length"]
+                m = ((xlo < k1 - 0.02) & (xhi > k0 + 0.02) & (ylo < blk["half_w"] - 0.02) & (yhi > -blk["half_w"] + 0.02)
+                     & (zlo < blk["z1"] - 0.02) & (zhi > blk["z0"] + 0.02))
+                if m.any():
+                    pen = np.minimum(np.minimum(xhi - k0, k1 - xlo), np.minimum(blk["half_w"] - ylo, yhi + blk["half_w"]))
+                    pen = np.minimum(pen, np.minimum(blk["z1"] - zlo, zhi - blk["z0"]))
+                    found.append(("tailstock", np.where(m, pen, -1.0)))
+        for what, depth in found:
+            j = int(np.argmax(depth))
+            if depth[j] <= 0:
+                continue
+            hits.append({"op": op_name, "move": int(IQ[j]), "pos": [round(float(v), 2) for v in Q[j, :3]], "a": round(float(Q[j, 3]), 2),
+                         "part": name, "what": what, "depth": round(float(depth[j]), 2), "rapid": bool(KQ[j] == cam.RAPID)})
 
 def _stamp_r(r, P, K, I, tool, res_x, res_a, x0, rapid_hits, op_name):
     for a, b in _runs(K):
@@ -580,11 +809,12 @@ def _stamp_r_run(r, P, K, I, tool, res_x, res_a, x0, rapid_hits, op_name):
         sp = sphi[:, :, None]; cp = cphi[:, :, None]
         with np.errstate(divide="ignore", invalid="ignore"):
             s_z = np.where(cp > 1e-9, z_c / cp, np.inf)
+            s_top = np.where(cp > 1e-9, (zt[:, None, None] + tool.shape.flute_length) / cp, np.inf)   # the flutes end here: nothing above them cuts
             ylo = (yt[:, None, None] - rh); yhi = (yt[:, None, None] + rh)
             t1 = np.where(np.abs(sp) > 1e-9, ylo / sp, np.where((ylo <= 0) & (yhi >= 0), -np.inf, np.inf))
             t2 = np.where(np.abs(sp) > 1e-9, yhi / sp, np.where((ylo <= 0) & (yhi >= 0), np.inf, -np.inf))
         s_lo = np.maximum(np.minimum(t1, t2), 0.0)
-        s_hi = np.maximum(t1, t2)
+        s_hi = np.minimum(np.maximum(t1, t2), s_top)
         s1 = np.maximum(s_z, s_lo)
         valid_c = (cp > 1e-9) & (s1 < s_hi)
         if ball:
@@ -608,18 +838,25 @@ def _stamp_r_run(r, P, K, I, tool, res_x, res_a, x0, rapid_hits, op_name):
         IA = np.broadcast_to(ia[:, :, None], valid.shape)[valid]
         IX = np.broadcast_to(np.clip(ix, 0, nx - 1)[:, None, :], valid.shape)[valid]
         S1 = s1[valid]; SH = s_hi[valid]
-        cur = r[IA, IX]
-        reach = SH >= cur - 1e-3                                                                   # tool covers out to the surface
-        cut = reach & (S1 < cur)
         rap = np.broadcast_to((K[s:s + chunk] == cam.RAPID)[:, None, None], valid.shape)[valid]
-        hit = cut & rap & (cur - S1 > 0.05)
-        if hit.any() and len(rapid_hits) < 50:
-            owner = np.broadcast_to(I[s:s + chunk][:, None, None], valid.shape)[valid][hit]
-            depth = (cur - S1)[hit]
-            j = int(np.argmax(depth))
-            rapid_hits.append({"op": op_name, "move": int(owner[j]) + 1, "depth": round(float(depth[j]), 3)})
-        if cut.any():
+        owner = np.broadcast_to(I[s:s + chunk][:, None, None], valid.shape)[valid]
+        # the flutes end at s_top, so a sample only cuts a ray once its flutes reach the surface: a chunk is stamped in one
+        # go, so pass again for the samples an earlier sample in the chunk has opened the way for (a plunge deeper than
+        # the flutes cuts progressively; what it leaves above the flutes is the body's contact, reported by _contact_r)
+        for _ in range(8):
+            cur = r[IA, IX]
+            reach = SH >= cur - 1e-3                                                               # tool covers out to the surface
+            cut = reach & (S1 < cur)
+            if not cut.any():
+                break
+            hit = cut & rap & (cur - S1 > 0.05)
+            if hit.any() and len(rapid_hits) < 50:
+                depth = (cur - S1)[hit]
+                j = int(np.argmax(depth))
+                rapid_hits.append({"op": op_name, "move": int(owner[hit][j]) + 1, "depth": round(float(depth[j]), 3)})
             np.minimum.at(r, (IA[cut], IX[cut]), S1[cut])
+            keep = ~cut
+            IA, IX, S1, SH, rap, owner = IA[keep], IX[keep], S1[keep], SH[keep], rap[keep], owner[keep]
 
 
 # ----------------------------------------------------------------------------- machine collisions (holder / nose / head / table)
@@ -733,44 +970,6 @@ def _collide_z(hits, zhi, P, I, done, tool, mm, res, x0, y0, op_name, stock, pla
         k = int(np.argmin(P[:, 2]))
         hits.append({"op": op_name, "move": int(I[k]), "pos": [round(float(P[k, 0]), 2), round(float(P[k, 1]), 2), round(zmin, 2)],
                      "part": "tool", "what": "table" if spoil <= 0 else "bed under the spoilboard", "depth": round(table_z - spoil - zmin, 2)})
-
-
-def _collide_rotary(out, program, sel, mm, placement):
-    """4th-axis setups: the holder stack against the chuck face and the tailstock (the stock is handled radially)."""
-    rot = mm.rotary
-    if not rot:
-        return
-    hits = []
-    st = program.setup_of(program.ops[sel[0]])
-    stock = st.model_stock
-    dx = float(placement.get("x", 0.0))
-    # stock placement along the rotary: its xmin sits `gap` from the chuck jaws unless a placement says otherwise
-    gap = float(placement.get("chuck_gap", 5.0))
-    chuck_face_model = stock.xmin - gap
-    tail_model = chuck_face_model + (rot["tail_x"] - rot["chuck_face_x"])
-    for i in sel:
-        op = program.ops[i]
-        if not op.moves:
-            continue
-        levels = holder_levels(mm, op.tool)
-        P = st.to_model(np.array([m[1:4] for m in op.moves], dtype=float))
-        for name, r, zb_off, h, box in levels:
-            lo_x, hi_x = (min(b[0] for b in box), max(b[1] for b in box)) if box else (-r, r)
-            if name == "tool shank":
-                continue
-            # chuck: a disc of radius chuck_r on the axis; the level is a cylinder of radius r from zb up h along the tool axis
-            near = P[:, 0] + lo_x < chuck_face_model + dx
-            if near.any():
-                k = int(np.argmax(near)); hits.append({"op": op.name, "move": k, "pos": [round(float(v), 2) for v in P[k]], "part": name, "what": "chuck", "depth": round(float(chuck_face_model + dx - (P[k, 0] + lo_x)), 2)})
-                break
-            near = P[:, 0] + hi_x > tail_model + dx
-            if near.any():
-                k = int(np.argmax(near)); hits.append({"op": op.name, "move": k, "pos": [round(float(v), 2) for v in P[k]], "part": name, "what": "tailstock", "depth": round(float((P[k, 0] + hi_x) - (tail_model + dx)), 2)})
-                break
-    out.stats["collisions"] = _collision_stats(hits)
-    out.stats["machine"] = {"key": mm.key, "name": mm.name, "placement": placement}
-
-
 
 
 # ----------------------------------------------------------------------------- fixtures (vise jaws, clamps, plates: uncuttable)

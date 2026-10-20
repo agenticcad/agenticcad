@@ -228,34 +228,61 @@ for fx in (-150, 150):
 
 # ------------------------------------------------------------------ 4th-axis module (when fitted)
 rotary = None
+rotary_source = None
 if fourth:
-    ay, az = -10.0, 45.0                                                             # chuck axis: 10 mm forward of centre, 45 above the bed
+    # Belt-driven module, Ø80 × 150 work area, 4-jaw self-centring chuck (Ø52 body), tailstock with a live centre. The axis
+    # position is per machine: the firmware's coordinate.rotation_offset_y (85.5 default → bed Y −2.5; this user's config says
+    # 69.0 → bed Y −19) — machine.model["rotary"] (Machine page probing / Settings) overrides the reference numbers below.
+    rg = rotary_cfg(clearance=nose_z, axis_y=-10.0, axis_z=45.0, chuck_gap=5.0, jaw_reach=16.0, tail=True, tail_gap=0.0)
+    ay, az = rg["axis_y"], rg["axis_z"]
+    chuck_face = -45.0                                                               # the chuck BODY face (jaws stand proud of it)
+    jaw_reach, chuck_gap = rg["jaw_reach"], rg["chuck_gap"]
     node("chuck", "bed", axis="a", mode="table", stock=True, pivot=(0.0, ay, az))
     part("4th axis rail", "bed", box(262, 52, 8.5, at=(3, ay, 0), zmin=0), "anodised", collision=True)
     hs = box(35, 52, 57, at=(-110, ay, 0), zmin=8.5)
     hs = fillet(hs.edges().filter_by(Axis.X), 4)
     part("4th axis housing", "bed", hs, "anodised", collision=True)
     part("4th axis motor cap", "bed", box(4, 44, 44, at=(-129.5, ay, 0), zmin=15), "paint_dark")
-    part("chuck", "chuck", cyl_x(26, 6, ay, az, -84) + cyl_x(24.35, 11, ay, az, -78) + cyl_x(15, 20, ay, az, -67), "steel", collision=True)
+    part("chuck", "chuck", cyl_x(26, 6, ay, az, chuck_face - 39) + cyl_x(24.35, 11, ay, az, chuck_face - 33) + cyl_x(15, 20, ay, az, chuck_face - 20),
+         "steel", collision=True)
+    # 4 self-centring jaws: 10.4 wide, stepped from r 6 to r 22 at their modelled (nominal) opening, 15 mm inside the body
+    jaw_r_in, jaw_r_out, jaw_w = 6.0, 22.0, 10.4
     jaws = None
     for k in range(4):
         a = math.radians(90 * k)
-        jaw = Pos(-60 + 15.5, ay + 13.2 * math.cos(a), az + 13.2 * math.sin(a)) * Box(31, 10.4 if k % 2 == 0 else 25.5, 25.5 if k % 2 == 0 else 10.4)
+        rc = (jaw_r_in + jaw_r_out) / 2
+        jaw = (Pos(chuck_face - 15 + (jaw_reach + 15) / 2, ay + rc * math.cos(a), az + rc * math.sin(a)) * Rot(90 * k, 0, 0)
+               * Box(jaw_reach + 15, jaw_r_out - jaw_r_in, jaw_w))
         jaws = jaw if jaws is None else jaws + jaw
     part("chuck jaws", "chuck", jaws, "anodised", collision=True)
-    tb = box(34, 52, 57, at=(111, ay, 0), zmin=8.5)
-    tb = fillet(tb.edges().filter_by(Axis.X), 4)
-    tail = (tb + cyl_x(7.5, 4, ay, az, 93) + cyl_x(7, 5, ay, az, 88)
-            + Plane(origin=(88, ay, az), z_dir=(-1, 0, 0)) * Cone(7, 0, 8, align=(Align.CENTER, Align.CENTER, Align.MIN)))
-    part("tailstock", "bed", tail, "anodised", collision=True)
-    part("tailstock handwheel", "bed", cyl_x(4, 6, ay, az, 128) + cyl_x(14, 6, ay, az, 134) + cyl_x(3, 10, ay, az + 9, 140), "alu")
-    rotary = {"axis_y": ay, "axis_z": az, "chuck_face_x": -45.0, "chuck_r": 26.0, "tail_x": 80.0, "tail_r": 7.5, "max_diameter": 80, "max_length": 150}
+    tail_cone_len, tail_barrel, tail_r = 12.0, 9.0, 7.5                             # live centre: 30° half-angle cone, Ø15 barrel
+    if rg["tail"]:
+        # tip at the nominal bar's far end (+ tail_gap); the viewer slides the tailstock to the program's stock, the simulator checks it there
+        bar = rg["stock_length"] if rg["stock_length"] is not None else 120.0
+        tail_tip = chuck_face + chuck_gap + bar + rg["tail_gap"]
+        xb = tail_tip + tail_cone_len + tail_barrel
+        tb = box(34, 52, 57, at=(xb + 17, ay, 0), zmin=8.5)
+        tb = fillet(tb.edges().filter_by(Axis.X), 4)
+        tail = (tb + cyl_x(7.5, 4, ay, az, xb - 4) + cyl_x(7, tail_barrel - 4, ay, az, tail_tip + tail_cone_len)
+                + Plane(origin=(tail_tip + tail_cone_len, ay, az), z_dir=(-1, 0, 0))
+                * Cone(tail_cone_len * math.tan(math.radians(30)), 0, tail_cone_len, align=(Align.CENTER, Align.CENTER, Align.MIN)))
+        part("tailstock", "bed", tail, "anodised", collision=True)
+        part("tailstock handwheel", "bed", cyl_x(4, 6, ay, az, xb + 34) + cyl_x(14, 6, ay, az, xb + 40) + cyl_x(3, 10, ay, az + 9, xb + 46), "alu")
+    else:
+        tail_tip = None
+    rotary = {"axis_y": ay, "axis_z": az, "chuck_face_x": chuck_face, "chuck_r": 26.0, "chuck_gap": chuck_gap,
+              "jaw_reach": jaw_reach, "jaw_r": math.hypot(jaw_r_out, jaw_w / 2), "jaw_w": jaw_w, "jaw_count": 4,
+              "tail": rg["tail"], "tail_x": tail_tip, "tail_r": tail_r, "tail_gap": rg["tail_gap"],
+              "tail_cone": {"half_angle": 30.0, "length": tail_cone_len}, "tail_barrel": tail_barrel,
+              "tail_block": {"half_w": 26.0, "z0": 8.5, "z1": 65.5, "length": 34.0},
+              "max_diameter": 80, "max_length": 150, "source": rg["source"]}
+    rotary_source = rg["source_text"]
 
 # what moves with the tool, from the nose bottom up, in the machine's X / Y about the spindle axis: the Ø16 nose, then the
 # head cover — its front steps out along the chamfer (taken at each slab's widest) — with the stored wired probe on its
 # right from 12 mm up, then the motor cap
 _hd = [-32.5, 32.5]
-machine(key="z1_4axis" if fourth else "z1", home=(hx, hy, nose_z), travel=(200, 200, 100), clearance=nose_z,
+machine(key="z1_4axis" if fourth else "z1", home=(hx, hy, nose_z), travel=(200, 159 if fourth else 200, 100), clearance=nose_z,   # the 4th-axis module takes 41 mm of Y (cam_data)
         nose=[{"name": "collet / nose", "r": 8.0, "h": 20.0},
               {"name": "head", "box": _hd + [-41.4, 18.0], "h": 6.3},
               {"name": "head", "box": _hd + [-46.8, 18.0], "h": 5.7},
@@ -272,7 +299,9 @@ machine(key="z1_4axis" if fourth else "z1", home=(hx, hy, nose_z), travel=(200, 
                  "enclosure 355×435×449": "reference: Makera's simplified Z1 model",
                  "case styling (plinth, canopy, diagonal split, lettering)": "reference: Makera product photos",
                  "plinth height 89, diagonal 40→355 mm back, edge radii 32/12, rim 12": "estimated: scaled from Makera product photos",
-                 "4th axis chuck Ø52, axis 45 above bed, tailstock Ø14": "reference: community simplified model; Ø80×150 verified: makera.com",
+                 "4th axis Ø80×150, belt drive, 4-jaw self-centring chuck, live-centre tailstock": "verified: makera.com",
+                 "4th axis chuck Ø52 body, jaws 16 proud, tailstock Ø15": "reference: community simplified model; jaw shape estimated",
+                 **({"4th axis position": rotary_source} if rotary_source else {}),
                  "rods, carriages, bridge uprights, motors, cable chains": "estimated: from photos, representative only",
                  "tool-length sensor at the rear-right corner of the bed": "reference: reviews (fauxhammer); position (88, 88) and size estimated — measure yours",
                  "canopy hinges, LED bar, power button, vents, feet": "estimated: from photos"},
