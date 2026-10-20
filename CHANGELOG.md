@@ -5,6 +5,55 @@ patch bumps fix things, a major bump changes something scripts or workspaces rel
 
 ## [Unreleased]
 
+## [1.1.0] — 2026-10-20
+
+The 4th axis, properly: what a review of the rotary code found and fixed, gear cutting, A on the Machine page, a deeper
+rotary simulation, finish patterns, and the fixes from a close look at a real program's toolpaths. CAM and machine
+control stay **experimental**.
+
+### Added
+- **Gear teeth on the 4th axis** (`gear_teeth`, CAM ▸ Add operation on a rotary setup): involute spur or helical teeth
+  cut with a disc-type module cutter on an arbor (new tool type **gear cutter**: module, pressure angle, cutter number
+  / tooth range, disc Ø and thickness, arbor) from the *side* of the blank - the cutter's form lines up with the tooth
+  space that way - indexing A between spaces, depth passes in Y, helix as A interpolated along the feed. The
+  simulation cuts it exactly (a 20-tooth module-1 gear comes out within 0.02 mm of the model).
+- **Rotary profile** (`rotary_profile`): a hex, square, cam or any cross-section from round stock, continuous A with Z
+  following the real tool profile; unreachable concave corners are reported. `regular_polygon(sides, across_flats)`.
+- **A on the Machine page** (Makera Z1): the 4th axis in the status strip and the phone's DRO, A+ / A− on the jog pad
+  (1 / 10 / 45 / 90°), and **Zero on the 4th axis**: Makera's own 4th-axis Z probe (`M495 … O0`, work Z0 on the chuck
+  centreline), Y0 on the axis from the controller's own `rotation_offset` (read with `config-get`), A0 and "shrink A",
+  X0 at the chuck face or here, and a **bed touch** that gives the axis height above the bed exactly (same probe,
+  its length cancels). The found position is written into the machine's model for the simulation.
+- **Rotary simulation**: the cutter has a flute length (the body, neck and holder are checked against the bar),
+  the chuck body, jaws and tailstock (cone, barrel, block) are solids checked in 3D for every move including rapids,
+  the tailstock follows the stock length, gouges are attributed to operations, and a mixed mounting is refused.
+  Settings ▸ Machines ▸ Model: the rotary axis position (Y, Z), chuck gap and tailstock are configurable, with the
+  source shown (reference / from the machine's config / probed on a date).
+- **Finish patterns**: `parallel3d` has `pattern` (parallel, radial, spiral) and `one_way` (every pass the same
+  direction, one uniform lay, rapids back just over the surface); `face` honours its angle, takes `one_way`, and
+  continues across levels instead of returning to the first row. Both in Add operation and the Inspector.
+- Checks for 4th-axis programs: Y/Z reach from the axis (the Z1 with the module reaches 159 mm in Y), A speed against
+  the module's maximum, an origin off the centreline, and stacked roughing bands that leave different skins.
+
+### Fixed
+- **A 3+1 operation after a continuous one in the same setup was cut at the wrong angle** (no re-index: 6.4° off on
+  a test program while the viewer showed it right). Every 3+1 op now indexes A to its setup's angle by the short way.
+- **A wound up without limit** (118 turns on a 62 mm shaft): rings alternate direction so A stays within one turn;
+  after a spiral the Makera post drops the whole turns (`G92.4 A0 S0`, what MakeraStudio does) so the next index is
+  a short move.
+- **Collinear merging accumulated error** in the post: a tab top and its exit ramp merged into one slope, 0.058 mm
+  low at the tab's end. Every dropped point is now tested against the chord that replaces it.
+- Straight runs with rounding noise no longer post as huge-radius arcs (a 3 mm facet pass came out as 2–3 arcs).
+- Finishing operations (3D finish, V-carve, chamfer, anything with a V tool) are posted to 0.005 mm, not the
+  machine's roughing tolerance (0.05 mm had become the surface accuracy on facet edges).
+- From a real program's toolpaths: the contour's closing lap ran at the plunge rate (now the feed, plunge rate only on
+  the descent), adaptive lift links came down from above the stock (now to the level the previous pass cleared, and
+  stop clear of the wall before plunging), the V-carve retracted to safe height between letters (hops over the text
+  block now), adaptive corner feeds in five steps (fewer feed changes, longer arcs and lines).
+- Settings ▸ Tools: a gear cutter is drawn to scale (nut, disc, arbor) with a legend.
+- The CAM inspector no longer throws when the machine-view panel has already moved (the simulation failed to show).
+
+
 ## [1.0.0] — 2026-10-19
 
 A new layout and machine control you can run a job with: design, CAM and the Makera Z1 in one window. CAM and
