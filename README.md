@@ -187,7 +187,10 @@ Agent-native, like the CAD side: a second script per design, `cam.py`, written b
   editor that draws the tool to scale, with the feeds & speeds calculator; see [New in 1.0](#new-in-10-cam-and-machine--experimental)), or ask the agent
   (`save_machine`, `save_tool`).
 - **Tool shapes** ([tool_shape.py](tool_shape.py)): flat, ball, bull nose (corner radius), V-bit / engraver (angle + tip
-  Ø), chamfer, drill (point angle) and tapered ball (ball Ø + taper per side), each with its flute length, an optional
+  Ø), chamfer, drill (point angle), tapered ball (ball Ø + taper per side) and **gear cutter** (a disc-type involute
+  module cutter on an arbor: module, pressure angle, cutter number as the lowest tooth count of its range, disc Ø and
+  width, arbor shank Ø, retaining nut; the disc's radius follows the tooth-space form, and Settings ▸ Tools draws it to
+  scale with a legend), each with its flute length, an optional
   neck (Ø and reach), the shank Ø (a 0.3 mm endmill on a 1/8" shank) and the stickout. One profile (radius against
   height above the tip) feeds everything: the tool drawn in the viewer, the simulation and machine model; 3D finishing
   drops the whole tool (cutting shape, neck, shank) onto the surface, so any type follows it without gouging; the 4th
@@ -203,11 +206,25 @@ Agent-native, like the CAD side: a second script per design, `cam.py`, written b
   `holes(part)` (vertical round holes from concave cylindrical faces, with through detection),
   `face_polygon(model.get_face(id))` for a clicked face.
 - **Operations**: `face`, `contour` (outside/inside/on, depth passes, tabs, climb), `pocket` (concentric,
-  islands), `drill` (peck), `parallel3d` (heightmap raster finishing, ball or flat). All in model coords.
+  islands), `drill` (peck), `parallel3d` (heightmap raster finishing, any tool profile), `chamfer_edges`, `vcarve`,
+  and on the 4th axis `rotary_rough`, `rotary_finish`, `rotary_wrap`, `rotary_profile` and `gear_teeth` (below).
+  All in model coords.
+- **Finish patterns**: the lay is part of a finish. `parallel3d(..., pattern="parallel" | "radial" | "spiral",
+  one_way=True)`: straight passes at `angle`, rays from `center` (the region's centre by default) or one continuous
+  spiral out from it; `one_way` cuts every pass in the same direction (climb throughout, one uniform lay) and rapids
+  back just over the surface instead of zig-zagging. `face(..., angle=45, one_way=True)` honours its pass angle, takes
+  `one_way` the same way, and continues across depth levels instead of returning to the first row. Both are in
+  *Add operation* and the Inspector (*Pattern*, *Angle*, *One way*).
 - **Post**: `Program.gcode()` → GRBL dialect (G21 G90 G94 G17, G54, M3 S, G0/G1, F on change, M6/M0 tool
   change pauses, M30). WCS origin choices: stock-top-left / stock-top-center / stock-bottom-left /
-  stock-bottom-center / model-origin / (x, y, z). Checks: machine travel, spindle range, feeds clamped,
-  cutting below stock bottom, multi-tool with `tool_change=none`.
+  stock-bottom-center / model-origin / (x, y, z); on a rotary setup rotary-axis-left (default) or rotary-axis-center.
+  Checks: machine travel, spindle range, feeds clamped, cutting below stock bottom, multi-tool with
+  `tool_change=none`, and for 4th-axis programs the ones listed under *4th axis* below. **Post tolerance per kind**:
+  roughing operations are posted at the machine's `arc_tolerance`; finishing operations (`parallel3d`, `vcarve`,
+  `chamfer`, `rotary_finish`, `rotary_profile`, `gear_teeth`, and anything cut with a V or chamfer tool) at
+  `FINE_POST_TOL` = 0.005 mm, so the roughing tolerance never becomes the surface accuracy of a facet edge. Every
+  point the collinear merge drops is tested against the chord that replaces it, and straight runs with rounding noise
+  are never fitted as huge-radius arcs.
 - **UI**: the CAM workspace. The program, its setups, operations (colour/visibility) and the tools they use are a
   tree on the left, with warnings, *Export G-code* and a G-code preview; the Inspector edits the selected operation
   (Tool & feeds · Cut · Display) or setup (stock & origin, workholding, machine view). Toolpaths + stock + WCS origin
@@ -224,10 +241,44 @@ Agent-native, like the CAD side: a second script per design, `cam.py`, written b
   as the machine sees it for `section`/`holes`. Between setups the post stops the spindle, parks and pauses for the
   operator to flip or re-fixture (Makera M600, GRBL M0), then restarts the spindle.
 - **4th axis** (rotation about X, A in degrees): `Setup(..., rotary=True)` on a machine with `machine.rotary`.
-  Indexed 3+1 (`Setup(..., rotary=True, a=90)`; setups on the same mounting share one WCS and just turn A) and
-  continuous 4-axis: `rotary_rough` (rings or lines, from a radial height map), `rotary_finish` (lines, rings or a
-  continuous spiral, ball or flat), `rotary_wrap` (pocket/contour a 2D pattern wrapped onto a cylinder).
-  `Stock.cylinder(d, length)` for bar stock; checks for swing diameter, length and a missing/uninstalled axis.
+  Indexed 3+1 (`Setup(..., rotary=True, a=90)`; setups on the same mounting share one WCS and just turn A, and every
+  3+1 operation indexes A to its setup's angle by the short way, even after a continuous one) and
+  continuous 4-axis: `rotary_rough` (rings or lines, from a radial height map, leaving stock), `rotary_finish`
+  (lines, rings or a continuous spiral, ball or flat), `rotary_wrap` (pocket/contour a 2D pattern wrapped onto a
+  cylinder), `rotary_profile` and `gear_teeth`. `Stock.cylinder(d, length)` for bar stock. Rings alternate direction
+  so A stays within one turn, and after a spiral the Makera post drops the whole turns (`G92.4 A0 S0`, what
+  MakeraStudio does) so the next index is a short move.
+  - **`rotary_profile(setup, tool, profile)`**: a hex, square, cam, splines or any cross-section from round stock.
+    `profile` is a shapely polygon in the setup's Y–Z plane (the section perpendicular to the axis, the same at every
+    X in `x_range`); for every A the tool tip sits at the lowest Z that keeps the whole tool (its real profile) clear of
+    the turned section, cut as rings from the stock radius down `stepdown` per level. Concave corners tighter than the
+    tool and slots narrower than it are reported as unreachable. `regular_polygon(sides, across_flats, rotation=0)`
+    gives the polygon (a flat faces up at A = 0).
+    ```python
+    bar = Setup(machines["Makera Z1 + 4th axis"], Stock.cylinder(20, 60), rotary=True)
+    program.add(rotary_profile(bar, tools[1], regular_polygon(6, 16), x_range=(5, 45), stepdown=1.0))
+    ```
+  - **`gear_teeth(setup, tool, module, teeth, width=None, helix=0, ...)`**: involute spur or helical teeth with a
+    **gear cutter** tool (`type: "gear_cutter"`, whose module must match). The cutter works from the *side* of the
+    blank, where its form lines up with the tooth space: the cutter's axis is vertical, its disc is centred on the axis
+    height, and it cuts at the 3 o'clock side of the blank (`side="+y"` or `"-y"`). Y is the depth (passes of
+    `stepdown` mm of radial depth towards the axis, the last to the root radius plus `leave` minus `backlash`), X is the
+    feed across the face width (one direction only, climb, with a lead-in/out of the cutter radius + 2 mm beyond both
+    faces and the return made clear of the blank), and A indexes 360/N between spaces from `a0`. Helical teeth are A
+    interpolated along X (`helix` in degrees, + = right hand). Warnings: wrong pressure angle or cutter number for the
+    tooth count, a disc narrower than the space at the tip line, a blank bigger or smaller than the tip diameter, HSS
+    surface speed over 80 m/min, lead-in reaching the chuck jaws or the tailstock. The simulation cuts it exactly: a
+    20-tooth module-1 gear comes out within 0.02 mm of the model.
+    ```python
+    blank = Setup(machines["Makera Z1 + 4th axis"], Stock.cylinder(22, 12), rotary=True)  # Ø22 = tip Ø of m1 z20
+    program.add(gear_teeth(blank, tools[8], module=1.0, teeth=20, stepdown=0.75))         # T8: a module-1 gear cutter
+    ```
+  - **Checks** for 4th-axis programs (shown in the CAM tree's warnings before you run): swing diameter and length
+    against the module, a missing or uninstalled axis, the work origin off the rotary centreline (Y or Z: 4th-axis
+    programs must be zeroed on the axis), Y/Z reach from the axis (the Z1 with the module fitted reaches 159 mm in Y),
+    toolpaths below the bed, A speed against the module's maximum (the controller would slow those moves and the
+    time estimate would be short), an operation that moves A on a setup that is not rotary, and stacked roughing
+    bands that leave different skins on their walls.
 - **Makera Carvera** (Z1 and Carvera Air, with and without the 4th axis, as built-in machines): a `makera` post
   written against the controller firmware: lines ≤ 63 characters, no N numbers, `M6 Tn` on one line (the machine
   measures the tool after each manual change), M3 only after a tool is active, G28 park, M600 between setups,
@@ -236,7 +287,8 @@ Agent-native, like the CAD side: a second script per design, `cam.py`, written b
 - **Rendered simulation**: *Rendered* on the CAM timeline plays the program as a studio render: metallic stock machined
   live in front of you (the viewer stamps the tool along every move), a chrome holder with a spinning fluted tool, the
   camera following the cut with depth of field (Settings ▸ General to turn it off), and a HUD with the step, tool
-  changes and the speed factor.
+  changes and the speed factor. On a 4th-axis setup the stock is the simulator's radial map drawn as a closed bar about
+  the axis in the same metallic material, updated at the simulation's keyframes rather than stamped live.
 - **Voxel stock**: the stock you watch being machined is a signed-distance voxel solid in a Web Worker
   ([static/voxel_stock.js](static/voxel_stock.js)), stamped with every move and meshed with surface nets, so walls
   are smooth and floors exact; Settings ▸ General ▸ *Simulation stock* falls back to a lighter height map.
@@ -253,6 +305,14 @@ Agent-native, like the CAD side: a second script per design, `cam.py`, written b
   shows the stock being cut in step with the slider, with gouges in red and material left in amber on the last
   frame; the summary reports removed volume, gouges (depth, area, which op), material left on the part, stock
   left outside it, and rapids through material. Side setups (front/back/left/right) are not simulated yet.
+  **On the 4th axis** the cutter cuts with its real profile up to its flute length only: the body above the flutes, a
+  neck, the shank and the holder stack are checked against the remaining bar (contact, not cutting); the chuck body,
+  the jaw ring and the tailstock (cone, barrel, block) are solids about the axis, placed from the machine's model and
+  the setup's stock (the tailstock follows the stock length), and the whole tool stack is checked against them in 3D
+  for every move, rapids included; gouges are attributed to the operation that made them; and operations on
+  different 4th-axis mountings (a different stock, axis, origin or machine) are refused in one simulation: simulate
+  the setups separately. Not checked yet: the module's housing and rail, and the gaps between the jaws (the jaws are
+  a full ring at their tips, the safe side).
 - **Machine models and collision checks** ([machine_models.py](machine_models.py)): every built-in machine has a
   kinematic 3D model built in build123d from published and measured numbers — Makera Z1 and Carvera Air (bed with the
   real hole grid, moving bed in Y under the rear bridge, head in X/Z, 4th-axis chuck and tailstock, enclosure), Haas
@@ -261,10 +321,18 @@ Agent-native, like the CAD side: a second script per design, `cam.py`, written b
   program's machine around the stock and plays the simulation on it: head, table and chuck move as they would, the
   tool hangs from the spindle, and any part the simulator saw collide flashes red at that move. The simulation itself
   checks the whole stack above the flutes (shank, collet nut, nose, collar, head) against the remaining stock, the
-  tool tip against the bed under the spoilboard, and the holder against the chuck and tailstock on 4th-axis jobs;
-  contacts are listed in the summary with the op, move, position and depth. Every number carries its source and
+  tool tip against the bed under the spoilboard, and on 4th-axis jobs the whole stack against the chuck body, the
+  jaws and the tailstock in 3D for every move; contacts are listed in the summary with the op, move, position and
+  depth. Every number carries its source and
   accuracy tier (`verified` / `reference` / `estimated`) in **Settings ▸ Machines ▸ Model**, where measured values
-  (nose profile, stickout, spoilboard, clearance) can be entered per machine.
+  (nose profile, stickout, spoilboard, clearance) can be entered per machine. On a machine with a 4th axis the same
+  pane has a **Rotary axis** row: *Y* (mm from the bed centre, + towards the back), *Z* (mm above the bed), *chuck gap*
+  (the stock's end face this far in front of the chuck body face) and *tailstock fitted*, with a source line next to
+  them: *reference model — probe it on the Machine page or measure and type it here*, *from the machine's config*
+  (with the machine Y/Z it was converted from), *probed on <date>*, or *set here*. The JSON overrides take the same
+  keys (`rotary`: `axis_y`, `axis_z` in the bed frame, or `axis_my`, `axis_mz` in machine coordinates converted with
+  the anchor, `chuck_gap`, `jaw_reach`, `tail`, `tail_gap`, `stock_length`); Machine ▸ Zero's *Zero on the 4th axis*
+  writes the position it finds into this model for the simulation.
 - **Model your own machine** ([machine_script.py](machine_script.py)): a machine's model is a script,
   `workspace/machines/<slug>.machine.py`, in the design-script namespace plus `node(name, parent, axis, mode, stock,
   pivot)`, `part(name, node, shape, material, collision)` and `machine(home, travel, clearance, nose, table, rotary,
@@ -299,7 +367,11 @@ positions, the machine's camera, Hold / STOP, homing, jogging, go-to, the probe 
 changes and the auto Z probe. A status strip (state, position, tool, Control, Hold / Pause / Stop program, STOP) sits
 over the camera with the jog pad on it, and the Inspector takes you through four steps: **Prepare** (connect, home,
 tool change, accessories), **Zero** (what the setup wants next to what set the machine's origin, the 3D probe,
-*Find the block*), **Run** and **Manual**.
+*Find the block*, *Zero on the 4th axis*), **Run** and **Manual**. On a Z1 with the rotary module the strip and the
+phone's DRO show **A°** (work A over machine A) next to X, Y and Z, and the jog pad has an **A+ / A−** column with its own
+step (1°, 10°, 45°, 90°; `$J A… F…` like the other axes, at half the module's rate, under the same guards). A is shown
+and jogged only when the machine is known to have a 4th axis: the machine record has `rotary` or the status reports a
+non-zero A.
 First driver: the Makera Z1 (TCP 2222 framed protocol, UDP 3333 discovery, camera on `ws://<ip>:82/ws_video`;
 [machine_link.py](machine_link.py) documents what was read from the firmware and checked on a real machine). Other
 machines later.
@@ -319,8 +391,32 @@ position and limits; after: the firmware's `[PRB:]` results, the reported tool a
   firmware moves, probes and sets the work origin; the app requires the 3D probe (T9999) fitted and measured, checks
   the routine's travel against the limits, and sends a feed hold if the head leaves that area or Z drops more than
   10 mm before the first touch. **Lower to N mm above Z0** brings the probe to its start height (down only).
+- **Zero on the 4th axis** (Machine ▸ Zero, on a rotary setup): Makera's own routines and commands, one step at a time,
+  each behind a confirmation; nothing here moves X/Y/Z except the firmware's own probe. The card first reads the
+  module's position from the controller (*Read from the controller*: `config-get sd coordinate.rotation_offset_x/y/z`,
+  read-only; the numbers MakeraStudio set up for the module), then:
+  1. **Z0 on the centreline** = Makera's 4th-axis Z probe, `M495 X0 Y0 O0` (O without F) with the wired probe (T0)
+     fitted and measured: Z goes up, the head goes to the module's reference pad (Anchor 1 + rotation offset),
+     touches it fast then slow, and the firmware sets work Z0 `rotation_offset_z` below the pad: the chuck centreline.
+     Watched like the 3D-probe routines (the head must stay between where it started and the pad, Z above a floor).
+  2. **Bed height** (optional, for the machine model and the simulation): *Auto Z here* over the bare bed with the same
+     probe, then *Use as bed height*. The axis height above the bed is then axis Z − bed Z exactly, whatever the probe's
+     length (it cancels). The result goes into Settings ▸ Machines ▸ Model as *probed on <date>*.
+  3. **Y0 on the centreline** = `G10 L2 P0 Y` at machine Y = anchor1_y + rotation_offset_y, the controller's own sum
+     (*Set Y0 on the axis*), or a typed machine Y when the offsets are unknown. Nothing moves.
+  4. **A0 here**: the chuck's current angle becomes A0 (`G92.4 A0`, then `G10 L20 P0 A0` so work A reads 0); turn the
+     chuck with A+ / A− first if you want a feature up. **Shrink A** (`G92.4 A0 S0`) drops whole turns from the A count.
+     Nothing moves.
+  5. **X0** at what the setup wants (the stock's left end or its centre on the axis): *X0 here* (jog the tool to the
+     point first) or the chuck face's machine X plus the offset to the origin (*Set X0*).
+
+  With Z0 on the centreline the stock top sits at Z = the stock radius, so the card offers a **Z floor** above it before
+  you jog. The same three commands are on Machine ▸ Manual's *4th axis* row (*A0 here*, *Shrink A*, *4th-axis Z probe*).
+  Before a run, the CAM program's warnings cover the rotary checks (origin off the centreline, Y/Z reach, A speed, swing
+  and length): read them in the CAM tree before *Send to machine →*.
 - **Machine-specific values come from the machine's live config** (MakeraStudio's downloaded `ControllerConfig.txt`):
-  this Z1's Anchor 1 was -191.28, -194.45 against the firmware default -192.4, -194.3.
+  this Z1's Anchor 1 was -191.28, -194.45 against the firmware default -192.4, -194.3; the rotary module's offsets
+  (`coordinate.rotation_offset_x/y/z`) are read from the controller the same way.
 
 Safety rules in `machine_link`:
 - **Connecting is monitor-only.** Status, camera, Hold and STOP; Hold and STOP always work. **Control** must be on
@@ -362,7 +458,8 @@ a jog past the end, so the tests prove the guard does.
 
 - **Add operation** (CAM tree ▸ *+ Add operation*, no chat or code): face, adaptive clearing, pocket (floors picked in
   the viewer), contour, drill, 3D finish, **chamfer edges** and **V-carve**, each written as one `program.add(...)` line
-  in cam.py. *Chamfer edges* puts a chamfer of a given width on the top edges of picked faces or the part's outline,
+  in cam.py; on a 4th-axis setup the list adds *Rotary rough*, *Rotary finish*, *Rotary profile* and *Gear teeth*
+  (and drops adaptive). *Chamfer edges* puts a chamfer of a given width on the top edges of picked faces or the part's outline,
   with a V-bit or chamfer tool, the tip size included in the offset; bigger chamfers take several laps. *V-carve* cuts
   letters or a logo along their centrelines, as deep as each stroke is wide, so the top edge follows the outline and
   corners come out sharp; *Max depth* gives wide strokes a flat bottom; taken in levels, linked at depth.
@@ -675,7 +772,7 @@ Minor bump for features, patch bump for fixes, major bump when scripts or worksp
 
 ## Status, gaps and roadmap
 
-**Status (v1.0):** working end to end on a single machine for a single user — design by chat, by
+**Status (v1.1):** working end to end on a single machine for a single user — design by chat, by
 hand, or both; multi-body designs and assemblies; constrained sketches; threads; measurement; drawings; part library;
 extensions; CAM with GRBL, Makera, Haas and LinuxCNC posts; Makera Z1 control; unit tests and graded agent evals. The
 modelling kernel is exact and the toolpaths are checked and simulated, but **CAM and machine control are
@@ -688,7 +785,9 @@ experimental**: they have been run on a real machine only by the author so far.
   nose / head contacts with the stock and bed (the viewer's voxel stock is for watching, not for the checks), but the
   machine models' castings and enclosures are representative
   (the work-area numbers are verified; see Settings ▸ Machines ▸ Model). Side setups and mixed 4th-axis + flat
-  programs are simulated separately. Time estimates ignore acceleration.
+  programs are simulated separately, and so are operations on different 4th-axis mountings. On the 4th axis the chuck
+  body, jaws and tailstock are checked in 3D, but not the module's housing and rail, and the jaws are a full ring (no
+  gaps between them). Time estimates ignore acceleration.
 - **Adaptive corners rely on feed reduction**, not on geometry: the engagement still rises at sharp concave
   corners and around small islands, where the feed drops instead. No trochoidal slotting op, no rest for 3D, no Z-level (waterline) finishing.
 - **Sketches** have constraints and dimensions but no sketch fillet, trim or offset.
