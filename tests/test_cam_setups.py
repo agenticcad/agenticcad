@@ -537,3 +537,58 @@ def test_pocket_finishes_each_region_before_the_next(machines, plate):
     # within a region the deeper levels start with a plunge where the tool is, not a retract to safe Z
     safe_rapids = sum(1 for mv in op.moves if mv[0] == cam.RAPID and mv[3] >= st.safe_z - 1e-6)
     assert safe_rapids <= 4
+
+
+def test_rotary_a_stays_within_a_turn_and_3plus1_ops_are_reindexed(machines, shaft):
+    """Two defects found reviewing the 4th axis (2026-10-20): rings wound A up without limit (42,480 deg on a 62 mm
+    shaft), and a 3+1 op after a continuous op in the same setup was cut at whatever angle the previous op stopped at."""
+    from shapely.geometry import box
+    m = machines["Makera Z1 + 4th axis"]
+    st = cam.Setup(m, cam.Stock.cylinder(32, 62, x0=-1), rotary=True, a=0.0)
+    p = cam.Program(st)
+    p.add(cam.rotary_rough(st, flat(), shaft.shape, stepdown=2.0, mode="rings"))
+    A = [mv[5] for mv in p.ops[0].moves if len(mv) > 5]
+    assert -1e-6 <= min(A) and max(A) <= 360.0 + 1e-6              # rings alternate: never more than one turn
+    # a lines finish ends part way round; the flat contour after it must be cut at the setup's angle (0), lifted first
+    p.add(cam.rotary_finish(st, ball(), shaft.shape, mode="lines", stepover=0.5))
+    p.add(cam.contour(st, flat(), [box(5, -6, 25, 6)], z_top=16, z_bottom=14, name="flat3p1"))
+    g = p.gcode().splitlines()
+    fin_a = [float(x) for l in g[:g.index("; flat3p1 [contour] T1 3.175 flat D3.175")] for x in re.findall(r"\bA(-?\d+\.?\d*)", l)]
+    assert fin_a and abs(fin_a[-1]) > 1                              # the finish really did leave A off zero
+    i = g.index("; flat3p1 [contour] T1 3.175 flat D3.175")
+    after = g[i:i + 6]
+    assert after[1].startswith("G53 G0 Z"), after                                  # lifted first
+    a_idx = float(re.fullmatch(r"G0 A(-?\d+\.?\d*)", after[2]).group(1))
+    assert abs(a_idx % 360.0) < 1e-6 and abs(a_idx - fin_a[-1]) <= 180.0, after     # the setup's angle, by the short way
+    # a spiral winds up by nature: the Makera post drops the whole turns afterwards (G92.4 ... S0), so the next
+    # index is a short move and A words stay small
+    p2 = cam.Program(st)
+    p2.add(cam.rotary_finish(st, ball(), shaft.shape, mode="spiral", stepover=1.0))
+    p2.add(cam.contour(st, flat(), [box(5, -6, 25, 6)], z_top=16, z_bottom=14, name="flat3p1"))
+    g2 = p2.gcode().splitlines()
+    k = g2.index("; flat3p1 [contour] T1 3.175 flat D3.175")
+    assert any(l.startswith("G92.4 A0 S0") for l in g2[:k + 4])
+    idx = [float(x) for l in g2[k:k + 4] for x in re.findall(r"^G0 A(-?\d+\.?\d*)", l)]
+    assert idx and abs(idx[0] % 360.0) < 1e-6 and abs(idx[0]) <= 360.0, g2[k:k + 4]   # small, after the turns are dropped
+    assert any("winds up" in w for w in p2.ops[0].warnings)
+
+
+def test_rotary_checks_reach_speed_and_centreline(machines, shaft):
+    m = machines["Makera Z1 + 4th axis"]
+    st = cam.Setup(m, cam.Stock.cylinder(32, 62, x0=-1), rotary=True)
+    p = cam.Program(st)
+    op = cam.rotary_finish(st, ball(), shaft.shape, mode="rings", stepover=0.5)
+    # ask for an A rate above the module's 1800 deg/min: a feed the arc at r = 16 can't give at that speed
+    for mv in op.moves:
+        if mv[0] != cam.RAPID: mv[4] = 100000.0
+    p.add(op)
+    w = p.check()
+    assert any("deg/min" in x and "above its 1800" in x for x in w), w
+    # a tool parked far behind the axis (Y -80) is outside the Z1's reach with the module (-51 .. 108)
+    op2 = cam.contour(st, flat(), [__import__("shapely.geometry", fromlist=["box"]).box(5, -90, 25, -70)], z_top=16, z_bottom=14, name="far")
+    p.add(op2)
+    assert any("either side of it" in x for x in p.check())
+    # an origin off the centreline is refused by the checks
+    st2 = cam.Setup(m, cam.Stock.cylinder(32, 62, x0=-1), rotary=True, origin=(0.0, 3.0, 0.0))
+    p3 = cam.Program(st2); p3.add(cam.rotary_finish(st2, ball(), shaft.shape, mode="rings", stepover=0.5))
+    assert any("off the rotary centreline" in x for x in p3.check())

@@ -29,10 +29,15 @@ DEFAULT_MACHINES = [
     Machine(name="Makera Z1 + 4th axis", controller="makera", post="makera", travel={"x": 200, "y": 159, "z": 100},
             max_feed={"x": 1200, "y": 1200, "z": 600}, rapid=1200, spindle={"min": 0, "max": 13000},
             tool_change="manual", safe_z=5, clearance_z=15, collet=3.175, max_stepdown={"aluminium": 0.8},
-            rotary={"axis": "A", "about": "x", "max_diameter": 80, "max_length": 150, "max_speed": 1800, "installed": True},
-            notes="Makera Z1 with the 4th axis module (Ø80 x 150 mm, ~2.5 Nm). A rotates about X; the work origin's "
-                  "Y and Z must be on the rotary centreline (Makera's 4th-axis probing sets Z0 on the axis). With the "
-                  "module fitted the firmware limits Y to about 159 mm. A max 1800 deg/min used (3600 without A homing)."),
+            rotary={"axis": "A", "about": "x", "max_diameter": 80, "max_length": 150, "max_speed": 1800, "installed": True,
+                    # where the axis sits in the travel (firmware default coordinate.rotation_offset_y 85.5 from Anchor 1:
+                    # machine Y -108.95; the head reaches Y -1 .. -160 with the module) and above the bed (model, reference)
+                    "y_reach": [-51.0, 108.0], "axis_z": 45.0},
+            notes="Makera Z1 with the 4th axis module (Ø80 x 150 mm, belt drive, ~2.5 Nm). A rotates about X; the work "
+                  "origin's Y and Z must be on the rotary centreline (Makera's 4th-axis probing sets Z0 on the axis). With "
+                  "the module fitted the firmware limits Y to about 159 mm. A max 1800 deg/min used (3600 without A homing). "
+                  "y_reach / axis_z: your machine's values come from its config (coordinate.rotation_offset_*) - set them in "
+                  "Settings ▸ Machines."),
     Machine(name="Carvera Air", controller="makera", post="makera", travel={"x": 300, "y": 200, "z": 130},
             max_feed={"x": 4000, "y": 4000, "z": 2000}, rapid=4000, spindle={"min": 0, "max": 13000},
             tool_change="manual", safe_z=5, clearance_z=15, collet=3.175,

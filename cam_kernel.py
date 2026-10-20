@@ -638,6 +638,18 @@ class Op:
         xs = [m[1] for m in self.moves]; ys = [m[2] for m in self.moves]; zs = [m[3] for m in self.moves]
         return (min(xs), min(ys), min(zs)), (max(xs), max(ys), max(zs))
 
+    def a_rate_max(self) -> float:
+        """The fastest the rotary axis is asked to turn on a feed move, deg/min (0 if A never moves while cutting)."""
+        worst = 0.0
+        prev = None
+        for m in self.moves:
+            if prev is not None and m[0] != RAPID and len(m) > 5 and len(prev) > 5 and m[5] != prev[5]:
+                t = self._seg(prev, m) / max(m[4], 1.0)                 # minutes for this move at its feed
+                if t > 1e-9:
+                    worst = max(worst, abs(m[5] - prev[5]) / t)
+            prev = m
+        return worst
+
 
 class PathBuilder:
     """Accumulates moves for one operation with a safe-Z discipline."""
@@ -2405,10 +2417,28 @@ class Program:
                 L = st.stock.xmax - st.stock.xmin
                 if rot.get("max_length") and L > rot["max_length"] + 1e-6:
                     w.append(f"{tag}stock length {L:.1f} mm exceeds the 4th axis capacity {rot['max_length']} mm")
+                # the work origin must sit on the rotary centreline: the post's A feeds and the simulation assume it
+                oy, oz = st.origin_point()[1], st.origin_point()[2]
+                if abs(oy - st.axis[0]) > 1e-3 or abs(oz - st.axis[1]) > 1e-3:
+                    w.append(f"{tag}the work origin is {abs(oy - st.axis[0]):.2f} mm (Y) / {abs(oz - st.axis[1]):.2f} mm (Z) "
+                             "off the rotary centreline: 4th-axis programs must be zeroed on the axis")
+                # Y / Z reach from the axis (where the module sits in the travel), when the machine says
+                if b and rot.get("y_reach"):
+                    lo_y, hi_y = rot["y_reach"]
+                    if y0 < lo_y - 1e-6 or y1 > hi_y + 1e-6:
+                        w.append(f"{tag}toolpath Y {y0:.1f} .. {y1:.1f} from the rotary axis; {m.name} reaches "
+                                 f"{lo_y:.1f} .. {hi_y:.1f} mm either side of it")
+                if b and rot.get("axis_z") and z0 < -float(rot["axis_z"]) + 1e-6:
+                    w.append(f"{tag}toolpath goes {-(z0 + float(rot['axis_z'])):.1f} mm below the bed (the axis is {rot['axis_z']} mm above it)")
         for op in self.ops:
             st = self.setup_of(op); t = op.tool
             if op.uses_a and not st.rotary:
                 w.append(f"{op.name}: moves A but its setup is not on the 4th axis")
+            if op.uses_a and st.rotary and (m.rotary or {}).get("max_speed"):
+                ar = op.a_rate_max()
+                if ar > float(m.rotary["max_speed"]) * 1.001:
+                    w.append(f"{op.name}: asks the 4th axis for {ar:.0f} deg/min, above its {m.rotary['max_speed']:.0f} deg/min: "
+                             "the controller will slow those moves (the time estimate is short)")
             if not (m.spindle["min"] <= t.rpm <= m.spindle["max"]):
                 w.append(f"{op.name}: {t.label()} rpm {t.rpm} outside spindle range {m.spindle}")
             w += [f"{op.name}: {x}" for x in op.warnings]
@@ -2792,6 +2822,34 @@ def _emit(prog: Program, dialect: str) -> str:
     prev_setup: Setup | None = None
     last_f = None
     cur_a = 0.0
+    a_shift = 0.0            # whole turns the controller has dropped from A (Makera `G92.4 A0 S0` after a wound-up op)
+    aw0 = (m0.rotary or {}).get("axis", "A")
+
+    def a_out(a: float) -> float:
+        return a - a_shift
+
+    def a_shrink():
+        """Makera only: drop the whole turns A has wound up (the firmware's G92.4 ... S0 keeps the work angle modulo 360),
+        so the next index is a short move and the controller's A stays small. Nothing moves."""
+        nonlocal a_shift
+        if not mk:
+            return
+        cur = a_out(cur_a)
+        if abs(cur) >= 360.0 - 1e-6:
+            line(f"G92.4 {aw0}0 S0")
+            a_shift += cur - math.fmod(cur, 360.0)
+
+    def a_index(target: float, clear_wcs: float):
+        """Turn A to `target` (an angle; the nearest equivalent turn is used) with the tool lifted first."""
+        nonlocal cur_a
+        eq = target + 360.0 * round((cur_a - target) / 360.0)
+        if abs(eq - cur_a) < 1e-6:
+            cur_a = eq
+            return
+        lift(clear_wcs)
+        a_shrink()
+        line(f"G0 {aw0}{_fmt(a_out(eq))}")
+        cur_a = eq
     last: list = [None, None, None, None]
     spindle_on = False
     for op in prog.ops:
@@ -2839,14 +2897,23 @@ def _emit(prog: Program, dialect: str) -> str:
                 if prev_setup is not None:
                     lift(clear)
             if st.rotary:
-                line(f"G0 {aw}{_fmt(st.a)}")
+                if prev_setup is not None and Program.same_mounting(prev_setup, st):
+                    a_index(st.a, clear)                   # same chuck: the shortest turn to this setup's angle
+                else:
+                    a_shrink()
+                    cur_a = st.a                           # a fresh mounting: the operator zeroed A
+                    line(f"G0 {aw}{_fmt(a_out(cur_a))}")
+            else:
+                cur_a = st.a
             prev_setup = st
-            cur_a = st.a
             last = [None, None, None, cur_a]               # positions restart in the new setup's frame
             last_f = None
         t = op.tool
         rpm = min(max(t.rpm, m.spindle["min"]), m.spindle["max"])
         comment(f"{op.name} [{op.kind}] {t.label()} D{_fmt(t.diameter)}")
+        if st.rotary and not op.uses_a:
+            a_index(st.a, clear)                           # a 3+1 op after a continuous one: back to the setup's angle
+            last[3] = cur_a
         if cur_tool != t.number:
             if mk:
                 if cur_tool is not None:
@@ -2946,7 +3013,7 @@ def _emit(prog: Program, dialect: str) -> str:
             da = 0.0
             if a is not None and (last[3] is None or abs(a - last[3]) > 1e-6):
                 da = a - (last[3] if last[3] is not None else a)
-                words.append(f"{aw}{_fmt(a)}")
+                words.append(f"{aw}{_fmt(a_out(a))}")
             if not words:
                 continue
             if k == RAPID:
@@ -2980,6 +3047,8 @@ def _emit(prog: Program, dialect: str) -> str:
             last = [x, y, z, a if a is not None else last[3]]
         if op.uses_a:
             cur_a = last[3]
+            if abs(a_out(cur_a)) >= 360.0:
+                a_shrink()
     if g93:
         line("G94")
     line("M5")

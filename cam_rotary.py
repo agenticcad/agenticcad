@@ -197,6 +197,13 @@ def _rb(setup, tool, op):
     return pb
 
 
+def _ring_dir(start: float) -> float:
+    """A full ring from `start` goes +360 when A is at (or below) 0 and -360 when it is at a full turn: rings alternate,
+    so A stays within [0, 360] and never has to unwind (the rotary axis is absolute; wound-up A costs float precision on
+    the controller and a long unwinding rapid at the next index)."""
+    return -1.0 if start > 180.0 else 1.0
+
+
 def _rapid_to(pb: PathBuilder, x: float, a: float) -> None:
     """Retract to safe height (clear of the swept stock), turn A, move X."""
     s = pb.setup.safe_z
@@ -262,8 +269,8 @@ def rotary_rough(setup: Setup, tool: Tool, shape=None, model=None, stepdown: flo
                     continue                                # nothing left at this level here
                 a_step = max(1.0, min(5.0, math.degrees(so / max(L, so)) / 2))
                 n = int(math.ceil(360.0 / a_step))
-                start = pb.cur_a or 0.0                     # A is absolute: keep turning the same way, never unwind
-                aa = start + np.linspace(0.0, 360.0, n + 1)
+                start = pb.cur_a or 0.0                     # A is absolute; rings alternate direction, so A stays within one turn
+                aa = start + _ring_dir(start) * np.linspace(0.0, 360.0, n + 1)
                 zz = np.array([_interp_row(Z, angles, a)[j] for a in aa])
                 _rapid_to(pb, float(xc), float(start))
                 _feed(pb, float(xc), float(zz[0]), float(start), pb.plunge, PLUNGE)
@@ -351,7 +358,7 @@ def rotary_finish(setup: Setup, tool: Tool, shape=None, model=None, stepover: fl
         a_step = max(0.5, min(3.0, math.degrees(rx / max(r_part, rx))))
         for xc in np.linspace(x0, x1, n_x):
             start = pb.cur_a or 0.0
-            aa = start + np.arange(0.0, 360.0 + 1e-9, a_step)
+            aa = start + _ring_dir(start) * np.arange(0.0, 360.0 + 1e-9, a_step)   # alternate direction: no wind-up
             if pb.pos is None:
                 _rapid_to(pb, float(xc), float(start))
                 _feed(pb, float(xc), z_at(xc, start), float(start), pb.plunge, PLUNGE)
@@ -371,6 +378,9 @@ def rotary_finish(setup: Setup, tool: Tool, shape=None, model=None, stepover: fl
         for a in aa[1:]:
             x = x0 + (x1 - x0) * a / (360.0 * turns)
             _feed(pb, float(x), z_at(x, a), float(a))
+        if turns > 10:
+            op.warnings.append(f"spiral: A winds up {turns:.0f} turns ({360 * turns:.0f}°) in one pass; the Makera post resets "
+                               "the turns after the operation (G92.4), other controllers must accept large A values")
     else:
         raise CamError("rotary_finish mode must be lines | rings | spiral")
     if pb.pos is not None:
