@@ -29,6 +29,24 @@ Safety model (MachineControl):
     (prepare_program: comments out, 62-character lines, no relative moves / probing / offset changes), checked
     against the travel from the current work origin, uploaded to the machine's SD and played; Pause / Resume /
     Stop program and STOP stay available.
+
+4th axis (Makera's rotary module, the firmware's "delta" actuator: delta_max_rate 3600 deg/min, delta_acceleration 360):
+  * The status carries A (and B) as the 4th and 5th coordinates (mpos_ab / wpos_ab). A is shown and jogged only when
+    the machine is known to have a 4th axis: the saved machine record has `rotary` (installed), or the status shows a
+    non-zero A (work or machine) - a bare Z1 reports 0.0 for both; the user's Z1 with the module reports e.g. WPos A
+    -180. Once seen, A stays shown for the session (has_fourth()).
+  * Jog A: `$J A<deg> F<scale>` like X/Y (SimpleShell::jog takes A-C), at most JOG_MAX["a"] degrees per click, same
+    guards as X/Y (Control, homed, Idle, tool measured). A has no travel box (it is continuous).
+  * Zeroing a rotary setup uses the machine's own routines: Makera's 4th-axis Z probe is `M495 X<x> Y<y> O<o>` with NO
+    F word (ATCHandler M495 handler: O without F sets its zprobe_abs flag -> fill_zprobe_abs_scripts: M494.1, G53 G0 Z
+    clearance, G53 G0 to anchor1 + rotation_offset_x - 3 (or - 7 after a Y clearance move, FuncSetting bit 0),
+    anchor1_y + rotation_offset_y, G38.2 Z fast, retract 2, G38.2 slow, `G10 L20 P0 Z<rotation_offset_z>`, retract,
+    M494.2): work Z0 lands rotation_offset_z below the module's reference pad = the chuck centreline. Y0 on the
+    centreline is machine Y = anchor1_y + rotation_offset_y (`G10 L2 P0 Y`). A0: `G92.4 A0` sets machine A to 0
+    (Robot.cpp G92.4) and `G10 L20 P0 A0` makes work A read 0 too (G10 L20 takes A; G10 L2's A is commented out in
+    the firmware). `G92.4 A0 S0` shrinks A modulo 360. The offsets are coordinate.rotation_offset_x/y/z in the
+    controller's config, readable over the console with `config-get sd coordinate.rotation_offset_y`
+    (SimpleShell -> Configurator::config_get_command: "sd: <key> is set to <v>").
 """
 from __future__ import annotations
 
@@ -379,6 +397,14 @@ class Profile:
     probe3d_tool: int = 9999               # tool number of the add-on 3D probe, as MakeraStudio uses it (its tool codes:
                                            # T0 wired probe, T8888 3D Probe Rod, T9999 3D probe; the firmware powers the
                                            # probe port for T9999 after a change)
+    clearance_z: float = -3.0              # coordinate.clearance_z: where the firmware's routines lift Z to first
+    # where the real axes end (soft_endstop.*): the firmware's own routines may go there (the rotary module's reference
+    # pad is at machine X -201.8 on the user's Z1), jogs and go-to moves stay inside `travel`
+    hard_travel: dict = field(default_factory=lambda: {"x": 206.0, "y": 206.0, "z": 102.0})
+    # the rotary module's position, from the controller's config (coordinate.rotation_offset_x/y/z: the reference pad
+    # X/Y from Anchor 1, the pad's height above the chuck centreline). None until the live config or `config-get` gives
+    # it; the firmware defaults are 12 / 85.5 / 23 (the user's Z1 is calibrated to -7.5 / 69.0 / 17.0)
+    rotation_offset: dict | None = None
 
 
 def makera_live_config(path=None) -> dict:
@@ -400,7 +426,7 @@ def makera_live_config(path=None) -> dict:
     return out
 
 
-Z1 = Profile("Makera Z1", travel={"x": 200.0, "y": 200.0, "z": 100.0}, max_rate={"x": 1200.0, "y": 1200.0, "z": 600.0},
+Z1 = Profile("Makera Z1", travel={"x": 200.0, "y": 200.0, "z": 100.0}, max_rate={"x": 1200.0, "y": 1200.0, "z": 600.0, "a": 3600.0},
              # MakeraStudio's own switch definitions (MacOS/config/interface_config.json): dust = "Extend output" M851/M852,
              # light M821/M822, probe laser M831/M832, spindle fan M811 S<0..100 %> / M812
              switches={"dust": ("M851", "M852"), "light": ("M821", "M822"), "probe_laser": ("M831", "M832"),
@@ -411,10 +437,12 @@ SWITCH_POWER_DEFAULT = {"spindle_fan": 20}                   # MakeraStudio's de
 DIAG_EVERY_S = 10.0                                          # re-read the switches this often while Idle (the firmware runs
                                                              # the spindle fan itself above 45 C and at play)
 
-JOG_MAX = {"xy": 10.0, "z_up": 10.0, "z_down": 1.0}          # mm per click
+JOG_MAX = {"xy": 10.0, "z_up": 10.0, "z_down": 1.0, "a": 90.0}   # mm per click; A in degrees
 GOTO_FEED_MAX = 600.0                                        # mm/min cap for go-to moves
 Z_TOP_BAND = 1.5                                             # go-to moves only while machine Z is within this of the top
-JOG_SCALE = {"xy": 0.5, "z_up": 0.5, "z_down": 0.25}         # fraction of the axis max rate ($J F)
+JOG_SCALE = {"xy": 0.5, "z_up": 0.5, "z_down": 0.25, "a": 0.5}   # fraction of the axis max rate ($J F)
+ROTATION_KEYS = ("coordinate.rotation_offset_x", "coordinate.rotation_offset_y", "coordinate.rotation_offset_z")
+ROTARY_ZPROBE = "M495 X0 Y0 O0"                              # Makera's 4th-axis Z probe: O without F = zprobe_abs (see the module doc)
 # Makera's 3D-probe routines (firmware ATCHandler M480.n, sent by MakeraStudio as `M480.n X<offset> Y<offset> Z<depth>
 # D<ball dia>`, defaults X20 Y20 Z2 D2). Corners are named as seen from the front of the machine (Y+ is the back).
 # sx, sy: the firmware's signed X/Y_distance for that subcode.
@@ -460,9 +488,10 @@ def prepare_program(gcode: str, op_names: list[str], air_cut: float = 0.0) -> di
     out: list[str] = []
     ops: list[dict] = []
     k = 0
-    x = y = z = None
-    ext = {"x": [1e9, -1e9], "y": [1e9, -1e9], "z": [1e9, -1e9]}
+    x = y = z = a = None
+    ext = {"x": [1e9, -1e9], "y": [1e9, -1e9], "z": [1e9, -1e9], "a": [1e9, -1e9]}
     tools: list[int] = []
+    uses_a = False
     for raw in gcode.splitlines():
         s_ = raw.strip()
         if s_.startswith(";"):
@@ -489,14 +518,15 @@ def prepare_program(gcode: str, op_names: list[str], air_cut: float = 0.0) -> di
         if air_cut and not g53:
             s_ = re.sub(r"Z(-?\d*\.?\d+)", lambda mm: "Z" + f"{float(mm.group(1)) + air_cut:.3f}".rstrip("0").rstrip("."), s_)
         if not g53:
-            for a, v in _WORD.findall(s_):
-                if a == "X": x = float(v)
-                elif a == "Y": y = float(v)
-                elif a == "Z": z = float(v)
-            if re.search(r"\bG0?[0-3]\b", s_) or re.match(r"^[XYZ]", s_):
-                for a, v in (("x", x), ("y", y), ("z", z)):
+            for w_, v in _WORD.findall(s_):
+                if w_ == "X": x = float(v)
+                elif w_ == "Y": y = float(v)
+                elif w_ == "Z": z = float(v)
+                elif w_ == "A": a = float(v); uses_a = True
+            if re.search(r"\bG0?[0-3]\b", s_) or re.match(r"^[XYZA]", s_):
+                for w_, v in (("x", x), ("y", y), ("z", z), ("a", a)):
                     if v is not None:
-                        ext[a][0] = min(ext[a][0], v); ext[a][1] = max(ext[a][1], v)
+                        ext[w_][0] = min(ext[w_][0], v); ext[w_][1] = max(ext[w_][1], v)
         if len(s_) > MAX_LINE:
             raise Refused(f"line {len(out) + 1} is {len(s_)} characters; the Z1 plays at most {MAX_LINE}: {s_[:40]}…")
         out.append(s_)
@@ -507,7 +537,7 @@ def prepare_program(gcode: str, op_names: list[str], air_cut: float = 0.0) -> di
     if k != len(op_names):
         raise Refused(f"found {k} of {len(op_names)} operations in the program (headers missing)")
     return {"text": "\n".join(out) + "\n", "lines": len(out), "ops": ops, "tools": tools,
-            "extents": {a: v for a, v in ext.items() if v[0] <= v[1]}, "air_cut": air_cut}
+            "extents": {w_: v for w_, v in ext.items() if v[0] <= v[1]}, "air_cut": air_cut, "uses_a": uses_a}
 
 
 def strip_tool_changes(text: str) -> str:
@@ -552,6 +582,72 @@ class MachineControl:
         # this session (or by something the app didn't see), so a setup can't rely on it without zeroing
         self.origin: dict = {}
         self.probes: list[dict] = []         # 3D-probe results this session: {kind, ref, wco [x, y], z, t} (Find the block)
+        # 4th axis: the saved machine record's `rotary` (+ model.rotary) if the program's machine has one (the server keeps
+        # it in step), the module's position found this session, and whether the status has shown a meaningful A yet
+        self.rotary_module: dict | None = None
+        self.rotary_found: dict | None = None   # {"axis_my", "axis_mz", "pad_mz", "t"}: machine Y / Z of the chuck centreline
+        self.on_rotary_found: Callable[[dict], Any] | None = None
+        self._a_seen = False
+
+    # -- 4th axis
+    def set_machine_record(self, machine: dict | None) -> None:
+        """The CAM program's machine record (Settings ▸ Machines): its `rotary` says whether a 4th axis is fitted and
+        `model.rotary` what an earlier zeroing found (axis_my / axis_mz)."""
+        rot = (machine or {}).get("rotary")
+        if rot and rot.get("installed", True) is not False:
+            self.rotary_module = {**rot, **((machine.get("model") or {}).get("rotary") or {}), "machine": machine.get("name")}
+        else:
+            self.rotary_module = None
+
+    def has_fourth(self) -> bool:
+        """Show / jog A only when the machine is known to have a 4th axis: the machine record says so, or the status
+        has shown a non-zero A (work or machine; a bare Z1 reports 0.0 for both). Latched for the session."""
+        if self.rotary_module:
+            return True
+        if not self._a_seen:
+            a = self.a_pos()
+            if any(v is not None and abs(v) > 1e-6 for v in a.values()):
+                self._a_seen = True
+        return self._a_seen
+
+    @property
+    def rotation_offset(self) -> dict | None:
+        return self.profile.rotation_offset
+
+    def axis_machine_y(self) -> float | None:
+        """Machine Y of the chuck centreline: anchor1_y + coordinate.rotation_offset_y (the firmware's own sum)."""
+        off = self.rotation_offset
+        return self.profile.anchor1[1] + off["y"] if off and off.get("y") is not None else None
+
+    def a_pos(self, st: dict | None = None) -> dict:
+        st = st or self._status() or {}
+        ma, wa = (st.get("mpos_ab") or [None])[0], (st.get("wpos_ab") or [None])[0]
+        return {"machine": ma if isinstance(ma, float) else None, "work": wa if isinstance(wa, float) else None}
+
+    async def read_rotation_offset(self, timeout: float = 3.0) -> dict:
+        """Ask the controller for coordinate.rotation_offset_x/y/z (`config-get sd <key>`, read-only): the module's
+        reference pad from Anchor 1 and its height above the chuck centreline. Beats the MakeraStudio copy on disk."""
+        if not self.connected:
+            raise Refused("not connected")
+        t0 = time.time()
+        for k in ROTATION_KEYS:
+            await self.link.line(f"config-get sd {k}")
+        got: dict[str, float] = {}
+        while time.time() - t0 < timeout and len(got) < 3:
+            await asyncio.sleep(0.05)
+            for t, ln in self.link.log:
+                if t < t0:
+                    continue
+                m = re.search(r"coordinate\.rotation_offset_([xyz]) is set to (-?\d*\.?\d+)", ln)
+                if m:
+                    got[m.group(1)] = float(m.group(2))
+                elif "rotation_offset" in ln and "not in config" in ln:
+                    raise Refused("the controller's config has no coordinate.rotation_offset_*: is the 4th axis set up in MakeraStudio?")
+        if len(got) < 3:
+            raise Refused("the controller didn't answer config-get in time")
+        self.profile.rotation_offset = {**got, "source": "controller"}
+        self._note(f"rotation offsets from the controller: X {got['x']:g} Y {got['y']:g} Z {got['z']:g} (from Anchor 1 / above the centreline)")
+        return self.payload()
 
     # -- connection
     async def connect(self, host: str, port: int = 2222) -> dict:
@@ -565,6 +661,8 @@ class MachineControl:
         self.measured = self.routine = self.job = None
         self.origin = {}
         self.probes = []
+        self.rotary_found = None
+        self._a_seen = False
         self._note(f"connected to {host}:{port}")
         self._watch = asyncio.create_task(self._watchdog())
         return self.payload()
@@ -623,7 +721,9 @@ class MachineControl:
                 self.homed = False           # after a halt the position may be off: home again before jogging
         if self.jog_busy:
             tgt = self.jog_busy["target"]
-            mp = st.get("mpos") or [0, 0, 0]
+            mp = list(st.get("mpos") or [0, 0, 0])
+            if len(tgt) > 3:                                 # an A jog: the 4th coordinate must arrive too
+                mp += [v for v in (st.get("mpos_ab") or [0.0])[:1] if isinstance(v, float)] or [0.0]
             if s == "Idle" and max(abs(a - b) for a, b in zip(mp, tgt)) < 0.02:
                 self.jog_busy = None
             elif s in ("Alarm", "Hold", "Pause", "Sleep"):
@@ -684,7 +784,11 @@ class MachineControl:
                 "limits": {"jog_max": JOG_MAX, "travel": self.profile.travel, "margin": self.profile.margin, "top": self.profile.top},
                 "profile": self.profile.name, "probe3d_tool": self.profile.probe3d_tool,
                 "anchor1": list(self.profile.anchor1), "bed_anchor": list(self.profile.bed_anchor),
-                "origin": self.origin_payload(st), "probes": self.probes[-12:]}
+                "origin": self.origin_payload(st), "probes": self.probes[-12:],
+                # the 4th axis: shown only when known (has_fourth); A in work and machine degrees; the module's position
+                "fourth": self.has_fourth(), "a": self.a_pos(st),
+                "rotary": {"module": self.rotary_module, "offset": self.rotation_offset, "axis_my": self.axis_machine_y(),
+                           "found": self.rotary_found}}
 
     def _wco(self, st: dict | None = None) -> list[float] | None:
         st = st or self._status() or {}
@@ -698,8 +802,25 @@ class MachineControl:
         wco, t = self._wco(), time.time()
         if xy:
             self.origin["xy"] = {"ref": xy[0], "how": xy[1], "t": t, "wco": list(wco_xy) if wco_xy else (wco[:2] if wco else None)}
+            # the per-axis records a rotary setup reads follow the combined one (X0 Y0 set together)
+            for i, ax in enumerate("xy"):
+                self.origin[ax] = {"ref": xy[0], "how": xy[1], "t": t, "wco": self.origin["xy"]["wco"][i] if self.origin["xy"]["wco"] else None}
         if z:
             self.origin["z"] = {"ref": z[0], "how": z[1], "t": t}
+
+    def _record_axis(self, axis: str, ref: str, how: str, wco_v: float | None = None) -> None:
+        """One axis of the work origin on its own (a rotary setup zeroes X, Y, Z and A separately). The combined X/Y
+        record is kept in step so the flat-setup logic doesn't call it 'changed'."""
+        t = time.time()
+        self.origin[axis] = {"ref": ref, "how": how, "t": t, "wco": wco_v}
+        if axis in "xy":
+            xy = self.origin.get("xy")
+            wco = self._wco()
+            cur = list(xy["wco"]) if xy and xy.get("wco") else (wco[:2] if wco else [None, None])
+            cur["xy".index(axis)] = wco_v
+            ox, oy = self.origin.get("x", {}), self.origin.get("y", {})
+            self.origin["xy"] = {"ref": "axis" if ("axis" in (ox.get("ref"), oy.get("ref"))) else ref,
+                                 "how": f"X: {ox.get('how', 'not set')}; Y: {oy.get('how', 'not set')}", "t": t, "wco": cur}
 
     async def _await_offsets(self, xy: list[float] | None, t_sent: float, timeout: float = 3.0) -> None:
         """Wait until the machine reports the offsets just set (the real Z1 takes a moment), or `timeout`."""
@@ -715,8 +836,12 @@ class MachineControl:
         out = {k: dict(v) for k, v in self.origin.items()}
         wco = self._wco(st) if st else None
         xy = out.get("xy")
-        if xy and wco and xy.get("wco") and max(abs(a - b) for a, b in zip(wco[:2], xy["wco"])) > 0.01:
+        if xy and wco and xy.get("wco") and all(v is not None for v in xy["wco"]) and max(abs(a - b) for a, b in zip(wco[:2], xy["wco"])) > 0.01:
             xy["changed"] = True                      # the offsets moved since: something else set them
+        for i, ax in enumerate("xy"):
+            r = out.get(ax)
+            if r and wco and r.get("wco") is not None and abs(wco[i] - r["wco"]) > 0.01:
+                r["changed"] = True
         out["wco"] = wco
         return out
 
@@ -729,7 +854,10 @@ class MachineControl:
         f = lambda v: ", ".join(f"{a:.3f}" for a in v) if v else "?"
         sp = st.get("spindle") or {}
         tl = st.get("tool") or {}
-        return (f"{self.profile.name} at {self.link.host}: state {st.get('state')}, machine position {f(mp)}, work position {f(wp)}, "
+        a = self.a_pos(st)
+        fa = lambda v: "?" if v is None else f"{v:.3f}"
+        fourth = (f", 4th axis A {fa(a['work'])}° (machine {fa(a['machine'])}°)" if self.has_fourth() else "")
+        return (f"{self.profile.name} at {self.link.host}: state {st.get('state')}, machine position {f(mp)}, work position {f(wp)}{fourth}, "
                 f"tool T{tl.get('number')} (length offset {tl.get('offset')}), spindle {sp.get('rpm')} rpm, "
                 f"Control {'on' if self.armed else 'off'}, homed this session: {'yes' if self.homed else 'no'}"
                 + ("" if self.fresh() else " (status is stale)"))
@@ -755,7 +883,7 @@ class MachineControl:
     def check_jog(self, axis: str, dist: float) -> tuple[list[float], float]:
         """Validate a jog; returns (target machine position, $J speed scale) or raises Refused."""
         axis = axis.lower()
-        if axis not in ("x", "y", "z"):
+        if axis not in ("x", "y", "z", "a"):
             raise Refused(f"unknown axis {axis!r}")
         if not isinstance(dist, (int, float)) or dist != dist or dist == 0:
             raise Refused("jog distance must be a non-zero number")
@@ -763,6 +891,16 @@ class MachineControl:
         self._need_tool_measured()
         if self.jog_busy:
             raise Refused("the previous jog hasn't finished")
+        if axis == "a":                                      # the 4th axis: degrees, no travel box (it is continuous)
+            if not self.has_fourth():
+                raise Refused("this machine has no 4th axis (Settings ▸ Machines: tick '4th axis' on the program's machine, "
+                              "or connect with the module fitted)")
+            if abs(dist) > JOG_MAX["a"] + 1e-9:
+                raise Refused(f"A jog of {abs(dist):g}° is over the {JOG_MAX['a']:g}° step limit")
+            ma = self.a_pos(st)["machine"]
+            if ma is None:
+                raise Refused("the status carries no A position")
+            return list(st["mpos"]) + [ma + dist], JOG_SCALE["a"]
         kind = "xy" if axis in "xy" else ("z_up" if dist > 0 else "z_down")
         if abs(dist) > JOG_MAX[kind] + 1e-9:
             raise Refused(f"{axis.upper()} jog of {abs(dist):g} mm is over the {JOG_MAX[kind]:g} mm step limit"
@@ -809,7 +947,136 @@ class MachineControl:
         t_est = abs(dist) / max(rate, 1.0) * 60.0
         self.jog_busy = {"target": target, "t0": time.time(), "deadline": time.time() + t_est * 3 + 3.0}
         await self.link.line(f"$J {axis.upper()}{dist:.3f} F{scale:g}")
-        self._note(f"jog {axis.upper()}{dist:+g}")
+        self._note(f"jog {axis.upper()}{dist:+g}" + ("°" if axis.lower() == "a" else ""))
+        return self.payload()
+
+    # -- the 4th axis: zeroing a rotary setup with the machine's own commands (nothing here moves X/Y/Z except the
+    #    firmware's 4th-axis Z probe, which is watched like the other routines)
+    def _need_fourth(self) -> None:
+        if not self.has_fourth():
+            raise Refused("this machine has no 4th axis (Settings ▸ Machines: tick '4th axis' on the program's machine)")
+
+    def check_rotary_z_probe(self, max_drop: float | None = None) -> dict:
+        """Validate Makera's 4th-axis Z probe from here: the wired probe (T0) fitted and measured, the module's offsets
+        known; returns the routine's info (where the firmware will go, the guard box)."""
+        st = self._need(armed=True, idle=True, homed=True)
+        self._need_tool_measured()
+        self._need_fourth()
+        if (st.get("tool") or {}).get("number") != 0:
+            raise Refused("the 4th-axis Z probe needs the wired probe (T0) fitted and measured: Change tool → 0")
+        if self.jog_busy or self.job_active:
+            raise Refused("wait for the machine to finish")
+        off = self.rotation_offset
+        if not off or any(off.get(k) is None for k in "xyz"):
+            raise Refused("the module's position (coordinate.rotation_offset_x/y/z) is unknown: read it from the controller first")
+        ax, ay = self.profile.anchor1
+        pad = (ax + off["x"], ay + off["y"])                 # the firmware probes 3 (or 7) mm to the -X of this
+        mx, my, mz = st["mpos"]
+        pad_x = (pad[0] - 7.0, pad[0] - 3.0)
+        margin = 1.5
+        reach = (min(mx, pad_x[0]), max(mx, pad_x[1]), min(my, pad[1]), max(my, pad[1]))
+        for axn, lo_, hi_ in (("x", reach[0], reach[1]), ("y", reach[2], reach[3])):
+            lo, hi = -self.profile.hard_travel[axn], 0.0           # the firmware's own G53 moves: the real travel
+            if lo_ < lo - 1e-9 or hi_ > hi + 1e-9:
+                raise Refused(f"the routine would reach {axn.upper()} {lo_:.1f} .. {hi_:.1f} (machine), outside {lo:.1f} .. {hi:.1f}: "
+                              "check the rotation offsets")
+        box = (reach[0] - margin, reach[1] + margin, reach[2] - margin, reach[3] + margin)
+        # Z: the firmware lifts to clearance_z first, then probes down to the pad (its G38.2 target is the full travel).
+        # Floor: a pad height found before (-5 mm), else `max_drop` below the clearance height, else the travel.
+        known = (self.rotary_module or {}).get("pad_mz", (self.rotary_found or {}).get("pad_mz"))
+        floor = known - 5.0 if isinstance(known, (int, float)) else (self.profile.clearance_z - max_drop if max_drop else -self.profile.travel["z"] + self.profile.margin)
+        return {"command": ROTARY_ZPROBE, "label": "4th-axis Z probe", "pad": [pad[0] - 3.0, pad[1]], "start": [mx, my, mz], "tool": 0,
+                "expect_prbs": 2, "offset": dict(off),
+                "guard": {"box": box, "start_z": max(mz, self.profile.clearance_z), "max_drop": None, "z_floor": floor, "depth": 2.5, "z_probe": True}}
+
+    async def rotary_z_probe(self, max_drop: float | None = None) -> dict:
+        """Makera's 4th-axis Z probe (M495 X0 Y0 O0 - O without F): the firmware lifts Z, goes to the module's reference
+        pad (anchor1 + rotation_offset), touches it with the wired probe (fast, then slow) and sets work Z0
+        rotation_offset_z below the pad - on the chuck centreline. Watched like the 3D-probe routines: the head must stay
+        between where it started and the pad, Z may not go below the floor; either sends a feed hold."""
+        info = self.check_rotary_z_probe(max_drop)
+        cmd = info.pop("command")
+        self.last_action = time.time()
+        self._start_routine("4th-axis Z probe", cmd, 300.0, **info)
+        await self.link.line(cmd)
+        self._note(f"{cmd} sent (Makera's 4th-axis Z probe: pad at about machine X{info['pad'][0]:.2f} Y{info['pad'][1]:.2f}, "
+                   f"Z0 will be {info['offset']['z']:g} mm below it, on the centreline)")
+        return self.payload()
+
+    async def set_origin_axis_y(self, my: float | None = None) -> dict:
+        """Work Y0 on the chuck centreline: machine Y = anchor1_y + rotation_offset_y (the controller's own numbers), or
+        a typed machine Y when the offsets are unknown. G10 L2 P0 Y only; X, Z and A untouched; nothing moves."""
+        self._need(armed=True, idle=True, homed=True)
+        self._need_fourth()
+        if self.jog_busy or self.job_active:
+            raise Refused("wait for the machine to finish")
+        how = "Y0 on the 4th axis: anchor1_y + rotation_offset_y"
+        if my is None:
+            my = self.axis_machine_y()
+            if my is None:
+                raise Refused("the module's Y offset is unknown: read it from the controller, or type the axis's machine Y")
+        else:
+            if not isinstance(my, (int, float)) or my != my:
+                raise Refused("machine Y: a number")
+            how = f"Y0 on the 4th axis: typed machine Y {my:.3f}"
+        lo, hi = -self.profile.travel["y"], self.profile.top
+        if not (lo - 1e-9 <= my <= hi + 1e-9):
+            raise Refused(f"machine Y {my:.2f} is outside the travel")
+        t_sent = time.time()
+        await self.link.line(f"G10 L2 P0 Y{my:.3f}")
+        self.last_action = time.time()
+        self._note(f"work Y0 set on the 4th axis (machine Y{my:.3f})")
+        w0 = self._wco()
+        await self._await_offsets([w0[0], my] if w0 else None, t_sent)
+        self._record_axis("y", "axis", how, my)
+        if self.rotary_found is None:
+            self.rotary_found = {}
+        self.rotary_found.update(axis_my=my, t=time.time())
+        return self.payload()
+
+    async def origin_x_at(self, mx: float, ref: str, how: str) -> dict:
+        """Work X0 at machine X (G10 L2 P0 X only): e.g. the chuck face plus the setup's stock offset. Nothing moves."""
+        if not isinstance(mx, (int, float)) or mx != mx:
+            raise Refused("machine X: a number")
+        self._need(armed=True, idle=True, homed=True)
+        if self.jog_busy or self.job_active:
+            raise Refused("wait for the machine to finish")
+        lo, hi = -self.profile.travel["x"], self.profile.top
+        if not (lo - 1e-9 <= mx <= hi + 1e-9):
+            raise Refused(f"machine X {mx:.2f} is outside the travel")
+        t_sent = time.time()
+        await self.link.line(f"G10 L2 P0 X{mx:.3f}")
+        self.last_action = time.time()
+        self._note(f"work X0 set at machine X{mx:.3f} ({how})")
+        w0 = self._wco()
+        await self._await_offsets([mx, w0[1]] if w0 else None, t_sent)
+        self._record_axis("x", str(ref)[:40], str(how)[:120], mx)
+        return self.payload()
+
+    async def zero_a(self) -> dict:
+        """The chuck's current angle becomes A0: G92.4 A0 (machine A := 0, Robot.cpp's manual homing) then G10 L20 P0 A0
+        (work A reads 0 whatever the G54 A offset was). Nothing moves."""
+        st = self._need(armed=True, idle=True, homed=True)
+        self._need_fourth()
+        if self.jog_busy or self.job_active or (self.routine and self.routine["stage"] in ("running", "awaiting")):
+            raise Refused("wait for the machine to finish")
+        await self.link.line("G92.4 A0")
+        await self.link.line("G10 L20 P0 A0")
+        self.last_action = time.time()
+        a = self.a_pos(st)
+        self._note(f"A0 set here (was work A {a['work']}, machine A {a['machine']})")
+        self.origin["a"] = {"ref": "here", "how": "A0 set at the chuck's current angle (G92.4 A0, G10 L20 P0 A0)", "t": time.time()}
+        return self.payload()
+
+    async def shrink_a(self) -> dict:
+        """G92.4 A0 S0: the firmware drops whole turns from A (modulo 360) so the count doesn't grow forever. Nothing moves."""
+        self._need(armed=True, idle=True, homed=True)
+        self._need_fourth()
+        if self.jog_busy or self.job_active:
+            raise Refused("wait for the machine to finish")
+        await self.link.line("G92.4 A0 S0")
+        self.last_action = time.time()
+        self._note("A shrunk modulo 360 (G92.4 A0 S0)")
         return self.payload()
 
     def tool_ok(self) -> bool:
@@ -964,6 +1231,28 @@ class MachineControl:
                                     "size": r.get("size"), "t": time.time()})
                 del self.probes[:-12]
                 self._record_origin(xy=(ref, f"3D probe, {r['label']}"), z=("top", f"3D probe, {r['label']}") if r["sub"] != 9 else None)
+            elif kind == "4th-axis Z probe":
+                if len(prbs) != r["expect_prbs"]:
+                    raise Refused(f"the routine reported {len(prbs)} touches, not {r['expect_prbs']}: the work Z0 may be wrong, check it")
+                z = prbs[-1][0][2]
+                wco = [m - w for m, w in zip(st["mpos"], st["wpos"])]
+                off_z = r["offset"]["z"]
+                if abs((z - off_z) - wco[2]) > 0.05:
+                    raise Refused(f"after the probe work Z0 is at machine Z {wco[2]:.3f}, not {z - off_z:.3f} (pad {z:.3f} minus "
+                                  f"rotation_offset_z {off_z:g}): check the module's offsets before cutting")
+                self._record_origin(z=("axis", "Makera's 4th-axis Z probe (M495 O0): Z0 on the chuck centreline"))
+                self.rotary_found = {**(self.rotary_found or {}), "axis_my": self.axis_machine_y(), "axis_mz": wco[2], "pad_mz": z,
+                                     "pad_mxy": prbs[-1][0][:2], "t": time.time()}
+                r.update(stage="done", touch=prbs[-1][0], touches=[p_[0][2] for p_ in prbs], wpos=st.get("wpos"), found=dict(self.rotary_found),
+                         msg=f"reference pad touched at machine Z {z:.3f} (first {prbs[0][0][2]:.3f}); work Z0 set {off_z:g} mm below it, on the "
+                             f"chuck centreline (machine Z {wco[2]:.3f} with the probe); the probe is {st['wpos'][2]:.3f} above the centreline")
+                if self.on_rotary_found:
+                    try:
+                        res = self.on_rotary_found(dict(self.rotary_found))
+                        if asyncio.iscoroutine(res):
+                            await res
+                    except Exception as e:  # noqa: BLE001
+                        self._note(f"could not save the axis position to the machine record: {e}")
             else:
                 z = prbs[-1][0][2]
                 self._record_origin(z=("top", "auto Z probe (wired probe)"))
@@ -1248,6 +1537,8 @@ class MachineControl:
             floor = g["start_z"] - 0.5
         elif prbs:
             floor = prbs[0][0][2] - g["depth"] - 0.5
+        elif g.get("max_drop") is None:                  # the 4th-axis Z probe: the pad may be far below the start
+            floor = g["z_floor"]
         else:
             floor = g["start_z"] - g["max_drop"]
         if z < floor:
@@ -1287,9 +1578,12 @@ class MachineControl:
     def job_active(self) -> bool:
         return bool(self.job and self.job["stage"] in ("uploading", "starting", "running", "awaiting", "paused"))
 
-    def check_job(self, prep: dict) -> dict:
-        """Everything that must be true before a program is sent: returns notes for the confirmation, raises Refused."""
+    def check_job(self, prep: dict, rotary: bool = False, ack: bool = False) -> dict:
+        """Everything that must be true before a program is sent: returns notes for the confirmation, raises Refused.
+        `rotary`: the program's setup is on the 4th axis (or the program drives A): the work origin must have been zeroed
+        on the axis this session (Y and Z `ref: axis`) unless the user acknowledged it (`ack`)."""
         st = self._need(armed=True, idle=True, homed=True)
+        rotary = bool(rotary or prep.get("uses_a"))
         if self.job_active:
             raise Refused(f"a program is already {self.job['stage']}")
         if self.routine and self.routine["stage"] in ("running", "awaiting"):
@@ -1326,23 +1620,42 @@ class MachineControl:
                               f"outside {lo:.1f} .. {hi:.1f}: check the work origin (Machine ▸ Zero) and the setup")
         ez = prep["extents"].get("z")
         if ez:
-            notes.append(f"Z {ez[0]:.2f} .. {ez[1]:.2f} above work zero" + (f" (lifted {prep['air_cut']:g} mm: air cut)" if prep["air_cut"] else ""))
+            notes.append(f"Z {ez[0]:.2f} .. {ez[1]:.2f} above work zero" + (f" (lifted {prep['air_cut']:g} mm: air cut)" if prep["air_cut"] else "")
+                         + (" - on the 4th axis Z is the radius from the centreline, so the lift is radial" if rotary and prep["air_cut"] else ""))
             if ez[1] + wco[2] > self.profile.top + 1e-6:
                 raise Refused(f"the program's highest Z ({ez[1]:.1f} in work coordinates) is above the machine's travel "
                               "with the current work zero" + (": use a smaller air-cut lift" if prep["air_cut"] else ""))
+        if rotary:
+            self._need_fourth()
+            o = self.origin
+            refs = {k: (o.get(k) or {}).get("ref") for k in ("y", "z")}
+            changed = any((self.origin_payload(st).get(k) or {}).get("changed") for k in ("y",))
+            if (refs["y"] != "axis" or refs["z"] != "axis" or changed) and not ack:
+                missing = [k.upper() for k in ("y", "z") if refs[k] != "axis"] + (["Y (changed since)"] if changed else [])
+                raise Refused("a 4th-axis program needs the work origin on the rotary axis: " + ", ".join(missing)
+                              + " not zeroed on the axis this session (Machine ▸ Zero ▸ Zero on the 4th axis), or tick 'I checked it'")
+            if "a" not in o and not ack:
+                raise Refused("A0 hasn't been set this session (Zero on the 4th axis ▸ A0 here), or tick 'I checked it'")
+            notes.append("4th axis: Y0 and Z0 on the chuck centreline" + (" (acknowledged)" if ack and (refs["y"] != "axis" or refs["z"] != "axis") else "")
+                         + (f", A {prep['extents']['a'][0]:.1f} .. {prep['extents']['a'][1]:.1f}°" if prep["extents"].get("a") else ""))
+            reach = (self.rotary_module or {}).get("y_reach")
+            ey = prep["extents"].get("y")
+            if isinstance(reach, (int, float)) and ey and max(abs(ey[0]), abs(ey[1])) > reach + 1e-6:
+                raise Refused(f"the program reaches Y {ey[0]:.1f} .. {ey[1]:.1f} from the centreline, beyond the module's "
+                              f"{reach:g} mm reach (machine record rotary.y_reach)")
         return {"notes": notes, "work_origin": wco}
 
-    async def run_program(self, name: str, prep: dict, info: dict | None = None) -> dict:
+    async def run_program(self, name: str, prep: dict, info: dict | None = None, rotary: bool = False, ack: bool = False) -> dict:
         """Upload `prep["text"]` as /sd/gcodes/<name> and play it. `prep` comes from prepare_program(). The tool is fitted
         and measured already (check_job): its M6 line becomes M5 (spindle off), line for line, so nothing in the file
         changes tools and the line numbers still map to the operations."""
-        chk = self.check_job(prep)
+        chk = self.check_job(prep, rotary=rotary, ack=ack)
         prep = dict(prep, text=strip_tool_changes(prep["text"]))
         fname = program_filename(name)
         path = "/sd/gcodes/" + fname
         self.last_action = time.time()
         self.job = {"name": fname, "path": path, "stage": "uploading", "upload": 0.0, "lines": prep["lines"],
-                    "ops": prep["ops"], "tools": prep["tools"], "air_cut": prep["air_cut"], "line": 0, "percent": 0,
+                    "ops": prep["ops"], "tools": prep["tools"], "air_cut": prep["air_cut"], "rotary": bool(rotary or prep.get("uses_a")), "line": 0, "percent": 0,
                     "seconds": 0, "op": None, "msg": "uploading", "notes": chk["notes"], "started": time.time(), **(info or {})}
         self._note(f"program {fname}: {prep['lines']} lines, {len(prep['ops'])} operation(s)" + (f", air cut +{prep['air_cut']:g} mm" if prep["air_cut"] else ""))
         self._job_task = asyncio.create_task(self._job_flow(path, prep["text"].encode()))

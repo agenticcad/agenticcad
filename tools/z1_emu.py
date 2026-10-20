@@ -7,7 +7,13 @@ rate, '!' hold / '~' resume / 0x18 halt -> Alarm, $X unlock, M851/M852 (external
 NOT enforce soft limits: a jog past the end just goes there (and is recorded in `crashes`) so tests can prove the
 guard in machine_link refuses it first.
 
-    python tools/z1_emu.py [--port 2222] [--cam-port 8282] [--speed 10]
+4th axis (--fourth / fourth=True): A is a real axis (status 4th coordinate, $J A, G0/G1 A in G90/G91, G92.4 A<v>,
+G92.4 A0 S0 shrink, G10 L20 P0 A), `config-get sd coordinate.rotation_offset_*` answers like the controller, and the
+M495 variant with O but no F runs the firmware's fill_zprobe_abs_scripts: Z to clearance, G53 to the module's reference
+pad (anchor1 + rotation_offset, X - 3), G38.2 fast / retract / slow, G10 L20 P0 Z<rotation_offset_z> (work Z0 on the
+chuck centreline), retract. Without the module the pad position is bare bed (the probe lands on the MDF).
+
+    python tools/z1_emu.py [--port 2222] [--cam-port 8282] [--speed 10] [--fourth]
 """
 from __future__ import annotations
 
@@ -27,13 +33,22 @@ from machine_link import (T_FILE_CAN, T_FILE_DATA, T_FILE_END, T_FILE_MD5, T_FIL
 
 class Z1Emu:
     TRAVEL = {"x": 206.0, "y": 206.0, "z": 102.0}       # firmware soft_endstop.* (where the real axes end)
-    MAX_RATE = {"x": 1200.0, "y": 1200.0, "z": 600.0}   # mm/min
+    MAX_RATE = {"x": 1200.0, "y": 1200.0, "z": 600.0, "a": 3600.0}   # mm/min; A deg/min (delta_max_rate)
+    ANCHOR1 = (-191.28, -194.45)                        # coordinate.anchor1_x/y (the user's Z1)
+    CONFIG = {"coordinate.anchor1_x": -191.28, "coordinate.anchor1_y": -194.45, "coordinate.clearance_x": -11.6,
+              "coordinate.clearance_y": -14.6, "coordinate.clearance_z": -3.0,
+              "coordinate.rotation_offset_x": -7.5, "coordinate.rotation_offset_y": 69.0, "coordinate.rotation_offset_z": 17.0}
 
-    def __init__(self, speed: float = 1.0, max_clients: int = 2, homed: bool = True):
+    def __init__(self, speed: float = 1.0, max_clients: int = 2, homed: bool = True, fourth: bool = False):
         self.speed = speed                              # >1 runs moves faster than real time (tests)
         self.max_clients = max_clients
         self.mpos = [-1.0, -1.0, -1.0] if homed else [-50.0, -40.0, -20.0]
         self.wco = [-148.8, -125.4, -61.36]             # work offset: WPos = MPos - wco (as on the real Z1)
+        self.fourth = fourth                            # the rotary module is fitted (its reference pad is on the bed)
+        self.a = 0.0                                    # machine A (degrees, the firmware's delta actuator)
+        self.wco_a = 180.0 if fourth else 0.0           # G54 A offset (the user's Z1 reports WPos A -180 at MPos A 0)
+        self.abs_mode = True                            # G90 / G91
+        self.pad_z = -45.0                              # machine Z where the probe tip meets the module's reference pad
         self.state = "Idle"
         self.halted = False
         self.switches = {"extendout": False, "light": True, "probe_laser": False, "spindle_fan": False}
@@ -79,17 +94,22 @@ class Z1Emu:
         wco = self._shown_wco if (self._shown_wco is not None and time.time() < self._shown_until) else self.wco
         w = [m - o for m, o in zip(self.mpos, wco)]
         f = lambda v: ",".join(f"{a:.4f}" for a in v)
-        return (f"<{self.state}|MPos:{f(self.mpos)},0.0000,0.0000|WPos:{f(w)},0.0000,0.0000|F:0.0,2000.0,100.0"
+        return (f"<{self.state}|MPos:{f(self.mpos)},{self.a:.4f},0.0000|WPos:{f(w)},{self.a - self.wco_a:.4f},0.0000|F:0.0,2000.0,100.0"
                 f"|S:0.0,10000.0,100.0,0,27.2,27.4,0,0,0,0|T:{self.tool},-17.297,-1|L:0, 0, 0, 0.0,100.0"
                 + ("|H:1" if self.halted else "")
                 + (f"|P:{self.play['i']},{self.play['pct']},{int(time.time() - self.play['t0'])}" if self.play else "")
                 + "|C:3,1,0,1|E:0,0,0,1,7613|OTA:0,0>")
 
     # ---- motion
-    async def _move_to(self, target, rate_mm_min):
+    async def _move_to(self, target, rate_mm_min, a=None, a_rate=None):
+        """Linear move of XYZ to `target` (machine) at rate_mm_min, optionally turning A to `a` (degrees) along the way
+        (the firmware's A moves alone run at a_rate deg/min)."""
         start = list(self.mpos)
+        a0 = self.a
         dist = math.dist(start, target)
         dur = dist / max(rate_mm_min, 1e-6) * 60.0 / self.speed
+        if a is not None:
+            dur = max(dur, abs(a - a0) / max(a_rate or self.MAX_RATE["a"], 1e-6) * 60.0 / self.speed)
         t0 = time.time()
         done = 0.0
         while done < 1.0:
@@ -98,7 +118,9 @@ class Z1Emu:
                 return
             await asyncio.sleep(0.01)
             done = 1.0 if dur <= 0 else min(1.0, (time.time() - t0) / dur)
-            self.mpos = [a + (b - a) * done for a, b in zip(start, target)]
+            self.mpos = [p + (q - p) * done for p, q in zip(start, target)]
+            if a is not None:
+                self.a = a0 + (a - a0) * done
         for ax, v in zip("xyz", self.mpos):
             if v > 0.0 + 1e-9 or v < -self.TRAVEL[ax] - 1e-9:
                 self.crashes.append(f"{ax.upper()} ran to {v:.3f} (outside 0 .. {-self.TRAVEL[ax]:g})")
@@ -135,6 +157,23 @@ class Z1Emu:
         await self._go(z=-20.0)
         await self._go(z=-3.0)
         await self._go(last[0], last[1])
+        self.replies.append("Done ATC")
+        self.state = "Idle"
+
+    async def _z_probe_abs(self):
+        """M495 X Y O (no F): the firmware's fill_zprobe_abs_scripts - the 4th-axis Z probe. Z to clearance, G53 to the
+        module's reference pad (anchor1 + rotation_offset, 3 mm to -X), G38.2 fast, retract 2, G38.2 slow, then
+        G10 L20 P0 Z<rotation_offset_z>: work Z0 lands on the chuck centreline. Without the module: bare bed there."""
+        c = self.CONFIG
+        px, py = self.ANCHOR1[0] + c["coordinate.rotation_offset_x"] - 3.0, self.ANCHOR1[1] + c["coordinate.rotation_offset_y"]
+        await self._go(z=c["coordinate.clearance_z"])
+        await self._go(px, py)
+        surf = self.pad_z if self.fourth else self.surface_z(px, py)
+        await self._touch(surf, 300.0)
+        await self._go(z=self.mpos[2] + 2.0)
+        await self._touch(surf, 60.0)
+        self.wco[2] = self.mpos[2] - c["coordinate.rotation_offset_z"]
+        await self._go(z=self.mpos[2] + 2.0)
         self.replies.append("Done ATC")
         self.state = "Idle"
 
@@ -366,8 +405,8 @@ class Z1Emu:
                         self.replies.append(f"Please change the tool to: T{n}")
                         await self._routine(change_to=n)
                     continue
-                words = dict((a, float(v)) for a, v in re.findall(r"([XYZF])(-?\d*\.?\d+)", u))
-                if not any(a in words for a in "XYZ"):
+                words = dict((a, float(v)) for a, v in re.findall(r"([XYZAF])(-?\d*\.?\d+)", u))
+                if not any(a in words for a in "XYZA"):
                     continue
                 if "G53" in u:
                     tgt = [words.get(a, m) for a, m in zip("XYZ", self.mpos)]
@@ -375,7 +414,8 @@ class Z1Emu:
                     x, y, z = words.get("X", x), words.get("Y", y), words.get("Z", z)
                     tgt = [self.mpos[k] if v is None else v + self.wco[k] for k, v in enumerate((x, y, z))]
                 self.state = "Run"
-                await self._move_to(tgt, words.get("F", 3000.0) if not re.match(r"G0\b", u) else 3000.0)
+                await self._move_to(tgt, words.get("F", 3000.0) if not re.match(r"G0\b", u) else 3000.0,
+                                    a=words["A"] + self.wco_a if "A" in words else None)
             pl["pct"] = 100
             self.state = "Idle"
             await asyncio.sleep(1.0)                    # the 100 % report is held for a second, then the field goes
@@ -432,7 +472,7 @@ class Z1Emu:
             self._start(self._home(), "Home")
             return "ok"
         if u.startswith("$J"):
-            delta = {"x": 0.0, "y": 0.0, "z": 0.0}
+            delta = {"x": 0.0, "y": 0.0, "z": 0.0, "a": 0.0}
             scale = 1.0
             for tok in s.split()[1:]:
                 k = tok[0].lower()
@@ -440,11 +480,57 @@ class Z1Emu:
                     scale = float(tok[1:])
                 elif k in delta:
                     delta[k] = float(tok[1:])
-            moving = [a for a, d in delta.items() if d]
+                elif k in "bc":
+                    return f"error:axis out of range {tok[0].upper()}"
+                else:
+                    return f"error:bad axis {tok[0].upper()}"
+            moving = [ax for ax, d in delta.items() if d]
             if not moving:
                 return "error:no delta jog specified"
-            rate = min(self.MAX_RATE[a] for a in moving) * scale
-            self._start(self._move_to([m + delta[a] for m, a in zip(self.mpos, "xyz")], rate))
+            rate = min(self.MAX_RATE[ax] for ax in moving) * scale                 # the slowest axis's max rate, scaled
+            self._start(self._move_to([m + delta[ax] for m, ax in zip(self.mpos, "xyz")], rate,
+                                      a=self.a + delta["a"] if delta["a"] else None, a_rate=rate))
+            return None
+        if re.match(r"^G9[01]\b", u) and not re.search(r"\bG0?[0-3]\b", u):
+            self.abs_mode = u.startswith("G90")
+            return "ok"
+        if u.startswith("G92.4"):                        # Robot.cpp: manual homing; A with S shrinks modulo 360
+            w = dict((t[0].upper(), float(t[1:])) for t in s.split()[1:] if len(t) > 1 and t[0].upper() in "XYZAS")
+            has_s = any(t.upper().startswith("S") for t in s.split()[1:])
+            for i, ax in enumerate("XYZ"):
+                if ax in w:
+                    self.mpos[i] = w[ax]
+            if "A" in w:
+                if has_s:
+                    wa = self.a - self.wco_a
+                    if abs(wa) > 360:
+                        self.a -= wa - math.fmod(wa, 360.0)
+                else:
+                    self.a = w["A"]
+            return "ok"
+        if u.startswith("CONFIG-GET"):
+            parts = s.split()
+            key = parts[2] if len(parts) > 2 else (parts[1] if len(parts) > 1 else "")
+            src = parts[1] if len(parts) > 2 else "cached"
+            if key in self.CONFIG:
+                return f"{src}: {key} is set to {self.CONFIG[key]:g}"
+            return f"{src}: {key} is not in config"
+        if re.match(r"^(G0?[01]\b|G90 G0?[01]\b|G91 G0?[01]\b)", u) or (re.match(r"^G9[01]\b", u) and re.search(r"\bG0?[01]\b", u)):
+            if "G91" in u:
+                self.abs_mode = False
+            elif "G90" in u:
+                self.abs_mode = True
+            words = dict((t[0].upper(), float(t[1:])) for t in re.findall(r"[XYZAF]-?\d*\.?\d+", u))
+            if not any(k in words for k in "XYZA"):
+                return "ok"
+            if self.abs_mode:
+                tgt = [words[k] + self.wco[i] if k in words else self.mpos[i] for i, k in enumerate("XYZ")]
+                a = words["A"] + self.wco_a if "A" in words else None
+            else:
+                tgt = [self.mpos[i] + words.get(k, 0.0) for i, k in enumerate("XYZ")]
+                a = self.a + words["A"] if "A" in words else None
+            rate = 3000.0 if re.search(r"\bG0?0\b", u) else words.get("F", 1000.0)
+            self._start(self._move_to(tgt, rate, a=a, a_rate=min(rate, self.MAX_RATE["a"])))
             return None
         if u.startswith("DIAGNOSE"):
             sw = self.switches
@@ -471,14 +557,20 @@ class Z1Emu:
             return None
         if u.startswith("M495"):
             w = dict((t[0].upper(), float(t[1:])) for t in s.split()[1:] if len(t) > 1)
+            if "X" in w and "Y" in w and "O" in w and "F" not in w:    # the firmware's zprobe_abs: O without F
+                self.replies.append("Auto z probe for 4 axis")
+                self._start(self._z_probe_abs(), "Run")
+                return None
             self._start(self._z_probe(w.get("X", 0) + w.get("O", 0), w.get("Y", 0) + w.get("F", 0)), "Run")
             return None
         if u.replace(" ", "").startswith("G10L20P0"):
             self._lag_offsets()
-            w = dict((t[0].upper(), float(t[1:])) for t in re.findall(r"[XYZ]-?[\d.]+", s.replace(" ", "")[8:]))
+            w = dict((t[0].upper(), float(t[1:])) for t in re.findall(r"[XYZA]-?[\d.]+", s.replace(" ", "")[8:]))
             for i, a_ in enumerate("XYZ"):
                 if a_ in w:
                     self._set_work(i, w[a_])
+            if "A" in w:
+                self.wco_a = self.a - w["A"]
             return "ok"
         if u.startswith("G10 L2 P0") or u.replace(" ", "").startswith("G10L2P0"):
             self._lag_offsets()
@@ -660,7 +752,7 @@ class Z1Emu:
 
 
 async def _main(a):
-    emu = Z1Emu(speed=a.speed)
+    emu = Z1Emu(speed=a.speed, fourth=a.fourth)
     if a.stock:                                  # W,D[,top machine Z]: a block of that size in the L-bracket corner
         w, d, *top = (float(v) for v in a.stock.split(","))
         x0, y0, zt = -191.28, -194.45, (top[0] if top else -55.0)
@@ -679,4 +771,5 @@ if __name__ == "__main__":
     ap.add_argument("--cam-port", type=int, default=8282)
     ap.add_argument("--stock", help="W,D[,top]: the block's size (mm) in the L-bracket corner, its top machine Z")
     ap.add_argument("--speed", type=float, default=1.0)
+    ap.add_argument("--fourth", action="store_true", help="the rotary module is fitted: A axis, reference pad, G54 A offset 180")
     asyncio.run(_main(ap.parse_args()))

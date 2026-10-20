@@ -960,7 +960,12 @@ class CadAgent:
     MACHINE_NOW = ("status", "hold", "pause", "stop_program", "halt", "check_ops", "connect", "disconnect")
     MACHINE_ASK = ("control_on", "control_off", "home", "unlock", "resume", "resume_program", "change_tool", "confirm_tool",
                    "origin_anchor", "auto_z_probe", "set_origin", "shift_origin", "origin_at", "lower_to", "raise_z", "goto",
-                   "probe_3d", "run_ops", "switch", "console")
+                   "probe_3d", "run_ops", "switch", "console", "jog_a", "rotary_zero", "shrink_a")
+
+    def _setup_is_rotary(self, info: dict) -> bool:
+        """Is the setup a program_for_ops() picked on the 4th axis? (its origin must then be zeroed on the axis)"""
+        st = next((s for s in self.program.setups if s.name == info.get("setup")), None) if self.program is not None else None
+        return bool(st is not None and st.rotary)
 
     def _machine_plan(self, action: str, a: dict) -> tuple[str, Any]:
         """(what the approval card says, the coroutine factory that does it) - after the checks that can run up front."""
@@ -973,10 +978,12 @@ class CadAgent:
         elif action == "home":
             mc._need(armed=True, idle=False)
         elif action in ("change_tool", "origin_anchor", "auto_z_probe", "set_origin", "shift_origin", "origin_at", "lower_to", "raise_z",
-                        "goto", "switch", "console"):
+                        "goto", "switch", "console", "jog_a", "rotary_zero", "shrink_a"):
             mc._need(armed=True, idle=action != "switch", homed=action != "switch")
             if mc.jog_busy or mc.job_active:
                 raise ml.Refused("the machine is busy: wait for it to finish")
+            if action in ("jog_a", "rotary_zero", "shrink_a"):
+                mc._need_fourth()
         if action == "control_on":
             return "Turn Control on: commands may move the machine (it turns itself off after 5 minutes unused).", lambda: mc.arm(True)
         if action == "control_off":
@@ -1037,11 +1044,12 @@ class CadAgent:
                     "without a touch."), lambda: mc.probe_3d(str(f("kind")), float(f("x", 20)), float(f("y", 20)), float(f("depth", 2)), float(f("dia", 2)))
         if action == "run_ops":
             prep, info, label = self.program_for_ops(f("ops") or [], float(f("air", 0) or 0))
-            chk = mc.check_job(prep)
+            rot, ack = self._setup_is_rotary(info), bool(f("ack"))
+            chk = mc.check_job(prep, rotary=rot, ack=ack)
             names = ", ".join(o["name"] for o in prep["ops"])
             return (f"Run on the machine: {names} (setup {info['setup']}, {info['wcs']}) · about {info['time_min']} min"
-                    + (f" · AIR CUT +{prep['air_cut']:g} mm" if prep["air_cut"] else "") + ". " + "; ".join(chk["notes"])
-                    + ". The machine runs it on its own once started."), lambda: mc.run_program(label, prep, info)
+                    + (f" · AIR CUT +{prep['air_cut']:g} mm" if prep["air_cut"] else "") + (" · 4TH AXIS" if rot else "") + ". " + "; ".join(chk["notes"])
+                    + ". The machine runs it on its own once started."), lambda: mc.run_program(label, prep, info, rotary=rot, ack=ack)
         if action == "switch":
             what, on, pw = str(f("what", "")), bool(f("on")), f("power")
             if what not in mc.profile.switches:
@@ -1051,6 +1059,38 @@ class CadAgent:
             line = str(f("line", "")).strip()
             return (f"Send this line to the machine exactly as written: {line}  (the app only checks it isn't blocked; "
                     "it does not check where a move goes)."), lambda: mc.console(line)
+        # -- the 4th axis
+        if action == "jog_a":
+            deg = float(f("deg", "nan"))
+            mc.check_jog("a", deg)                                   # the same guards and step limit the jog pad meets
+            return f"Turn the 4th axis by {deg:+g}° ($J A{deg:g}, half the axis's max rate). X/Y/Z stay.", lambda: mc.jog("a", deg)
+        if action == "shrink_a":
+            return "Shrink A modulo 360 (G92.4 A0 S0): whole turns are dropped from the count. Nothing moves.", mc.shrink_a
+        if action == "rotary_zero":
+            what = str(f("what", "z_probe"))
+            if what == "z_probe":
+                info = mc.check_rotary_z_probe()
+                off = info["offset"]
+                summary = (f"Makera's 4th-axis Z probe ({info['command']}): Z goes up, the head goes to the rotary module's reference "
+                           f"pad (about machine X {info['pad'][0]:.1f} Y {info['pad'][1]:.1f}), the wired probe touches it and work Z0 is "
+                           f"set {off['z']:g} mm below the pad - on the chuck centreline. The app holds it if the head leaves that path.")
+                return summary, lambda: mc.rotary_z_probe()
+            if what == "y_axis":
+                my = f("y")
+                my = float(my) if my is not None else mc.axis_machine_y()
+                if my is None:
+                    raise ml.Refused("the module's Y offset is unknown: read it from the controller (Machine ▸ Zero) or give y (machine)")
+                return (f"Set work Y0 on the rotary axis: machine Y {my:.3f} (G10 L2 P0 Y). X, Z and A stay. Nothing moves."
+                        ), lambda: mc.set_origin_axis_y(my if f("y") is not None else None)
+            if what == "a_zero":
+                return "The chuck's current angle becomes A0 (G92.4 A0, then G10 L20 P0 A0 so work A reads 0). Nothing moves.", mc.zero_a
+            if what == "x_here":
+                return "The head's current X becomes work X0 (G10 L20 P0 X0). Nothing moves.", lambda: mc.set_origin(0.0, None, None)
+            if what == "x_at":
+                mx = float(f("x", "nan"))
+                return (f"Set work X0 at machine X {mx:.3f} (G10 L2 P0 X), e.g. the chuck face plus the stock offset. Nothing moves."
+                        ), lambda: mc.origin_x_at(mx, str(f("ref", "chuck")), f"set by the assistant at machine X {mx:.3f}")
+            raise ml.Refused("rotary_zero: what = z_probe | y_axis {y: machine Y, optional} | a_zero | x_here | x_at {x: machine X}")
         raise ml.Refused(f"unknown machine action {action!r}")
 
     async def machine_action(self, action: str, args: dict | None = None, wait: float = 900.0) -> str:
@@ -1091,7 +1131,7 @@ class CadAgent:
                 await mc.job_abort(); return "Program stopped; spindle off."
             if action == "check_ops":
                 prep, info, label = await asyncio.to_thread(self.program_for_ops, a.get("ops") or [], float(a.get("air") or 0))
-                chk = mc.check_job(prep)
+                chk = mc.check_job(prep, rotary=self._setup_is_rotary(info), ack=bool(a.get("ack")))
                 return (f"{label}: {prep['lines']} lines, operations {[o['name'] for o in prep['ops']]}, tools {prep['tools']}, "
                         f"about {info['time_min']} min. " + "; ".join(chk["notes"]))
             summary, do = await asyncio.to_thread(self._machine_plan, action, a)   # may build a big program: off the loop
@@ -1123,8 +1163,8 @@ class CadAgent:
             await self.emit({"type": "machine_request_done", "id": rid, "outcome": "failed", "text": str(e)})
             return f"Approved, but it failed: {type(e).__name__}: {e}"
         await self.emit({"type": "machine_request_done", "id": rid, "outcome": "done"})
-        return "Approved and sent. " + mc.describe() + ("" if action not in ("change_tool", "probe_3d", "auto_z_probe", "run_ops", "home")
-                                                         else " It is still running: check with action status.")
+        running = action in ("change_tool", "probe_3d", "auto_z_probe", "run_ops", "home", "jog_a") or (action == "rotary_zero" and a.get("what", "z_probe") == "z_probe")
+        return "Approved and sent. " + mc.describe() + (" It is still running: check with action status." if running else "")
 
     def resolve_machine_request(self, rid: str, ok: bool) -> bool:
         """The user's Approve / Decline (a click in the app)."""
@@ -2750,8 +2790,13 @@ class CadAgent:
               "work values}, shift_origin {dx,dy,ref}, origin_at {x,y machine, ref} (e.g. the block's front-left corner from "
               "the faces 3D-probe runs found: status lists them), lower_to {height above work Z0}, raise_z, goto {x,y,frame: "
               "work|machine; Z goes to the top first}, probe_3d {kind e.g. outside_back_right, x, y, depth, dia; 3D probe "
-              "T9999 fitted}, run_ops {ops: 0-based indices in ONE setup, air: lift mm for an air cut}, switch {what: "
-              "dust|light|probe_laser|spindle_fan, on, power: fan speed 0-100 %}, console {line: one line of G-code, sent as written}. Rules: one step at a time; say what "
+              "T9999 fitted}, run_ops {ops: 0-based indices in ONE setup, air: lift mm for an air cut, ack: true only when the user "
+              "has vouched for a rotary setup's origin}, switch {what: "
+              "dust|light|probe_laser|spindle_fan, on, power: fan speed 0-100 %}, console {line: one line of G-code, sent as written}. "
+              "4th axis (only on a machine with the rotary module; status shows A): jog_a {deg: up to ±90}, rotary_zero {what: "
+              "z_probe (Makera's 4th-axis Z probe with the wired probe T0: Z0 on the chuck centreline) | y_axis (Y0 on the centreline "
+              "from the controller's rotation offset; y: machine Y to override) | a_zero (A0 here) | x_here | x_at {x: machine X}}, "
+              "shrink_a (A modulo 360). A rotary program needs Y0 and Z0 zeroed on the axis and A0 set this session. Rules: one step at a time; say what "
               "you will do and why before asking; every tool change is measured before moving with it; suggest an air "
               "cut the first time a program runs at an origin; never ask to run M490 or M498.2. If the user says stop, "
               "call halt (or hold) first, then talk.",

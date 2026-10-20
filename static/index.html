@@ -581,6 +581,14 @@
   .mv-jogpad button:hover:not(:disabled) { background:rgba(78,161,255,.22); border-color:rgba(78,161,255,.5); }
   .mv-jogpad button:disabled { opacity:.35; cursor:default; } .mv-jogpad .jp-step { background:transparent; border-color:transparent; color:var(--muted); font-weight:500; font-size:11.5px; }
   .mv-jogpad.off .jp-step { opacity:.6; }
+  /* 4th axis: A+ / A− column (only on machines with the rotary module), the A column of the DRO */
+  .jp-a { display:none; grid-template-rows:44px 30px 44px; gap:4px; background:rgba(16,19,24,.86); border:1px solid rgba(255,255,255,.08); border-radius:12px; padding:6px; backdrop-filter:blur(6px); }
+  .mv-jogpad.fourth .jp-a { display:grid; } .jp-a .jp-step { height:30px; padding:0; }
+  .ms-pos #ms-pos-a { display:none; } .ms-pos.fourth #ms-pos-a { display:flex; }
+  .rotseq .seq { display:flex; gap:10px; align-items:flex-start; padding:7px 0; border-top:1px solid var(--line); } .rotseq .seq:first-of-type { border-top:0; }
+  .rotseq .seq .n { width:18px; height:18px; border-radius:50%; background:var(--s3); color:var(--muted); font-size:10.5px; display:grid; place-items:center; flex:none; margin-top:1px; }
+  .rotseq .seq.ok .n { background:rgba(62,207,122,.16); color:var(--ok); } .rotseq .seq > div { flex:1; min-width:0; } .rotseq .seq small { display:block; color:var(--muted); font-size:11.5px; line-height:1.4; }
+  .rotseq .seq .acts { display:flex; flex-direction:row; gap:6px; align-items:center; flex-wrap:wrap; margin-top:6px; }   /* (.seq div stacks by default) */
   /* right column: steps */
   #insp-machine { padding:0; gap:0; }
   .msteps { position:sticky; top:0; z-index:2; background:var(--panel); display:grid; grid-template-columns:1fr 1fr 1fr .8fr; border-bottom:1px solid var(--line); }
@@ -808,7 +816,7 @@
   <span id="ms-badge" class="ms-badge s-offline">OFFLINE</span>
   <div class="ms-conn"><input id="mv-host" placeholder="machine address, e.g. 192.168.1.36" spellcheck="false"><button class="btn sm" id="mv-discover" title="Listen for Makera machines on this network">Find</button><button class="btn sm pri" id="mv-connect">Connect</button></div>
   <div class="ms-live">
-    <div class="ms-pos" id="ms-pos"><div><small>X</small><b id="mv-wx">–</b><i id="mv-mx">–</i></div><div><small>Y</small><b id="mv-wy">–</b><i id="mv-my">–</i></div><div><small>Z</small><b id="mv-wz">–</b><i id="mv-mz">–</i></div></div>
+    <div class="ms-pos" id="ms-pos"><div><small>X</small><b id="mv-wx">–</b><i id="mv-mx">–</i></div><div><small>Y</small><b id="mv-wy">–</b><i id="mv-my">–</i></div><div><small>Z</small><b id="mv-wz">–</b><i id="mv-mz">–</i></div><div id="ms-pos-a" title="4th axis: work A (machine A below), degrees"><small>A°</small><b id="mv-wa">–</b><i id="mv-ma">–</i></div></div>
     <span class="ms-sep"></span>
     <div class="ms-tool"><span id="ms-tool-sil"></span><div><b id="ms-tool">–</b><small id="ms-tool-sub"></small></div></div>
     <span class="ms-sep"></span>
@@ -865,7 +873,8 @@
         <label class="mv-camtoggle"><input type="checkbox" id="mv-cam-on" checked> Camera</label>
         <div class="mv-jogpad" id="mv-jogpad"><div class="jp-why" id="mv-jog-why"></div>
           <div class="jp-z"><button data-j="z+">Z+</button><button data-j="z-" title="Z down: at most 1 mm per click, never below the Z floor">Z−</button></div>
-          <div class="jp-xy"><button data-j="y+" style="grid-area:yp">Y+</button><button data-j="x-" style="grid-area:xm">X−</button><button id="mv-step" class="jp-step" style="grid-area:c" title="Jog step: click to change">1 mm</button><button data-j="x+" style="grid-area:xp">X+</button><button data-j="y-" style="grid-area:ym">Y−</button></div></div>
+          <div class="jp-xy"><button data-j="y+" style="grid-area:yp">Y+</button><button data-j="x-" style="grid-area:xm">X−</button><button id="mv-step" class="jp-step" style="grid-area:c" title="Jog step: click to change">1 mm</button><button data-j="x+" style="grid-area:xp">X+</button><button data-j="y-" style="grid-area:ym">Y−</button></div>
+          <div class="jp-a" id="mv-jp-a"><button data-j="a+" title="Turn the 4th axis + (degrees, at half its max rate)">A+</button><button id="mv-step-a" class="jp-step" title="A step in degrees: click to change">10°</button><button data-j="a-" title="Turn the 4th axis −">A−</button></div></div>
       </div>
     </div>
     <div id="cam-view"><div class="seg" id="cv-scope"><button data-v="sel" title="Only the selected operation's toolpath">Selected op</button><button data-v="all" class="on">All</button></div>
@@ -952,7 +961,8 @@
   <select class="msetup inp"></select>
   <div class="mcard" id="mz-cmp"></div>
   <div id="mz-find"></div>
-  <div class="mcard"><div class="h">Probe the block · 3D probe</div>
+  <div id="mz-rot"></div>
+  <div class="mcard" id="mz-probe-card"><div class="h">Probe the block · 3D probe</div>
     <div class="pickrow"><svg id="mz-picker" width="200" height="160" viewBox="0 0 200 160">
       <path d="M26,138 L26,40 L34,40 L34,130 L130,130 L130,138 Z" class="pbr"/>
       <rect x="40" y="20" width="130" height="104" rx="3" class="pblk"/>
@@ -992,6 +1002,7 @@
     <div class="row"><span class="muted">Lower to</span><span class="inp" style="width:84px"><input type="number" id="mm-lower" value="5" min="2" max="50" step="1">mm</span><span class="muted sm">above work Z0</span><button class="btn sm" data-act="mlower">Lower</button></div></div>
   <div class="mcard"><div class="h">Set the work origin</div>
     <div class="row"><button class="btn sm" data-act="x0y0">X0 Y0 here</button><button class="btn sm" data-act="z0">Z0 here</button><button class="btn sm" data-act="anchor">Origin = Anchor 1</button><button class="btn sm" data-act="autoz">Auto Z (wired probe)</button></div>
+    <div class="row" id="mm-arow" style="display:none"><span class="muted sm">4th axis</span><button class="btn sm" data-act="rota" title="The chuck's current angle becomes A0 (G92.4 A0, then G10 L20 P0 A0). Nothing moves.">A0 here</button><button class="btn sm" data-act="rotshrink" title="G92.4 A0 S0: drop whole turns from the A count (modulo 360). Nothing moves.">Shrink A</button><button class="btn sm" data-act="rotz" title="Makera's 4th-axis Z probe (M495 X0 Y0 O0) with the wired probe: Z0 on the chuck centreline">4th-axis Z probe</button></div>
     <div class="row"><span class="muted sm">The head is at work</span><span class="inp" style="width:78px"><b>X</b><input type="number" id="mm-ox" step="0.1" placeholder="–"></span><span class="inp" style="width:78px"><b>Y</b><input type="number" id="mm-oy" step="0.1" placeholder="–"></span><span class="inp" style="width:78px"><b>Z</b><input type="number" id="mm-oz" step="0.1" placeholder="–"></span><button class="btn sm" data-act="settyped">Set</button></div></div>
   <div class="mcard"><div class="h">Any 3D-probe routine</div>
     <div class="row"><select id="mv-p3-kind" class="inp" title="Makera's own 3D-probe routines (M480.n), as MakeraStudio runs them">
@@ -6145,7 +6156,8 @@ async function renderPhonePane(pane) {
 // Idle, inside the travel box and above the Z floor). The page only mirrors that state; it never decides on its own.
 // Layout: status strip (state, position, tool, Control, Hold / Pause / STOP) · camera with jog · right column steps
 // Prepare → Zero → Run, and Manual for anything ad hoc (go to, set origin, any 3D-probe routine, console, run a file).
-const MV = { st: null, step: null, camOn: true, busy: false, jog: 1, si: 0, corner: 'obr', ack: '', tcSeen: '' };
+const MV = { st: null, step: null, camOn: true, busy: false, jog: 1, jogA: 10, si: 0, corner: 'obr', ack: '', tcSeen: '' };
+const JOG_A_STEPS = [1, 10, 45, 90];               // degrees per click on A+ / A− (90 is the server's limit)
 const MVP = { sel: new Set(), key: '' };
 function mvEl(id) { return document.getElementById(id); }
 function mvVisible() { return ribbonTab() === 'machine'; }
@@ -6183,7 +6195,10 @@ async function mvAsk(title, html, ok) { const d = document.createElement('div');
 const ORIGIN_WANTS = { 'stock-top-left': { xy: 'front-left', z: 'top' }, 'stock-top-center': { xy: 'centre', z: 'top' },
   'stock-bottom-left': { xy: 'front-left', z: 'bottom' }, 'stock-bottom-center': { xy: 'centre', z: 'bottom' } };
 const REF_TEXT = { 'front-left': 'front-left corner', 'front-right': 'front-right corner', 'back-left': 'back-left corner', 'back-right': 'back-right corner',
-  centre: 'centre', anchor1: 'Anchor 1 (the L-bracket corner)', typed: 'set by hand', top: 'top of the block', bottom: 'bottom of the stock' };
+  centre: 'centre', anchor1: 'Anchor 1 (the L-bracket corner)', typed: 'set by hand', top: 'top of the block', bottom: 'bottom of the stock',
+  axis: 'the 4th-axis centreline', chuck: 'the chuck face + offset', here: 'here' };
+// a rotary setup's origin: X at the setup's origin point, Y and Z on the chuck centreline, A zeroed
+const ROT_X_TEXT = { 'rotary-axis-left': 'the stock\'s left end (chuck side)', 'rotary-axis-center': 'the middle of the stock' };
 const CORNERS = { obl: ['outside_back_left', 'back-left'], obr: ['outside_back_right', 'back-right'], ofr: ['outside_front_right', 'front-right'],
   ofl: ['outside_front_left', 'front-left'], c: ['boss_center', 'centre'] };
 function mvSetup() { return program && program.setups[Math.min(MV.si, program.setups.length - 1)]; }
@@ -6223,7 +6238,21 @@ function mvExpectedOrigin(stp, st) {
   const bed = w.xy === 'front-left' ? [at[0] - sz[0] / 2, at[1] - sz[1] / 2] : at;
   return [bed[0] - st.bed_anchor[0] + st.anchor1[0], bed[1] - st.bed_anchor[1] + st.anchor1[1]];
 }
+function mvZeroRotary(st, stp) {                 // a 4th-axis setup: Y and Z on the centreline (ref 'axis'), A0 set, X set
+  const o = (st && st.origin) || {}, x = o.x, y = o.y, z = o.z, a = o.a;
+  const okY = !!(y && y.ref === 'axis' && !y.changed), okZ = !!(z && z.ref === 'axis'), okA = !!a, okX = !!(x && !x.changed);
+  const why = [];
+  if (!(st && st.fourth)) why.push('this machine has no 4th axis (Settings ▸ Machines: tick 4th axis, or connect with the module fitted)');
+  if (!z) why.push('Z0 not set this session'); else if (!okZ) why.push(`Z0 is ${REF_TEXT[z.ref] || z.ref}, the setup wants the centreline (4th-axis Z probe)`);
+  if (!y) why.push('Y0 not set this session'); else if (y.changed) why.push('the Y offset changed since it was set here'); else if (!okY) why.push(`Y0 is ${REF_TEXT[y.ref] || y.ref}, the setup wants the centreline`);
+  if (!a) why.push('A0 not set this session');
+  if (!x) why.push('X0 not set this session'); else if (x.changed) why.push('the X offset changed since it was set here');
+  const state = !x && !y && !z && !a ? 'none' : okY && okZ && okA && okX && st.fourth ? 'ok' : 'warn';
+  const t = Math.max(...[x, y, z, a].filter(Boolean).map(r => r.t || 0), 0);
+  return { state, why, xy: { ref: 'axis', how: 'Y and Z on the 4th-axis centreline', t }, z, w: { xy: 'axis', z: 'axis' }, place: '', exp: null, rotary: true, okX, okY, okZ, okA };
+}
 function mvZero(st, stp) {                       // {state: ok|warn|none, rows, why}
+  if (stp && stp.rotary) return mvZeroRotary(st, stp);
   const o = (st && st.origin) || {}, w = stp ? ORIGIN_WANTS[stp.origin_name] : null;
   const xy = o.xy, z = o.z, exp = mvExpectedOrigin(stp, st), wco = o.wco;
   const okXY = xy && w && xy.ref === w.xy && !xy.changed, okZ = z && w && z.ref === w.z;
@@ -6256,7 +6285,7 @@ function mvReady(st, stp) {                      // the Run checklist
   return [
     { k: 'conn', ok: !!(conn && st.armed), txt: conn ? (st.armed ? 'Connected · Control on' : 'Turn Control on') : 'Connect the machine', go: 'prep' },
     { k: 'home', ok: !!(conn && st.homed), txt: st && st.homed ? 'Homed this session' : 'Home the machine', go: 'prep' },
-    { k: 'zero', ok: z.state === 'ok' || MV.ack === ackKey, warn: z.state !== 'ok' && MV.ack === ackKey, txt: z.state === 'ok' ? `Work origin: ${REF_TEXT[z.w.xy]}, ${REF_TEXT[z.w.z]}` : `Work origin: ${z.why[0] || 'not set'}`, go: 'zero', ackKey },
+    { k: 'zero', ok: z.state === 'ok' || MV.ack === ackKey, warn: z.state !== 'ok' && MV.ack === ackKey, txt: z.state === 'ok' ? (z.rotary ? 'Work origin on the 4th axis: Y and Z on the centreline, A0 and X0 set' : `Work origin: ${REF_TEXT[z.w.xy]}, ${REF_TEXT[z.w.z]}`) : `Work origin: ${z.why[0] || 'not set'}`, go: 'zero', ackKey },
     // one tool per run, fitted and measured first: a program never changes tools (the Z1 starts the spindle mid-change)
     { k: 'tool', ok: !!(first && selTools.length === 1 && tl === first.number && st.tool_ok),
       txt: !first ? 'Tick the operations to run' : selTools.length > 1 ? `These use ${selTools.map(n => 'T' + n).join(' and ')}: run one tool at a time (the T buttons above the list pick one tool's operations)`
@@ -6274,6 +6303,11 @@ function mvStrip(st) {
   document.body.classList.toggle('m-conn', !!conn);
   const f = v => (v == null ? '–' : (+v).toFixed(3)), w = s.wpos || [], m = s.mpos || [], rel = st.position_reliable !== false;
   ['x', 'y', 'z'].forEach((a, i) => { mvEl('mv-w' + a).textContent = rel ? f(w[i]) : '?'; mvEl('mv-m' + a).textContent = rel ? f(m[i]) : '?'; });
+  // the 4th axis: shown only when the machine is known to have one (st.fourth: the machine record, or a non-zero A seen)
+  const ap = st.a || {};
+  mvEl('ms-pos').classList.toggle('fourth', !!st.fourth); mvEl('mv-jogpad').classList.toggle('fourth', !!st.fourth);
+  mvEl('mv-wa').textContent = rel ? f(ap.work) : '?'; mvEl('mv-ma').textContent = rel ? f(ap.machine) : '?';
+  mvEl('mv-step-a').textContent = MV.jogA + '°';
   mvEl('ms-pos').title = rel ? 'work position (machine position below)' : 'position unknown while ' + (s.state || '').toLowerCase();
   const tl = s.tool ? s.tool.number : null;
   setHTML(mvEl('ms-tool-sil'), toolSil(mvToolShape(tl)));
@@ -6360,13 +6394,22 @@ function mvZeroRender(st) {
   const stp = mvSetup(), z = mvZero(st, stp), s = st.status || {}, conn = st.connected, tl = s.tool ? s.tool.number : null;
   mvSetupSelects();
   const hasRow = (lbl, r) => `<span>${lbl}</span><span>${r ? `${esc(REF_TEXT[r.ref] || r.ref)} · ${esc(r.how)} · ${mvAgo(r.t)}${r.changed ? ' · <span class="wa">changed since</span>' : ''}` : '<span class="muted">not set this session</span>'}</span>`;
+  const rot = !!(stp && stp.rotary), o = st.origin || {};
   setHTML(mvEl('mz-cmp'), !stp ? '<div class="h">Work origin</div><p class="muted">No CAM program: this compares the program\'s setup with the machine.</p>'
+    : rot ? `<div class="h">This setup wants</div><div class="kv"><span>Origin</span><span>on the rotary axis: Y and Z on the chuck centreline, X at ${esc(ROT_X_TEXT[stp.origin_name] || stp.origin_name)} (${esc(stp.wcs)})</span>
+      <span>Stock</span><span>Ø${(2 * (stp.max_radius || 0)).toFixed(1)} × ${stp.size[0].toFixed(1)} mm in the chuck · A ${stp.a}°</span></div>
+      <div class="h" style="margin-top:12px">The machine has <span class="zstate ${z.state}">${z.state === 'ok' ? 'matches' : z.state === 'none' ? 'not set' : 'check'}</span></div>
+      <div class="kv">${hasRow('X0', o.x)}${hasRow('Y0', o.y)}${hasRow('Z0', o.z)}<span>A0</span><span>${o.a ? `${esc(o.a.how)} · ${mvAgo(o.a.t)}` : '<span class="muted">not set this session</span>'}</span></div>
+      ${z.state !== 'ok' && z.why.length ? `<p class="wa sm">${z.why.map(esc).join(' · ')}</p>` : ''}`
     : `<div class="h">This setup wants</div><div class="kv"><span>Origin</span><span>${esc(ORIGIN_TEXT[stp.origin_name] || stp.origin_name)} (${esc(stp.wcs)})</span>
       <span>Block</span><span>${stp.size.slice(0, 2).map(v => v.toFixed(2)).join(' × ')} mm${stp.fixture && stp.fixture.extra && stp.fixture.extra.length ? ' · ' + stp.fixture.extra.map(f => esc(f.name)).join(', ') : ''}</span></div>
       <div class="h" style="margin-top:12px">The machine has <span class="zstate ${z.state}">${z.state === 'ok' ? 'matches' : z.state === 'none' ? 'not set' : 'check'}</span></div>
       <div class="kv">${hasRow('X / Y', z.xy)}${hasRow('Z0', z.z)}${z.place ? `<span>Placement</span><span>${z.place}</span>` : ''}</div>
       ${z.state !== 'ok' && z.why.length ? `<p class="wa sm">${z.why.map(esc).join(' · ')}</p>` : ''}${mvShiftOffer(st, stp, z)}`);
-  setHTML(mvEl('mz-find'), stp ? mvFindBlock(st, stp) : '');
+  setHTML(mvEl('mz-find'), stp && !rot ? mvFindBlock(st, stp) : '');
+  setHTML(mvEl('mz-rot'), rot ? mvRotaryCard(st, stp, z) : '');
+  mvEl('mz-probe-card').style.display = rot ? 'none' : '';
+  if (rot) return;
   // the corner picker + sequence
   const [kind, ref] = CORNERS[MV.corner], p3 = st.probe3d_tool || 9999, fitted = tl === p3 && st.tool_ok;
   document.querySelectorAll('#mz-picker .pk').forEach(g => g.classList.toggle('on', g.dataset.k === MV.corner));
@@ -6399,6 +6442,31 @@ function mvZeroRender(st) {
       z.z ? `<button class="btn sm" data-act="lower" data-h="5" ${ready && fitted ? '' : 'disabled'}>Lower</button>` : '')
     + row(4, false, `Probe the ${ref} ${MV.corner === 'c' ? '' : 'corner'}`, `Makera M480 · step out X ${sx} · Y ${sy} mm${tight ? ' <span class="wa">(less than ' + want + ': the travel ends there)</span>' : ''}${tooTight ? ' <span class="wa">— too little room: the head is too close to the end of the travel</span>' : ''} · the app holds it if the head leaves the area or Z drops 10 mm without a touch`,
       `<button class="btn pri sm" data-act="p3" data-x="${sx}" data-y="${sy}" ${ready && fitted && !tooTight ? '' : 'disabled'}>Probe</button>`));
+}
+// Zero on the 4th axis: Makera's own routines/commands, one step at a time, each behind a confirmation
+function mvRotaryCard(st, stp, z) {
+  const s = st.status || {}, conn = st.connected, tl = s.tool ? s.tool.number : null, rt = st.rotary || {}, off = rt.offset, o = st.origin || {};
+  const ready = conn && st.armed && st.homed && s.state === 'Idle' && !st.jogging && !(st.routine && ['running', 'awaiting'].includes(st.routine.stage));
+  const fourth = !!st.fourth, probe = tl === 0 && st.tool_ok;
+  const row = (n, ok, t, sub, acts) => `<div class="seq ${ok ? 'ok' : ''}"><span class="n">${ok ? '✓' : n}</span><div><b>${t}</b><small>${sub}</small>${acts ? `<div class="acts">${acts}</div>` : ''}</div></div>`;
+  const offTxt = off ? `rotation offset X ${(+off.x).toFixed(2)} · Y ${(+off.y).toFixed(2)} · Z ${(+off.z).toFixed(2)} (${esc(off.source || 'config')})` : 'the module\'s offsets (coordinate.rotation_offset_*) are unknown';
+  const my = rt.axis_my, mz = rt.found && rt.found.axis_mz, mod = rt.module || {};
+  const xWant = ROT_X_TEXT[stp.origin_name] || stp.origin_name, len = stp.size[0];
+  const xHint = stp.origin_name === 'rotary-axis-center' ? `chuck face + half the stock (${(len / 2).toFixed(1)} mm) + any stick-out` : 'the stock\'s left end: chuck face + the stock\'s stick-out from the jaws';
+  const dis = ok => (ok ? '' : 'disabled');
+  const floorHint = stp.max_radius ? `With Z0 on the centreline the stock top is at Z ${(+stp.max_radius).toFixed(1)}: set the Z floor above it before jogging.` : '';
+  return `<div class="mcard rotseq"><div class="h">Zero on the 4th axis ${fourth ? '' : '<span class="zstate warn">no 4th axis</span>'}</div>
+    <p class="muted sm" style="margin:0 0 6px">${esc(offTxt)}${my != null ? ` · centreline at machine Y ${(+my).toFixed(3)}` : ''}${mz != null ? ` · Z ${(+mz).toFixed(3)} (probe)` : mod.axis_mz != null ? ` · Z ${(+mod.axis_mz).toFixed(3)} (saved)` : ''}
+      <button class="btn ghost sm" data-act="rotoff" ${conn ? '' : 'disabled'} title="config-get sd coordinate.rotation_offset_* from the controller (read-only)">Read from the controller</button></p>
+    ${row(1, z.okZ, 'Z0 on the centreline · Makera\'s 4th-axis Z probe', `M495 X0 Y0 O0 with the wired probe (T0): Z goes up, the head goes to the module's reference pad (anchor 1 + rotation offset), touches it and sets Z0 ${off ? (+off.z).toFixed(1) : '…'} mm below the pad — the chuck centreline. ${probe ? 'T0 fitted and measured.' : `the machine has T${tl ?? '–'}: fit the wired probe first.`}`,
+      `${probe ? '' : `<button class="btn sm" data-act="tcpick-go" data-n="0" ${dis(ready)}>Change tool → T0</button>`}<button class="btn sm pri" data-act="rotz" ${dis(ready && fourth && probe && off)}>Probe</button>`)}
+    ${row(2, z.okY, 'Y0 on the centreline', my != null ? `machine Y ${(+my).toFixed(3)} = anchor1_y + rotation_offset_y (G10 L2 P0 Y). Nothing moves.` : 'needs the rotation offset (read it from the controller) or a typed machine Y',
+      `<button class="btn sm pri" data-act="roty" ${dis(ready && fourth && my != null)}>Set Y0 on the axis</button><span class="muted sm">or machine Y</span><span class="inp" style="width:92px"><input type="number" id="mz-rot-y" step="0.01" placeholder="${my != null ? (+my).toFixed(2) : '–'}"></span><button class="btn sm" data-act="roty-typed" ${dis(ready && fourth)}>Set</button>`)}
+    ${row(3, z.okA, 'A0 here', 'the chuck\'s current angle becomes A0 (G92.4 A0, then G10 L20 P0 A0 so work A reads 0). Turn the chuck with A+ / A− on the jog pad first if you want a feature up. Nothing moves.',
+      `<button class="btn sm pri" data-act="rota" ${dis(ready && fourth)}>Set A0</button><button class="btn sm ghost" data-act="rotshrink" ${dis(ready && fourth)} title="G92.4 A0 S0: drop whole turns from the A count">Shrink A</button>`)}
+    ${row(4, z.okX, `X0 at ${esc(xWant)}`, `${esc(xHint)}. "Here": the head's X becomes X0 (jog the tool to the point first). Or type the chuck face's machine X and the offset to the origin.`,
+      `<button class="btn sm" data-act="rotx-here" ${dis(ready)}>X0 here</button><span class="muted sm">chuck face at machine X</span><span class="inp" style="width:92px"><input type="number" id="mz-rot-cx" step="0.01" placeholder="${mod.chuck_face_mx != null ? (+mod.chuck_face_mx).toFixed(2) : '–'}"></span><span class="muted sm">+</span><span class="inp" style="width:74px"><input type="number" id="mz-rot-dx" step="0.1" value="${stp.origin_name === 'rotary-axis-center' ? (len / 2).toFixed(1) : '0'}"></span><span class="muted sm">mm</span><button class="btn sm" data-act="rotx-at" ${dis(ready)}>Set X0</button>`)}
+    ${floorHint ? `<p class="muted sm" style="margin:8px 0 0">${esc(floorHint)} <button class="btn ghost sm" data-act="rotzfloor" data-z="${(+stp.max_radius + 2).toFixed(1)}" ${conn ? '' : 'disabled'}>Z floor = ${(+stp.max_radius + 2).toFixed(1)} mm</button></p>` : ''}</div>`;
 }
 // the block's faces (machine X / Y) from this session's 3D-probe corners, the latest of each; missing faces from the setup's size
 function mvBlock(st, stp) {
@@ -6519,6 +6587,8 @@ function mvManual(st) {
   const s = st.status || {}, conn = st.connected, ready = conn && st.armed && st.homed && s.state === 'Idle' && !st.jogging;
   mvEl('mm-why').textContent = ready ? '' : !conn ? 'connect first' : !st.armed ? 'turn Control on' : !st.homed ? 'home first' : s.state !== 'Idle' ? `machine is ${s.state}` : 'moving…';
   document.querySelectorAll('#mstep-manual [data-act]').forEach(b => { if (b.dataset.act !== 'file' && b.dataset.act !== 'step') b.disabled = !ready; });
+  mvEl('mm-arow').style.display = st.fourth ? '' : 'none';            // A0 / Shrink A / 4th-axis Z probe: machines with the module only
+  if (st.fourth) mvEl('mstep-manual').querySelector('[data-act=rotz]').disabled = !(ready && s.tool && s.tool.number === 0 && st.tool_ok && st.rotary && st.rotary.offset);
   mvEl('mm-p3-hint').textContent = MV_P3_HINT[mvEl('mv-p3-kind').value.split('_')[0]];
   const zf = mvEl('mv-zfloor'); if (document.activeElement !== zf) zf.value = st.z_floor;
   const log = mvEl('mv-log'), stick = log.scrollTop + log.clientHeight >= log.scrollHeight - 4;
@@ -6545,16 +6615,20 @@ async function mvProbe(kind, x, y, depth, dia) {
 }
 async function mvRunOps() {
   const ops = [...MVP.sel].sort((a, b) => a - b), air = mvEl('mvp-air').checked ? +mvEl('mvp-air-mm').value : 0;
-  const r = await mvPost({ action: 'check_ops', ops, air });
+  // a rotary setup whose origin the user vouched for ("I checked it" in the Ready list) runs with ack
+  const stp = mvSetup(), ready = MV.st ? mvReady(MV.st, stp) : [], zr = ready.find(x => x.k === 'zero');
+  const ack = !!(stp && stp.rotary && zr && zr.warn);
+  const r = await mvPost({ action: 'check_ops', ops, air, ack });
   if (!r || !r.check) return;
-  const c = r.check, wo = r.origin && r.origin.wco;
-  const ok = await mvAsk('Run on the machine', `<div><b>${esc(c.program)}</b> · setup ${esc(c.setup)} (${esc(c.wcs || '')}) · ${c.ops.length} operation${c.ops.length === 1 ? '' : 's'} · about ${c.time_min} min · ${c.lines} lines</div>
+  const c = r.check, wo = r.origin && r.origin.wco, ea = c.extents && c.extents.a;
+  const ok = await mvAsk('Run on the machine', `<div><b>${esc(c.program)}</b> · setup ${esc(c.setup)} (${esc(c.wcs || '')}) · ${c.ops.length} operation${c.ops.length === 1 ? '' : 's'} · about ${c.time_min} min · ${c.lines} lines${c.rotary || c.uses_a ? ' · <b>4th axis</b>' : ''}</div>
     <ul>${c.ops.map(o => `<li>${esc(o.name)} · T${o.tool ?? '?'}</li>`).join('')}</ul>
     <div class="muted">${c.notes.map(esc).join('<br>')}</div>
-    ${wo ? `<div class="muted">Work origin on the machine: X ${wo[0].toFixed(3)} · Y ${wo[1].toFixed(3)} (machine).</div>` : ''}
-    ${air ? `<div style="color:var(--accent)">Air cut: everything ${air} mm higher; the spindle still runs.</div>` : ''}
+    ${wo ? `<div class="muted">Work origin on the machine: X ${wo[0].toFixed(3)} · Y ${wo[1].toFixed(3)} (machine)${c.rotary ? ' — Y and Z on the chuck centreline' : ''}.</div>` : ''}
+    ${ea ? `<div class="muted">A turns ${ea[0].toFixed(1)}° .. ${ea[1].toFixed(1)}°: keep clear of the chuck.</div>` : ''}
+    ${air ? `<div style="color:var(--accent)">Air cut: everything ${air} mm higher${c.rotary || c.uses_a ? ' — on the 4th axis Z is the radius, so the tool stays ' + air + ' mm further out from the centreline' : ''}; the spindle still runs.</div>` : ''}
     <div class="warn">The machine runs this on its own once started: keep a hand on the e-stop. Pause, Stop program and STOP stay in the bar at the top.</div>`, air ? 'Start air cut' : 'Start');
-  if (ok) mvPost({ action: 'run_ops', ops, air });
+  if (ok) mvPost({ action: 'run_ops', ops, air, ack });
 }
 async function mvRunFile(file) {
   const text = await file.text(), air = mvEl('mvp-air').checked ? +mvEl('mvp-air-mm').value : 0;
@@ -6590,9 +6664,11 @@ async function mvRunFile(file) {
   mvEl('ms-abort').onclick = () => mvPost({ action: 'job_abort' });
   mvEl('mv-arm').onchange = e => mvPost({ action: 'arm', on: e.target.checked });
   mvEl('mv-step').onclick = () => { MV.jog = MV.jog === 1 ? 10 : MV.jog === 10 ? 0.1 : 1; mvEl('mv-step').textContent = MV.jog + ' mm'; };
+  mvEl('mv-step-a').onclick = () => { MV.jogA = JOG_A_STEPS[(JOG_A_STEPS.indexOf(MV.jogA) + 1) % JOG_A_STEPS.length]; mvEl('mv-step-a').textContent = MV.jogA + '°'; };
   document.querySelectorAll('#mv-jogpad [data-j]').forEach(b => b.onclick = () => {
     const ax = b.dataset.j[0], sign = b.dataset.j[1] === '+' ? 1 : -1;
     let d = MV.jog * sign; if (ax === 'z' && sign < 0) d = -Math.min(MV.jog, 1);   // Z down: 1 mm per click at most
+    if (ax === 'a') d = MV.jogA * sign;                                               // the 4th axis: degrees
     mvPost({ action: 'jog', axis: ax, dist: d });
   });
   mvEl('mv-dust').onchange = e => mvPost({ action: 'switch', axis: 'dust', on: e.target.checked });
@@ -6645,6 +6721,24 @@ async function mvRunFile(file) {
     if (a === 'shift') { if (await mvAsk('Move X0 Y0', `<div>Work X0 Y0 moves by <b>${b.dataset.dx}, ${b.dataset.dy} mm</b> to the ${esc(REF_TEXT[b.dataset.ref])} (G10 L2 P0). Z0 stays. Nothing moves.</div>`, 'Move X0 Y0'))
         mvPost({ action: 'shift_origin', x: +b.dataset.dx, y: +b.dataset.dy, kind: b.dataset.ref, name: b.dataset.how }); return; }
     if (a === 'raise') { if (await mvAsk('Raise Z', '<div>Raise Z to the top of travel at 300 mm/min. X/Y stay.</div>', 'Raise')) mvPost({ action: 'raise_z' }); return; }
+    // -- the 4th axis
+    if (a === 'rotoff') return mvPost({ action: 'read_rotation_offset' });
+    if (a === 'rotz') { const off = (st.rotary || {}).offset || {}, my = (st.rotary || {}).axis_my, a1 = st.anchor1 || [0, 0];
+      if (await mvAsk('4th-axis Z probe', `<div><b>Makera's 4th-axis Z probe</b> (M495 X0 Y0 O0) with the wired probe T0.</div>
+        <div>Z goes up to the clearance height, the head moves to the rotary module's reference pad (about machine X ${(a1[0] + (+off.x || 0) - 3).toFixed(1)} Y ${my != null ? (+my).toFixed(1) : '?'}), the probe touches it fast then slow, and work Z0 is set ${(+off.z || 0).toFixed(1)} mm below the pad — on the chuck centreline. The app holds it if the head leaves that path.</div>
+        <div class="warn">The module must be fitted with its pad clear. Keep a hand on the e-stop; STOP halts it at once.</div>`, 'Probe')) mvPost({ action: 'rotary_z_probe' }); return; }
+    if (a === 'roty' || a === 'roty-typed') { const typed = a === 'roty-typed' ? opt('mz-rot-y') : null, my = typed != null ? typed : (st.rotary || {}).axis_my;
+      if (a === 'roty-typed' && typed == null) return mvMsg('type the centreline\'s machine Y');
+      if (await mvAsk('Y0 on the 4th axis', `<div>Work Y0 on the chuck centreline: <b>machine Y ${(+my).toFixed(3)}</b>${typed != null ? ' (typed)' : ' = anchor1_y + rotation_offset_y, the controller\'s own numbers'} (G10 L2 P0 Y). X, Z and A stay. Nothing moves.</div>`, 'Set Y0'))
+        mvPost(typed != null ? { action: 'origin_axis_y', y: typed } : { action: 'origin_axis_y' }); return; }
+    if (a === 'rota') { if (await mvAsk('A0 here', '<div>The chuck\'s current angle becomes <b>A0</b>: G92.4 A0 (machine A := 0), then G10 L20 P0 A0 so work A reads 0 too. Nothing moves.</div>', 'Set A0')) mvPost({ action: 'zero_a' }); return; }
+    if (a === 'rotshrink') { if (await mvAsk('Shrink A', '<div>G92.4 A0 S0: whole turns are dropped from the A count (modulo 360) so it doesn\'t grow forever. Nothing moves.</div>', 'Shrink')) mvPost({ action: 'shrink_a' }); return; }
+    if (a === 'rotx-here') { if (await mvAsk('X0 here', '<div>The head\'s current X becomes <b>work X0</b> (G10 L20 P0 X0). Y, Z and A stay. Nothing moves.</div>', 'Set X0')) mvPost({ action: 'set_origin', x: 0 }); return; }
+    if (a === 'rotx-at') { const cx = opt('mz-rot-cx'), dx = num('mz-rot-dx'); if (cx == null) return mvMsg('type the chuck face\'s machine X');
+      const mx = +(cx + dx).toFixed(3);
+      if (await mvAsk('X0 from the chuck face', `<div>Work X0 at <b>machine X ${mx.toFixed(3)}</b>: the chuck face (${cx.toFixed(2)}) ${dx >= 0 ? '+' : ''}${dx} mm (G10 L2 P0 X). Y, Z and A stay. Nothing moves.</div>`, 'Set X0'))
+        mvPost({ action: 'origin_x_at', x: mx, kind: 'chuck', name: `chuck face at machine X ${cx.toFixed(2)} ${dx >= 0 ? '+' : ''}${dx} mm` }); return; }
+    if (a === 'rotzfloor') return mvPost({ action: 'z_floor', z: +b.dataset.z });
     if (a === 'goto') { const work = mvEl('mm-space').value === 'work', x = num('mm-gx'), y = num('mm-gy');
       if (await mvAsk('Go to', `<div>Move to <b>${work ? 'work' : 'machine'} X ${x} Y ${y}</b> at 300 mm/min. Z goes up to the top of travel first if it isn't there.</div>`, 'Go')) mvPost({ action: work ? 'goto_work_xy' : 'goto_xy_raised', x, y, feed: 300 }); return; }
     if (a === 'console') { const line = mvEl('mm-con').value.trim(); if (!line) return;
@@ -6732,7 +6826,8 @@ function mpillRender(st) {
 var MREQ = new Map();
 const MREQ_TITLE = { control_on: 'Control on', control_off: 'Control off', home: 'Home', unlock: 'Unlock', resume: 'Resume', resume_program: 'Resume the program',
   change_tool: 'Tool change', confirm_tool: 'Confirm the tool', origin_anchor: 'Origin = Anchor 1', auto_z_probe: 'Auto Z probe', set_origin: 'Set the work origin',
-  shift_origin: 'Move X0 Y0', lower_to: 'Lower Z', raise_z: 'Raise Z', goto: 'Go to', probe_3d: '3D probe', run_ops: 'Run on the machine', switch: 'Accessory', console: 'Console line' };
+  shift_origin: 'Move X0 Y0', lower_to: 'Lower Z', raise_z: 'Raise Z', goto: 'Go to', probe_3d: '3D probe', run_ops: 'Run on the machine', switch: 'Accessory', console: 'Console line',
+  jog_a: 'Turn the 4th axis', rotary_zero: 'Zero on the 4th axis', shrink_a: 'Shrink A' };
 function mreqCard(r) {
   const st = r.state || 'waiting', title = MREQ_TITLE[r.action] || r.action;
   return `<div class="mreq ${st}" data-id="${r.id}"><div class="mr-h"><span class="mr-ic">⚙</span><b>The assistant asks: ${esc(title)}</b><span class="mr-st">${
