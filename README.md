@@ -450,6 +450,18 @@ the QR code's link; *New link* locks out old phones. The key can be turned off (
 page — your choice, and the pane says so). The phone uses the same MachineControl, so every rule above
 applies unchanged. Plain HTTP on the local network: turn it off when you don't need it.
 
+**Notifications on your phone** (Settings ▸ Phone control ▸ Notifications): Web Push, done in the app. When Phone
+access is on, the app makes its own CA, a server certificate for the phone page (the computer's Bonjour name and LAN
+address; renewed by itself under the same CA) and VAPID keys — in the workspace, never in the package, kept across
+upgrades — and serves the phone page over HTTPS on the next port. On the phone (once): More ▸ Notifications → install
+the computer's certificate, open the secure page (iPhone: add it to the Home Screen; iOS grants web push to Home
+Screen apps only), turn notifications on. The computer then encrypts each message for that phone (RFC 8291, checked
+against the RFC's test vector) and posts it to the phone's push service (Apple's / Google's: the only relay, and it
+sees ciphertext) when the machine waits for a tool, finishes or stops; the computer needs internet access for that.
+Tapping opens the page; browsers with notification buttons get *Tool changed · continue*, which posts a one-shot code
+for that wait only (`POST /m/api/confirm/{code}`). `phone_push.py` holds the certificates, keys, encryption and
+delivery; `static/mobile_sw.js` is the service worker.
+
 `tools/z1_emu.py` is a Z1 emulator (protocol, homing, jogs, hold/halt, the M6 / M491 / M495 / M480 routines with a tool
 setter, a stock block and an optional pocket, the camera) used by `tests/test_machine_link.py`; like the real firmware it does not stop
 a jog past the end, so the tests prove the guard does.

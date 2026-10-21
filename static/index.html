@@ -1002,6 +1002,7 @@
       <span class="inp" style="width:90px"><b>X</b><input type="number" id="mm-gx" value="0" step="1"></span><span class="inp" style="width:90px"><b>Y</b><input type="number" id="mm-gy" value="0" step="1"></span>
       <button class="btn sm" data-act="goto">Go</button></div>
     <div class="row"><button class="btn sm" data-act="raise">Raise Z to the top</button><span class="muted sm">Go raises Z to the top first, then moves X/Y.</span></div>
+    <div class="row"><button class="btn sm" data-act="clean" title="Z to the top, then the head over the middle of the bed's front edge with the table fully back: what Home covers is open to the brush. Home again when done.">Cleaning position</button><span class="muted sm">Home, clean; Cleaning position, clean the rest; Home.</span></div>
     <div class="row"><span class="muted">Lower to</span><span class="inp" style="width:84px"><input type="number" id="mm-lower" value="5" min="2" max="50" step="1">mm</span><span class="muted sm">above work Z0</span><button class="btn sm" data-act="mlower">Lower</button></div></div>
   <div class="mcard"><div class="h">Set the work origin</div>
     <div class="row"><button class="btn sm" data-act="x0y0">X0 Y0 here</button><button class="btn sm" data-act="z0">Z0 here</button><button class="btn sm" data-act="anchor">Origin = Anchor 1</button><button class="btn sm" data-act="autoz">Auto Z (wired probe)</button></div>
@@ -6231,6 +6232,15 @@ async function renderPhonePane(pane) {
       <label>Port</label><div style="display:flex;gap:8px;align-items:center"><input id="ph-port" type="number" min="1024" max="65535" value="${st.port}" style="width:100px"><span class="muted">${st.running ? 'listening on ' + st.ip + ':' + st.port : 'off'}</span></div>
     </div>
     <div id="ph-body" style="margin-top:14px"></div>
+    <div class="set-h" style="margin-top:22px">Notifications on your phone<span class="muted">a ping when the machine waits for a tool, finishes or stops</span></div>
+    <div class="set-grid" style="margin-top:6px">
+      <label>Notify</label><label style="color:var(--text);display:flex;gap:8px;align-items:center"><input type="checkbox" id="pu-on" style="width:auto" ${st.push.enabled ? 'checked' : ''}> send tool-change, finished and stopped notifications to the phones below</label>
+      <label>Secure page</label><div class="muted" style="font-size:12px;word-break:break-all">${st.https.running ? `on · <span style="color:var(--text)">${esc(st.https.url)}</span>` : st.https.error ? `<span class="err" style="margin:0">${esc(st.https.error)}</span>` : st.enabled ? 'starting…' : 'off — turn Phone access on'}</div>
+      <label>Certificate</label><div class="muted" style="font-size:12px">${st.push.cert ? `AgenticCAD Phone CA <code>${esc(st.push.cert.ca_fingerprint)}</code> (made here, in the app's data folder; kept across upgrades) · page certificate for ${st.push.cert.hosts.map(esc).join(', ')} until ${new Date(st.push.cert.not_after).toLocaleDateString()}, renewed by itself` : 'made the first time Phone access is turned on'} <button class="btn small" id="pu-newcert" style="margin-left:6px">New certificate</button></div>
+      <label>Phones</label><div style="font-size:12px">${st.push.devices.length ? st.push.devices.map(d => `<div>${esc(d.label)} · added ${new Date(d.added * 1000).toLocaleDateString()}${d.last ? ` · last sent ${new Date(d.last * 1000).toLocaleTimeString()}` : ''}</div>`).join('') : '<span class="muted">none yet — turn them on from the phone (More ▸ Notifications)</span>'}
+        <div style="display:flex;gap:8px;align-items:center;margin-top:6px"><button class="btn small" id="pu-test" ${st.push.devices.length ? '' : 'disabled'}>Send a test</button><button class="btn small" id="pu-forget" ${st.push.devices.length ? '' : 'disabled'}>Forget phones</button><span class="muted" id="pu-last">${st.push.last ? (st.push.last.error ? `<span class="err" style="margin:0">${esc(st.push.last.error)}</span>` : `last: ${st.push.last.sent} sent at ${new Date(st.push.last.t * 1000).toLocaleTimeString()}`) : ''}</span></div></div>
+    </div>
+    <div class="muted" style="margin-top:10px;font-size:12px">On the phone: scan the QR code, then More ▸ Notifications and its three steps — install this computer's certificate once, open the secure page (iPhone: add it to the Home Screen and open it from there), turn notifications on. Nothing ships in the app: the certificate and keys are made on this computer and survive upgrades. The only thing that leaves it is each message, encrypted for that phone, sent to the phone's own push service (Apple's or Google's) — so this computer needs internet access for that. The tool-change notification's button (Android) continues that one wait only; on iPhone a tap opens the page with Confirm.</div>
     <div class="muted" style="margin-top:12px;font-size:12px">${st.require_key ? 'Anyone on this network who has the link can use the Machine tab (with the same safety rules as here): keep the link to yourself, and use <b>New link</b> to lock out a phone that had an old one.' : 'With the key off, anyone on this network who opens the page can use the Machine tab (with the same safety rules as here).'} Plain HTTP on your local network; turn it off when you don't need it.</div>`;
   const body = pane.querySelector('#ph-body');
   if (st.error) body.innerHTML = `<div class="err">${esc(st.error)}</div>`;
@@ -6250,6 +6260,10 @@ async function renderPhonePane(pane) {
   }
   const apply = async patch => { const r = await fetch('/api/remote', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch) }); if (!r.ok) { const j = await r.json().catch(() => ({})); pane.querySelector('#ph-body').innerHTML = `<div class="err">${esc(j.error || 'failed')}</div>`; return; } renderPhonePane(pane); };
   pane.querySelector('#ph-on').onchange = e => apply({ enabled: e.target.checked });
+  pane.querySelector('#pu-on').onchange = e => apply({ push: e.target.checked });
+  pane.querySelector('#pu-test').onclick = async () => { const b = pane.querySelector('#pu-test'); b.disabled = true; b.textContent = 'Sending…'; await apply({ push_test: true }); };
+  pane.querySelector('#pu-forget').onclick = () => { if (confirm('Forget every phone?\n\nThey stop receiving notifications until turned on again from the phone.')) apply({ push_forget: true }); };
+  pane.querySelector('#pu-newcert').onclick = () => { if (confirm('New certificate?\n\nEvery phone has to install and trust the new one, and notifications are turned off on all of them.')) apply({ new_cert: true }); };
   pane.querySelector('#ph-port').onchange = e => apply({ port: +e.target.value });
   pane.querySelector('#ph-key').onchange = e => {
     if (!e.target.checked && !confirm('Turn the key off?\n\nAnyone on this network who opens the phone page can then move the machine (with the same safety rules as here).')) { e.target.checked = true; return; }
@@ -6833,6 +6847,7 @@ async function mvRunFile(file) {
     if (a === 'shift') { if (await mvAsk('Move X0 Y0', `<div>Work X0 Y0 moves by <b>${b.dataset.dx}, ${b.dataset.dy} mm</b> to the ${esc(REF_TEXT[b.dataset.ref])} (G10 L2 P0). Z0 stays. Nothing moves.</div>`, 'Move X0 Y0'))
         mvPost({ action: 'shift_origin', x: +b.dataset.dx, y: +b.dataset.dy, kind: b.dataset.ref, name: b.dataset.how }); return; }
     if (a === 'raise') { if (await mvAsk('Raise Z', '<div>Raise Z to the top of travel at 300 mm/min. X/Y stay.</div>', 'Raise')) mvPost({ action: 'raise_z' }); return; }
+    if (a === 'clean') { if (await mvAsk('Cleaning position', '<div>Z goes to the top of travel, then the head moves to the <b>middle of the bed\'s front edge</b> (machine X mid-travel, Y fully forward) at 600 mm/min: the table ends fully back, so the back of the bed and the floor under the table\'s front, which Home covers, are open to the brush.</div><div class="muted sm" style="margin-top:6px">Spindle off, nothing in the way of the head. <b>Home</b> again when you are done.</div>', 'Move')) mvPost({ action: 'cleaning_position' }); return; }
     // -- the 4th axis
     if (a === 'rotoff') return mvPost({ action: 'read_rotation_offset' });
     if (a === 'rotz') { const off = (st.rotary || {}).offset || {}, my = (st.rotary || {}).axis_my, a1 = st.anchor1 || [0, 0];

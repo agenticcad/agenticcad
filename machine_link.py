@@ -549,6 +549,11 @@ def program_filename(name: str) -> str:
 class MachineControl:
     def __init__(self, emit: Callable[[dict], Any] | None = None):
         self.emit = emit
+        # phone notifications (server sets it): called as notify(kind, info) at a tool-change wait, a program's end or
+        # failure. confirm_nonce is the one-shot code the notification's button posts back: it is minted when a wait
+        # starts and dropped when it ends, so a stale notification can never confirm a later tool change.
+        self.notify: Callable[[str, dict], Any] | None = None
+        self.confirm_nonce: str | None = None
         self.link: Z1Link | None = None
         self.profile = Z1
         self.armed = False
@@ -685,6 +690,30 @@ class MachineControl:
     def _note(self, text: str) -> None:
         self.events.append(time.strftime("%H:%M:%S ") + text)
         del self.events[:-100]
+
+    async def _notify(self, kind: str, **info) -> None:
+        if not self.notify:
+            return
+        try:
+            r = self.notify(kind, info)
+            if asyncio.iscoroutine(r):
+                await r
+        except Exception as e:                                # a relay hiccup never touches the machine side
+            self._note(f"phone notification failed: {e}")
+
+    def _new_wait(self) -> str:
+        import secrets
+        self.confirm_nonce = secrets.token_urlsafe(12)
+        return self.confirm_nonce
+
+    async def confirm_by_nonce(self, nonce: str) -> dict:
+        """The 'Tool changed - continue' button on a phone notification: valid for the wait it was sent for only."""
+        import hmac
+        if not self.confirm_nonce or not isinstance(nonce, str) or not hmac.compare_digest(nonce, self.confirm_nonce):
+            raise Refused("that notification is stale: confirm on the phone page or with the machine's front button")
+        res = await self.confirm_tool_change()
+        self.confirm_nonce = None
+        return res
 
     async def _push(self) -> None:
         if self.emit:
@@ -1162,6 +1191,36 @@ class MachineControl:
         return await self.goto_xy(x, y, feed)
 
     @property
+    def cleaning_xy(self) -> tuple[float, float]:
+        """Machine X, Y of the cleaning position: the head over the middle of the front edge of the bed, i.e. X mid-travel
+        and Y as far forward as a move may go. Home leaves the head back-right with the table forward, so this is where
+        everything home covered (the back of the bed, the floor under the table's front) is open to the brush."""
+        t, m = self.profile.travel, self.profile.margin
+        return -t["x"] / 2.0, -t["y"] + m
+
+    async def cleaning_position(self, feed: float = GOTO_FEED_MAX) -> dict:
+        """Move to the cleaning position: Z to the top of travel first, then X, Y (G53) at `feed`. Allowed before the
+        fitted tool is measured because Z is at the very top for the whole XY move, as it is at home; nothing is
+        lower than that. Home afterwards to get back."""
+        st = self._need(armed=True, idle=True, homed=True)
+        if self.jog_busy:
+            raise Refused("the previous move hasn't finished")
+        if not (0 < feed <= GOTO_FEED_MAX):
+            raise Refused(f"feed must be 0 .. {GOTO_FEED_MAX:g} mm/min")
+        x, y = self.cleaning_xy
+        if st["mpos"][2] < self.profile.top - Z_TOP_BAND:
+            await self.raise_z_top(feed)
+            t0 = time.time()
+            while self.jog_busy and time.time() - t0 < 120:
+                await asyncio.sleep(0.1)
+            if self.jog_busy or not self.armed:
+                raise Refused("Z didn't reach the top: check the machine")
+            await asyncio.sleep(0.3)
+        res = await self.goto_xy(x, y, feed, internal=True)
+        self._note("cleaning position: home again when done")
+        return res
+
+    @property
     def setter_xy(self) -> tuple[float, float]:
         a = self.profile.anchor1
         return a[0] + self.profile.setter_from_anchor[0], a[1] + self.profile.setter_from_anchor[1]
@@ -1212,6 +1271,7 @@ class MachineControl:
                     r.update(stage="awaiting", msg=f"fit {what} with the lever, "
                              "then press the machine's front button (or Confirm here): the machine measures it on the setter")
                     await self._push()
+                    await self._notify("tool_change", tool=r.get("tool"), what=what, msg=r["msg"], nonce=self._new_wait())
                 g = r.get("guard")
                 if g and st.get("state") in ("Run", "Idle") and self.fresh():
                     why = self._guard_breach(g, st["mpos"], since)
@@ -1276,6 +1336,7 @@ class MachineControl:
             self._note(f"{kind} failed: {e}")
         except asyncio.CancelledError:
             r.update(stage="failed", msg="stopped watching (cancelled)")
+        self.confirm_nonce = None
         await self._push()
 
     def _start_routine(self, kind: str, command: str, timeout: float, **info) -> None:
@@ -1308,11 +1369,13 @@ class MachineControl:
         if j and j["stage"] == "awaiting" and st.get("state") == "Tool":
             await self.link.line("M490.2")
             j.update(stage="running", confirmed=True, msg=f"measuring T{j.get('want_tool')} on the setter, then the program continues")
+            self.confirm_nonce = None
             return self.payload()
         if not r or r["stage"] != "awaiting" or st.get("state") != "Tool":
             raise Refused("the machine isn't waiting for a tool change")
         await self.link.line("M490.2")
         r.update(stage="running", msg="measuring the tool on the setter")
+        self.confirm_nonce = None
         return self.payload()
 
     async def set_origin_anchor(self) -> dict:
@@ -1716,6 +1779,8 @@ class MachineControl:
                     if j["stage"] != "awaiting" and not j.get("confirmed"):
                         j.update(stage="awaiting", want_tool=want, msg=f"tool change: fit T{want}, then press the front button (or Confirm): the machine measures it")
                         await self._push()
+                        await self._notify("tool_change", tool=want, what=f"T{want}", msg=j["msg"], nonce=self._new_wait(),
+                                           program=j["name"], op=((o or {}).get("name") or (o or {}).get("kind")))
                     continue
                 if j.get("changing") and s in ("Run", "Idle", "Hold"):
                     tl = st.get("tool") or {}                     # T-1 while it measures; the new number once it has
@@ -1743,8 +1808,11 @@ class MachineControl:
             j.update(stage="failed", msg=f"{type(e).__name__}: {e}")
         except asyncio.CancelledError:
             j.update(stage="failed", msg="stopped watching (cancelled)")
+        self.confirm_nonce = None
         self._note(f"program {j['name']}: {j['stage']} — {j['msg']}")
         await self._push()
+        await self._notify("program_done" if j["stage"] == "done" else "program_failed", program=j["name"], msg=j["msg"],
+                           air_cut=bool(j.get("air_cut")))
 
     async def job_pause(self) -> dict:
         if not self.job or self.job["stage"] != "running":

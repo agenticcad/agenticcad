@@ -21,6 +21,7 @@ import cad_kernel as ck
 import cam_kernel as cam
 import extensions as ext_mod
 import machine_link
+import phone_push
 import script_edit
 import slicer
 from agent import CadAgent, claude_cli_candidates, find_claude_cli
@@ -988,6 +989,8 @@ async def machine_post(body: MachineBody):
             if wco is None or body.x is None or body.y is None:
                 raise machine_link.Refused("need the machine's position and X, Y")
             res = await machine.goto_xy_raised(body.x + wco[0], body.y + wco[1], body.feed or 300.0)
+        elif a == "cleaning_position":                      # Z to the top, then the head over the front-middle of the bed
+            res = await machine.cleaning_position()
         elif a == "goto_xy_raised":                         # Z up to the top first if needed, then machine X, Y
             res = await machine.goto_xy_raised(body.x if body.x is not None else float('nan'), body.y if body.y is not None else float('nan'), body.feed or 300.0)
         elif a == "job_pause":
@@ -1058,7 +1061,7 @@ _remote: dict[str, Any] = {"server": None, "task": None, "error": None}
 
 
 def _remote_cfg() -> dict:
-    cfg = {"enabled": False, "port": 8790, "token": "", "require_key": True}
+    cfg = {"enabled": False, "port": 8790, "token": "", "require_key": True, "push": False}
     try:
         cfg.update(json.loads(REMOTE_FILE.read_text()))
     except (OSError, ValueError):
@@ -1067,6 +1070,101 @@ def _remote_cfg() -> dict:
         cfg["token"] = secrets.token_urlsafe(18)
         REMOTE_FILE.write_text(json.dumps(cfg))
     return cfg
+
+
+# ---- phone notifications, in the app: the phone page over HTTPS (this computer's own CA, trusted once on the phone)
+# plus Web Push from here to the phone's push service (Apple's / Google's: the only relay, carrying ciphertext).
+# Certificates, keys and the phones' subscriptions live in the workspace, never in the package; upgrades reuse them.
+PUSH_SUBJECT = "https://agenticcad.github.io/agenticcad/"
+PUSH_TEXT = {                                             # kind -> (title, TTL s, urgency)
+    "tool_change": ("Tool change: fit {what}", 3600, "high"),
+    "program_done": ("Program finished", 3600, "normal"),
+    "program_failed": ("Program stopped", 3600, "high"),
+    "test": ("AgenticCAD notifications work", 300, "normal"),
+}
+_push_store: phone_push.PushStore | None = None
+
+
+def _push() -> phone_push.PushStore:
+    global _push_store
+    if _push_store is None or _push_store.dir != WORKSPACE / "phone_push":
+        _push_store = phone_push.PushStore(WORKSPACE / "phone_push")
+    return _push_store
+
+
+def _https_port(cfg: dict) -> int:
+    return int(cfg["port"]) + 1
+
+
+def _https_url(cfg: dict, host: str | None = None) -> str:
+    host = host or phone_push.local_hosts(_lan_ip())[0]
+    return f"https://{host}:{_https_port(cfg)}/m" + (f"?k={cfg['token']}" if cfg["require_key"] else "")
+
+
+def _tls_running() -> bool:
+    return _remote.get("tls") is not None and _remote.get("tls_task") is not None and not _remote["tls_task"].done()
+
+
+def _push_payload(kind: str, info: dict, cfg: dict) -> tuple[dict, int, str]:
+    """(what the service worker shows, TTL, urgency). Tapping opens the secure page; a tool change also carries the
+    one-shot confirm URL for its 'Tool changed · continue' button (browsers that show action buttons)."""
+    title, ttl, urgency = PUSH_TEXT.get(kind, (kind, 3600, "normal"))
+    title = title.format(what=info.get("what") or f"T{info.get('tool')}")
+    body = str(info.get("msg") or title)
+    if info.get("program"):
+        body = f"{info['program']}" + (f" · {info['op']}" if info.get("op") else "") + f"\n{body}"
+    p = {"kind": kind, "title": title, "body": body, "tag": kind, "url": "/m"}     # the phone's own origin, key already there
+    if kind == "tool_change" and info.get("nonce"):
+        p["confirm_url"] = f"https://{phone_push.local_hosts(_lan_ip())[0]}:{_https_port(cfg)}/m/api/confirm/{info['nonce']}"
+    return p, ttl, urgency
+
+
+def _push_one(st: phone_push.PushStore, sub: dict, payload: dict, ttl: int, urgency: str, topic: str) -> dict:
+    try:
+        code = st.send(sub, payload, PUSH_SUBJECT, ttl=ttl, urgency=urgency, topic=topic)
+        return {"endpoint": sub["endpoint"], "code": code, "ok": 200 <= code < 300, "gone": code in (404, 410)}
+    except Exception as e:                                    # URLError, timeout, bad keys: reported, never raised
+        return {"endpoint": sub["endpoint"], "ok": False, "error": f"{type(e).__name__}: {e}"}
+
+
+async def _phone_notify(kind: str, info: dict, only: str | None = None) -> dict:
+    cfg = _remote_cfg()
+    res = {"kind": kind, "t": time.time(), "sent": 0, "failed": 0, "gone": 0}
+    if kind != "test" and not cfg["push"]:
+        return res
+    st = _push()
+    subs = st.subscriptions()
+    if only:
+        subs = [s for s in subs if s["endpoint"] == only]
+    if not subs:
+        res["error"] = "no phone has notifications on"
+        _remote["push_last"] = res
+        return res
+    payload, ttl, urgency = _push_payload(kind, info, cfg)
+    outs = await asyncio.gather(*(asyncio.to_thread(_push_one, st, s, payload, ttl, urgency, kind) for s in subs))
+    now = time.time()
+    keep = []
+    for s, o in zip(subs, outs):
+        if o.get("gone"):
+            res["gone"] += 1                                  # the phone unsubscribed or the browser dropped it
+            continue
+        if o["ok"]:
+            res["sent"] += 1
+            s["last"] = now
+        else:
+            res["failed"] += 1
+            res["error"] = o.get("error") or f"push service answered {o.get('code')}"
+        keep.append(s)
+    if only:
+        keep = [x for x in st.subscriptions() if x["endpoint"] != only] + keep
+    st._save(keep)
+    if res["failed"] or res["gone"]:
+        machine._note(f"phone notification: {res['sent']} sent, {res['failed']} failed, {res['gone']} gone" + (f" ({res['error']})" if res.get("error") else ""))
+    _remote["push_last"] = res
+    return res
+
+
+machine.notify = _phone_notify
 
 
 def _lan_ip() -> str:
@@ -1084,9 +1182,18 @@ def _remote_status() -> dict:
     cfg = _remote_cfg()
     running = _remote["server"] is not None and _remote["task"] is not None and not _remote["task"].done()
     ip = _lan_ip()
+    st = _push()
+    cert = st.cert_info() if st.ca_crt.exists() and st.leaf() is not None else None
     return {"enabled": cfg["enabled"], "port": cfg["port"], "running": running, "ip": ip, "error": _remote["error"],
             "require_key": cfg["require_key"],
-            "url": f"http://{ip}:{cfg['port']}/m" + (f"?k={cfg['token']}" if cfg["require_key"] else "")}
+            "url": f"http://{ip}:{cfg['port']}/m" + (f"?k={cfg['token']}" if cfg["require_key"] else ""),
+            "https": {"running": _tls_running(), "port": _https_port(cfg), "url": _https_url(cfg), "ip_url": _https_url(cfg, ip),
+                      "host": phone_push.local_hosts(ip)[0], "error": _remote.get("tls_error")},
+            "push": {"enabled": cfg["push"], "cert": cert, "last": _remote.get("push_last"),
+                     "devices": [{"label": s.get("label") or "phone", "added": s.get("added"), "last": s.get("last"), "endpoint": s["endpoint"]}
+                                 for s in st.subscriptions()]}}
+
+
 
 
 phone = FastAPI()
@@ -1102,8 +1209,10 @@ def _key_ok(request: Request) -> bool:
 
 @phone.middleware("http")
 async def _phone_auth(request: Request, call_next):
-    if request.url.path in ("/m", "/m/") or request.url.path.startswith("/m/static/"):
-        return await call_next(request)                   # the page itself; every API call carries the key
+    if (request.url.path in ("/m", "/m/", "/m/ca.crt", "/m/sw.js") or request.url.path.startswith("/m/static/")
+            or request.url.path.startswith("/m/api/confirm/")):
+        return await call_next(request)                   # the page, the public CA certificate and the service worker;
+                                                          # every API call carries the key (confirm: its one-shot code)
     if not _key_ok(request):
         return JSONResponse({"error": "not authorised: scan the QR code in AgenticCAD ▸ Settings ▸ Phone control"}, status_code=401)
     return await call_next(request)
@@ -1122,6 +1231,76 @@ async def phone_machine_get():
 @phone.post("/m/api/machine")
 async def phone_machine_post(body: MachineBody):
     return await machine_post(body)
+
+
+@phone.get("/m/ca.crt")
+async def phone_ca_cert():
+    """This computer's own CA certificate, for the phone to trust once (public: it holds no secret)."""
+    return Response(_push().ca_der(), media_type="application/x-x509-ca-cert",
+                    headers={"Content-Disposition": 'attachment; filename="AgenticCAD-Phone-CA.crt"', "Cache-Control": "no-store"})
+
+
+@phone.get("/m/sw.js")
+async def phone_service_worker():
+    return FileResponse(ROOT / "static" / "mobile_sw.js", media_type="application/javascript",
+                        headers={"Cache-Control": "no-store", "Service-Worker-Allowed": "/m"})
+
+
+@phone.get("/m/manifest.webmanifest")
+async def phone_manifest():
+    """The web app manifest (with the key in start_url: a Home Screen app has its own storage, so the page can't rely
+    on the key it saved in the browser). iOS grants web push to Home Screen apps only."""
+    cfg = _remote_cfg()
+    m = {"name": "AgenticCAD Machine", "short_name": "Machine", "start_url": "/m" + (f"?k={cfg['token']}" if cfg["require_key"] else ""),
+         "scope": "/m", "display": "standalone", "background_color": "#0f1115", "theme_color": "#0f1115"}
+    return Response(json.dumps(m), media_type="application/manifest+json", headers={"Cache-Control": "no-store"})
+
+
+class PushBody(BaseModel):
+    subscription: dict | None = None
+    label: str = ""
+    endpoint: str | None = None
+
+
+@phone.get("/m/api/push")
+async def phone_push_get(request: Request):
+    cfg = _remote_cfg()
+    ip = _lan_ip()
+    return {"enabled": cfg["push"], "vapid": _push().vapid()[1], "secure": request.url.scheme == "https", "https_running": _tls_running(),
+            "https_url": _https_url(cfg), "ip_url": _https_url(cfg, ip), "count": len(_push().subscriptions())}
+
+
+@phone.post("/m/api/push/subscribe")
+async def phone_push_subscribe(body: PushBody):
+    try:
+        _push().add(body.subscription or {}, body.label)
+    except ValueError as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+    return {"ok": True, "count": len(_push().subscriptions())}
+
+
+@phone.post("/m/api/push/unsubscribe")
+async def phone_push_unsubscribe(body: PushBody):
+    if body.endpoint:
+        _push().remove(body.endpoint)
+    return {"ok": True, "count": len(_push().subscriptions())}
+
+
+@phone.post("/m/api/push/test")
+async def phone_push_test(body: PushBody):
+    return await _phone_notify("test", {"msg": "This is how a tool change will reach you. Tap to open the Machine page."}, only=body.endpoint)
+
+
+@phone.post("/m/api/confirm/{nonce}")
+async def phone_confirm(nonce: str):
+    """The 'Tool changed - continue' button on a phone notification. The code is minted for one tool-change wait and
+    dropped when that wait ends, so it stands in for the key and an old notification cannot continue a later change."""
+    try:
+        return await machine.confirm_by_nonce(nonce)
+    except machine_link.Refused as e:
+        return JSONResponse({"error": str(e)}, status_code=409)
+    except (ConnectionError, OSError, asyncio.TimeoutError) as e:
+        return JSONResponse({"error": f"{type(e).__name__}: {e}"}, status_code=502)
 
 
 @phone.get("/m/api/tool_photo/{number}")
@@ -1145,7 +1324,7 @@ async def _remote_start() -> None:
     import uvicorn
     await _remote_stop()
     cfg = _remote_cfg()
-    _remote["error"] = None
+    _remote["error"] = _remote["tls_error"] = None
     server = uvicorn.Server(uvicorn.Config(phone, host="0.0.0.0", port=int(cfg["port"]), log_level="warning", lifespan="off"))
     server.install_signal_handlers = lambda: None         # the main server owns the signals
 
@@ -1155,19 +1334,36 @@ async def _remote_start() -> None:
         except (OSError, SystemExit) as e:
             _remote["error"] = f"phone control could not start on port {cfg['port']}: {e}"
     _remote["server"], _remote["task"] = server, asyncio.create_task(run())
+    # the same app over HTTPS on the next port, with this computer's own certificate (made or renewed here)
+    try:
+        st = _push()
+        st.ensure_certs(phone_push.local_hosts(_lan_ip()))
+        tls = uvicorn.Server(uvicorn.Config(phone, host="0.0.0.0", port=_https_port(cfg), log_level="warning", lifespan="off",
+                                            ssl_certfile=str(st.srv_crt), ssl_keyfile=str(st.srv_key)))
+        tls.install_signal_handlers = lambda: None
+
+        async def run_tls():
+            try:
+                await tls.serve()
+            except (OSError, SystemExit) as e:
+                _remote["tls_error"] = f"the secure page could not start on port {_https_port(cfg)}: {e}"
+        _remote["tls"], _remote["tls_task"] = tls, asyncio.create_task(run_tls())
+    except Exception as e:                                # a certificate problem never stops the plain page
+        _remote["tls_error"] = f"certificate: {type(e).__name__}: {e}"
     await asyncio.sleep(0.3)
 
 
 async def _remote_stop() -> None:
-    srv, task = _remote["server"], _remote["task"]
-    _remote["server"] = _remote["task"] = None
-    if srv is not None:
-        srv.should_exit = True
-    if task is not None:
-        try:
-            await asyncio.wait_for(task, 5)
-        except (asyncio.TimeoutError, asyncio.CancelledError):
-            task.cancel()
+    for sk, tk in (("server", "task"), ("tls", "tls_task")):
+        srv, task = _remote.get(sk), _remote.get(tk)
+        _remote[sk] = _remote[tk] = None
+        if srv is not None:
+            srv.should_exit = True
+        if task is not None:
+            try:
+                await asyncio.wait_for(task, 5)
+            except (asyncio.TimeoutError, asyncio.CancelledError):
+                task.cancel()
 
 
 class RemoteBody(BaseModel):
@@ -1175,6 +1371,10 @@ class RemoteBody(BaseModel):
     port: int | None = None
     new_link: bool = False
     require_key: bool | None = None
+    push: bool | None = None                              # phone notifications on/off
+    push_test: bool = False                               # a test notification to every phone
+    push_forget: bool = False                             # drop every phone's subscription
+    new_cert: bool = False                                # a new CA (phones must trust it again) and no subscriptions
 
 
 @app.get("/api/remote")
@@ -1195,11 +1395,20 @@ async def remote_set(body: RemoteBody):
         cfg["require_key"] = body.require_key
     if body.enabled is not None:
         cfg["enabled"] = body.enabled
+    if body.push is not None:
+        cfg["push"] = bool(body.push)
     REMOTE_FILE.write_text(json.dumps(cfg))
+    if body.push_forget:
+        _push().forget_all()
+    if body.new_cert:
+        _push().new_ca()
+        _push().forget_all()
     if cfg["enabled"]:
         await _remote_start()
     else:
         await _remote_stop()
+    if body.push_test:
+        await _phone_notify("test", {"msg": "This is how a tool change will reach you. Tap to open the Machine page."})
     return _remote_status()
 
 

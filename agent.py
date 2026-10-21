@@ -1003,7 +1003,7 @@ class CadAgent:
     MACHINE_NOW = ("status", "hold", "pause", "stop_program", "halt", "check_ops", "connect", "disconnect")
     MACHINE_ASK = ("control_on", "control_off", "home", "unlock", "resume", "resume_program", "change_tool", "confirm_tool",
                    "origin_anchor", "auto_z_probe", "set_origin", "shift_origin", "origin_at", "lower_to", "raise_z", "goto",
-                   "probe_3d", "run_ops", "switch", "console", "jog_a", "rotary_zero", "shrink_a")
+                   "cleaning_position", "probe_3d", "run_ops", "switch", "console", "jog_a", "rotary_zero", "shrink_a")
 
     def _setup_is_rotary(self, info: dict) -> bool:
         """Is the setup a program_for_ops() picked on the 4th axis? (its origin must then be zeroed on the axis)"""
@@ -1021,7 +1021,7 @@ class CadAgent:
         elif action == "home":
             mc._need(armed=True, idle=False)
         elif action in ("change_tool", "origin_anchor", "auto_z_probe", "set_origin", "shift_origin", "origin_at", "lower_to", "raise_z",
-                        "goto", "switch", "console", "jog_a", "rotary_zero", "shrink_a"):
+                        "goto", "cleaning_position", "switch", "console", "jog_a", "rotary_zero", "shrink_a"):
             mc._need(armed=True, idle=action != "switch", homed=action != "switch")
             if mc.jog_busy or mc.job_active:
                 raise ml.Refused("the machine is busy: wait for it to finish")
@@ -1080,6 +1080,11 @@ class CadAgent:
             return f"Lower Z only (X/Y stay) to {h:g} mm above work Z0 at 300 mm/min.", lambda: mc.lower_to(h)
         if action == "raise_z":
             return "Raise Z to the top of travel at 300 mm/min. X/Y stay.", lambda: mc.raise_z_top()
+        if action == "cleaning_position":
+            cx, cy = mc.cleaning_xy
+            return (f"Move to the cleaning position: Z to the top of travel, then machine X {cx:g} Y {cy:g} at 600 mm/min - the head "
+                    "over the middle of the bed's front edge with the table fully back, so the areas Home covers (the back of the "
+                    "bed, under the table's front) can be cleaned. Home again when done."), lambda: mc.cleaning_position()
         if action == "goto":
             x, y = float(f("x", "nan")), float(f("y", "nan"))
             work = f("frame", "work") == "work"
@@ -2844,7 +2849,8 @@ class CadAgent:
               "origin_anchor, auto_z_probe (wired probe T0 fitted), set_origin {x,y,z: the head's position becomes these "
               "work values}, shift_origin {dx,dy,ref}, origin_at {x,y machine, ref} (e.g. the block's front-left corner from "
               "the faces 3D-probe runs found: status lists them), lower_to {height above work Z0}, raise_z, goto {x,y,frame: "
-              "work|machine; Z goes to the top first}, probe_3d {kind e.g. outside_back_right, x, y, depth, dia; 3D probe "
+              "work|machine; Z goes to the top first}, cleaning_position (Z to the top, then the head over the front-middle of the bed "
+              "with the table back, exposing what Home covers; the user homes again after cleaning), probe_3d {kind e.g. outside_back_right, x, y, depth, dia; 3D probe "
               "T9999 fitted}, run_ops {ops: 0-based indices in ONE setup, air: lift mm for an air cut, ack: true only when the user "
               "has vouched for a rotary setup's origin}, switch {what: "
               "dust|light|probe_laser|spindle_fan, on, power: fan speed 0-100 %}, console {line: one line of G-code, sent as written}. "

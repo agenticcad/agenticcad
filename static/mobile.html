@@ -6,6 +6,8 @@
 <meta name="theme-color" content="#0f1115">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Machine">
+<link rel="manifest" id="manifest" href="/m/manifest.webmanifest">
 <title>AgenticCAD Machine</title>
 <style>
   :root {
@@ -34,6 +36,9 @@
   .row { display:flex; gap:8px; } .row > * { flex:1; }
   .btn { background:var(--card2); border:1px solid var(--line); border-radius:12px; padding:13px 10px; font-weight:600; font-size:15px; }
   .btn.primary { background:var(--blue); border-color:var(--blue); color:#06111f; }
+  a.btn { display:block; text-align:center; text-decoration:none; color:var(--text); margin-top:8px; }
+  a.btn.primary { color:#06111f; }
+  #push p a { color:var(--blue); }
   .btn.on { background:rgba(255,140,66,.16); border-color:var(--accent); color:#ffd1b3; }
   .card { background:var(--card); border:1px solid var(--line); border-radius:var(--r); padding:12px; margin-top:var(--gap); }
   .ctl { display:flex; align-items:center; gap:12px; }
@@ -141,6 +146,8 @@
     <div class="kv" style="margin-top:10px"><span>Spindle</span><span id="spin">–</span></div>
     <div class="kv"><span>Connection</span><span id="host2">–</span></div>
     <button class="btn" id="disconnect" style="width:100%;margin-top:10px">Disconnect machine</button>
+    <div class="kv" style="margin-top:16px"><b>Notifications</b><span id="pushst" class="muted small"></span></div>
+    <div id="push"></div>
   </div>
 
   <div class="sheet" id="sheet"><div class="in"><img id="sheetimg" alt="" style="display:none;width:100%;max-height:150px;object-fit:contain;border-radius:12px;background:#07080a;margin-bottom:10px"><div class="k" id="sheetk"></div><div class="m" id="sheetm"></div>
@@ -151,6 +158,7 @@
 
 <script>
 const KEY = (() => { const q = new URLSearchParams(location.search).get('k'); try { if (q) localStorage.setItem('ac_key', q); return q || localStorage.getItem('ac_key') || ''; } catch (e) { return q || ''; } })();
+document.getElementById('manifest').href = '/m/manifest.webmanifest' + (KEY ? '?k=' + encodeURIComponent(KEY) : '');
 if (new URLSearchParams(location.search).get('k')) history.replaceState(null, '', '/m');     // keep the key out of screenshots
 const $ = id => document.getElementById(id);
 let ST = null, step = 1, tnum = 0, busy = false, camOn = false, stepA = 10;
@@ -291,6 +299,76 @@ $('dust').onclick = () => api({ action: 'switch', axis: 'dust', on: !(ST.switche
 $('light').onclick = () => api({ action: 'switch', axis: 'light', on: !(ST.switches || {}).light });
 $('fan').onclick = () => api({ action: 'switch', axis: 'spindle_fan', on: !(ST.switches || {}).spindle_fan });
 document.addEventListener('visibilitychange', () => { if (ST) setCam(ST.connected && !document.hidden); });
+
+// ---- notifications: the secure page (this computer's own certificate, trusted once) + Web Push to this phone.
+// Three steps, shown as far as this phone has got: install the certificate, open the secure page (iOS: from the
+// Home Screen), turn notifications on. The computer encrypts each message for this phone and sends it to the phone's
+// own push service (Apple's / Google's), which cannot read it.
+const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const IOS = /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const STANDALONE = (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || navigator.standalone === true;
+const PUSH = { info: null, reg: null, sub: null, err: '' };
+function b64uToU8(s) { const b = atob(s.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - s.length % 4) % 4)); return Uint8Array.from(b, c => c.charCodeAt(0)); }
+function deviceLabel() { return (IOS ? 'iPhone' : /Android/.test(navigator.userAgent) ? 'Android' : 'phone') + ' · ' + (STANDALONE ? 'Home Screen' : 'browser'); }
+async function pushSave(sub) {
+  const r = await fetch('/m/api/push/subscribe', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Key': KEY }, body: JSON.stringify({ subscription: sub.toJSON(), label: deviceLabel() }) });
+  if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'could not save the subscription');
+}
+async function pushInit() {
+  try { const r = await fetch('/m/api/push', { headers: { 'X-Key': KEY } }); PUSH.info = r.ok ? await r.json() : null; } catch (e) { PUSH.info = null; }
+  if (location.protocol === 'https:' && 'serviceWorker' in navigator && 'PushManager' in window) {
+    try {
+      PUSH.reg = await navigator.serviceWorker.register('/m/sw.js', { scope: '/m' });
+      PUSH.sub = await PUSH.reg.pushManager.getSubscription();
+      if (PUSH.sub) await pushSave(PUSH.sub);                 // keep the computer's copy current
+    } catch (e) { PUSH.err = e.message; }
+  }
+  renderPush();
+}
+function renderPush() {
+  const el = $('push'), i = PUSH.info;
+  if (!i) { el.innerHTML = '<p class="muted small">Not available (the computer did not answer).</p>'; return; }
+  let h = '';
+  if (location.protocol !== 'https:') {
+    h = `<p class="small" style="margin:6px 2px">Notifications need the secure page. Once per phone:</p>
+      <a class="btn" href="/m/ca.crt" download="AgenticCAD-Phone-CA.crt">1 · Install this computer's certificate</a>
+      <p class="muted small" style="margin:6px 2px">${IOS ? 'Allow the download, then Settings ▸ General ▸ VPN &amp; Device Management ▸ <b>AgenticCAD Phone CA</b> ▸ Install. Then Settings ▸ General ▸ About ▸ Certificate Trust Settings ▸ turn it on.' : 'Install it as a CA certificate (Android: Settings ▸ Security ▸ Encryption &amp; credentials ▸ Install a certificate ▸ CA certificate).'}</p>
+      <a class="btn primary" href="${esc(i.https_url)}">2 · Open the secure page</a>
+      <p class="muted small" style="margin:6px 2px">${IOS ? 'There: Share ▸ <b>Add to Home Screen</b>, open <b>Machine</b> from the Home Screen, then More ▸ Notifications ▸ turn on.' : 'Then More ▸ Notifications ▸ turn on.'} If the name doesn't open, <a href="${esc(i.ip_url)}">use the address instead</a>.${i.https_running ? '' : ' <b>The secure page is not running on the computer</b> (Settings ▸ Phone control).'}</p>`;
+  } else if (IOS && !STANDALONE) {
+    h = `<p class="small" style="margin:6px 2px">Share ▸ <b>Add to Home Screen</b>, then open <b>Machine</b> from the Home Screen and turn notifications on here. (iPhones only deliver web notifications to Home Screen apps.)</p>`;
+  } else if (!PUSH.reg) {
+    h = `<p class="small" style="margin:6px 2px">This browser can't receive push notifications${PUSH.err ? ': ' + esc(PUSH.err) : ''}.</p>`;
+  } else if (PUSH.sub) {
+    h = `<p class="small" style="margin:6px 2px">On for this phone ✓${i.enabled ? '' : ' — but turned off on the computer (Settings ▸ Phone control ▸ Notify).'}</p>
+      <div class="row"><button class="btn" id="pushtest">Send a test</button><button class="btn" id="pushoff">Turn off</button></div>`;
+  } else {
+    h = `<button class="btn primary" id="pushon" style="width:100%">Turn on notifications</button><p class="muted small" style="margin:6px 2px">A ping when the machine waits for a tool, finishes or stops; tap it to come back here.</p>`;
+  }
+  el.innerHTML = h;
+  $('pushst').textContent = PUSH.sub ? 'on' : '';
+  const on = $('pushon'), off = $('pushoff'), test = $('pushtest');
+  if (on) on.onclick = async () => {
+    try {
+      const perm = await Notification.requestPermission();
+      if (perm !== 'granted') { toast('notifications were not allowed'); return; }
+      PUSH.sub = await PUSH.reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64uToU8(PUSH.info.vapid) });
+      await pushSave(PUSH.sub); renderPush(); toast('notifications on', true);
+    } catch (e) { toast('could not turn on: ' + e.message); }
+  };
+  if (off) off.onclick = async () => {
+    try { const ep = PUSH.sub.endpoint; await PUSH.sub.unsubscribe(); PUSH.sub = null;
+      await fetch('/m/api/push/unsubscribe', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Key': KEY }, body: JSON.stringify({ endpoint: ep }) });
+      renderPush(); toast('notifications off', true);
+    } catch (e) { toast('could not turn off: ' + e.message); }
+  };
+  if (test) test.onclick = async () => {
+    const r = await fetch('/m/api/push/test', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Key': KEY }, body: JSON.stringify({ endpoint: PUSH.sub.endpoint }) });
+    const j = await r.json().catch(() => ({}));
+    toast(j.sent ? 'sent: it should arrive in a moment' : 'not sent: ' + (j.error || 'unknown'), !!j.sent);
+  };
+}
+pushInit();
 (async function poll() { if (!document.hidden) await api(); setTimeout(poll, 500); })();
 </script>
 </body>

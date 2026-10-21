@@ -583,6 +583,8 @@ def test_run_program_changes_tools_in_the_file_and_waits_at_each_change():
                 mc.check_job(far)                                    # X 160 from a work origin at -150 runs past the top end
             other = ml.prepare_program(PROG1.replace("M6 T6", "M6 T4"), ["Face"])
             assert any("begins with a tool change to T4" in n for n in mc.check_job(other)["notes"])   # allowed: the file stops for it
+            got = []
+            mc.notify = lambda kind, info: got.append((kind, info))  # the phone notifications hook
             await mc.run_program("test job", both)
             await _until(lambda: mc.job["stage"] in ("running", "awaiting", "done", "failed"), timeout=20)
             sent = emu.sd["/sd/gcodes/test_job.nc"].decode()
@@ -590,10 +592,16 @@ def test_run_program_changes_tools_in_the_file_and_waits_at_each_change():
             await _until(lambda: mc.job["stage"] in ("awaiting", "done", "failed"), timeout=60)
             assert mc.job["stage"] == "awaiting" and mc.job.get("want_tool") == 3, mc.job
             assert emu.spindle_on is False if hasattr(emu, "spindle_on") else True
-            await mc.confirm_tool_change()                            # the front button
+            await _until(lambda: got, timeout=2)
+            assert got[0][0] == "tool_change" and got[0][1]["tool"] == 3 and got[0][1]["program"] == "test_job.nc"
+            assert got[0][1]["op"] == "Outline" and got[0][1]["nonce"] == mc.confirm_nonce
+            await mc.confirm_by_nonce(got[0][1]["nonce"])            # the button on the phone notification
+            assert mc.confirm_nonce is None
             await _until(lambda: mc.job["stage"] in ("done", "failed"), timeout=60)
             assert mc.job["stage"] == "done", mc.job
             assert emu.tool == 3 and not emu.crashes
+            await _until(lambda: len(got) >= 2, timeout=2)
+            assert got[-1][0] == "program_done" and got[-1][1]["program"] == "test_job.nc" and "finished" in got[-1][1]["msg"]
         finally:
             await mc.disconnect(); await emu.stop()
     run(go())
@@ -925,6 +933,58 @@ def test_rotary_programs_collect_a_and_need_the_origin_on_the_axis():
             await _until(lambda: mc.job["stage"] in ("done", "failed"), timeout=60)
             assert mc.job["stage"] == "done" and mc.job["rotary"], mc.job
             assert abs((emu.a - emu.wco_a) - 720.0) < 1e-6 and not emu.crashes       # the program turned the chuck twice
+        finally:
+            await mc.disconnect(); await emu.stop()
+    run(go())
+
+
+def test_cleaning_position_lifts_z_then_goes_to_the_front_middle_without_a_measured_tool():
+    async def go():
+        emu, mc, _ = await _setup()
+        try:
+            await mc.arm(True); await mc.home(); await _until(lambda: mc.homed)
+            assert not mc.tool_ok()                               # straight after homing: nothing measured yet
+            emu.mpos[2] = -12.0                                   # where a tool change leaves the head
+            await asyncio.sleep(0.4)
+            n = len(emu.lines)
+            await mc.cleaning_position()
+            await _until(lambda: not mc.jog_busy, timeout=20)
+            cx, cy = mc.cleaning_xy
+            assert (cx, cy) == (-100.0, -199.0)                   # X mid-travel, Y fully forward (table fully back)
+            assert emu.lines[n].startswith("G53 G1 Z") and emu.lines[n + 1] == "G53 G1 X-100.000 Y-199.000 F600"
+            assert abs(emu.mpos[0] - cx) < 1e-6 and abs(emu.mpos[1] - cy) < 1e-6 and emu.mpos[2] > -2
+            with pytest.raises(ml.Refused):                       # not while something else moves
+                mc.jog_busy = {"target": [0, 0, 0], "t0": 0, "deadline": 1e12}
+                await mc.cleaning_position()
+        finally:
+            await mc.disconnect(); await emu.stop()
+    run(go())
+
+
+def test_tool_change_wait_notifies_the_phone_and_its_code_confirms_once():
+    async def go():
+        emu, mc, _ = await _setup()
+        got = []
+        mc.notify = lambda kind, info: got.append((kind, info))
+        try:
+            await mc.arm(True); await mc.home(); await _until(lambda: mc.homed)
+            await mc.change_tool(3)
+            await _until(lambda: mc.routine["stage"] == "awaiting", timeout=15)
+            await _until(lambda: got, timeout=2)
+            kind, info = got[0]
+            assert kind == "tool_change" and info["tool"] == 3 and info["what"] == "T3" and "fit T3" in info["msg"]
+            nonce = info["nonce"]
+            assert nonce and mc.confirm_nonce == nonce
+            with pytest.raises(ml.Refused, match="stale"):
+                await mc.confirm_by_nonce("not-it")
+            assert mc.routine["stage"] == "awaiting"
+            await mc.confirm_by_nonce(nonce)                      # the button on the notification
+            assert mc.confirm_nonce is None
+            with pytest.raises(ml.Refused, match="stale"):          # once only
+                await mc.confirm_by_nonce(nonce)
+            await _until(lambda: mc.routine["stage"] in ("done", "failed"), timeout=30)
+            assert mc.routine["stage"] == "done" and emu.tool == 3
+            assert [k for k, _ in got] == ["tool_change"]           # the end of a manual change is not a notification
         finally:
             await mc.disconnect(); await emu.stop()
     run(go())

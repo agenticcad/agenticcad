@@ -5,6 +5,27 @@ patch bumps fix things, a major bump changes something scripts or workspaces rel
 
 ## [Unreleased]
 
+## [1.2.0] — 2026-10-21
+
+### Added
+- **Notifications on your phone, in the app.** Settings ▸ Phone control ▸ Notifications: a push notification when the
+  machine waits for a tool, when a program finishes and when it stops — delivered by Web Push from this computer
+  to the phone's own push service (Apple's for iPhone, Google's for Android; it carries ciphertext only). Nothing
+  ships in the package and no third party is involved: the first time Phone access is on, the app makes its own
+  certificate authority, a server certificate for the phone page (Bonjour name + LAN address, renewed by itself under
+  the same CA) and push keys, in its data folder, kept across upgrades. The phone page gains an HTTPS twin on the next
+  port and a More ▸ Notifications card with the three one-off steps per phone: install the computer's certificate,
+  open the secure page (iPhone: add it to the Home Screen), turn notifications on. Tapping a notification opens the
+  page; on browsers with notification buttons, **Tool changed · continue** posts a one-shot code minted for that wait
+  only (`POST /m/api/confirm/{code}`, no key), so an old notification cannot continue a later change. Settings lists
+  the phones, sends a test, forgets them, or starts over with a new certificate. Encryption is checked against
+  RFC 8291's test vector.
+- **Cleaning position.** Machine ▸ Manual ▸ Go to ▸ **Cleaning position** (and `cleaning_position` in the assistant's
+  machine_control) raises Z to the top, then moves the head to the middle of the bed's front edge at 600 mm/min — the
+  table ends fully back, so the back of the bed and the floor under the table's front, which Home covers, are open to
+  the brush. Home, clean; Cleaning position, clean the rest; Home. Allowed with an unmeasured tool because Z is at the
+  very top for the whole move, as it is at home; refused while anything else moves.
+
 ## [1.1.1] — 2026-10-21
 
 ### Changed
