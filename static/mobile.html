@@ -325,18 +325,37 @@ async function pushInit() {
   }
   renderPush();
 }
+// where this copy of the page is running: the plain page, the secure page in the browser, or the Home Screen app
+function whereAmI() { return location.protocol !== 'https:' ? 'plain page' : STANDALONE ? 'Home Screen app' : 'secure page in ' + (IOS ? 'Safari' : 'the browser'); }
+// From the plain page: probe the secure address every few seconds. The fetch only succeeds once the phone trusts the
+// computer's certificate, and then the page moves itself to the secure one (step 2 happens by itself).
+let probing = false;
+async function probeSecure() {
+  const i = PUSH.info;
+  if (location.protocol === 'https:' || !i || !i.https_running || probing) return;
+  probing = true;
+  try {
+    const origin = new URL(i.https_url).origin;
+    const r = await fetch(origin + '/m/api/ping', { cache: 'no-store', mode: 'cors' });
+    if (r.ok) { toast('certificate trusted: moving to the secure page', true); setTimeout(() => location.replace(i.https_url), 600); return; }
+  } catch (e) { /* not trusted yet (or not reachable): try again later */ }
+  probing = false;
+  setTimeout(probeSecure, 4000);
+}
 function renderPush() {
   const el = $('push'), i = PUSH.info;
+  $('pushst').textContent = (PUSH.sub ? 'on · ' : '') + whereAmI();
   if (!i) { el.innerHTML = '<p class="muted small">Not available (the computer did not answer).</p>'; return; }
   let h = '';
   if (location.protocol !== 'https:') {
+    probeSecure();
     h = `<p class="small" style="margin:6px 2px">Notifications need the secure page. Once per phone:</p>
       <a class="btn" href="/m/ca.crt">1 · Install this computer's certificate</a>
       <p class="muted small" style="margin:6px 2px">${IOS ? 'Allow the download, then Settings ▸ General ▸ VPN &amp; Device Management ▸ <b>AgenticCAD Phone CA</b> ▸ Install. Then Settings ▸ General ▸ About ▸ Certificate Trust Settings ▸ turn it on.' : 'Install it as a CA certificate (Android: Settings ▸ Security ▸ Encryption &amp; credentials ▸ Install a certificate ▸ CA certificate).'}</p>
       <a class="btn primary" href="${esc(i.https_url)}">2 · Open the secure page</a>
-      <p class="muted small" style="margin:6px 2px">${IOS ? 'There: Share ▸ <b>Add to Home Screen</b>, open <b>Machine</b> from the Home Screen, then More ▸ Notifications ▸ turn on.' : 'Then More ▸ Notifications ▸ turn on.'} If the name doesn't open, <a href="${esc(i.ip_url)}">use the address instead</a>.${i.https_running ? '' : ' <b>The secure page is not running on the computer</b> (Settings ▸ Phone control).'}</p>`;
+      <p class="muted small" style="margin:6px 2px">${IOS ? 'There: Share ▸ <b>Add to Home Screen</b>, open <b>Machine</b> from the Home Screen, then More ▸ Notifications ▸ turn on.' : 'Then More ▸ Notifications ▸ turn on.'} If the name doesn't open, <a href="${esc(i.ip_url)}">use the address instead</a>.${i.https_running ? ' This page checks every few seconds and moves to the secure page by itself once the certificate is trusted.' : ' <b>The secure page is not running on the computer</b> (Settings ▸ Phone control).'}</p>`;
   } else if (IOS && !STANDALONE) {
-    h = `<p class="small" style="margin:6px 2px">Share ▸ <b>Add to Home Screen</b>, then open <b>Machine</b> from the Home Screen and turn notifications on here. (iPhones only deliver web notifications to Home Screen apps.)</p>`;
+    h = `<p class="small" style="margin:6px 2px">This is the <b>secure page in Safari</b> — the right one to add: Share ▸ <b>Add to Home Screen</b>, then open <b>Machine</b> from the Home Screen and turn notifications on there. (iPhones only deliver web notifications to Home Screen apps.)</p>`;
   } else if (!PUSH.reg) {
     h = `<p class="small" style="margin:6px 2px">This browser can't receive push notifications${PUSH.err ? ': ' + esc(PUSH.err) : ''}.</p>`;
   } else if (PUSH.sub) {
@@ -346,7 +365,6 @@ function renderPush() {
     h = `<button class="btn primary" id="pushon" style="width:100%">Turn on notifications</button><p class="muted small" style="margin:6px 2px">A ping when the machine waits for a tool, finishes or stops; tap it to come back here.</p>`;
   }
   el.innerHTML = h;
-  $('pushst').textContent = PUSH.sub ? 'on' : '';
   const on = $('pushon'), off = $('pushoff'), test = $('pushtest');
   if (on) on.onclick = async () => {
     // iOS has answered 'denied' here while the setting is actually on (Apple forum 725619), so the answer is not

@@ -20,6 +20,9 @@ patch bumps fix things, a major bump changes something scripts or workspaces rel
   only (`POST /m/api/confirm/{code}`, no key), so an old notification cannot continue a later change. Settings lists
   the phones, sends a test, forgets them, or starts over with a new certificate. Encryption is checked against
   RFC 8291's test vector.
+  The plain page probes the secure address and moves there by itself once the certificate is trusted, and the
+  Notifications card says which copy of the page you are in (plain, secure in Safari, Home Screen app); the key
+  travels in the page's path so a Home Screen app keeps it.
 - **Cleaning position.** Machine ▸ Manual ▸ Go to ▸ **Cleaning position** (and `cleaning_position` in the assistant's
   machine_control) raises Z to the top, then moves the head to the middle of the bed's front edge at 600 mm/min — the
   table ends fully back, so the back of the bed and the floor under the table's front, which Home covers, are open to

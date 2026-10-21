@@ -77,6 +77,8 @@ def test_phone_push_endpoints_subscribe_notify_and_prune(tmp_path, monkeypatch):
     assert r.status_code == 200 and r.headers["content-type"].startswith("application/x-x509-ca-cert") and r.content[:2] == b"\x30\x82"
     r = c.get("/m/sw.js")
     assert r.status_code == 200 and r.headers["service-worker-allowed"] == "/m" and b"showNotification" in r.content
+    r = c.get("/m/api/ping")                                                # public, from any origin: the trust probe
+    assert r.status_code == 200 and r.json()["ok"] is True and r.headers["access-control-allow-origin"] == "*"
     assert c.get("/m/manifest.webmanifest").status_code == 401
     m = c.get(f"/m/manifest.webmanifest?k={key}").json()
     assert m["start_url"] == f"/m/k/{key}" and m["scope"] == "/m" and m["display"] == "standalone"

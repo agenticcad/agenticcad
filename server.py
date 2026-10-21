@@ -1215,7 +1215,7 @@ def _key_ok(request: Request) -> bool:
 
 @phone.middleware("http")
 async def _phone_auth(request: Request, call_next):
-    if (request.url.path in ("/m", "/m/", "/m/ca.crt", "/m/sw.js") or request.url.path.startswith(("/m/static/", "/m/k/"))
+    if (request.url.path in ("/m", "/m/", "/m/ca.crt", "/m/sw.js", "/m/api/ping") or request.url.path.startswith(("/m/static/", "/m/k/"))
             or request.url.path.startswith("/m/api/confirm/")):
         return await call_next(request)                   # the page, the public CA certificate and the service worker;
                                                           # every API call carries the key (confirm: its one-shot code)
@@ -1239,6 +1239,13 @@ async def phone_machine_get():
 @phone.post("/m/api/machine")
 async def phone_machine_post(body: MachineBody):
     return await machine_post(body)
+
+
+@phone.get("/m/api/ping")
+async def phone_ping(request: Request):
+    """Public, answers from any origin: the plain page probes the secure address with it, and the fetch only succeeds
+    once the phone trusts this computer's certificate - so the page can move itself over without being told."""
+    return JSONResponse({"ok": True, "secure": request.url.scheme == "https"}, headers={"Access-Control-Allow-Origin": "*", "Cache-Control": "no-store"})
 
 
 @phone.get("/m/ca.crt")
