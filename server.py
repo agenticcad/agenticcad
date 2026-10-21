@@ -1096,9 +1096,15 @@ def _https_port(cfg: dict) -> int:
     return int(cfg["port"]) + 1
 
 
+def _page_path(cfg: dict) -> str:
+    """The phone page's path with the key in it (/m/k/<key>): a path survives iOS's Add to Home Screen, a query
+    string does not, and a Home Screen app has its own storage so it cannot rely on a key saved in the browser."""
+    return f"/m/k/{cfg['token']}" if cfg["require_key"] else "/m"
+
+
 def _https_url(cfg: dict, host: str | None = None) -> str:
     host = host or phone_push.local_hosts(_lan_ip())[0]
-    return f"https://{host}:{_https_port(cfg)}/m" + (f"?k={cfg['token']}" if cfg["require_key"] else "")
+    return f"https://{host}:{_https_port(cfg)}" + _page_path(cfg)
 
 
 def _tls_running() -> bool:
@@ -1186,7 +1192,7 @@ def _remote_status() -> dict:
     cert = st.cert_info() if st.ca_crt.exists() and st.leaf() is not None else None
     return {"enabled": cfg["enabled"], "port": cfg["port"], "running": running, "ip": ip, "error": _remote["error"],
             "require_key": cfg["require_key"],
-            "url": f"http://{ip}:{cfg['port']}/m" + (f"?k={cfg['token']}" if cfg["require_key"] else ""),
+            "url": f"http://{ip}:{cfg['port']}" + _page_path(cfg),
             "https": {"running": _tls_running(), "port": _https_port(cfg), "url": _https_url(cfg), "ip_url": _https_url(cfg, ip),
                       "host": phone_push.local_hosts(ip)[0], "error": _remote.get("tls_error")},
             "push": {"enabled": cfg["push"], "cert": cert, "last": _remote.get("push_last"),
@@ -1209,7 +1215,7 @@ def _key_ok(request: Request) -> bool:
 
 @phone.middleware("http")
 async def _phone_auth(request: Request, call_next):
-    if (request.url.path in ("/m", "/m/", "/m/ca.crt", "/m/sw.js") or request.url.path.startswith("/m/static/")
+    if (request.url.path in ("/m", "/m/", "/m/ca.crt", "/m/sw.js") or request.url.path.startswith(("/m/static/", "/m/k/"))
             or request.url.path.startswith("/m/api/confirm/")):
         return await call_next(request)                   # the page, the public CA certificate and the service worker;
                                                           # every API call carries the key (confirm: its one-shot code)
@@ -1219,7 +1225,9 @@ async def _phone_auth(request: Request, call_next):
 
 
 @phone.get("/m")
-async def phone_page():
+@phone.get("/m/k/{token}")
+async def phone_page(token: str = ""):
+    """The page (the key, when the link carries one, is in the path: the page reads it and keeps it)."""
     return FileResponse(ROOT / "static" / "mobile.html", headers={"Cache-Control": "no-store"})
 
 
@@ -1251,7 +1259,7 @@ async def phone_manifest():
     """The web app manifest (with the key in start_url: a Home Screen app has its own storage, so the page can't rely
     on the key it saved in the browser). iOS grants web push to Home Screen apps only."""
     cfg = _remote_cfg()
-    m = {"name": "AgenticCAD Machine", "short_name": "Machine", "start_url": "/m" + (f"?k={cfg['token']}" if cfg["require_key"] else ""),
+    m = {"name": "AgenticCAD Machine", "short_name": "Machine", "start_url": _page_path(cfg),
          "scope": "/m", "display": "standalone", "background_color": "#0f1115", "theme_color": "#0f1115"}
     return Response(json.dumps(m), media_type="application/manifest+json", headers={"Cache-Control": "no-store"})
 

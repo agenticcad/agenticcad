@@ -23,6 +23,8 @@ def test_phone_listener_needs_the_key_and_exposes_only_the_machine(tmp_path, mon
     r = c.get("/m/api/machine", headers={"X-Key": cfg["token"]})
     assert r.status_code == 200 and r.json()["connected"] is False
     assert c.get(f"/m/api/machine?k={cfg['token']}").status_code == 200   # the camera <img> passes it in the URL
+    assert c.get(f"/m/k/{cfg['token']}").status_code == 200              # the page with the key in its path (Home Screen apps)
+    assert c.get("/m/k/whatever").status_code == 200                      # the page itself is public; the API is not
     assert c.get("/m/api/tool_photo/1").status_code == 401                # tool photos need the key too
     assert c.get(f"/m/api/tool_photo/1?k={cfg['token']}").status_code == 404   # T1 has no photo
     assert c.get("/api/settings", headers={"X-Key": cfg["token"]}).status_code in (401, 404)   # not the desktop app
@@ -77,10 +79,10 @@ def test_phone_push_endpoints_subscribe_notify_and_prune(tmp_path, monkeypatch):
     assert r.status_code == 200 and r.headers["service-worker-allowed"] == "/m" and b"showNotification" in r.content
     assert c.get("/m/manifest.webmanifest").status_code == 401
     m = c.get(f"/m/manifest.webmanifest?k={key}").json()
-    assert m["start_url"] == f"/m?k={key}" and m["scope"] == "/m" and m["display"] == "standalone"
+    assert m["start_url"] == f"/m/k/{key}" and m["scope"] == "/m" and m["display"] == "standalone"
     assert c.get("/m/api/push").status_code == 401
     info = c.get("/m/api/push", headers={"X-Key": key}).json()
-    assert info["enabled"] is False and len(info["vapid"]) > 80 and info["https_url"].startswith("https://") and ":8791/m?k=" in info["https_url"]
+    assert info["enabled"] is False and len(info["vapid"]) > 80 and info["https_url"].startswith("https://") and f":8791/m/k/{key}" in info["https_url"]
     assert info["secure"] is False and info["count"] == 0
     # subscribe (bad ones refused), the computer lists the phone
     assert c.post("/m/api/push/subscribe", headers={"X-Key": key}, json={"subscription": {"endpoint": "http://x"}}).status_code == 400

@@ -157,7 +157,7 @@
   <div class="toast" id="toast"></div>
 
 <script>
-const KEY = (() => { const q = new URLSearchParams(location.search).get('k'); try { if (q) localStorage.setItem('ac_key', q); return q || localStorage.getItem('ac_key') || ''; } catch (e) { return q || ''; } })();
+const KEY = (() => { const m = location.pathname.match(/^\/m\/k\/([^\/]+)/), q = (m && decodeURIComponent(m[1])) || new URLSearchParams(location.search).get('k'); try { if (q) localStorage.setItem('ac_key', q); return q || localStorage.getItem('ac_key') || ''; } catch (e) { return q || ''; } })();
 document.getElementById('manifest').href = '/m/manifest.webmanifest' + (KEY ? '?k=' + encodeURIComponent(KEY) : '');
 if (new URLSearchParams(location.search).get('k')) history.replaceState(null, '', '/m');     // keep the key out of screenshots
 const $ = id => document.getElementById(id);
@@ -170,7 +170,7 @@ async function api(body) {
   try {
     const r = await fetch('/m/api/machine', body ? { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Key': KEY }, body: JSON.stringify(body) } : { headers: { 'X-Key': KEY } });
     const j = await r.json();
-    if (r.status === 401) { toast(j.error || 'not authorised'); return; }
+    if (r.status === 401) { toast((j.error || 'not authorised') + (STANDALONE ? ' · opened without the key: remove the Home Screen app and add it again from the secure page' : '')); return; }
     if (!r.ok && j.error) toast(j.error);
     if (j && 'connected' in j) render(j);
     return j;
@@ -331,7 +331,7 @@ function renderPush() {
   let h = '';
   if (location.protocol !== 'https:') {
     h = `<p class="small" style="margin:6px 2px">Notifications need the secure page. Once per phone:</p>
-      <a class="btn" href="/m/ca.crt" download="AgenticCAD-Phone-CA.crt">1 · Install this computer's certificate</a>
+      <a class="btn" href="/m/ca.crt">1 · Install this computer's certificate</a>
       <p class="muted small" style="margin:6px 2px">${IOS ? 'Allow the download, then Settings ▸ General ▸ VPN &amp; Device Management ▸ <b>AgenticCAD Phone CA</b> ▸ Install. Then Settings ▸ General ▸ About ▸ Certificate Trust Settings ▸ turn it on.' : 'Install it as a CA certificate (Android: Settings ▸ Security ▸ Encryption &amp; credentials ▸ Install a certificate ▸ CA certificate).'}</p>
       <a class="btn primary" href="${esc(i.https_url)}">2 · Open the secure page</a>
       <p class="muted small" style="margin:6px 2px">${IOS ? 'There: Share ▸ <b>Add to Home Screen</b>, open <b>Machine</b> from the Home Screen, then More ▸ Notifications ▸ turn on.' : 'Then More ▸ Notifications ▸ turn on.'} If the name doesn't open, <a href="${esc(i.ip_url)}">use the address instead</a>.${i.https_running ? '' : ' <b>The secure page is not running on the computer</b> (Settings ▸ Phone control).'}</p>`;
