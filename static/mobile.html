@@ -163,7 +163,7 @@ if (new URLSearchParams(location.search).get('k')) history.replaceState(null, ''
 const $ = id => document.getElementById(id);
 let ST = null, step = 1, tnum = 0, busy = false, camOn = false, stepA = 10;
 const A_STEPS = [1, 10, 45, 90];                 // degrees per tap on A+ / A− (90 is the server's limit)
-function toast(t, ok) { const e = $('toast'); e.textContent = t; e.classList.toggle('ok', !!ok); e.classList.add('show'); clearTimeout(toast.t); toast.t = setTimeout(() => e.classList.remove('show'), ok ? 2200 : 4200); }
+function toast(t, ok) { const e = $('toast'); e.textContent = t; e.classList.toggle('ok', !!ok); e.classList.add('show'); clearTimeout(toast.t); toast.t = setTimeout(() => e.classList.remove('show'), ok ? 2200 : Math.max(4200, 60 * t.length)); }
 async function api(body) {
   if (busy && body && !['halt', 'hold'].includes(body.action)) return;
   busy = body && body.action === 'jog';
@@ -349,12 +349,18 @@ function renderPush() {
   $('pushst').textContent = PUSH.sub ? 'on' : '';
   const on = $('pushon'), off = $('pushoff'), test = $('pushtest');
   if (on) on.onclick = async () => {
+    // iOS has answered 'denied' here while the setting is actually on (Apple forum 725619), so the answer is not
+    // trusted: the subscription is attempted regardless and the real state comes from that.
+    let perm = 'unknown';
+    try { perm = await Notification.requestPermission(); } catch (e) { perm = 'error: ' + e.message; }
     try {
-      const perm = await Notification.requestPermission();
-      if (perm !== 'granted') { toast('notifications were not allowed'); return; }
       PUSH.sub = await PUSH.reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64uToU8(PUSH.info.vapid) });
       await pushSave(PUSH.sub); renderPush(); toast('notifications on', true);
-    } catch (e) { toast('could not turn on: ' + e.message); }
+    } catch (e) {
+      const fix = IOS ? 'On the phone: Settings ▸ Notifications ▸ Machine ▸ Allow Notifications, then tap again. If Machine is not listed there, remove it from the Home Screen and add it again from the secure page.'
+                      : 'Allow notifications for this site in the browser settings, then tap again.';
+      toast(`could not turn on (${e.name || 'error'}: ${e.message}; permission ${perm}). ${fix}`);
+    }
   };
   if (off) off.onclick = async () => {
     try { const ep = PUSH.sub.endpoint; await PUSH.sub.unsubscribe(); PUSH.sub = null;
