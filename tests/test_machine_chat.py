@@ -171,3 +171,27 @@ def test_building_a_big_program_does_not_stall_the_event_loop(ag, monkeypatch):
     r, ticks = asyncio.run(go())
     assert "no CAM program" in r
     assert ticks >= 6, f"the loop stalled while the program was built ({ticks} ticks in 0.6 s)"
+
+
+def test_tool_change_approval_names_the_tool_and_what_to_swap(ag):
+    """The chat's approval card for a tool change said only 'Tool change to T5': it now says which tool (name and packet
+    spec), what is in the machine now, and what the machine does; the card shows the tool's photo from the same data."""
+    ag.library.save_tool({"number": 5, "name": "0.1 mm 30° V-bit", "type": "vbit", "diameter": 3.175, "flutes": 2, "flute_length": 3,
+                          "angle": 30, "tip_diameter": 0.1, "rpm": 13000, "feed": 120, "plunge": 20, "stepdown": 0.1, "stepover": 0.2})
+    async def go():
+        emu = Z1Emu(speed=40.0)
+        port, _ = await emu.start()
+        ag.machine = ml.MachineControl()
+        try:
+            assert "Connected" in await ag.machine_action("connect", {"host": "127.0.0.1", "port": port})
+            await ag.machine.arm(True); await ag.machine.home()
+            await _until(lambda: ag.machine.homed)
+            summary, _ = ag._machine_plan("change_tool", {"tool": 5})
+            assert "T5 · 0.1 mm 30° V-bit" in summary and "30°" in summary and "tip" in summary.lower()
+            assert "M6 T5" in summary and "front button or Confirm" in summary and "measures it on the setter" in summary
+            assert f"T{emu.tool}" in summary                                      # what to take out
+            summary2, _ = ag._machine_plan("change_tool", {"tool": 9999})
+            assert "3D probe" in summary2
+        finally:
+            await ag.machine.disconnect(); await emu.stop()
+    asyncio.run(go())

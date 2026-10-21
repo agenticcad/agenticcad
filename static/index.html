@@ -728,6 +728,9 @@
   .mreq.done, .mreq.approved { border-color:rgba(62,207,122,.4); background:rgba(62,207,122,.05); } .mreq.done .mr-st, .mreq.approved .mr-st { color:var(--ok); }
   .mreq.declined, .mreq.expired { border-color:var(--line); background:none; opacity:.75; } .mreq.refused, .mreq.failed { border-color:rgba(255,90,95,.5); background:rgba(255,90,95,.06); }
   #mi-req .mreq { margin:12px 12px 0; } #mi-req:empty { display:none; }
+  .mreq .mr-tool { display:flex; align-items:center; gap:12px; margin:8px 0 2px; padding:8px 10px; background:rgba(0,0,0,.25); border-radius:8px; }
+  .mreq .mr-tool .tc-photo { max-height:88px; max-width:220px; border-radius:6px; object-fit:contain; }
+  .mreq .mr-tool b { display:block; font-size:13px; } .mreq .mr-tool small { color:var(--muted); }
   .mpill.ask { border-color:var(--accent); animation:askpulse 1.4s ease-in-out infinite; } @keyframes askpulse { 50% { box-shadow:0 0 0 4px rgba(255,140,66,.18); } }
 
   /* Settings ▸ Tools: list + detail, sizes as on the packet */
@@ -982,7 +985,7 @@
   <div class="next"><button class="btn" data-act="step" data-step="run">Next: Run →</button></div>
 </div>
 <div class="mstep" data-step="run" id="mstep-run" style="display:none">
-  <p class="xp-note"><b>Experimental.</b> Running programs on the machine is new: air-cut first, stay at the machine with a hand near the stop button, and run one tool at a time.</p>
+  <p class="xp-note"><b>Experimental.</b> Running programs on the machine is new: air-cut first and stay at the machine with a hand near the stop button, especially through the tool changes.</p>
   <select class="msetup inp"></select>
   <div id="mr-job"></div>
   <div class="mcard" id="mr-ready-card"><div id="mr-ready"></div></div>
@@ -6392,10 +6395,11 @@ function mvReady(st, stp) {                      // the Run checklist
     { k: 'conn', ok: !!(conn && st.armed), txt: conn ? (st.armed ? 'Connected · Control on' : 'Turn Control on') : 'Connect the machine', go: 'prep' },
     { k: 'home', ok: !!(conn && st.homed), txt: st && st.homed ? 'Homed this session' : 'Home the machine', go: 'prep' },
     { k: 'zero', ok: z.state === 'ok' || MV.ack === ackKey, warn: z.state !== 'ok' && MV.ack === ackKey, txt: z.state === 'ok' ? (z.rotary ? 'Work origin on the 4th axis: Y and Z on the centreline, A0 and X0 set' : `Work origin: ${REF_TEXT[z.w.xy]}, ${REF_TEXT[z.w.z]}`) : `Work origin: ${z.why[0] || 'not set'}`, go: 'zero', ackKey },
-    // one tool per run, fitted and measured first: a program never changes tools (the Z1 starts the spindle mid-change)
-    { k: 'tool', ok: !!(first && selTools.length === 1 && tl === first.number && st.tool_ok),
-      txt: !first ? 'Tick the operations to run' : selTools.length > 1 ? `These use ${selTools.map(n => 'T' + n).join(' and ')}: run one tool at a time (the T buttons above the list pick one tool's operations)`
-        : (tl === first.number && st.tool_ok) ? `T${first.number} fitted and measured` : `Fit and measure T${first.number} (${esc(first.name)}) first: Prepare ▸ Change tool. Programs never change tools themselves`, go: 'prep' },
+    // tool changes in the file are the machine's own: the program stops at each M6 (spindle off) until the tool is fitted and measured
+    { k: 'tool', ok: !!first, warn: !!(first && !(tl === first.number && st.tool_ok)),
+      txt: !first ? 'Tick the operations to run' : (tl === first.number && st.tool_ok)
+        ? (selTools.length > 1 ? `T${first.number} fitted and measured; then changes to ${selTools.slice(1).map(n => 'T' + n).join(', ')} in the program (each stops the file until you fit the tool and press the front button or Confirm)` : `T${first.number} fitted and measured`)
+        : `Starts with a tool change to T${first.number} (${esc(first.name)}): the file stops at once, spindle off, until you fit it and press the front button or Confirm${selTools.length > 1 ? `; then ${selTools.slice(1).map(n => 'T' + n).join(', ')}` : ''}`, go: 'prep' },
   ];
 }
 
@@ -6640,7 +6644,7 @@ function mvRun(st) {
   mvSetupSelects();
   const ops = program ? program.ops.map((o, i) => ({ ...o, i })).filter(o => o.setup === MV.si) : [];
   const key = program ? program.name + MV.si + ops.map(o => o.key + o.time).join() : '';
-  if (key !== MVP.key) { MVP.key = key; const b0 = mvToolBlocks(ops)[0] || []; MVP.sel = new Set(b0.map(o => o.i)); }
+  if (key !== MVP.key) { MVP.key = key; MVP.sel = new Set(ops.map(o => o.i)); }   // all of the setup's operations; the T buttons pick one tool's
   const runIdx = job ? (job.ops_index || []) : [], jops = job ? (job.ops || []) : [];
   let cur = null;
   if (job && job.line) jops.forEach((o, k) => { if (job.line >= o.start && job.line <= o.end) cur = k; });
@@ -6937,10 +6941,19 @@ const MREQ_TITLE = { control_on: 'Control on', control_off: 'Control off', home:
   change_tool: 'Tool change', confirm_tool: 'Confirm the tool', origin_anchor: 'Origin = Anchor 1', auto_z_probe: 'Auto Z probe', set_origin: 'Set the work origin',
   shift_origin: 'Move X0 Y0', lower_to: 'Lower Z', raise_z: 'Raise Z', goto: 'Go to', probe_3d: '3D probe', run_ops: 'Run on the machine', switch: 'Accessory', console: 'Console line',
   jog_a: 'Turn the 4th axis', rotary_zero: 'Zero on the 4th axis', shrink_a: 'Shrink A' };
+function mreqToolBlock(n) {                       // the tool a request is about: its photo (to pick it out of the drawer), silhouette and packet line
+  if (n == null || isNaN(+n)) return '';
+  n = +n; const t = toolByNumber(n), sh = mvToolShape(n);
+  const name = n === 9999 ? '3D probe' : n === 0 ? 'wired probe' : (t ? t.name : '');
+  return `<div class="mr-tool">${mvPhoto(n)}${sh ? toolSil(sh, 22, 70) : ''}<div><b>T${n}${name ? ' · ' + esc(name) : ''}</b>${t && toolSpec(t) ? `<small>${esc(toolSpec(t))}</small>` : ''}</div></div>`;
+}
 function mreqCard(r) {
-  const st = r.state || 'waiting', title = MREQ_TITLE[r.action] || r.action;
+  const st = r.state || 'waiting';
+  const a = r.args || {}, tn = r.action === 'change_tool' ? a.tool : null;
+  const title = r.action === 'change_tool' && tn != null ? `Change tool → T${tn}` : (MREQ_TITLE[r.action] || r.action);
   return `<div class="mreq ${st}" data-id="${r.id}"><div class="mr-h"><span class="mr-ic">⚙</span><b>The assistant asks: ${esc(title)}</b><span class="mr-st">${
       { waiting: 'waiting for you', approved: 'approved', done: 'done', declined: 'declined', expired: 'expired', refused: 'refused', failed: 'failed' }[st] || st}</span></div>
+    ${r.action === 'change_tool' ? mreqToolBlock(tn) : ''}
     <div class="mr-b">${esc(r.summary)}</div>${r.text ? `<div class="mr-x">${esc(r.text)}</div>` : ''}
     ${st === 'waiting' ? `<div class="mr-a"><button class="btn acc" data-ok="1">Approve</button><button class="btn ghost" data-ok="0">Decline</button><span class="muted">STOP stays at the top of the Machine page</span></div>` : ''}</div>`;
 }

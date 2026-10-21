@@ -564,10 +564,10 @@ def test_prepare_program_strips_maps_ops_and_refuses_unsafe():
     assert ml.program_filename("obsidian logo - ops 2..5") == "obsidian_logo_ops_2..5.nc"
 
 
-def test_run_program_one_tool_no_tool_change_in_the_file():
-    """A program never changes tools on the machine: on 2026-10-18 the Z1 read ahead past M6 T2 and started the spindle
-    (M3) while it was still changing and measuring the tool. One tool per run, fitted and measured beforehand; its M6
-    line goes to the machine as M5, so the file can't change tools and the line numbers still map to the operations."""
+def test_run_program_changes_tools_in_the_file_and_waits_at_each_change():
+    """A program may change tools (M6 Tn): the machine's own routine stops the file with the spindle off, waits for the
+    front button / Confirm and measures the new tool, then plays on. The 2026-10-18 incident was the start order (down
+    before over the work), fixed in the post; the 0.48.7 one-tool-per-run rule is gone."""
     async def go():
         emu, mc, _ = await _setup(speed=60.0)
         try:
@@ -576,24 +576,24 @@ def test_run_program_one_tool_no_tool_change_in_the_file():
             emu.wco = [-150.0, -150.0, -60.0]
             await asyncio.sleep(0.4)
             both = ml.prepare_program(PROG, ["Face", "Outline"])
-            with pytest.raises(ml.Refused, match="T6 and T3: run one tool at a time"):
-                mc.check_job(both)
-            prep = ml.prepare_program(PROG1, ["Face"])
+            chk = mc.check_job(both)
+            assert any("changes tools 1 time" in n and "T6 → T3" in n for n in chk["notes"]), chk["notes"]
             far = ml.prepare_program(PROG1.replace("X40", "X160"), ["Face"])
             with pytest.raises(ml.Refused, match="outside"):
                 mc.check_job(far)                                    # X 160 from a work origin at -150 runs past the top end
             other = ml.prepare_program(PROG1.replace("M6 T6", "M6 T4"), ["Face"])
-            with pytest.raises(ml.Refused, match="fit and measure T4 first"):
-                mc.check_job(other)                                  # the machine has T6
-            await mc.run_program("test job", prep)
-            await _until(lambda: mc.job["stage"] in ("running", "done", "failed"), timeout=20)
+            assert any("begins with a tool change to T4" in n for n in mc.check_job(other)["notes"])   # allowed: the file stops for it
+            await mc.run_program("test job", both)
+            await _until(lambda: mc.job["stage"] in ("running", "awaiting", "done", "failed"), timeout=20)
             sent = emu.sd["/sd/gcodes/test_job.nc"].decode()
-            assert "M6" not in sent and sent.splitlines()[2] == "M5" and len(sent.splitlines()) == prep["lines"]
-            assert sent.index("M5") < sent.index("M3 S10000")         # spindle off where the change was, on after it
-            assert "play /sd/gcodes/test_job.nc" in emu.raw_lines            # sent without a newline
+            assert sent == both["text"] and "M6 T3" in sent              # the file is played as written
+            await _until(lambda: mc.job["stage"] in ("awaiting", "done", "failed"), timeout=60)
+            assert mc.job["stage"] == "awaiting" and mc.job.get("want_tool") == 3, mc.job
+            assert emu.spindle_on is False if hasattr(emu, "spindle_on") else True
+            await mc.confirm_tool_change()                            # the front button
             await _until(lambda: mc.job["stage"] in ("done", "failed"), timeout=60)
             assert mc.job["stage"] == "done", mc.job
-            assert emu.tool == 6 and not emu.crashes                 # no tool change happened
+            assert emu.tool == 3 and not emu.crashes
         finally:
             await mc.disconnect(); await emu.stop()
     run(go())

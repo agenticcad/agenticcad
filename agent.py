@@ -1041,10 +1041,22 @@ class CadAgent:
             return "Resume the paused program.", mc.job_resume
         if action == "change_tool":
             n = int(f("tool", -1))
-            return (f"Tool change to T{n} (Makera's M6 T{n}, or M491 to re-measure): Z up, the head parks and waits for you to "
-                    "swap the tool; after Confirm the machine measures it on the setter."), lambda: mc.change_tool(n)
+            t = self.library.tool_map().get(n)
+            cur = (((mc._status() or {}) if mc.connected else {}).get("tool") or {}).get("number")
+            what = f"T{n} · {t.name} ({t.spec()})" if t else (f"T{n} · the 3D probe" if n == 9999 else f"T{n} · the wired probe" if n == 0 else f"T{n}")
+            have = (f"T{cur}" + (f" · {self.library.tool_map()[cur].name}" if cur in self.library.tool_map() else "")) if cur is not None else "no tool recorded"
+            if cur == n:
+                return (f"Re-measure {what} (Makera's M491): it is already fitted. Spindle off, Z goes up, the head parks and waits; "
+                        "press the front button or Confirm and the machine measures it on the setter."), lambda: mc.change_tool(n)
+            return (f"Change to {what} (Makera's M6 T{n}). Spindle off, Z goes up, the head parks at the change position and "
+                    f"waits with the collet open. Take out {have}, fit {what}, then press the front button or Confirm: the machine "
+                    "measures it on the setter before anything else moves."), lambda: mc.change_tool(n)
         if action == "confirm_tool":
-            return "Confirm the tool is fitted (M490.2, same as the front button): the machine measures it on the setter.", mc.confirm_tool_change
+            want = ((mc.job or {}).get("want_tool") if mc.job else None) or ((mc.routine or {}).get("tool") if mc.routine else None)
+            tw = self.library.tool_map().get(want) if want is not None else None
+            what = f"T{want} · {tw.name} ({tw.spec()})" if tw else (f"T{want}" if want is not None else "the tool")
+            return (f"Confirm {what} is fitted and the lever is closed (M490.2, the same as the front button): the machine then "
+                    "measures it on the setter and carries on."), mc.confirm_tool_change
         if action == "origin_anchor":
             return "Set work X0 Y0 = Anchor 1, the L-bracket's inside corner (G10 L2 P0). Nothing moves.", mc.set_origin_anchor
         if action == "auto_z_probe":

@@ -427,7 +427,7 @@ Safety rules in `machine_link`:
   doesn't have) and `M498.2` (erases the stored tool lengths and G54). No free-form G-code except one line at a time
   from Machine ▸ Manual's console (each line confirmed; the commands above, machine settings, tool changes and probing
   refused), and no spindle control buttons.
-- **Running operations** (experimental; tried on a real Z1 with air cuts and first jobs — always air-cut first, run one tool at a time and stay at the machine): Machine ▸
+- **Running operations** (experimental; tried on a real Z1 with air cuts and first jobs — always air-cut first and stay at the machine, a hand near the stop through every tool change): Machine ▸
   **Run** lists the CAM program's setups and operations under a readiness checklist (CAM's *Send to machine →* opens it
   with the setup's operations ticked); tick some (one setup at a time) and *Run…*. The
   app builds those operations' G-code, removes comments, refuses lines over 62 characters (the Z1 plays lines from

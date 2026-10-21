@@ -540,15 +540,6 @@ def prepare_program(gcode: str, op_names: list[str], air_cut: float = 0.0) -> di
             "extents": {w_: v for w_, v in ext.items() if v[0] <= v[1]}, "air_cut": air_cut, "uses_a": uses_a}
 
 
-def strip_tool_changes(text: str) -> str:
-    """Every tool-change line (M6 Tn) becomes M5 (spindle off), keeping the line count: the program runs with the tool
-    that is already fitted and measured, and nothing can start the spindle while a tool change is still going on."""
-    out = []
-    for ln in text.splitlines():
-        out.append("M5" if re.search(r"\bM0?6\b", ln) else ln)
-    return "\n".join(out) + ("\n" if text.endswith("\n") else "")
-
-
 def program_filename(name: str) -> str:
     """An ASCII file name the Z1 plays safely (no spaces, no ' -' option marker)."""
     base = re.sub(r"[^A-Za-z0-9_.]+", "_", name).strip("_.")[:40] or "program"
@@ -1616,17 +1607,23 @@ class MachineControl:
         first = prep["tools"][0] if prep["tools"] else None
         if first is None:
             raise Refused("the program never selects a tool (no M6 Tn)")
-        # One tool per run, fitted and measured beforehand (Prepare ▸ Change tool): a program file never changes tools.
-        # The Z1 reads ahead while it plays a file: on 2026-10-18 it ran the M3 after an M6 while it was still changing
-        # and measuring the tool, so the spindle turned at the tool setter.
-        if len(set(prep["tools"])) > 1:
-            raise Refused("these operations use " + " and ".join(f"T{t}" for t in dict.fromkeys(prep["tools"])) + ": run one "
-                          "tool at a time - change and measure each in Prepare ▸ Change tool, then run its operations "
-                          "(a program never changes tools itself: the Z1 starts the spindle while it is still changing them)")
-        if first != fitted or not self.tool_ok():
-            raise Refused(f"fit and measure T{first} first (Prepare ▸ Change tool → {first}): a program never changes tools itself"
-                          + (f"; the machine has T{fitted}" if first != fitted else f"; T{fitted} hasn't been measured this session"))
-        notes.append(f"uses T{first} (fitted and measured); the file has no tool change in it - the spindle starts after it")
+        # Tool changes in the file are the machine's own (M6 Tn): the firmware stops the spindle, parks, waits for the
+        # front button / Confirm, measures the new tool on the setter and only then plays on (verified in the Carvera
+        # firmware source, 2026-10-18); the post also sends M5 before every M6 and never comes down before moving over
+        # the work. The 2026-10-18 spindle-at-the-setter incident was the old start order, not a read-ahead: see the
+        # 1.0.0 notes. The job shows a Fit Tn card at each change; the operator stays at the machine.
+        seq = list(dict.fromkeys(prep["tools"]))
+        changes = sum(1 for a, b in zip(prep["tools"], prep["tools"][1:]) if a != b)
+        if first == fitted and self.tool_ok():
+            notes.append(f"starts with T{first}, fitted and measured" + (f"; then changes tools {changes} time{'s' if changes != 1 else ''} "
+                         f"({' → '.join('T' + str(t) for t in prep['tools'])}): each change stops the file with the spindle off until you fit the tool "
+                         "and press the front button or Confirm, and the machine measures it" if changes else "; the file has no tool change in it"))
+        else:
+            notes.append(f"begins with a tool change to T{first} (the machine has T{fitted}" + ("" if first != fitted else ", not measured this session")
+                         + "): the file stops at once, spindle off, until you fit T" + f"{first} and press the front button or Confirm"
+                         + (f"; {changes} more change{'s' if changes != 1 else ''} follow ({' → '.join('T' + str(t) for t in prep['tools'])})" if changes else ""))
+        if len(seq) > 1:
+            notes.append("stay at the machine for the tool changes with a hand near the stop button")
         wco = [m - w for m, w in zip(st["mpos"], st["wpos"])]
         for ax, i in (("x", 0), ("y", 1)):
             e = prep["extents"].get(ax)
@@ -1665,11 +1662,9 @@ class MachineControl:
         return {"notes": notes, "work_origin": wco}
 
     async def run_program(self, name: str, prep: dict, info: dict | None = None, rotary: bool = False, ack: bool = False) -> dict:
-        """Upload `prep["text"]` as /sd/gcodes/<name> and play it. `prep` comes from prepare_program(). The tool is fitted
-        and measured already (check_job): its M6 line becomes M5 (spindle off), line for line, so nothing in the file
-        changes tools and the line numbers still map to the operations."""
+        """Upload `prep["text"]` as /sd/gcodes/<name> and play it. `prep` comes from prepare_program(). Tool changes in
+        the file (M6 Tn) are the machine's own routine: the job pauses as 'awaiting' with a Fit Tn card at each one."""
         chk = self.check_job(prep, rotary=rotary, ack=ack)
-        prep = dict(prep, text=strip_tool_changes(prep["text"]))
         fname = program_filename(name)
         path = "/sd/gcodes/" + fname
         self.last_action = time.time()

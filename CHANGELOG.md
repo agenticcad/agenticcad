@@ -5,6 +5,21 @@ patch bumps fix things, a major bump changes something scripts or workspaces rel
 
 ## [Unreleased]
 
+## [1.1.1] — 2026-10-21
+
+### Changed
+- **Programs change tools again.** The one-tool-per-run rule and the M6 → M5 rewrite from 0.48.7 are gone: a program
+  with several tools is sent as written, and at each `M6 Tn` the machine's own routine stops the file with the spindle
+  off, parks, waits for the front button or Confirm (the Fit Tn card, with the tool's photo), measures the new tool on
+  the setter and plays on. The real cause of the 2026-10-18 incident was the start order, fixed in 1.0.0 (lift, over
+  the work, spindle, down), and the post still sends M5 before every M6. Run's checklist and dialog now describe the
+  changes in the program instead of refusing them; the whole setup is selected by default (the T buttons still pick
+  one tool's operations if you want to run them separately).
+- **The assistant's tool-change approval card** shows the tool's photo, silhouette and packet line, names the tool to
+  take out and the one to fit, and says what the machine does (spindle off, park, wait, measure on the setter);
+  Confirm cards name the tool being fitted.
+
+
 ## [1.1.0] — 2026-10-20
 
 The 4th axis, properly: what a review of the rotary code found and fixed, gear cutting, A on the Machine page, a deeper
