@@ -1136,8 +1136,14 @@ def contour(setup: Setup, tool: Tool, polys, z_top: float, z_bottom: float, side
                 zz = levels[-1] if zmod is None else zmod(s % total, levels[-1])
                 dz = abs(zz - pb.pos[2]); L3 = math.dist(pb.pos, (x, y, zz))
                 pb.feed_to(x, y, zz, None if dz < 1e-9 else min(pb.feed, pb.plunge * L3 / dz))   # descent never outruns the plunge rate
-        for x, y in lead_out:
-            pb.feed_to(x, y, pb.pos[2])
+        # the lead-out arc swings one radius away from the wall into the waste: at full depth it would half-slot fresh
+        # stock (the Outline on the Z1 bit 1.15 mm in one go there, 2026-10-22). The arc climbs out instead - up to just
+        # above the top within its first 40 % - so the wall still gets a tangential exit and the waste a thin wedge.
+        # (Climbing along the wall before the arc is not safe: the lap's own ramp may have left that stretch shallow.)
+        if lead_out:
+            z_exit, z_from = z_top + 0.2, pb.pos[2]
+            for k, (x, y) in enumerate(lead_out, 1):
+                pb.feed_to(x, y, z_from + (z_exit - z_from) * min(1.0, 2.5 * k / len(lead_out)))
         pb.retract()
     pb.retract()
     return op

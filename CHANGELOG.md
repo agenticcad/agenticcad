@@ -10,6 +10,10 @@ patch bumps fix things, a major bump changes something scripts or workspaces rel
   operation before the change, whose tool is the one in the spindle; the card (and the phone notification) now name
   the first operation ahead whose tool is not the fitted one — what the machine is actually waiting for.
 
+- **Contour lead-out climbs out.** The tangential lead-out arc used to swing one radius into the uncut waste at full
+  depth (the Outline bit 1.15 mm in one go); it now rises to just above the top within its first 40 % while the
+  wall is still cut at depth to the exit point.
+
 ### Added
 - **The simulation reports the bite of every pass and feed time spent in air.** For each operation: the deepest the
   stock stood above the tool's cutting surface in one pass (anywhere under the tool, so a stair step beside a ball

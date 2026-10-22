@@ -628,3 +628,23 @@ def test_sim_reports_the_bite_of_each_pass_and_feed_in_air(machines, plate):
     q = cam.Program(st); q.add(ok)
     r2 = cam_sim.simulate(q)
     assert r2.stats["bites"][0]["max"] == pytest.approx(0.4, abs=0.05) and "BITE" not in r2.summary()
+
+
+def test_contour_lead_out_leaves_above_the_top_not_through_the_waste(machines, plate):
+    """The lead-out arc used to swing into uncut waste at full depth (the Outline bit 1.15 mm in one go on the Z1):
+    the tool now climbs out over the last radius of the lap and the arc runs above the top."""
+    st = cam.Setup(machines["Makera Z1"], cam.Stock.from_model(plate, margin=2))
+    top = st.stock.top
+    op = cam.contour(st, flat(), cam.rect(-20, -15, 20, 15), z_top=top, z_bottom=top - 1.2, side="outside")
+    assert op.params["passes"] == 2 and op.params["lead"] > 0
+    feeds = [m for m in op.moves if m[0] != cam.RAPID]
+    deep = [m for m in feeds if m[3] < top - 1.2 + 1e-6]
+    assert len(deep) > 20                                                # the final lap really ran at depth
+    r = flat().diameter / 2
+    arc = [m for m in feeds[-20:] if abs(m[1]) > 20 + r + 1e-3 or abs(m[2]) > 15 + r + 1e-3]   # the lead-out: beyond the offset path
+    assert len(arc) >= 6 and arc[-1][3] >= top + 0.2 - 1e-6              # it ends above the top
+    assert all(b[3] >= a[3] for a, b in zip(arc, arc[1:]))               # climbing all the way
+    assert arc[int(len(arc) * 0.4)][3] >= top + 0.2 - 1e-6              # and up by 40 % of the arc: the deep part is a thin wedge
+    # the wall itself (on the profile) is cut at full depth right up to the exit point
+    on_wall = [m for m in feeds[-40:] if m not in arc]
+    assert on_wall[-1][3] == pytest.approx(top - 1.2, abs=1e-6)
