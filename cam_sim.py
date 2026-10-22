@@ -96,7 +96,7 @@ class SimResult:
             lines.append(f"RAPIDS THROUGH MATERIAL: {len(rc)} — " + "; ".join(f"{h['op']} move {h['move']} ({h['depth']:.2f} mm deep)" for h in rc[:5]))
         for b in s.get("bites") or []:
             sd = b.get("stepdown") or 0
-            if sd and b["max"] > sd * 1.1 + 0.02:
+            if sd and b["max"] > sd * 1.1 + 0.02 and b.get("kind") not in ("vcarve", "chamfer"):   # those cut to depth by design
                 lines.append(f"BITE: {b['op']}: the {b['tool']} takes up to {b['max']:.2f} mm in one pass at move {b['move']} "
                              f"{tuple(b['at']) if b['at'] else ''} - its stepdown is {sd:g} mm. Rough or step the stock down first "
                              "so a finishing pass only meets what it was planned for (small ball and V tools break on steps like this)")
@@ -176,7 +176,7 @@ def _bite_stats(op, mv, idx, bite, rapid_rate) -> dict:
                 air_moves.append(k)
     worst = int(np.argmax(per_move)) if n else 0
     mx = float(per_move[worst]) if n and np.isfinite(per_move[worst]) else 0.0
-    return {"op": op.name, "tool": op.tool.label(), "max": round(max(mx, 0.0), 3), "move": worst + 1,
+    return {"op": op.name, "kind": op.kind, "tool": op.tool.label(), "max": round(max(mx, 0.0), 3), "move": worst + 1,
             "at": [round(float(v), 2) for v in mv[worst][1:4]] if n else None, "stepdown": op.tool.stepdown,
             "rapid_s": round(rapid_s, 1), "cut_s": round(cut_s, 1), "air_s": round(air_s, 1), "air_moves": len(air_moves)}
 
