@@ -5,6 +5,8 @@ patch bumps fix things, a major bump changes something scripts or workspaces rel
 
 ## [Unreleased]
 
+## [1.3.0] — 2026-10-22
+
 ### Fixed
 - **The tool-change card asked for the fitted tool.** At an `M6` the firmware's progress line still points at the
   operation before the change, whose tool is the one in the spindle; the card (and the phone notification) now name
