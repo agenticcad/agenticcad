@@ -988,3 +988,15 @@ def test_tool_change_wait_notifies_the_phone_and_its_code_confirms_once():
         finally:
             await mc.disconnect(); await emu.stop()
     run(go())
+
+
+def test_next_tool_asks_for_the_tool_the_program_wants_not_the_fitted_one():
+    ops = [{"name": "Face", "tool": 2, "start": 1, "end": 40}, {"name": "Gem", "tool": 3, "start": 41, "end": 90},
+           {"name": "Letters", "tool": 5, "start": 91, "end": 120}]
+    # the firmware's progress line lags: at the M6 T3 the 'current' op is still Face (T2 fitted) -> T3, not T2
+    assert ml.next_tool(ops, 0, 2, [2, 3, 5]) == (3, ops[1])
+    assert ml.next_tool(ops, 1, 2, [2, 3, 5]) == (3, ops[1])        # or already counted into Gem
+    assert ml.next_tool(ops, 1, 3, [2, 3, 5]) == (5, ops[2])        # next change while T3 is fitted
+    assert ml.next_tool(ops, None, 6, [2, 3, 5]) == (2, ops[0])     # the first change of the program
+    assert ml.next_tool(ops, 2, 5, [2, 3, 5]) == (5, ops[2])        # nothing else differs: the op's own tool
+    assert ml.next_tool([], None, 6, []) == (None, None)

@@ -592,3 +592,39 @@ def test_rotary_checks_reach_speed_and_centreline(machines, shaft):
     st2 = cam.Setup(m, cam.Stock.cylinder(32, 62, x0=-1), rotary=True, origin=(0.0, 3.0, 0.0))
     p3 = cam.Program(st2); p3.add(cam.rotary_finish(st2, ball(), shaft.shape, mode="rings", stepover=0.5))
     assert any("off the rotary centreline" in x for x in p3.check())
+
+
+def test_sim_reports_the_bite_of_each_pass_and_feed_in_air(machines, plate):
+    """The R1 ball broke on the Z1 (2026-10-22) taking 0.6-0.7 mm stair steps the roughing left: the simulation now
+    says how deep each op bites in one pass against its stepdown, and how long its feed moves cut nothing."""
+    st = cam.Setup(machines["Makera Z1"], cam.Stock.from_model(plate, margin=2))
+    top = st.stock.top
+    from dataclasses import replace
+    t = replace(flat(), stepdown=0.5)
+    op = cam.Op("deep slot", "pocket", t)
+    pb = cam.PathBuilder(st, op.tool, op)
+    pb._add(cam.RAPID, -30, 0, top + 3, 0)
+    pb._add(cam.PLUNGE, -30, 0, top - 2.0, 150)                # 2 mm down in one go, stepdown says 0.5
+    pb._add(cam.FEED, 30, 0, top - 2.0, 600)                    # a 60 mm slot 2 mm deep
+    pb._add(cam.RAPID, 30, 0, top + 3, 0)
+    pb._add(cam.FEED, -30, 0, top + 1.0, 600)                   # 60 mm of feed in the air (6 s at F600)
+    pb._add(cam.FEED, 30, 0, top + 1.0, 600)
+    pb._add(cam.FEED, -30, 0, top + 1.0, 600)
+    pb._add(cam.FEED, 30, 0, top + 1.0, 600)                    # 24 s of air feeds, 6 s of cutting
+    p = cam.Program(st); p.add(op)
+    r = cam_sim.simulate(p)
+    b = r.stats["bites"][0]
+    assert b["op"] == "deep slot" and b["max"] == pytest.approx(2.0, abs=0.05) and b["stepdown"] == 0.5
+    assert b["cut_s"] == pytest.approx(6.0 + 5.0 / 150 * 60, abs=0.6) and b["air_s"] == pytest.approx(24.0, abs=0.6) and b["air_moves"] == 4
+    s = r.summary()
+    assert "BITE: deep slot" in s and "2.00 mm in one pass" in s and "stepdown is 0.5" in s
+    assert "24 s of feed moves cut nothing" in s
+    # a pass that stays within its stepdown is not flagged
+    ok = cam.Op("fine", "pocket", t)
+    pb = cam.PathBuilder(st, ok.tool, ok)
+    pb._add(cam.RAPID, -30, 10, top + 3, 0)
+    pb._add(cam.PLUNGE, -30, 10, top - 0.4, 150)
+    pb._add(cam.FEED, 30, 10, top - 0.4, 600)
+    q = cam.Program(st); q.add(ok)
+    r2 = cam_sim.simulate(q)
+    assert r2.stats["bites"][0]["max"] == pytest.approx(0.4, abs=0.05) and "BITE" not in r2.summary()

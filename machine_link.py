@@ -480,6 +480,20 @@ class Refused(Exception):
 _WORD = re.compile(r"([A-Z])(-?\d*\.?\d+)")
 
 
+def next_tool(ops: list[dict], op_idx: int | None, fitted: int | None, tools: list[int]) -> tuple[int | None, dict | None]:
+    """The tool an M6 wait is asking for: the first operation at or after the current one whose tool is not the one
+    fitted. The firmware's progress line lags at the pause, so the 'current' op is often still the one before the
+    change - its tool is the fitted one, which is exactly what the machine is NOT asking for (seen on the Z1
+    2026-10-22: the card said 'fit T2' with T2 in the spindle, when the program wanted T3)."""
+    start = op_idx if op_idx is not None else 0
+    for o in ops[start:]:
+        if o.get("tool") is not None and o["tool"] != fitted:
+            return o["tool"], o
+    o = ops[start] if start < len(ops) else None
+    want = (o or {}).get("tool") or (tools[0] if tools else None)
+    return want, o
+
+
 def prepare_program(gcode: str, op_names: list[str], air_cut: float = 0.0) -> dict:
     """G-code from the CAM post -> what the Z1 plays: comments and blank lines removed (the machine stores lines in 64-byte
     slots), optionally lifted `air_cut` mm (every Z except machine-coordinate G53 moves), each operation's line range
@@ -1773,8 +1787,8 @@ class MachineControl:
                     h = st.get("halt") or {}
                     raise Refused(f"the machine alarmed: {h.get('reason', 'halted')} ({h.get('advice', 'Unlock, then home')})")
                 if s == "Tool":
-                    o = j["ops"][j["op"]] if j.get("op") is not None and j["op"] < len(j["ops"]) else None
-                    want = (o or {}).get("tool") or (j["tools"][0] if j["tools"] else None)
+                    fitted = (st.get("tool") or {}).get("number")
+                    want, o = next_tool(j["ops"], j.get("op"), fitted, j["tools"])
                     j["changing"] = True
                     if j["stage"] != "awaiting" and not j.get("confirmed"):
                         j.update(stage="awaiting", want_tool=want, msg=f"tool change: fit T{want}, then press the front button (or Confirm): the machine measures it")

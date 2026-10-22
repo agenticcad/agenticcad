@@ -94,6 +94,15 @@ class SimResult:
         rc = s.get("rapid_hits") or []
         if rc:
             lines.append(f"RAPIDS THROUGH MATERIAL: {len(rc)} — " + "; ".join(f"{h['op']} move {h['move']} ({h['depth']:.2f} mm deep)" for h in rc[:5]))
+        for b in s.get("bites") or []:
+            sd = b.get("stepdown") or 0
+            if sd and b["max"] > sd * 1.1 + 0.02:
+                lines.append(f"BITE: {b['op']}: the {b['tool']} takes up to {b['max']:.2f} mm in one pass at move {b['move']} "
+                             f"{tuple(b['at']) if b['at'] else ''} - its stepdown is {sd:g} mm. Rough or step the stock down first "
+                             "so a finishing pass only meets what it was planned for (small ball and V tools break on steps like this)")
+            if b["air_s"] >= 20 and b["air_s"] > 0.15 * max(b["cut_s"], 1.0):
+                lines.append(f"{b['op']}: {b['air_s']:.0f} s of feed moves cut nothing ({b['air_moves']} moves; cutting {b['cut_s']:.0f} s): "
+                             "links, approaches or returns that could be rapids or shorter")
         lines += [f"note: {n}" for n in self.notes]
         return "\n".join(lines)
 
@@ -143,6 +152,35 @@ def simulate(program: cam.Program, ops: list[int] | None = None, part=None, reso
     return out
 
 
+def _bite_stats(op, mv, idx, bite, rapid_rate) -> dict:
+    """Per operation: the deepest single-pass cut (and where), against the tool's stepdown, plus how the time splits
+    into rapids, cutting feeds and feed moves that removed nothing (links, plunges in air, returns)."""
+    n = len(op.moves)
+    per_move = np.full(n, -np.inf)
+    if len(idx):
+        np.maximum.at(per_move, idx, bite)
+    rapid_s = cut_s = air_s = 0.0
+    air_moves = []
+    for k in range(1, n):
+        a, b = mv[k - 1], mv[k]
+        d = math.dist(a[1:4], b[1:4])
+        if b[0] == cam.RAPID:
+            rapid_s += d / rapid_rate * 60.0
+            continue
+        t = d / (b[4] or 1.0) * 60.0
+        if per_move[k] > 0.005:
+            cut_s += t
+        else:
+            air_s += t
+            if d > 0.05:
+                air_moves.append(k)
+    worst = int(np.argmax(per_move)) if n else 0
+    mx = float(per_move[worst]) if n and np.isfinite(per_move[worst]) else 0.0
+    return {"op": op.name, "tool": op.tool.label(), "max": round(max(mx, 0.0), 3), "move": worst + 1,
+            "at": [round(float(v), 2) for v in mv[worst][1:4]] if n else None, "stepdown": op.tool.stepdown,
+            "rapid_s": round(rapid_s, 1), "cut_s": round(cut_s, 1), "air_s": round(air_s, 1), "air_moves": len(air_moves)}
+
+
 def _frame_marks(total: int, frames: int) -> list[int]:
     if total <= 0:
         return [0]
@@ -187,7 +225,7 @@ def _sim_zmap(program, sel, part, resolution, frames, tol, machine_model=None, p
             out.notes.append(f"{op.name}: side setup ({st.orient}) is not simulated in the height-map model")
             plans.append((i, op, 0, None)); continue
         P = st.to_model(np.array([m[1:4] for m in op.moves], dtype=float)) if op.moves else np.zeros((0, 3))
-        mv = [[m[0], *p] for m, p in zip(op.moves, P)]
+        mv = [[m[0], *p, m[4]] for m, p in zip(op.moves, P)]
         plans.append((i, op, side, mv))
     total = sum(len(op.moves) for _, op, _, _ in plans)
     marks = _frame_marks(total, frames)
@@ -210,6 +248,8 @@ def _sim_zmap(program, sel, part, resolution, frames, tol, machine_model=None, p
                      "replaces_spoilboard": placement.get("replaces_spoilboard", setups[0].replaces_spoilboard())}
     gouged = np.zeros((ny, nx), dtype=bool)
     gouge_ops: list[str] = []
+    bites: list[dict] = []                                # per op: the deepest single-pass cut, and feed time spent in air
+    rapid_rate = float(getattr(program.setup.machine, "rapid", 2000.0) or 2000.0)
 
     snap(0)
     for i, op, side, mv in plans:
@@ -219,7 +259,8 @@ def _sim_zmap(program, sel, part, resolution, frames, tol, machine_model=None, p
                 snap(marks[mark_i]); mark_i += 1
             continue
         tool = op.tool
-        pts, idx, kinds = _samples(mv, res / 2, False)
+        pts, idx, kinds = _samples([m[:4] for m in mv], res / 2, False)
+        bite = np.full(len(pts), -np.inf)
         # process in pieces that end at frame marks so snapshots are exact
         start = 0
         while start < len(pts):
@@ -233,7 +274,7 @@ def _sim_zmap(program, sel, part, resolution, frames, tol, machine_model=None, p
             P = pts[start:end]; K = kinds[start:end]; I = idx[start:end]
             if side == 1:
                 _buried_z(collisions, zhi, P, K, I, tool, res, x0, y0, op.name)
-            _stamp_z(zhi, zlo, P, K, I, tool, side, res, x0, y0, rapid_hits, op.name)
+            _stamp_z(zhi, zlo, P, K, I, tool, side, res, x0, y0, rapid_hits, op.name, bite[start:end])
             if machine_model is not None and side == 1:
                 _collide_z(collisions, zhi, P, I, done, tool, machine_model, res, x0, y0, op.name, st_boxes[0], placement)
             if fix is not None and side == 1:
@@ -242,6 +283,7 @@ def _sim_zmap(program, sel, part, resolution, frames, tol, machine_model=None, p
             if next_mark is not None and end_move_done(idx, end, done, next_mark):
                 snap(next_mark); mark_i += 1
         done += len(op.moves)
+        bites.append(_bite_stats(op, mv, idx, bite, rapid_rate))
         if pmaps is not None:
             g = _gouge_z(pmaps, zhi, zlo, tol, has_bottom)[0]
             if (g & ~gouged).sum() * res * res > 0.5:
@@ -253,7 +295,7 @@ def _sim_zmap(program, sel, part, resolution, frames, tol, machine_model=None, p
         snap(total)
     remaining = np.where(zhi > zlo, zhi - zlo, 0.0).sum() * res * res
     out.stats = {"moves": total, "ops": len(sel), "removed_cm3": round((initial - remaining) / 1000.0, 3),
-                 "rapid_hits": rapid_hits[:50]}
+                 "rapid_hits": rapid_hits[:50], "bites": bites}
     if machine_model is not None or fix_hi is not None or collisions:
         out.stats["collisions"] = _collision_stats(collisions)
         if machine_model is not None:
@@ -291,12 +333,15 @@ def _runs(K):
     return list(zip(edges[:-1], edges[1:]))
 
 
-def _stamp_z(zhi, zlo, P, K, I, tool, side, res, x0, y0, rapid_hits, op_name):
+def _stamp_z(zhi, zlo, P, K, I, tool, side, res, x0, y0, rapid_hits, op_name, bite=None):
     for a, b in _runs(K):                              # in order: a rapid sees everything cut before it
-        _stamp_z_run(zhi, zlo, P[a:b], K[a:b], I[a:b], tool, side, res, x0, y0, rapid_hits, op_name)
+        _stamp_z_run(zhi, zlo, P[a:b], K[a:b], I[a:b], tool, side, res, x0, y0, rapid_hits, op_name,
+                     None if bite is None else bite[a:b])
 
 
-def _stamp_z_run(zhi, zlo, P, K, I, tool, side, res, x0, y0, rapid_hits, op_name):
+def _stamp_z_run(zhi, zlo, P, K, I, tool, side, res, x0, y0, rapid_hits, op_name, bite=None):
+    """Stamp the tool along the samples. `bite` (same length as P, in/out): for every feed sample, the deepest the
+    stock stands above the tool's cutting surface anywhere under the tool - what the cut bites off in one pass."""
     ny, nx = zhi.shape
     if len(P) == 0:
         return
@@ -332,6 +377,14 @@ def _stamp_z_run(zhi, zlo, P, K, I, tool, side, res, x0, y0, rapid_hits, op_name
                     owner = np.broadcast_to(I[s:e][:, None], d.shape)[ok][rows]
                     j = int(np.argmax(np.where(hit, depth, -1)))
                     rapid_hits.append({"op": op_name, "move": int(owner[j]) + 1, "depth": round(float(depth[j]), 3)})
+        if bite is not None and not rap.all():
+            hi = zhi.ravel()[flat]; lo = zlo.ravel()[flat]
+            depth = np.where(hi > lo, (hi - vals) if side > 0 else (vals - lo), -np.inf)
+            rows = np.broadcast_to(np.arange(d.shape[0])[:, None], d.shape)[ok]
+            per = np.full(d.shape[0], -np.inf)
+            np.maximum.at(per, rows, depth)
+            per[rap] = -np.inf
+            bite[s:s + d.shape[0]] = np.maximum(bite[s:s + d.shape[0]], per)
         if side > 0:
             np.minimum.at(zhi.ravel(), flat, vals)
         else:

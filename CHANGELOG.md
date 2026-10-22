@@ -5,6 +5,18 @@ patch bumps fix things, a major bump changes something scripts or workspaces rel
 
 ## [Unreleased]
 
+### Fixed
+- **The tool-change card asked for the fitted tool.** At an `M6` the firmware's progress line still points at the
+  operation before the change, whose tool is the one in the spindle; the card (and the phone notification) now name
+  the first operation ahead whose tool is not the fitted one — what the machine is actually waiting for.
+
+### Added
+- **The simulation reports the bite of every pass and feed time spent in air.** For each operation: the deepest the
+  stock stood above the tool's cutting surface in one pass (anywhere under the tool, so a stair step beside a ball
+  counts), where, and against the tool's stepdown — a **BITE** warning when a pass takes more than it was planned
+  for; plus the split into rapids, cutting feeds and feed moves that removed nothing, with a note when the latter is
+  worth chasing.
+
 ## [1.2.0] — 2026-10-21
 
 ### Added
