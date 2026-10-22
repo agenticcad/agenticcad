@@ -67,6 +67,7 @@ class SimResult:
     notes: list = field(default_factory=list)
     final: dict = field(default_factory=dict)            # name -> np.ndarray (final state)
     masks: dict = field(default_factory=dict)            # gouge / left masks (bool arrays)
+    per_move: dict = field(default_factory=dict)         # op index -> {"mrr": np.ndarray, "ap": np.ndarray} per move (zmap)
 
     def summary(self) -> str:
         s = self.stats
@@ -96,10 +97,22 @@ class SimResult:
             lines.append(f"RAPIDS THROUGH MATERIAL: {len(rc)} — " + "; ".join(f"{h['op']} move {h['move']} ({h['depth']:.2f} mm deep)" for h in rc[:5]))
         for b in s.get("bites") or []:
             sd = b.get("stepdown") or 0
-            if sd and b["max"] > sd * 1.1 + 0.02 and b.get("kind") not in ("vcarve", "chamfer"):   # those cut to depth by design
-                lines.append(f"BITE: {b['op']}: the {b['tool']} takes up to {b['max']:.2f} mm in one pass at move {b['move']} "
+            by_design = b.get("kind") in ("vcarve", "chamfer")                     # those cut to depth by design
+            if sd and b["max"] > sd * 1.1 + 0.02 and not by_design:
+                lines.append(f"BITE: {b['op']}: the {b['tool']} is buried {b['max']:.2f} mm deep at move {b['move']} "
                              f"{tuple(b['at']) if b['at'] else ''} - its stepdown is {sd:g} mm. Rough or step the stock down first "
                              "so a finishing pass only meets what it was planned for (small ball and V tools break on steps like this)")
+            rated = b.get("mrr_rated") or 0
+            mean = b.get("mrr_mean") or 0
+            where = f"at move {b['mrr_move']} {tuple(b['mrr_at']) if b['mrr_at'] else ''}"
+            if b.get("kind") in FINISHING_KINDS and mean > 0 and b.get("mrr_max", 0) > 3 * mean and b["mrr_max"] > 20:
+                lines.append(f"MRR: {b['op']}: a finishing pass removes {b['mrr_max']:.0f} mm³/min {where}, {b['mrr_max'] / mean:.0f}x the "
+                             f"operation's own average of {mean:.0f} - it has found stock the roughing left (a cap, a step, a collar) "
+                             "and is cutting it as a slot. Rough that away first; a slower feed there only hides it (Program.limit_feeds)")
+            elif rated and not by_design and b.get("mrr_max", 0) > rated * 3.0 and b["mrr_max"] > 5:   # a full slot is ~2.5x
+                lines.append(f"MRR: {b['op']}: removes up to {b['mrr_max']:.0f} mm³/min {where} - {b['mrr_max'] / rated:.1f}x the {b['tool']}'s "
+                             f"{rated:.0f} mm³/min at its stepdown x stepover x feed (mean while cutting {mean:.0f}). The tool cannot sustain "
+                             "that: change the path there (rough first, approach from above the stock) or limit the feed (Program.limit_feeds)")
             if b["air_s"] >= 20 and b["air_s"] > 0.15 * max(b["cut_s"], 1.0):
                 lines.append(f"{b['op']}: {b['air_s']:.0f} s of feed moves cut nothing ({b['air_moves']} moves; cutting {b['cut_s']:.0f} s): "
                              "links, approaches or returns that could be rapids or shorter")
@@ -152,13 +165,37 @@ def simulate(program: cam.Program, ops: list[int] | None = None, part=None, reso
     return out
 
 
-def _bite_stats(op, mv, idx, bite, rapid_rate) -> dict:
-    """Per operation: the deepest single-pass cut (and where), against the tool's stepdown, plus how the time splits
-    into rapids, cutting feeds and feed moves that removed nothing (links, plunges in air, returns)."""
+FINISHING_KINDS = ("parallel3d", "contour", "rotary_finish", "rotary_profile")   # ops planned as skims: a buried pass is a surprise
+
+
+def _bite_stats(op, mv, pts, idx, kinds, eng, rapid_rate) -> tuple[dict, dict]:
+    """Per operation: the deepest axial engagement of one pass (and where) against the tool's stepdown, the highest
+    material removal rate (mm3/min: volume a sample removes / its step x the move's feed) against the tool's rated
+    MRR (stepdown x stepover width x feed), how the time splits into rapids, cutting feeds and feed moves that removed
+    nothing - and per move the max ap and MRR (for Program.limit_feeds)."""
     n = len(op.moves)
-    per_move = np.full(n, -np.inf)
+    ap_move = np.full(n, -np.inf); mrr_move = np.zeros(n); vol_move = np.zeros(n)
     if len(idx):
-        np.maximum.at(per_move, idx, bite)
+        np.maximum.at(ap_move, idx, eng[:, 0])
+        feeding = kinds != cam.RAPID
+        vol = np.where(feeding, eng[:, 1], 0.0)
+        np.add.at(vol_move, idx, vol)
+        # removal rate over a window of one tool radius (at least 0.5 mm) of feed travel: a single sample's volume
+        # comes in cell-sized jumps and a 0.02 mm move would read ten times its real rate
+        step = np.zeros(len(pts))
+        if len(pts) > 1:
+            step[1:] = np.linalg.norm(pts[1:, :3] - pts[:-1, :3], axis=1)
+        feed = np.array([mv[i][4] or 0.0 for i in idx], dtype=float)
+        minutes = np.where(feeding & (feed > 0), step / np.maximum(feed, 1e-9), 0.0)
+        dist = np.where(feeding, step, 0.0)
+        cv, ct, cd = np.concatenate([[0.0], np.cumsum(vol)]), np.concatenate([[0.0], np.cumsum(minutes)]), np.concatenate([[0.0], np.cumsum(dist)])
+        W = max(op.tool.diameter / 2.0, 0.5)
+        j = np.searchsorted(cd, cd[1:] - W, side="left")       # window start for each sample (index into the cumulative arrays)
+        for a, b in _runs(kinds):                                # a window never reaches back across a rapid
+            j[a:b] = np.maximum(j[a:b], a)
+        dv = cv[1:] - cv[j]; dt = ct[1:] - ct[j]
+        rate = np.where((dt > 1e-9) & feeding, dv / np.maximum(dt, 1e-9), 0.0)
+        np.maximum.at(mrr_move, idx, rate)
     rapid_s = cut_s = air_s = 0.0
     air_moves = []
     for k in range(1, n):
@@ -168,17 +205,24 @@ def _bite_stats(op, mv, idx, bite, rapid_rate) -> dict:
             rapid_s += d / rapid_rate * 60.0
             continue
         t = d / (b[4] or 1.0) * 60.0
-        if per_move[k] > 0.005:
+        if vol_move[k] > 1e-4 or ap_move[k] > 0.005:
             cut_s += t
         else:
             air_s += t
             if d > 0.05:
                 air_moves.append(k)
-    worst = int(np.argmax(per_move)) if n else 0
-    mx = float(per_move[worst]) if n and np.isfinite(per_move[worst]) else 0.0
-    return {"op": op.name, "kind": op.kind, "tool": op.tool.label(), "max": round(max(mx, 0.0), 3), "move": worst + 1,
-            "at": [round(float(v), 2) for v in mv[worst][1:4]] if n else None, "stepdown": op.tool.stepdown,
-            "rapid_s": round(rapid_s, 1), "cut_s": round(cut_s, 1), "air_s": round(air_s, 1), "air_moves": len(air_moves)}
+    worst = int(np.argmax(ap_move)) if n else 0
+    mx = float(ap_move[worst]) if n and np.isfinite(ap_move[worst]) else 0.0
+    wm = int(np.argmax(mrr_move)) if n else 0
+    tool = op.tool
+    rated = tool.rated_mrr()
+    b = {"op": op.name, "kind": op.kind, "tool": tool.label(), "max": round(max(mx, 0.0), 3), "move": worst + 1,
+         "at": [round(float(v), 2) for v in mv[worst][1:4]] if n else None, "stepdown": tool.stepdown,
+         "mrr_max": round(float(mrr_move[wm]), 1), "mrr_move": wm + 1, "mrr_at": [round(float(v), 2) for v in mv[wm][1:4]] if n else None,
+         "mrr_rated": round(rated, 1), "mrr_mean": round(float(vol_move.sum()) / (cut_s / 60.0), 1) if cut_s > 1e-6 else 0.0,
+         "removed_mm3": round(float(vol_move.sum()), 2),
+         "rapid_s": round(rapid_s, 1), "cut_s": round(cut_s, 1), "air_s": round(air_s, 1), "air_moves": len(air_moves)}
+    return b, {"ap": np.where(np.isfinite(ap_move), ap_move, 0.0), "mrr": mrr_move}
 
 
 def _frame_marks(total: int, frames: int) -> list[int]:
@@ -260,7 +304,7 @@ def _sim_zmap(program, sel, part, resolution, frames, tol, machine_model=None, p
             continue
         tool = op.tool
         pts, idx, kinds = _samples([m[:4] for m in mv], res / 2, False)
-        bite = np.full(len(pts), -np.inf)
+        eng = np.full((len(pts), 3), -np.inf); eng[:, 1] = 0.0
         # process in pieces that end at frame marks so snapshots are exact
         start = 0
         while start < len(pts):
@@ -274,7 +318,7 @@ def _sim_zmap(program, sel, part, resolution, frames, tol, machine_model=None, p
             P = pts[start:end]; K = kinds[start:end]; I = idx[start:end]
             if side == 1:
                 _buried_z(collisions, zhi, P, K, I, tool, res, x0, y0, op.name)
-            _stamp_z(zhi, zlo, P, K, I, tool, side, res, x0, y0, rapid_hits, op.name, bite[start:end])
+            _stamp_z(zhi, zlo, P, K, I, tool, side, res, x0, y0, rapid_hits, op.name, eng[start:end])
             if machine_model is not None and side == 1:
                 _collide_z(collisions, zhi, P, I, done, tool, machine_model, res, x0, y0, op.name, st_boxes[0], placement)
             if fix is not None and side == 1:
@@ -283,7 +327,8 @@ def _sim_zmap(program, sel, part, resolution, frames, tol, machine_model=None, p
             if next_mark is not None and end_move_done(idx, end, done, next_mark):
                 snap(next_mark); mark_i += 1
         done += len(op.moves)
-        bites.append(_bite_stats(op, mv, idx, bite, rapid_rate))
+        b, per_move = _bite_stats(op, mv, pts, idx, kinds, eng, rapid_rate)
+        bites.append(b); out.per_move[i] = per_move
         if pmaps is not None:
             g = _gouge_z(pmaps, zhi, zlo, tol, has_bottom)[0]
             if (g & ~gouged).sum() * res * res > 0.5:
@@ -333,15 +378,18 @@ def _runs(K):
     return list(zip(edges[:-1], edges[1:]))
 
 
-def _stamp_z(zhi, zlo, P, K, I, tool, side, res, x0, y0, rapid_hits, op_name, bite=None):
+def _stamp_z(zhi, zlo, P, K, I, tool, side, res, x0, y0, rapid_hits, op_name, eng=None):
     for a, b in _runs(K):                              # in order: a rapid sees everything cut before it
         _stamp_z_run(zhi, zlo, P[a:b], K[a:b], I[a:b], tool, side, res, x0, y0, rapid_hits, op_name,
-                     None if bite is None else bite[a:b])
+                     None if eng is None else eng[a:b])
 
 
-def _stamp_z_run(zhi, zlo, P, K, I, tool, side, res, x0, y0, rapid_hits, op_name, bite=None):
-    """Stamp the tool along the samples. `bite` (same length as P, in/out): for every feed sample, the deepest the
-    stock stands above the tool's cutting surface anywhere under the tool - what the cut bites off in one pass."""
+def _stamp_z_run(zhi, zlo, P, K, I, tool, side, res, x0, y0, rapid_hits, op_name, eng=None):
+    """Stamp the tool along the samples. `eng` (len(P) x 3, in/out) measures every feed sample's cut against the
+    stock as the previous sample left it: [0] ap - the axial depth of the material being cut (stock height above
+    the tool tip over the cells this sample removes something from: a buried ball in a slot reads the slot depth,
+    not the sample's increment), [1] the volume it removes (mm3), [2] the deepest the stock stands above the
+    tool's cutting surface (the old 'bite'). Material removal rate follows from [1] / step x feed."""
     ny, nx = zhi.shape
     if len(P) == 0:
         return
@@ -377,14 +425,36 @@ def _stamp_z_run(zhi, zlo, P, K, I, tool, side, res, x0, y0, rapid_hits, op_name
                     owner = np.broadcast_to(I[s:e][:, None], d.shape)[ok][rows]
                     j = int(np.argmax(np.where(hit, depth, -1)))
                     rapid_hits.append({"op": op_name, "move": int(owner[j]) + 1, "depth": round(float(depth[j]), 3)})
-        if bite is not None and not rap.all():
+        if eng is not None and not rap.all():
+            m_ = d.shape[0]
             hi = zhi.ravel()[flat]; lo = zlo.ravel()[flat]
-            depth = np.where(hi > lo, (hi - vals) if side > 0 else (vals - lo), -np.inf)
-            rows = np.broadcast_to(np.arange(d.shape[0])[:, None], d.shape)[ok]
-            per = np.full(d.shape[0], -np.inf)
-            np.maximum.at(per, rows, depth)
-            per[rap] = -np.inf
-            bite[s:s + d.shape[0]] = np.maximum(bite[s:s + d.shape[0]], per)
+            mat = hi > lo
+            rows = np.broadcast_to(np.arange(m_)[:, None], d.shape)[ok]
+            depth = np.where(mat, (hi - vals) if side > 0 else (vals - lo), -np.inf)
+            per = np.full(m_, -np.inf); np.maximum.at(per, rows, depth); per[rap] = -np.inf
+            # the surface the previous sample left under these cells: what is new for this sample is below it
+            prev_idx = np.arange(s, s + m_) - 1                # -1 for the first sample of the run: nothing before it
+            PX = np.where(prev_idx[:, None] >= 0, P[np.maximum(prev_idx, 0), 0:1], np.inf)
+            PY = np.where(prev_idx[:, None] >= 0, P[np.maximum(prev_idx, 0), 1:2], np.inf)
+            dprev = np.hypot(x0 + CX * res - PX, y0 + CY * res - PY)
+            okp = ok & (dprev < R - 1e-4) & (prev_idx[:, None] >= 0)
+            profp = _profile(tool, np.where(okp, dprev, 0.0))
+            zprev = np.broadcast_to(P[np.maximum(prev_idx, 0), 2:3], d.shape)
+            tipz = np.broadcast_to(P[s:s + m_, 2:3], d.shape)[ok]
+            surf_prev = np.where(okp & np.isfinite(profp), (zprev + profp) if side > 0 else (zprev - profp), np.inf if side > 0 else -np.inf)[ok]
+            if side > 0:
+                ceiling = np.minimum(hi, surf_prev)
+                inc = np.where(mat, ceiling - vals, -np.inf)
+            else:
+                floor_ = np.maximum(lo, surf_prev)
+                inc = np.where(mat, vals - floor_, -np.inf)
+            cut = inc > 1e-6
+            axial = np.where(cut, (hi - tipz) if side > 0 else (tipz - lo), -np.inf)
+            ap = np.full(m_, -np.inf); np.maximum.at(ap, rows, axial); ap[rap] = -np.inf
+            vol = np.zeros(m_); np.add.at(vol, rows[cut], inc[cut] * res * res); vol[rap] = 0.0
+            eng[s:s + m_, 0] = np.maximum(eng[s:s + m_, 0], ap)
+            eng[s:s + m_, 1] += vol
+            eng[s:s + m_, 2] = np.maximum(eng[s:s + m_, 2], per)
         if side > 0:
             np.minimum.at(zhi.ravel(), flat, vals)
         else:

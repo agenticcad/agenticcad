@@ -297,7 +297,13 @@ After building a program, check it with `simulate_cam`: it removes material from
 reports gouges into the part (with the op that caused them), material left on the part, rapids through
 material, and machine collisions: the collet nut / spindle nose / head against the remaining stock (narrow cuts deeper
 than the flutes), the tool through the spoilboard into the bed, and the holder against the chuck or tailstock on
-4th-axis jobs. Fix gouges, rapid hits and collisions before exporting (shorter tool stickout, a longer tool, a wider
+4th-axis jobs. It also reports, per operation, how deep each pass is BURIED against the tool's stepdown (BITE) and the
+material removal rate (MRR) against the tool's rating and - for finishing passes - the operation's own average: a
+finishing pass that suddenly removes several times its average has met stock the roughing left (a cap over a top, a
+collar at a roughing band's floor, a step) and is slotting it with a tool that was never meant to; that is how an R1 ball
+broke on the Z1. Those are PATH problems: rough the leftover first (a level that takes the cap, collars cut as profile
+laps), approach from above the stock and ramp in, never plunge a ball into a step. `limit_feeds_from_sim` slows what
+remains, last, before sending - it is not a substitute for fixing the path. Fix gouges, rapid hits and collisions before exporting (shorter tool stickout, a longer tool, a wider
 pocket, or shallower depth); the user can scrub the simulation in the CAM workspace and watch it on the machine model
 (the CAM viewer's Machine toggle).
 Makera Z1 / Carvera Air post (machine.post == "makera"): M6 Tn runs the whole manual change (moves to the change
@@ -1246,6 +1252,20 @@ class CadAgent:
         self.sim = res
         self.sim_ops = ops if ops is not None else list(range(len(self.program.ops)))
         await self.emit({"type": "cam_sim", "sim": res.to_payload(), "ops": self.sim_ops})
+        return res
+
+    async def limit_feeds(self, floor: float = 0.25, margin: float = 2.5, finishing_factor: float = 3.0) -> dict:
+        """Material removal rate as part of the calculation: after a simulation, slow every move that removes more
+        than its reference (see Program.limit_feeds) and push the program back to the viewer. A rebuild of cam.py
+        resets the feeds, so this is the last step before the program is sent."""
+        if self.program is None:
+            raise cam.CamError("no CAM program built")
+        if self.sim is None or not getattr(self.sim, "per_move", None):
+            raise cam.CamError("simulate the program first (simulate_cam): the feed limits come from the simulation's per-move removal rates")
+        res = self.program.limit_feeds(self.sim, floor=floor, margin=margin, finishing_factor=finishing_factor)
+        if res["changed"]:
+            await self.emit({"type": "cam", "program": self.program.to_payload(), "code": self.cam_code, "source": "limit_feeds"})
+        return res
         return res
 
     def _run_cam(self, code: str) -> cam.Program:
@@ -2298,6 +2318,28 @@ class CadAgent:
             except cam.CamError as e:
                 return {"content": [{"type": "text", "text": f"simulation failed: {e}"}], "is_error": True}
             return {"content": [{"type": "text", "text": res.summary()}]}
+
+        @tool("limit_feeds_from_sim",
+              "Material removal rate as part of the calculation. After simulate_cam, slow every feed move whose removal rate "
+              "(from the simulation) exceeds its reference: `margin` x the tool's rated MRR (stepdown x stepover width x feed; "
+              "2.5 = a full slot at the rated chip load, so roughing entries are left alone), and for finishing operations "
+              "`finishing_factor` x the operation's own average (a skim that suddenly slots has found leftover stock). Never "
+              "below `floor` x the planned feed; moves that would need less are listed as 'beyond' - there the PATH must change "
+              "(rough first, approach from above the stock), a slower feed is not a fix. Rebuilding cam.py resets the feeds: "
+              "run this last, then send.",
+              {"type": "object", "properties": {"floor": {"type": "number"}, "margin": {"type": "number"},
+                                                "finishing_factor": {"type": "number"}}, "required": []})
+        async def limit_feeds_from_sim(args: dict[str, Any]) -> dict[str, Any]:
+            try:
+                res = await agent.limit_feeds(float(args.get("floor", 0.25)), float(args.get("margin", 2.5)), float(args.get("finishing_factor", 3.0)))
+            except cam.CamError as e:
+                return {"content": [{"type": "text", "text": str(e)}], "is_error": True}
+            if not res["changed"]:
+                return {"content": [{"type": "text", "text": "no move exceeds its removal-rate reference: feeds unchanged"}]}
+            lines = [f"{res['changed']} feed moves slowed:"]
+            for name, o in res["ops"].items():
+                lines.append(f"  {name}: {o['moves']} moves, down to x{o['min_factor']}" + (f"; {o['beyond_count']} beyond the floor (moves {o['beyond'][:8]}) - change the path there" if o["beyond_count"] else ""))
+            return {"content": [{"type": "text", "text": "\n".join(lines)}]}
 
         @tool("check_interference",
               "Exact interference check between bodies (OCCT booleans): every pair whose solids overlap, with the "

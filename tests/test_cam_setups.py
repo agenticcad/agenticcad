@@ -617,8 +617,19 @@ def test_sim_reports_the_bite_of_each_pass_and_feed_in_air(machines, plate):
     assert b["op"] == "deep slot" and b["max"] == pytest.approx(2.0, abs=0.05) and b["stepdown"] == 0.5
     assert b["cut_s"] == pytest.approx(6.0 + 5.0 / 150 * 60, abs=0.6) and b["air_s"] == pytest.approx(24.0, abs=0.6) and b["air_moves"] == 4
     s = r.summary()
-    assert "BITE: deep slot" in s and "2.00 mm in one pass" in s and "stepdown is 0.5" in s
+    assert "BITE: deep slot" in s and "buried 2.00 mm deep" in s and "stepdown is 0.5" in s
     assert "24 s of feed moves cut nothing" in s
+    # material removal rate: a 3.175 wide x 2 deep slot at F600 is ~3800 mm3/min against a rating of 0.5 x 1.27 x 600 = 381
+    assert t.rated_mrr() == pytest.approx(0.5 * 0.4 * 3.175 * 600, rel=1e-6)
+    assert b["mrr_max"] == pytest.approx(3.175 * 2.0 * 600, rel=0.15) and b["mrr_rated"] == pytest.approx(t.rated_mrr(), rel=1e-3)
+    assert "MRR: deep slot" in s and "x the" in s
+    # limit_feeds: 10x the rating is 4x the slotting allowance; the slot move can only be slowed to the floor (25 %)
+    # and is reported as beyond a feed fix
+    before = [m[4] for m in op.moves]
+    lim = p.limit_feeds(r)
+    assert lim["changed"] >= 1 and lim["ops"]["deep slot"]["beyond_count"] >= 1
+    slot = op.moves[2]
+    assert slot[4] == pytest.approx(600 * 0.25, abs=0.2) and op.moves[4][4] == before[4]       # the air move is untouched
     # a pass that stays within its stepdown is not flagged
     ok = cam.Op("fine", "pocket", t)
     pb = cam.PathBuilder(st, ok.tool, ok)
@@ -628,6 +639,26 @@ def test_sim_reports_the_bite_of_each_pass_and_feed_in_air(machines, plate):
     q = cam.Program(st); q.add(ok)
     r2 = cam_sim.simulate(q)
     assert r2.stats["bites"][0]["max"] == pytest.approx(0.4, abs=0.05) and "BITE" not in r2.summary()
+    # a 0.4 deep x 3.175 wide slot at F600 = 762 mm3/min (2x the rating); the plunge that starts it bores the full
+    # face 0.4 deep at F150 (~1190 mm3/min) and the window at the slot's start still holds it: the max sits between
+    slot_rate, plunge_rate = 3.175 * 0.4 * 600, math.pi * 3.175 ** 2 / 4 * 150
+    assert slot_rate * 0.9 < r2.stats["bites"][0]["mrr_max"] < plunge_rate * 1.1
+    assert "MRR:" not in r2.summary()                                   # a slot at the rated chip load is normal work
+    lim2 = q.limit_feeds(r2)
+    assert lim2["changed"] == 0 or lim2["ops"]["fine"]["min_factor"] > 0.9   # within the slotting allowance: left alone
+    # a finishing kind is held to its own average: a parallel3d skim that suddenly slots is slowed even if the tool's rating allows it
+    fin = cam.Op("skim", "parallel3d", t)
+    pb = cam.PathBuilder(st, fin.tool, fin)
+    pb._add(cam.RAPID, -30, -10, top + 3, 0)
+    pb._add(cam.PLUNGE, -30, -10, top - 0.02, 150)
+    pb._add(cam.FEED, 10, -10, top - 0.02, 600)                   # 40 mm skimming 0.02
+    pb._add(cam.FEED, 10, -10, top - 0.4, 600)                    # then drops 0.4 and slots 20 mm
+    pb._add(cam.FEED, 30, -10, top - 0.4, 600)
+    f = cam.Program(st); f.add(fin)
+    r3 = cam_sim.simulate(f)
+    assert "MRR: skim" in r3.summary() and "operation's own average" in r3.summary()
+    lim3 = f.limit_feeds(r3)
+    assert lim3["ops"]["skim"]["moves"] >= 1 and fin.moves[4][4] < 600 and fin.moves[2][4] == 600
 
 
 def test_contour_lead_out_leaves_above_the_top_not_through_the_waste(machines, plate):

@@ -506,6 +506,21 @@ async def cam_simulate(body: SimBody):
     return res.to_payload() | {"ops": agent.sim_ops}
 
 
+class LimitBody(BaseModel):
+    floor: float = 0.25
+    margin: float = 2.5
+    finishing_factor: float = 3.0
+
+
+@app.post("/api/cam/limit_feeds")
+async def cam_limit_feeds(body: LimitBody):
+    """Slow the moves the last simulation showed removing more than their reference (Program.limit_feeds)."""
+    try:
+        return await agent.limit_feeds(body.floor, body.margin, body.finishing_factor)
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"error": str(e)}, status_code=400)
+
+
 @app.get("/api/cam/machine_model")
 async def cam_machine_model(quality: str = "normal", name: str | None = None, info: bool = False):
     """The kinematic 3D model of the program's machine (or `name`) for the viewer's Machine toggle: tessellated parts,

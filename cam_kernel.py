@@ -76,6 +76,13 @@ class Tool:
         import tool_shape
         return tool_shape.shape(self)
 
+    def rated_mrr(self) -> float:
+        """Material removal rate (mm3/min) at the tool's own stepdown x stepover width x feed - the cut feeds() sized it
+        for. A pass that removes much more than this (a ball buried in a slot, a plunge into a step) is one the tool
+        was never meant to take; V-bits and chamfer tools cut to depth by design, so theirs is only a guide."""
+        w = self.stepover * self.diameter if self.type not in ("vbit", "chamfer") else max(self.tip_diameter, 0.2)
+        return float(max(self.stepdown, 0.0) * max(w, 0.0) * max(self.feed, 0.0))
+
     def label(self) -> str:
         return f"T{self.number} {self.name}"
 
@@ -2673,6 +2680,44 @@ class Program:
         }
 
     # ---------------------------------------------------------------- post
+    def limit_feeds(self, sim, floor: float = 0.25, margin: float = 2.5, finishing_factor: float = 3.0) -> dict:
+        """Material removal rate as part of the calculation: scale every feed move whose MRR (from the simulation's
+        per-move numbers) exceeds its reference down to it, never below `floor` x the planned feed. The reference is
+        `margin` x the tool's rated MRR (stepdown x stepover width x feed; 2.5x is a full slot at the rated chip load,
+        so roughing entries and links are left alone) - and for finishing operations also `finishing_factor` x the
+        operation's own average while cutting, because a skim that suddenly removes several times its average has
+        found stock the roughing left (the R1 ball on the Z1, 2026-10-22: 195 mm3/min against an average of 38).
+        Moves that would need less than the floor are left at the floor and reported: there the path itself must
+        change (rough first, approach from above the stock) - a slower feed is not a fix for a cut the tool cannot take.
+        Returns {"changed": n, "ops": {name: {"moves": n, "min_factor": f, "beyond": [move numbers]}}}."""
+        out: dict = {"changed": 0, "ops": {}}
+        per = getattr(sim, "per_move", None) or {}
+        for i, op in enumerate(self.ops):
+            pm = per.get(i)
+            if not pm or op.kind in ("vcarve", "chamfer"):
+                continue
+            rated = op.tool.rated_mrr() * margin
+            if rated <= 0:
+                continue
+            if op.kind in ("parallel3d", "contour", "rotary_finish", "rotary_profile"):
+                b = next((x for x in (getattr(sim, "stats", {}) or {}).get("bites", []) if x.get("op") == op.name), None)
+                if b and b.get("mrr_mean"):
+                    rated = min(rated, finishing_factor * b["mrr_mean"])
+            mrr = pm["mrr"]
+            changed, beyond, fmin = 0, [], 1.0
+            for k, m in enumerate(op.moves):
+                if m[0] == RAPID or k >= len(mrr) or mrr[k] <= rated or not m[4]:
+                    continue
+                f = rated / float(mrr[k])
+                if f < floor:
+                    beyond.append(k + 1); f = floor
+                m[4] = round(m[4] * f, 1); changed += 1; fmin = min(fmin, f)
+            if changed:
+                out["ops"][op.name] = {"moves": changed, "min_factor": round(fmin, 3), "beyond": beyond[:50], "beyond_count": len(beyond)}
+                out["changed"] += changed
+                op.params["feed_limited"] = {"moves": changed, "min_factor": round(fmin, 3), "beyond": len(beyond)}
+        return out
+
     def gcode(self) -> str:
         post = self.setup.machine.post
         if post == "makera":

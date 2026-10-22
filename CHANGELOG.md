@@ -15,6 +15,15 @@ patch bumps fix things, a major bump changes something scripts or workspaces rel
   wall is still cut at depth to the exit point.
 
 ### Added
+- **Material removal rate is part of the calculation.** The simulation measures every pass against the stock as
+  the previous sample left it: how deep the tool is buried (a ball in a slot reads the slot depth, not the step),
+  the volume it removes and its removal rate over a tool radius of travel. Per operation it reports the deepest
+  burial against the stepdown (**BITE**), the highest and mean MRR against the tool's rating (stepdown x stepover
+  width x feed, `Tool.rated_mrr`) and - for finishing passes - against the operation's own average: a skim that
+  suddenly removes several times its average has found stock the roughing left (**MRR** line). The R1 ball that
+  broke on the Z1 was doing exactly that: plunging into the facing's cap over the gem top, then slotting it at
+  5x its average. `Program.limit_feeds` / the assistant's `limit_feeds_from_sim` / `POST /api/cam/limit_feeds` slow
+  the moves that remain over their reference (floor 25 %; moves beyond the floor are listed as path problems).
 - **The simulation reports the bite of every pass and feed time spent in air.** For each operation: the deepest the
   stock stood above the tool's cutting surface in one pass (anywhere under the tool, so a stair step beside a ball
   counts), where, and against the tool's stepdown — a **BITE** warning when a pass takes more than it was planned
