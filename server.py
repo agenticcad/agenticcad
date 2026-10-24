@@ -333,7 +333,7 @@ async def _load_initial() -> None:
         await bus.emit({"type": "cam", "code": agent.cam_code, "source": "load",
                         "program": agent.program.to_payload() if agent.program else None,
                         "summary": agent.program.summary() if agent.program else "",
-                        "gcode_lines": agent.program.gcode().count("\n") if agent.program else 0})
+                        "gcode_lines": _gcode_lines(agent.program)})
 
 
 async def _watch_extensions() -> None:
@@ -404,14 +404,41 @@ async def tabs_page() -> HTMLResponse:
     return HTMLResponse((ROOT / "static" / "tabs.html").read_text())
 
 
+_gcode_n: dict[int, tuple] = {}
+
+
+def _gcode_lines(p) -> int:
+    """G-code line count of a program, worked out once per program (posting 36,000 lines takes seconds, and every page
+    of every tab that connects asks)."""
+    if p is None:
+        return 0
+    hit = _gcode_n.get(id(p))
+    if hit is None or hit[0] is not p:
+        if len(_gcode_n) > 64:
+            _gcode_n.clear()
+        hit = (p, p.gcode().count("\n"))
+        _gcode_n[id(p)] = hit
+    return hit[1]
+
+
+_prog_info: dict[int, dict] = {}                   # id(program) -> its summary (a program's time takes a while to add up)
+
+
 def _doc_info(doc_id: str, a: CadAgent) -> dict[str, Any]:
     p = a.program
     prog = None
     if p is not None:
-        try:
-            prog = {"name": p.name, "ops": len(p.ops), "setups": [st.name for st in p.setups], "minutes": round(p.time_minutes(), 1)}
-        except Exception:  # noqa: BLE001
-            prog = {"name": p.name, "ops": len(p.ops), "setups": [], "minutes": None}
+        prog = _prog_info.get(id(p))
+        if prog is None or prog.get("_p") is not p:
+            try:
+                prog = {"name": p.name, "ops": len(p.ops), "setups": [st.name for st in p.setups], "minutes": round(p.time_minutes(), 1)}
+            except Exception:  # noqa: BLE001
+                prog = {"name": p.name, "ops": len(p.ops), "setups": [], "minutes": None}
+            prog["_p"] = p
+            if len(_prog_info) > 64:
+                _prog_info.clear()
+            _prog_info[id(p)] = prog
+        prog = {k: v for k, v in prog.items() if k != "_p"}
     return {"id": doc_id, "name": a.design_name, "dirty": bool(a.model) and a.dirty, "busy": a.busy,
             "ready": bool(a.startup.get("done")), "program": prog, "pending": len(a.pending_machine_requests())}
 
@@ -486,6 +513,17 @@ async def docs_close(body: DocBody):
         _active["doc"] = None
     _save_open()
     return {"ok": True}
+
+
+if os.environ.get("AGENTICCAD_TEST_HOOKS") == "1":         # development only: deliver an event to one design's pages
+    class _EmitBody(BaseModel):
+        doc: str
+        event: dict
+
+    @app.post("/api/_test/emit")
+    async def _test_emit(body: _EmitBody):
+        await bus.emit_doc(body.doc, body.event)
+        return {"ok": True}
 
 
 @app.post("/api/docs/active")
@@ -1843,7 +1881,7 @@ async def ws_endpoint(ws: WebSocket) -> None:
         await ws.send_text(json.dumps({"type": "cam", "code": agent.cam_code, "source": "load",
                                        "program": agent.program.to_payload() if agent.program else None,
                                        "summary": agent.program.summary() if agent.program else "",
-                                       "gcode_lines": agent.program.gcode().count("\n") if agent.program else 0}))
+                                       "gcode_lines": _gcode_lines(agent.program)}))
         await ws.send_text(json.dumps(agent.slicer_payload()))
         await ws.send_text(json.dumps(agent.extensions.payload()))
         if agent.slice_layers is not None:
