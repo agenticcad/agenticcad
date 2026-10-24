@@ -339,7 +339,18 @@ def design_kit(workspace: Path | None):
     return _KITS[key]
 
 
-def run_script(code: str, quality: str = "normal", workspace: Path | None = None, library=None, threads: str = "real",
+import threading as _threading
+# One geometry build at a time across every open design: the OCCT kernel and the module-level bindings below
+# (WORKSPACE, LIBRARY) are not safe for two scripts at once. Re-entrant: a build may build (from_library, imports).
+BUILD_LOCK = _threading.RLock()
+
+
+def run_script(*args, **kwargs) -> "Model":
+    with BUILD_LOCK:
+        return _run_script(*args, **kwargs)
+
+
+def _run_script(code: str, quality: str = "normal", workspace: Path | None = None, library=None, threads: str = "real",
                config: str | None = None) -> Model:
     """Execute a build123d script. The script must assign `result`.
     `workspace` / `library` bind import_step() and from_library() for this run.

@@ -460,6 +460,11 @@
   .tb-file .dirty { width:6px; height:6px; border-radius:50%; background:var(--accent); display:none; flex:none; } body.dirty .tb-file .dirty { display:inline-block; }
   #filemenu .dd { top:38px; min-width:200px; }
   #ws { position:absolute; left:50%; transform:translateX(-50%); display:flex; background:var(--bg); border:1px solid var(--line); border-radius:9px; padding:3px; gap:2px; }
+  /* the Machine tab (tabs edition): which open design's program the machine shows */
+  #tabprog { position:absolute; left:50%; transform:translateX(-50%); display:none; align-items:center; gap:8px; background:var(--bg); border:1px solid var(--line); border-radius:9px; padding:4px 6px 4px 12px; color:var(--muted); white-space:nowrap; }
+  #tabprog select { background:var(--s3); color:var(--text); border:1px solid var(--line2); border-radius:6px; font:inherit; font-weight:600; padding:3px 6px; max-width:260px; }
+  #tabprog select:disabled { opacity:.85; }
+  #tabprog .info { font-size:12px; } #tabprog a { color:var(--accent2); cursor:pointer; text-decoration:none; font-size:12px; padding:0 6px; }
   #ws button { background:none; border:0; color:var(--muted); font:inherit; font-weight:500; padding:5px 18px; border-radius:6px; cursor:pointer; }
   #ws button:hover { color:var(--text); } #ws button.on { background:var(--s3); color:var(--text); box-shadow:0 1px 0 rgba(255,255,255,.04) inset; }
   .tb-right { margin-left:auto; display:flex; align-items:center; gap:8px; }
@@ -794,6 +799,7 @@
           <hr>
           <div data-act="library">Part library…</div>
     </div></div>
+  <div id="tabprog" title="The machine runs one design's program at a time: pick which open design's CAM program to set up and run">Program from <select id="tabprog-sel"></select><span class="info" id="tabprog-info"></span><a id="tabprog-open">open design ↗</a></div>
   <nav id="ws" role="tablist"><button type="button" data-rtab="design" class="on">Design</button><button type="button" data-rtab="cam" title="CAM is experimental: check every program in the simulation and with an air cut">CAM<span class="expbadge">Experimental</span></button><button type="button" data-rtab="machine">Machine</button></nav>
   <div class="tb-right">
     <button id="mpill" class="mpill off" title="The machine: click for the Machine workspace"><i class="d"></i><b id="mpill-name">No machine</b><span id="mpill-state">not connected</span></button>
@@ -1084,6 +1090,29 @@
                "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/" } }
 </script>
 <script type="module">
+// ------------------------------------------------------------------ tabs: this page is one open design (static/tabs.html)
+// ?doc=d2 names the design; every request and the live connection carry it. mode=machine shows the machine for that
+// design's program. Going to the machine, New and Open are handed to the tab strip (postMessage).
+const TAB = (() => { const q = new URLSearchParams(location.search);
+  return { doc: q.get('doc'), mode: q.get('mode') || 'design', setup: q.get('setup'), embedded: window.parent !== window && !!q.get('doc') }; })();
+if (TAB.doc) {
+  const _fetch = window.fetch.bind(window);
+  window.fetch = (input, init) => {
+    const url = typeof input === 'string' ? input : (input && input.url) || '';
+    if (url.startsWith('/') || url.startsWith(location.origin)) {
+      init = { ...(init || {}) }; const h = new Headers(init.headers || (typeof input !== 'string' && input ? input.headers : undefined));
+      h.set('X-Doc', TAB.doc); init.headers = h;
+    }
+    return _fetch(input, init);
+  };
+  const st = document.createElement('style');
+  st.textContent = TAB.mode === 'machine'
+    ? '#ws, #filemenu { display:none !important; } #tabprog { display:flex; }'
+    : '#ws [data-rtab=machine] { display:none !important; }';
+  document.head.appendChild(st);
+}
+function tabPost(msg) { if (TAB.embedded) { try { window.parent.postMessage({ ...msg, doc: TAB.doc }, location.origin); } catch (e) {} } }
+const RIBBON_KEY = TAB.doc ? 'ribbonTab.' + TAB.doc : 'ribbonTab';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
@@ -1556,9 +1585,11 @@ async function api(path, body) {
 }
 async function fileAction(act) {
   try {
+    if (act === 'new' && TAB.embedded) { tabPost({ t: 'new_tab' }); return; }
     if (act === 'new') { if (design.dirty && !await confirmBox('Discard unsaved changes and start a new design?')) return; await api('/api/design/new', {}); }
     else if (act === 'save') { if (design.name) await api('/api/design/save', { name: design.name }); else await fileAction('saveas'); }
     else if (act === 'saveas') { const name = await promptBox('Save design as', design.name || 'my-part'); if (name) { await api('/api/design/save', { name }); addMsg('system', `saved as ${name}`); } }
+    else if (act === 'open' && TAB.embedded) { const { designs } = await api('/api/designs'); const name = await pickBox('Open design (in a new tab)', designs); if (name) tabPost({ t: 'open_tab', name }); }
     else if (act === 'open') { const { designs } = await api('/api/designs'); const name = await pickBox('Open design', designs); if (name) { if (design.dirty && !await confirmBox('Discard unsaved changes?')) return; await api('/api/design/open', { name }); } }
     else if (act === 'download') { window.open('/api/design/download'); }
     else if (act === 'import') { document.getElementById('filepick').click(); }
@@ -4951,12 +4982,14 @@ placeTree();
 // ribbon tabs (Design · CAM · Output · Extensions): one row per tab; compact (icons only) when the row would wrap
 function setRibbonTab(name, remember = true) {
   if (!['design', 'cam', 'machine'].includes(name)) name = 'design';
+  if (TAB.embedded && TAB.mode === 'machine') name = 'machine';
+  else if (TAB.embedded && name === 'machine') { tabPost({ t: 'open_machine', setup: typeof MV !== 'undefined' ? MV.si : 0 }); return; }
   const rb = document.getElementById('ribbon');
   document.querySelectorAll('#ws [data-rtab]').forEach(b => b.classList.toggle('on', b.dataset.rtab === name));
   document.body.dataset.ws = name;
   const groups = [...rb.querySelectorAll('.rg')]; groups.forEach(g => { g.classList.toggle('on', g.dataset.tab === name); g.classList.remove('last'); });
   const on = groups.filter(g => g.classList.contains('on')); if (on.length) on[on.length - 1].classList.add('last');
-  if (remember) { try { localStorage.setItem('ribbonTab', name); } catch (e) {} }
+  if (remember && !(TAB.embedded && TAB.mode === 'machine')) { try { localStorage.setItem(RIBBON_KEY, name); } catch (e) {} }
   fitRibbon();
   if (typeof onWorkspace === 'function') onWorkspace(name);
 }
@@ -4980,7 +5013,7 @@ document.querySelectorAll('#ribbon .rg').forEach(g => {
 document.addEventListener('click', e => { if (!e.target.closest('#ribbon .rg.fold')) document.querySelectorAll('#ribbon .rg.open').forEach(x => x.classList.remove('open')); });
 document.querySelectorAll('#ws [data-rtab]').forEach(b => b.onclick = () => setRibbonTab(b.dataset.rtab));
 window.addEventListener('resize', fitRibbon);
-(() => { let t = 'design'; try { t = localStorage.getItem('ribbonTab') || 'design'; } catch (e) {} setRibbonTab(t, false); })();
+(() => { let t = 'design'; try { t = localStorage.getItem(RIBBON_KEY) || 'design'; } catch (e) {} if (TAB.embedded && TAB.mode === 'machine') t = 'machine'; else if (t === 'machine' && TAB.embedded) t = 'design'; setRibbonTab(t, false); })();
 function activateTool(k) {
   if (k === 'sketch') { if (tool) endTool(); if (measuring) setMeasuring(false); sk ? endSketch() : startSketch(null); return; }
   if (k === 'measure') { if (tool) endTool(); setMeasuring(!measuring); return; }
@@ -5933,7 +5966,7 @@ function splashHide() {
   if (splashTimer) { clearInterval(splashTimer); splashTimer = null; }
 }
 function connect() {
-  ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws');
+  ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws' + (TAB.doc ? '?doc=' + encodeURIComponent(TAB.doc) : ''));
   ws.onopen = () => setStatus('connected');
   ws.onclose = () => { setStatus('disconnected — retrying'); if (!splashHidden) { document.getElementById('sp-sub').textContent = 'waiting for the server…'; } setTimeout(connect, 1500); };
   ws.onmessage = async ev => {
@@ -6278,6 +6311,7 @@ async function renderPhonePane(pane) {
 // Layout: status strip (state, position, tool, Control, Hold / Pause / STOP) · camera with jog · right column steps
 // Prepare → Zero → Run, and Manual for anything ad hoc (go to, set origin, any 3D-probe routine, console, run a file).
 const MV = { st: null, step: null, camOn: true, busy: false, jog: 1, jogA: 10, si: 0, corner: 'obr', ack: '', tcSeen: '' };
+if (TAB.embedded && TAB.mode === 'machine' && TAB.setup != null) { MV.si = +TAB.setup || 0; MV.step = 'run'; }
 const JOG_A_STEPS = [1, 10, 45, 90];               // degrees per click on A+ / A− (90 is the server's limit)
 const MVP = { sel: new Set(), key: '' };
 function mvEl(id) { return document.getElementById(id); }
@@ -6983,6 +7017,30 @@ function mreqPaint(r) {
   }
   if (r.state && !['waiting', 'approved'].includes(r.state)) { const m = document.querySelector(`#mi-req .mreq[data-id="${r.id}"]`); if (m) setTimeout(() => m.parentElement && m.parentElement.remove(), 4000); }
 }
+if (TAB.embedded && TAB.mode === 'machine') {           // the program picker: every open design, with its CAM program
+  const sel = document.getElementById('tabprog-sel'), info = document.getElementById('tabprog-info');
+  const fill = async () => {
+    let d; try { d = await (await fetch('/api/docs')).json(); } catch (e) { return; }
+    const locked = d.machine_doc && d.machine_doc === TAB.doc;
+    sel.innerHTML = d.docs.map(x => `<option value="${x.id}" ${x.id === TAB.doc ? 'selected' : ''} ${!x.program && x.id !== TAB.doc ? 'disabled' : ''}>${esc(x.name || 'untitled')}${x.program ? '' : ' — no CAM program'}</option>`).join('');
+    sel.disabled = !!d.machine_doc;
+    sel.title = d.machine_doc ? `${d.machine_doc_name || 'a design'}'s program is on the machine: it stays here until the program ends` : '';
+    const me = d.docs.find(x => x.id === TAB.doc), p = me && me.program;
+    info.textContent = p ? `· ${p.ops} operation${p.ops === 1 ? '' : 's'}${p.setups && p.setups.length > 1 ? ` in ${p.setups.length} setups` : ''}${p.minutes ? ` · ${Math.round(p.minutes)} min` : ''}${locked ? ' · running' : ''}` : '· no CAM program yet';
+  };
+  sel.onchange = () => tabPost({ t: 'machine_doc', to: sel.value });
+  document.getElementById('tabprog-open').onclick = () => tabPost({ t: 'focus', to: TAB.doc });
+  fill(); setInterval(fill, 3000);
+}
+if (TAB.embedded) setInterval(() => {
+  const waiting = [...MREQ.values()].filter(x => x.state === 'waiting');
+  tabPost({ t: 'status', name: design.name, dirty: design.dirty, busy: !!busy, ws: ribbonTab(), pending: waiting.length,
+            ask: waiting.length ? waiting[waiting.length - 1].summary || '' : '', askId: waiting.length ? waiting[waiting.length - 1].id : '' });
+}, 700);
+window.addEventListener('message', e => {                 // the strip asks this tab to show its chat (a Review on a toast)
+  if (e.origin !== location.origin || !e.data || e.data.t !== 'show_chat') return;
+  if (typeof showPane === 'function') showPane('chat');
+});
 function machineRequest(m) {
   if (MREQ.has(m.id)) return;
   const r = { ...m, state: 'waiting' }; MREQ.set(m.id, r); mreqPaint(r);

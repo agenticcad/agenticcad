@@ -27,8 +27,11 @@ import slicer
 from agent import CadAgent, claude_cli_candidates, find_claude_cli
 from version import __version__
 
+import contextvars
 import os
+import shutil
 import sys
+import urllib.parse
 
 ROOT = Path(__file__).parent
 WORKSPACE = Path(os.environ.get("AGENTICCAD_WORKSPACE") or (ROOT / "workspace"))   # override for tests
@@ -36,36 +39,61 @@ for sub in ("exports", "history", "designs"):
     (WORKSPACE / sub).mkdir(parents=True, exist_ok=True)
 
 
+# Multiple open designs (tabs). Every HTTP request and WebSocket belongs to one design: the X-Doc header, a `doc`
+# query parameter, or the page that made the request (its Referer carries ?doc=). `agent` below is a proxy to that
+# design's CadAgent, so the endpoints read as before. Events an agent emits go to its design's pages only; machine,
+# library and extension events go to every page.
+_doc_var: contextvars.ContextVar[str | None] = contextvars.ContextVar("agenticcad_doc", default=None)
+GLOBAL_EVENTS = {"machine_link", "library", "library_parts", "extensions", "remote"}
+SHELL = "shell"                                   # the tab strip page (static/tabs.html)
+
+
 class Bus:
     """Fan-out to browsers plus request/response for browser-rendered screenshots."""
 
     def __init__(self) -> None:
-        self.clients: set[WebSocket] = set()
-        self.primary: WebSocket | None = None      # the tab the user last chatted from
+        self.clients: dict[WebSocket, str] = {}   # page -> the design it shows (SHELL for the tab strip)
+        self.primary: dict[str, WebSocket] = {}   # per design: the page the user last chatted from
         self.pending: dict[str, asyncio.Future] = {}
 
-    async def emit(self, event: dict[str, Any]) -> None:
-        data = json.dumps(event)
+    def _targets(self, event: dict[str, Any], doc: str | None) -> list[WebSocket]:
+        if event.get("type") in GLOBAL_EVENTS or doc is None:
+            return list(self.clients)
+        return [ws for ws, d in self.clients.items() if d == doc]
+
+    async def _send(self, targets: list[WebSocket], data: str) -> None:
         dead = []
-        for ws in list(self.clients):
+        for ws in targets:
             try:
                 await ws.send_text(data)
             except Exception:
                 dead.append(ws)
         for ws in dead:
-            self.clients.discard(ws)
+            self.clients.pop(ws, None)
 
-    async def screenshot(self, spec: dict[str, Any], timeout: float = 20.0) -> str:
-        if not self.clients:
-            raise RuntimeError("no browser connected to render the view")
+    async def emit(self, event: dict[str, Any]) -> None:
+        """To the pages of the design this request / task belongs to (all pages for machine and library events)."""
+        await self._send(self._targets(event, _doc_var.get()), json.dumps(event))
+
+    async def emit_doc(self, doc: str, event: dict[str, Any]) -> None:
+        await self._send(self._targets(event, doc), json.dumps(event))
+
+    async def emit_all(self, event: dict[str, Any]) -> None:
+        await self._send(list(self.clients), json.dumps(event))
+
+    async def screenshot(self, spec: dict[str, Any], doc: str | None = None, timeout: float = 20.0) -> str:
+        doc = doc or _doc_var.get()
+        mine = [ws for ws, d in self.clients.items() if d == doc] if doc else [ws for ws, d in self.clients.items() if d != SHELL]
+        if not mine:
+            raise RuntimeError("no page of this design is open to render the view")
         rid = uuid.uuid4().hex
         fut: asyncio.Future = asyncio.get_running_loop().create_future()
         self.pending[rid] = fut
         req = json.dumps({"type": "screenshot_request", "id": rid, **spec})
         try:
-            # Prefer the tab the user is working in; other tabs (or hidden preview webviews) may
-            # answer with an empty render. Fall back to everyone if the primary is gone.
-            targets = [self.primary] if self.primary in self.clients else list(self.clients)
+            # Prefer the page the user chats from; other pages of the design may answer with an empty render.
+            p = self.primary.get(doc) if doc else None
+            targets = [p] if p in mine else mine
             for ws in targets:
                 try:
                     await ws.send_text(req)
@@ -74,9 +102,9 @@ class Bus:
             try:
                 return await asyncio.wait_for(fut, timeout / 2)
             except asyncio.TimeoutError:
-                if len(targets) == len(self.clients):
+                if len(targets) == len(mine):
                     raise
-                await self.emit({"type": "screenshot_request", "id": rid, **spec})
+                await self._send(mine, req)
                 return await asyncio.wait_for(fut, timeout / 2)
         finally:
             self.pending.pop(rid, None)
@@ -95,8 +123,69 @@ class Bus:
 
 
 bus = Bus()
-agent = CadAgent(WORKSPACE, bus.emit, bus.screenshot)
-machine = machine_link.MachineControl(bus.emit)        # the Machine tab; the agent only reads it
+
+DOCS: dict[str, CadAgent] = {}                    # open designs (tabs), in tab order
+OPEN_FILE = WORKSPACE / "open_docs.json"
+_active: dict[str, str | None] = {"doc": None}    # the tab the user is looking at (the shell tells us)
+
+
+def _doc_dir(doc_id: str) -> Path:
+    """d1 keeps the workspace's own model.py / cam.py (a single-design workspace opens as one tab); others get docs/<id>."""
+    return WORKSPACE if doc_id == "d1" else WORKSPACE / "docs" / doc_id
+
+
+def _make_doc(doc_id: str) -> CadAgent:
+    a = CadAgent(WORKSPACE, lambda ev, _i=doc_id: bus.emit_doc(_i, ev), lambda spec, _i=doc_id: bus.screenshot(spec, _i),
+                 doc_dir=_doc_dir(doc_id))
+    a.doc_id = doc_id
+    if DOCS:                                      # one tool / machine / part library and one set of extensions for all
+        first = next(iter(DOCS.values()))
+        a.library, a.parts, a.extensions = first.library, first.parts, first.extensions
+        ck.LIBRARY = first.parts
+    if "machine" in globals():
+        a.machine, a.camera = machine, camera
+    DOCS[doc_id] = a
+    return a
+
+
+def _save_open() -> None:
+    OPEN_FILE.write_text(json.dumps({"docs": list(DOCS)}))
+
+
+def _default_doc() -> str:
+    """For a request that names no design (the phone page, background work): the design whose program is on the
+    machine, else the tab in front, else the first."""
+    m = globals().get("machine")
+    owner = (((m.job or {}).get("owner") or {}).get("doc") if m is not None and m.job_active else None)
+    for d in (owner, _active["doc"]):
+        if d in DOCS:
+            return d
+    return next(iter(DOCS))
+
+
+def _cur_agent() -> CadAgent:
+    d = _doc_var.get()
+    return DOCS[d] if d in DOCS else DOCS[_default_doc()]
+
+
+class _AgentProxy:
+    """`agent` in the endpoints: the CadAgent of the design the request belongs to."""
+
+    def __getattr__(self, name):
+        return getattr(_cur_agent(), name)
+
+    def __setattr__(self, name, value):
+        setattr(_cur_agent(), name, value)
+
+
+try:
+    _ids = [i for i in json.loads(OPEN_FILE.read_text()).get("docs", []) if isinstance(i, str) and i.startswith("d")]
+except (OSError, ValueError):
+    _ids = []
+for _i in (_ids or ["d1"]):
+    _make_doc(_i)
+agent = _AgentProxy()
+machine = machine_link.MachineControl(bus.emit_all)    # one machine for every design; its events go to every page
 _live = machine_link.makera_live_config()               # this machine's calibrated anchor, if MakeraStudio has fetched it
 if "coordinate.anchor1_x" in _live and "coordinate.anchor1_y" in _live:
     machine.profile.anchor1 = (_live["coordinate.anchor1_x"], _live["coordinate.anchor1_y"])
@@ -105,7 +194,8 @@ if "coordinate.clearance_x" in _live and "coordinate.clearance_y" in _live:
 if all(k in _live for k in machine_link.ROTATION_KEYS):    # the rotary module's reference pad / centreline offsets
     machine.profile.rotation_offset = {k[-1]: float(_live[k]) for k in machine_link.ROTATION_KEYS} | {"source": "live config"}
 camera = machine_link.CameraRelay()
-agent.machine, agent.camera = machine, camera
+for _a in DOCS.values():
+    _a.machine, _a.camera = machine, camera
 
 
 def _rotary_machine() -> "cam.Machine | None":
@@ -150,19 +240,70 @@ machine.on_rotary_found = _rotary_found
 _loader: asyncio.Task | None = None
 
 
+_boot: dict[str, asyncio.Task] = {}
+
+
+async def _doc_boot(doc_id: str, open_name: str | None = None, code: str | None = None) -> None:
+    """Build one design (in the background: the page shows a splash with progress), open a saved design or import code
+    into it, then start its own Claude session."""
+    _doc_var.set(doc_id)
+    a = DOCS[doc_id]
+    loop = asyncio.get_running_loop()
+    a.on_startup = lambda st, _i=doc_id: loop.call_soon_threadsafe(lambda: asyncio.ensure_future(bus.emit_doc(_i, {"type": "startup", **st})))
+    await _load_initial()
+    try:
+        if open_name:
+            await a.open_design(open_name)
+        elif code is not None:
+            await a.new_design(code)
+    except Exception as e:  # noqa: BLE001
+        await bus.emit({"type": "error", "text": f"could not open {open_name or 'the design'}: {e}"})
+    if os.environ.get("AGENTICCAD_NO_AGENT") != "1" and (doc_id == _active["doc"] or len(DOCS) == 1 or _active["doc"] is None and doc_id == next(iter(DOCS))):
+        await _connect_agent()                             # the tab in front starts its assistant at once; others when shown
+
+
+MAX_LIVE = int(os.environ.get("AGENTICCAD_MAX_ASSISTANTS") or 4)
+
+
+async def _wake(doc_id: str) -> None:
+    """The user looks at this tab: make sure its assistant runs; above MAX_LIVE, stop the idle assistant that was
+    looked at longest ago (its conversation is kept in the design's history and the session resumes when needed)."""
+    a = DOCS.get(doc_id)
+    if a is None or os.environ.get("AGENTICCAD_NO_AGENT") == "1":
+        return
+    a.last_seen = time.time()
+    live = [i for i, x in DOCS.items() if x.client is not None]
+    if a.client is None:
+        while len(live) >= MAX_LIVE:
+            idle = sorted((i for i in live if i != doc_id and not DOCS[i].busy and not DOCS[i].pending_machine_requests()),
+                          key=lambda i: getattr(DOCS[i], "last_seen", 0))
+            if not idle:
+                break
+            try:
+                await DOCS[idle[0]].stop()
+            except Exception:  # noqa: BLE001
+                pass
+            live.remove(idle[0])
+        if doc_id in _boot and not _boot[doc_id].done():
+            return                                         # still building: its boot starts the assistant
+        tok = _doc_var.set(doc_id)
+        try:
+            await _connect_agent()
+        finally:
+            _doc_var.reset(tok)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # The first design is built in the background so the window can show a splash with progress at once (a big design
+    # Every open design is built in the background so the window can show a splash with progress at once (a big design
     # with real threads takes minutes). Clients get `startup` events, then the model when it lands.
-    loop = asyncio.get_running_loop()
-    agent.on_startup = lambda st: loop.call_soon_threadsafe(lambda: asyncio.ensure_future(bus.emit({"type": "startup", **st})))
     global _loader
-    _loader = asyncio.create_task(_load_initial())
+    for i in list(DOCS):
+        _boot[i] = asyncio.create_task(_doc_boot(i))
+    _loader = _boot[next(iter(DOCS))]
     if os.environ.get("AGENTICCAD_STARTUP_SYNC") == "1":  # tests: the model exists before the first request
-        await _loader
+        await asyncio.gather(*_boot.values())
     task = None
-    if os.environ.get("AGENTICCAD_NO_AGENT") != "1":      # tests run the API without a Claude session
-        task = asyncio.create_task(_connect_agent())
     watcher = asyncio.create_task(_watch_extensions())
     if os.environ.get("AGENTICCAD_NO_REMOTE") != "1" and _remote_cfg().get("enabled"):
         await _remote_start()
@@ -173,7 +314,11 @@ async def lifespan(app: FastAPI):
     watcher.cancel()
     await machine.disconnect()
     camera.set_host(None)
-    await agent.stop()
+    for a in list(DOCS.values()):
+        try:
+            await a.stop()
+        except Exception:  # noqa: BLE001
+            pass
 
 
 async def _load_initial() -> None:
@@ -205,13 +350,21 @@ async def _watch_extensions() -> None:
         await asyncio.sleep(1.5)
 
 
+_auth_lock = asyncio.Lock()
+_auth_cache: dict[str, Any] = {}
+
+
 async def _connect_agent() -> None:
-    if _loader is not None:
-        await _loader                                         # the agent's first context needs the built model
+    """Start the Claude session of the design this task belongs to (after its model is built)."""
     if find_claude_cli() is None:
         await bus.emit({"type": "agent_missing_cli"})
         return
-    auth = await asyncio.to_thread(agent.auth_status)
+    async with _auth_lock:                                  # one sign-in check for every tab (a good answer holds 10 min)
+        if _auth_cache.get("ok") and time.time() - _auth_cache.get("t", 0) < 600:
+            auth = _auth_cache["auth"]
+        else:
+            auth = await asyncio.to_thread(agent.auth_status)
+            _auth_cache.update(ok=bool(auth.get("logged_in")), t=time.time(), auth=auth)
     if not auth.get("logged_in"):
         agent.auth_problem = "Claude Code is installed but not signed in."
         await bus.emit({"type": "agent_auth_required", "text": agent.auth_problem})
@@ -225,6 +378,122 @@ async def _connect_agent() -> None:
 
 app = FastAPI(lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=ROOT / "static"), name="static")
+
+
+def _doc_of_request(headers, query) -> str | None:
+    d = headers.get("x-doc") or query.get("doc")
+    if not d:
+        ref = headers.get("referer") or ""
+        if "doc=" in ref:
+            d = (urllib.parse.parse_qs(urllib.parse.urlsplit(ref).query).get("doc") or [None])[0]
+    return d if d in DOCS else None
+
+
+@app.middleware("http")
+async def _doc_scope(request, call_next):
+    tok = _doc_var.set(_doc_of_request(request.headers, request.query_params))
+    try:
+        return await call_next(request)
+    finally:
+        _doc_var.reset(tok)
+
+
+@app.get("/tabs")
+async def tabs_page() -> HTMLResponse:
+    """The tab strip: one page per open design, plus the machine."""
+    return HTMLResponse((ROOT / "static" / "tabs.html").read_text())
+
+
+def _doc_info(doc_id: str, a: CadAgent) -> dict[str, Any]:
+    p = a.program
+    prog = None
+    if p is not None:
+        try:
+            prog = {"name": p.name, "ops": len(p.ops), "setups": [st.name for st in p.setups], "minutes": round(p.time_minutes(), 1)}
+        except Exception:  # noqa: BLE001
+            prog = {"name": p.name, "ops": len(p.ops), "setups": [], "minutes": None}
+    return {"id": doc_id, "name": a.design_name, "dirty": bool(a.model) and a.dirty, "busy": a.busy,
+            "ready": bool(a.startup.get("done")), "program": prog, "pending": len(a.pending_machine_requests())}
+
+
+@app.get("/api/docs")
+async def docs_list():
+    owner = ((machine.job or {}).get("owner") or {}) if machine.job_active else {}
+    return {"docs": [_doc_info(i, a) for i, a in DOCS.items()], "machine_doc": owner.get("doc"),
+            "machine_doc_name": owner.get("name"), "active": _active["doc"]}
+
+
+class DocBody(BaseModel):
+    id: str | None = None
+    name: str | None = None        # a saved design to open in a new tab (an open tab with it is reused)
+    code: str | None = None        # or a design's code (Import .py into a new tab)
+
+
+@app.post("/api/docs/new")
+async def docs_new(body: DocBody):
+    if body.name:
+        for i, a in DOCS.items():
+            if body.name in (a.design_name, getattr(a, "opening", None)):     # open already, or still opening
+                return {"id": i, "existing": True}
+        if not (WORKSPACE / "designs" / f"{body.name}.py").exists():
+            return JSONResponse({"error": f"no saved design named {body.name}"}, status_code=404)
+    n = 1
+    while f"d{n}" in DOCS:
+        n += 1
+    doc_id = f"d{n}"
+    d = _doc_dir(doc_id)
+    if d != WORKSPACE and d.exists():
+        shutil.rmtree(d, ignore_errors=True)       # a closed tab's leftovers
+    d.mkdir(parents=True, exist_ok=True)
+    # the tab starts from the saved design (its splash says so, its CAM program is rebuilt as part of the start)
+    # rather than building an empty design first
+    if body.name:
+        src = WORKSPACE / "designs"
+        shutil.copy2(src / f"{body.name}.py", d / "model.py")
+        if (src / f"{body.name}.cam.py").exists():
+            shutil.copy2(src / f"{body.name}.cam.py", d / "cam.py")
+        (d / "state.json").write_text(json.dumps({"design": body.name, "config": None}))
+    elif body.code is not None:
+        (d / "model.py").write_text(body.code)
+    _make_doc(doc_id).opening = body.name
+    _save_open()
+    _boot[doc_id] = asyncio.create_task(_doc_boot(doc_id))
+    return {"id": doc_id}
+
+
+@app.post("/api/docs/close")
+async def docs_close(body: DocBody):
+    doc_id = body.id or ""
+    if doc_id not in DOCS:
+        return JSONResponse({"error": "no such tab"}, status_code=404)
+    owner = ((machine.job or {}).get("owner") or {}) if machine.job_active else {}
+    if owner.get("doc") == doc_id:
+        return JSONResponse({"error": "its program is running on the machine: close it when the program has ended"}, status_code=409)
+    if len(DOCS) == 1:
+        return JSONResponse({"error": "the last tab stays open (File ▸ New starts a fresh design in it)"}, status_code=409)
+    a = DOCS.pop(doc_id)
+    t = _boot.pop(doc_id, None)
+    if t is not None and not t.done():
+        t.cancel()
+    try:
+        await a.stop()
+    except Exception:  # noqa: BLE001
+        pass
+    d = _doc_dir(doc_id)
+    if d != WORKSPACE:
+        shutil.rmtree(d, ignore_errors=True)
+    if _active["doc"] == doc_id:
+        _active["doc"] = None
+    _save_open()
+    return {"ok": True}
+
+
+@app.post("/api/docs/active")
+async def docs_active(body: DocBody):
+    _active["doc"] = body.id if body.id in DOCS else None
+    if _active["doc"]:
+        asyncio.create_task(_wake(_active["doc"]))
+    return {"ok": True}
 
 
 @app.get("/")
@@ -959,6 +1228,7 @@ async def machine_post(body: MachineBody):
                                                    "notes": chk["notes"], "uses_a": prep["uses_a"], **info}}
         elif a == "run_ops":                              # upload the chosen operations to the machine and play them
             prep, info, label = await asyncio.to_thread(_program_for_ops, body)   # big programs: keep the loop (and status) running
+            info["owner"] = {"doc": _doc_var.get() or _default_doc(), "name": agent.design_name or "untitled"}
             res = await machine.run_program(label, prep, info, rotary=info["rotary"], ack=bool(body.ack))
         elif a in ("check_file", "run_file"):              # any .nc file, through the same checks as CAM operations
             if not body.text:
@@ -1076,7 +1346,7 @@ _remote: dict[str, Any] = {"server": None, "task": None, "error": None}
 
 
 def _remote_cfg() -> dict:
-    cfg = {"enabled": False, "port": 8790, "token": "", "require_key": True, "push": False}
+    cfg = {"enabled": False, "port": int(os.environ.get("AGENTICCAD_PHONE_PORT") or 8790), "token": "", "require_key": True, "push": False}
     try:
         cfg.update(json.loads(REMOTE_FILE.read_text()))
     except (OSError, ValueError):
@@ -1548,7 +1818,20 @@ async def design_download():
 @app.websocket("/ws")
 async def ws_endpoint(ws: WebSocket) -> None:
     await ws.accept()
-    bus.clients.add(ws)
+    doc = ws.query_params.get("doc")
+    if doc == SHELL:                                       # the tab strip: machine / library events only
+        bus.clients[ws] = SHELL
+        try:
+            while True:
+                await ws.receive_text()
+        except WebSocketDisconnect:
+            pass
+        finally:
+            bus.clients.pop(ws, None)
+        return
+    doc = doc if doc in DOCS else _default_doc()
+    _doc_var.set(doc)
+    bus.clients[ws] = doc
     try:
         if not agent.startup["done"] or agent.startup["error"]:      # still building the first design: feed the splash
             await ws.send_text(json.dumps({"type": "startup", **agent.startup_payload()}))
@@ -1583,13 +1866,13 @@ async def ws_endpoint(ws: WebSocket) -> None:
     except WebSocketDisconnect:
         pass
     finally:
-        bus.clients.discard(ws)
+        bus.clients.pop(ws, None)
 
 
 async def _dispatch(ws: WebSocket, msg: dict) -> None:
     t = msg.get("type")
     if t == "chat":
-        bus.primary = ws
+        bus.primary[_doc_var.get() or _default_doc()] = ws
         asyncio.create_task(agent.chat(msg.get("text", ""), msg.get("selection"), msg.get("images") or []))
     elif t == "get_model" and agent.model:
         await ws.send_text(json.dumps(_model_event()))
@@ -1720,7 +2003,7 @@ async def _dispatch(ws: WebSocket, msg: dict) -> None:
             elif op == "action":
                 await agent.ext_apply(msg.get("action") or {}, panel=None, state=state)
             elif op == "chat":
-                bus.primary = ws
+                bus.primary[_doc_var.get() or _default_doc()] = ws
                 asyncio.create_task(agent.chat(msg.get("text", ""), msg.get("selection_chips"), []))
         except (ext_mod.ExtError, ck.CadError, script_edit.Unsupported, KeyError, ValueError, TypeError) as e:
             await ws.send_text(json.dumps({"type": "error", "text": f"extension {op} failed: {e}"}))

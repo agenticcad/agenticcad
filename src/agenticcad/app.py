@@ -53,18 +53,39 @@ function hint(t){document.getElementById('hint').textContent=t}
 </script></body></html>"""
 
 
+def _seed_from_main(main: Path, data: Path) -> None:
+    """First start of the tabs edition: copy the main app's libraries and saved designs (read only: the main app's
+    folder is never written). The phone link, its certificates and the open working copy are not copied."""
+    import shutil
+    if not main.exists():
+        return
+    for name in ("tools.json", "settings.json", "machine.json", "model.py", "cam.py", "state.json"):
+        if (main / name).is_file():
+            shutil.copy2(main / name, data / name)
+    for name in ("designs", "imports", "tool_photos", "machines", "fixtures", "library", "extensions", "kit"):
+        if (main / name).is_dir():
+            shutil.copytree(main / name, data / name, dirs_exist_ok=True)
+
+
 def main() -> None:
     root = _repo_root()
     sys.path.insert(0, str(root))
     os.chdir(root)
 
     import platformdirs
-    data = Path(os.environ.get("AGENTICCAD_WORKSPACE") or platformdirs.user_data_dir("AgenticCAD", "AgenticCAD"))
+    tabs = os.environ.get("AGENTICCAD_EDITION") == "tabs"     # the side-by-side test build: several designs in tabs
+    app_name = "AgenticCAD Tabs" if tabs else "AgenticCAD"
+    data = Path(os.environ.get("AGENTICCAD_WORKSPACE") or platformdirs.user_data_dir(app_name, "AgenticCAD"))
+    fresh = not data.exists() or not any(data.iterdir())
     data.mkdir(parents=True, exist_ok=True)
+    if tabs and fresh and not os.environ.get("AGENTICCAD_WORKSPACE"):
+        _seed_from_main(Path(platformdirs.user_data_dir("AgenticCAD", "AgenticCAD")), data)
+    if tabs:
+        os.environ.setdefault("AGENTICCAD_PHONE_PORT", "8890")   # the phone page of the main app keeps 8790
     os.environ["AGENTICCAD_WORKSPACE"] = str(data)
     os.environ.setdefault("AGENTICCAD_PACKAGED", "1")
     os.environ.setdefault("MPLBACKEND", "Agg")
-    port = _free_port(int(os.environ.get("PORT") or 8765))
+    port = _free_port(int(os.environ.get("PORT") or (8865 if tabs else 8765)))
     os.environ["PORT"] = str(port)
     base = f"http://127.0.0.1:{port}"
     state: dict = {"srv": None, "url": None}
@@ -88,7 +109,7 @@ def main() -> None:
                 break
             except Exception:
                 time.sleep(0.05)
-        state["url"] = base + ("/" if cli else "/setup")
+        state["url"] = base + (("/tabs" if tabs else "/") if cli else "/setup")
         if window is not None:
             say("Opening the workspace")
             window.load_url(state["url"])
@@ -110,7 +131,7 @@ def main() -> None:
             pass
     else:
         import version as _v
-        window = webview.create_window(f"AgenticCAD {_v.__version__}", html=SPLASH_HTML, width=1500, height=950, min_size=(1000, 650),
+        window = webview.create_window(f"{app_name} {_v.__version__}", html=SPLASH_HTML, width=1500, height=950, min_size=(1000, 650),
                                        background_color="#14171c", text_select=True)
         webview.start(boot, window, debug=bool(os.environ.get("AGENTICCAD_DEBUG")))   # blocks until the window closes
         del window

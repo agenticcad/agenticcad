@@ -1,0 +1,308 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AgenticCAD</title>
+<style>
+  /* The tab strip (tabs edition): one page per open design, each a full AgenticCAD page in its own frame, plus the
+     machine. A design's page keeps its own model, CAM program, simulation and assistant; the machine is shared. */
+  :root { --bg:#0d0f13; --panel:#14171d; --panel2:#1a1e25; --s3:#222730; --line:#262c35; --line2:#323944; --text:#e6e9ee;
+          --muted:#8c95a3; --mut2:#626b78; --accent:#ff8c42; --accent2:#4ea1ff; --ok:#3ecf7a; --warn:#f2c94c; --err:#ff5a5f; }
+  * { box-sizing:border-box; }
+  html, body { margin:0; height:100%; background:var(--bg); color:var(--text); overflow:hidden; font:13px/1.45 Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+  body { display:flex; flex-direction:column; }
+  button { font:inherit; color:inherit; background:none; border:0; cursor:pointer; }
+  #tabs { height:36px; flex:none; display:flex; align-items:flex-end; gap:2px; padding:0 8px; background:#090b0e; border-bottom:1px solid var(--line); position:relative; z-index:9; }
+  .tab { position:relative; height:30px; display:flex; align-items:center; gap:8px; padding:0 8px 0 11px; min-width:140px; max-width:240px; flex:0 1 auto;
+         border-radius:8px 8px 0 0; color:var(--muted); border:1px solid transparent; border-bottom:0; white-space:nowrap; }
+  .tab:hover { background:#12151a; color:var(--text); }
+  .tab.on { background:var(--panel); color:var(--text); border-color:var(--line); height:31px; margin-bottom:-1px; }
+  .tab .ico { width:14px; height:14px; flex:none; }
+  .tab .nm { overflow:hidden; text-overflow:ellipsis; font-weight:550; }
+  .tab .ws { font-size:10.5px; color:var(--mut2); }
+  .tab .st { margin-left:auto; display:flex; align-items:center; gap:6px; }
+  .tab .x { width:18px; height:18px; border-radius:5px; display:grid; place-items:center; color:var(--mut2); opacity:0; font-size:11px; }
+  .tab:hover .x, .tab.on .x { opacity:1; } .tab .x:hover { background:var(--s3); color:var(--text); }
+  .dirty { width:7px; height:7px; border-radius:50%; background:var(--text); opacity:.75; }
+  .need { min-width:16px; height:16px; padding:0 4px; border-radius:8px; background:var(--warn); color:#1a1300; font-size:10.5px; font-weight:700; display:grid; place-items:center; }
+  .busy { width:12px; height:12px; border-radius:50%; border:2px solid rgba(78,161,255,.25); border-top-color:var(--accent2); animation:spin .9s linear infinite; }
+  @keyframes spin { to { transform:rotate(360deg); } }
+  .tab.machine { min-width:170px; }
+  .tab.machine .ico { color:var(--accent); }
+  .tab.machine .sub { font-size:11px; color:var(--muted); }
+  .tab.machine.alert .sub { color:var(--warn); font-weight:600; }
+  .tab.machine.alert::after { content:""; position:absolute; inset:3px 3px 0 3px; border-radius:7px 7px 0 0; box-shadow:inset 0 0 0 1px rgba(242,201,76,.6); animation:pulse 1.6s ease-in-out infinite; pointer-events:none; }
+  .tab.machine.alarm .sub { color:var(--err); font-weight:700; }
+  @keyframes pulse { 50% { box-shadow:inset 0 0 0 1px rgba(242,201,76,.1); } }
+  .tabsep { width:1px; height:18px; background:var(--line2); margin:0 6px 6px; align-self:flex-end; flex:none; }
+  #plus { height:26px; width:28px; border-radius:7px; margin:0 0 3px 4px; color:var(--muted); display:grid; place-items:center; flex:none; }
+  #plus:hover { background:#14181e; color:var(--text); }
+  .tip { position:fixed; width:270px; background:#1b1f26; border:1px solid var(--line2); border-radius:9px; padding:10px 12px; box-shadow:0 12px 30px rgba(0,0,0,.5);
+         color:var(--text); font-size:12px; display:none; z-index:20; white-space:normal; pointer-events:none; }
+  .tip .r { display:flex; justify-content:space-between; gap:10px; color:var(--muted); margin-top:4px; } .tip .r span:last-child { color:var(--text); text-align:right; }
+  #frames { flex:1; min-height:0; position:relative; }
+  #frames iframe { position:absolute; inset:0; width:100%; height:100%; border:0; background:var(--bg); visibility:hidden; pointer-events:none; }
+  #frames iframe.on { visibility:visible; pointer-events:auto; z-index:1; }
+  .menu { position:fixed; background:#1b1f26; border:1px solid var(--line2); border-radius:10px; padding:6px; box-shadow:0 18px 40px rgba(0,0,0,.55); z-index:40; display:none; min-width:260px; max-height:70vh; overflow:auto; }
+  .menu .it { padding:7px 10px; border-radius:6px; display:flex; gap:10px; align-items:center; cursor:pointer; }
+  .menu .it:hover { background:var(--s3); } .menu .it span { margin-left:auto; color:var(--mut2); font-size:11.5px; }
+  .menu hr { border:0; border-top:1px solid var(--line); margin:5px 2px; } .menu .hd { font-size:10.5px; letter-spacing:.1em; color:var(--mut2); padding:6px 10px 3px; }
+  .menu .none { padding:6px 10px; color:var(--mut2); }
+  #toasts { position:fixed; right:16px; bottom:16px; display:flex; flex-direction:column; gap:10px; z-index:30; }
+  .toast { width:380px; background:#1c2028; border:1px solid var(--line2); border-left:3px solid var(--warn); border-radius:10px; padding:12px 14px; box-shadow:0 18px 40px rgba(0,0,0,.55); }
+  .toast .t { font-size:11px; color:var(--muted); } .toast .t b { color:var(--text); }
+  .toast .m { margin:5px 0 9px; } .toast .row { display:flex; gap:8px; justify-content:flex-end; }
+  .btn { padding:6px 12px; border-radius:7px; border:1px solid var(--line2); background:var(--panel2); font-weight:550; }
+  .btn.pri { background:var(--accent2); border-color:var(--accent2); color:#06111f; } .btn.warn { background:var(--warn); border-color:var(--warn); color:#1a1300; }
+  #modal { position:fixed; inset:0; background:rgba(0,0,0,.5); display:none; z-index:50; align-items:center; justify-content:center; }
+  #modal .box { width:440px; background:#1b1f26; border:1px solid var(--line2); border-radius:12px; padding:18px 18px 14px; box-shadow:0 30px 70px rgba(0,0,0,.6); }
+  #modal h3 { margin:0 0 8px; font-size:15px; } #modal p { margin:0 0 14px; color:#cfd4db; } #modal .row { display:flex; gap:8px; justify-content:flex-end; }
+  #empty { position:absolute; inset:0; display:grid; place-items:center; color:var(--muted); }
+</style>
+</head>
+<body>
+<div id="tabs">
+  <button class="tab machine" id="mtab" data-tab="machine" title="">
+    <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M12 3v7m-3 0h6l-1 4h-4z"/><path d="M6 21v-3h12v3"/></svg>
+    <span><span class="nm" id="mname">Machine</span> <span class="sub" id="msub">not connected</span></span>
+  </button>
+  <div class="tabsep"></div>
+  <div id="doctabs" style="display:contents"></div>
+  <button id="plus" title="New design or open a saved one in a new tab"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg></button>
+</div>
+<div id="frames"><div id="empty">opening…</div></div>
+<div class="tip" id="tip"></div>
+<div class="menu" id="plusmenu"></div>
+<div id="toasts"></div>
+<div id="modal"><div class="box"><h3 id="mh"></h3><p id="mp"></p><div class="row" id="mrow"></div></div></div>
+
+<script>
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const ICON_DESIGN = '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="#4ea1ff" stroke-width="1.8"><path d="M12 2 21 7v10l-9 5-9-5V7z"/><path d="M12 22V12m9-5-9 5-9-5"/></svg>';
+const ICON_CAM = '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="#ff8c42" stroke-width="1.8"><path d="M4 18c3-8 6-12 16-12M4 13c4-5 7-7 12-7M4 8c2-2 4-2 7-2"/></svg>';
+
+const S = { docs: new Map(), order: [], active: null, machine: { doc: null, setup: null, frame: null }, mst: null, seenAsk: new Set(), lastStage: null };
+// docs: id -> { id, name, dirty, busy, pending, ask, askId, ws, program, frame }
+
+async function api(path, body) {
+  const r = await fetch(path, body ? { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) } : {});
+  const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || r.statusText); return j;
+}
+
+function frameFor(id) {
+  const d = S.docs.get(id);
+  if (!d.frame) {
+    const f = document.createElement('iframe');
+    f.src = '/?doc=' + encodeURIComponent(id);
+    f.title = 'design ' + id;
+    $('#frames').appendChild(f); d.frame = f;
+  }
+  return d.frame;
+}
+
+function machineFrame(doc, setup) {
+  const m = S.machine;
+  const want = '/?doc=' + encodeURIComponent(doc) + '&mode=machine' + (setup != null ? '&setup=' + setup : '');
+  if (!m.frame) {
+    m.frame = document.createElement('iframe'); m.frame.title = 'machine';
+    $('#frames').appendChild(m.frame);
+  }
+  if (m.doc !== doc || (setup != null && m.setup !== setup)) { m.frame.src = want; m.doc = doc; m.setup = setup; }
+  return m.frame;
+}
+
+function activate(id) {
+  S.active = id;
+  if (id === 'machine') {
+    const owner = S.mst && S.mst.job && S.mst.job.owner && S.mst.job.owner.doc;
+    const doc = (owner && S.docs.has(owner)) ? owner : (S.machine.doc && S.docs.has(S.machine.doc)) ? S.machine.doc
+              : [...S.docs.values()].find(d => d.program) ? [...S.docs.values()].find(d => d.program).id : S.order[0];
+    if (doc) machineFrame(doc, S.machine.doc === doc ? S.machine.setup : null);
+  } else if (S.docs.has(id)) {
+    frameFor(id);
+    api('/api/docs/active', { id }).catch(() => {});
+  }
+  document.querySelectorAll('#frames iframe').forEach(f => f.classList.toggle('on', id === 'machine' ? f === S.machine.frame : f === (S.docs.get(id) || {}).frame));
+  try { localStorage.setItem('tabs.active', id); } catch (e) {}
+  render();
+  // the page in front gets the keyboard
+  const f = id === 'machine' ? S.machine.frame : (S.docs.get(id) || {}).frame;
+  if (f) setTimeout(() => { try { f.contentWindow.focus(); } catch (e) {} }, 50);
+}
+
+function render() {
+  const host = $('#doctabs');
+  host.innerHTML = S.order.map(id => {
+    const d = S.docs.get(id); if (!d) return '';
+    const st = d.pending ? `<span class="need" title="${d.pending} waiting for you">${d.pending}</span>` : d.busy ? '<i class="busy" title="the assistant is working"></i>' : d.dirty ? '<i class="dirty" title="unsaved changes"></i>' : '';
+    const ws = d.ws === 'cam' ? 'CAM' : 'Design';
+    return `<button class="tab ${S.active === id ? 'on' : ''}" data-tab="${id}">${d.ws === 'cam' ? ICON_CAM : ICON_DESIGN}<span class="nm">${esc(d.name || 'untitled')}</span><span class="ws">${ws}</span>
+      <span class="st">${st}</span><span class="x" data-close="${id}" title="Close tab">✕</span></button>`;
+  }).join('');
+  $('#mtab').classList.toggle('on', S.active === 'machine');
+  // the machine tab
+  const m = S.mst, job = m && m.job, stage = job && job.stage, s = (m && m.status) || {};
+  let sub = 'not connected', alert = false, alarm = false;
+  if (m && m.connected) {
+    if (s.state === 'Alarm') { sub = 'ALARM'; alarm = true; }
+    else if (stage === 'awaiting') { sub = 'fit T' + (job.want_tool ?? '?'); alert = true; }
+    else if (m.routine && m.routine.stage === 'awaiting') { sub = 'tool change'; alert = true; }
+    else if (['uploading', 'starting', 'running', 'paused'].includes(stage)) sub = (stage === 'paused' ? 'paused ' : stage === 'uploading' ? 'uploading ' : 'running ') + Math.round(stage === 'uploading' ? (job.upload || 0) * 100 : job.percent || 0) + '%';
+    else sub = (s.state || 'connected').toLowerCase();
+  }
+  $('#mname').textContent = (m && m.profile) || 'Machine';
+  $('#msub').textContent = sub;
+  $('#mtab').classList.toggle('alert', alert); $('#mtab').classList.toggle('alarm', alarm);
+  $('#empty').style.display = S.order.length ? 'none' : '';
+}
+
+// ---- tooltips
+document.addEventListener('mouseover', e => {
+  const t = e.target.closest('.tab'), tip = $('#tip');
+  if (!t) { tip.style.display = 'none'; return; }
+  const id = t.dataset.tab, r = t.getBoundingClientRect();
+  let h;
+  if (id === 'machine') {
+    const m = S.mst || {}, job = m.job || {};
+    h = `<b>${esc(m.profile || 'Machine')}</b> — shared by every design.` +
+        (job.stage ? `<div class="r"><span>Program</span><span>${esc((job.owner && job.owner.name) || job.program || job.name || '')}</span></div><div class="r"><span>Now</span><span>${esc(job.msg || job.stage)}</span></div>` : '<div class="r"><span>Program</span><span>none running</span></div>');
+  } else {
+    const d = S.docs.get(id); if (!d) return;
+    const p = d.program;
+    h = `<b>${esc(d.name || 'untitled')}</b><div class="r"><span>Workspace</span><span>${d.ws === 'cam' ? 'CAM' : 'Design'}</span></div>
+      <div class="r"><span>CAM program</span><span>${p ? `${p.ops} operations${p.minutes ? ' · ' + Math.round(p.minutes) + ' min' : ''}` : 'none'}</span></div>
+      <div class="r"><span>Assistant</span><span>${d.pending ? 'waiting for you' : d.busy ? 'working' : 'idle'}</span></div>
+      <div class="r"><span>Saved</span><span>${d.dirty ? '● unsaved changes' : d.name ? 'yes' : 'never'}</span></div>`;
+  }
+  tip.innerHTML = h; tip.style.left = Math.min(r.left, innerWidth - 290) + 'px'; tip.style.top = (r.bottom + 4) + 'px';
+  clearTimeout(tip._t); tip._t = setTimeout(() => { if (t.matches(':hover')) tip.style.display = 'block'; }, 400);
+});
+document.addEventListener('mouseleave', () => { $('#tip').style.display = 'none'; });
+
+// ---- dialogs
+function modal(h, p, buttons) {
+  return new Promise(res => {
+    $('#mh').textContent = h; $('#mp').innerHTML = p;
+    $('#mrow').innerHTML = buttons.map(([l, v, c], k) => `<button class="btn ${c || ''}" data-k="${k}">${l}</button>`).join('');
+    $('#modal').style.display = 'flex';
+    $('#mrow').onclick = e => { const b = e.target.closest('[data-k]'); if (!b) return; $('#modal').style.display = 'none'; res(buttons[+b.dataset.k][1]); };
+  });
+}
+function toast(key, html, actions) {
+  if (document.querySelector(`.toast[data-key="${key}"]`)) return;
+  const t = document.createElement('div'); t.className = 'toast'; t.dataset.key = key;
+  t.innerHTML = html + `<div class="row">${actions.map(([l, c], k) => `<button class="btn ${c || ''}" data-k="${k}">${l}</button>`).join('')}</div>`;
+  t.onclick = e => { const b = e.target.closest('[data-k]'); if (!b) return; t.remove(); actions[+b.dataset.k][2] && actions[+b.dataset.k][2](); };
+  $('#toasts').appendChild(t);
+}
+function dropToast(key) { const t = document.querySelector(`.toast[data-key="${key}"]`); if (t) t.remove(); }
+
+// ---- tabs: open, new, close
+async function newTab(body) {
+  try {
+    const r = await api('/api/docs/new', body || {});
+    if (!S.docs.has(r.id)) { S.docs.set(r.id, { id: r.id, name: body && body.name || null }); S.order.push(r.id); }
+    activate(r.id);
+  } catch (e) { modal('Could not open the design', esc(e.message), [['OK', null, 'pri']]); }
+}
+async function closeTab(id) {
+  const d = S.docs.get(id); if (!d) return;
+  const name = esc(d.name || 'untitled');
+  if (S.mst && S.mst.job && S.mst.job.owner && S.mst.job.owner.doc === id && ['uploading', 'starting', 'running', 'awaiting', 'paused'].includes(S.mst.job.stage)) {
+    await modal(`${name} is on the machine`, 'Its program is running on the machine. Close the tab when the program has ended (closing never stops the machine — STOP does).', [['OK', null, 'pri']]);
+    return;
+  }
+  if (d.busy && !await modal(`Close ${name}?`, 'Its assistant is still working. Stop it and close the tab?', [['Cancel', false], ['Stop and close', true, 'warn']])) return;
+  if (d.dirty && !await modal(`Close ${name}?`, 'It has unsaved changes: they are lost when the tab closes. Cancel and use File ▸ Save to keep them.', [['Cancel', false], ['Close without saving', true, 'warn']])) return;
+  try { await api('/api/docs/close', { id }); }
+  catch (e) { await modal('Could not close the tab', esc(e.message), [['OK', null, 'pri']]); return; }
+  if (d.frame) d.frame.remove();
+  S.docs.delete(id); S.order = S.order.filter(x => x !== id);
+  if (S.machine.doc === id && S.machine.frame) { S.machine.frame.remove(); S.machine.frame = null; S.machine.doc = null; }
+  dropToast('ask-' + id);
+  if (S.active === id || !S.order.includes(S.active)) activate(S.order[Math.max(0, S.order.length - 1)] || 'machine'); else render();
+}
+async function plusMenu(anchor) {
+  const m = $('#plusmenu');
+  if (m.style.display === 'block') { m.style.display = 'none'; return; }
+  let designs = [];
+  try { designs = (await api('/api/designs')).designs || []; } catch (e) {}
+  const open = new Set([...S.docs.values()].map(d => d.name).filter(Boolean));
+  m.innerHTML = `<div class="it" data-a="new">New design</div><hr><div class="hd">OPEN A SAVED DESIGN</div>` +
+    (designs.length ? designs.slice(0, 30).map(x => `<div class="it" data-open="${esc(x.name)}">${esc(x.name)}<span>${open.has(x.name) ? 'open' : new Date(x.modified * 1000).toLocaleDateString()}</span></div>`).join('') : '<div class="none">no saved designs yet</div>');
+  const r = anchor.getBoundingClientRect(); m.style.left = Math.min(r.left, innerWidth - 280) + 'px'; m.style.top = (r.bottom + 2) + 'px'; m.style.display = 'block';
+}
+document.addEventListener('click', e => {
+  const x = e.target.closest('[data-close]'); if (x) { e.stopPropagation(); closeTab(x.dataset.close); return; }
+  const t = e.target.closest('.tab'); if (t) { activate(t.dataset.tab); return; }
+  if (e.target.closest('#plus')) { plusMenu(e.target.closest('#plus')); return; }
+  const it = e.target.closest('#plusmenu .it');
+  if (it) { $('#plusmenu').style.display = 'none'; if (it.dataset.a === 'new') newTab({}); else if (it.dataset.open) newTab({ name: it.dataset.open }); return; }
+  if (!e.target.closest('#plusmenu')) $('#plusmenu').style.display = 'none';
+});
+
+// ---- messages from the pages
+window.addEventListener('message', e => {
+  if (e.origin !== location.origin || !e.data || !e.data.t) return;
+  const m = e.data, d = S.docs.get(m.doc);
+  if (m.t === 'status' && d) {
+    const fromMachine = S.machine.frame && e.source === S.machine.frame.contentWindow;
+    if (!fromMachine) { Object.assign(d, { name: m.name, dirty: m.dirty, busy: m.busy, ws: m.ws }); }
+    d.pending = m.pending; d.ask = m.ask;
+    if (m.pending && m.askId && !S.seenAsk.has(m.askId) && S.active !== m.doc && !(S.active === 'machine' && S.machine.doc === m.doc)) {
+      S.seenAsk.add(m.askId);
+      toast('ask-' + m.doc, `<div class="t"><b>${esc(d.name || 'untitled')}</b> · assistant</div><div class="m">${esc(m.ask || 'asks for your approval')}</div>`,
+            [['Later', ''], ['Review', 'warn', () => { activate(m.doc); try { d.frame.contentWindow.postMessage({ t: 'show_chat' }, location.origin); } catch (er) {} }]]);
+    }
+    if (!m.pending) dropToast('ask-' + m.doc);
+    render();
+  } else if (m.t === 'open_machine') {
+    machineFrame(m.doc, m.setup != null ? m.setup : null); activate('machine');
+  } else if (m.t === 'machine_doc' && S.docs.has(m.to)) {
+    machineFrame(m.to, null); activate('machine');
+  } else if (m.t === 'focus' && S.docs.has(m.to)) {
+    activate(m.to);
+  } else if (m.t === 'new_tab') {
+    newTab({});
+  } else if (m.t === 'open_tab' && m.name) {
+    newTab({ name: m.name });
+  }
+});
+
+// ---- the machine: one connection for the strip (machine events go to every page)
+function machineSocket() {
+  const w = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws?doc=shell');
+  w.onmessage = ev => {
+    let m; try { m = JSON.parse(ev.data); } catch (e) { return; }
+    if (m.type !== 'machine_link') return;
+    S.mst = m;
+    const job = m.job, key = job ? job.name + ':' + job.stage + ':' + (job.want_tool ?? '') : null;
+    if (job && job.stage === 'awaiting' && key !== S.lastStage && S.active !== 'machine') {
+      const who = (job.owner && job.owner.name) || 'the program';
+      toast('tool', `<div class="t"><b>${esc(m.profile || 'Machine')}</b> · ${esc(who)}</div><div class="m">Tool change: <b>fit T${esc(job.want_tool ?? '?')}</b>. The spindle is off and parked; the machine measures the tool when you press the front button (or Confirm on the Machine tab).</div>`,
+            [['Later', ''], ['Open machine', 'warn', () => activate('machine')]]);
+    }
+    if (!job || job.stage !== 'awaiting') dropToast('tool');
+    S.lastStage = key;
+    render();
+  };
+  w.onclose = () => setTimeout(machineSocket, 1500);
+}
+
+// ---- start: the open designs from the server, the tab that was in front
+(async () => {
+  let r;
+  for (let k = 0; k < 100; k++) { try { r = await api('/api/docs'); break; } catch (e) { await new Promise(z => setTimeout(z, 300)); } }
+  for (const d of (r && r.docs) || []) { S.docs.set(d.id, { ...d }); S.order.push(d.id); frameFor(d.id); }   // every design's page loads: its assistant renders views and asks for approvals there
+  let a = null; try { a = localStorage.getItem('tabs.active'); } catch (e) {}
+  activate(a === 'machine' || S.docs.has(a) ? a : S.order[0]);
+  machineSocket();
+  setInterval(async () => {                                   // names / programs of tabs not in front (CAM built in the background)
+    try { const r2 = await api('/api/docs'); for (const x of r2.docs) { const d = S.docs.get(x.id); if (d) { d.program = x.program; if (!d.frame) Object.assign(d, { name: x.name, dirty: x.dirty, busy: x.busy, pending: x.pending }); } } render(); } catch (e) {}
+  }, 4000);
+})();
+</script>
+</body>
+</html>

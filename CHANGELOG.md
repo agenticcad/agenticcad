@@ -5,6 +5,29 @@ patch bumps fix things, a major bump changes something scripts or workspaces rel
 
 ## [Unreleased]
 
+## [1.4.0a1] — 2026-10-24 (test build: AgenticCAD Tabs)
+
+A separate test app, **AgenticCAD Tabs**, installed next to AgenticCAD: several designs open at once, in tabs. Its
+own data folder (seeded on first start by copying AgenticCAD's tools, machines, fixtures, saved designs and imports
+- AgenticCAD's folder is only read), its own ports (8865, phone page 8890) and its own bundle id.
+
+### Added
+- **A tab per open design.** Each tab is a whole design: its model, its own CAM program and simulation, its own
+  assistant (a separate Claude Code session working in the tab's own folder) and its view. File ▸ New and Open, and
+  the **+** on the tab strip, open designs in new tabs (an open design is switched to, not opened twice). Tabs show
+  when their assistant is working, when something waits for you, and unsaved changes; closing asks about both.
+  The open tabs come back when the app starts.
+- **The machine is its own tab**, shared by every design. **Program from [design ▾]** at the top picks which open
+  design's CAM program Prepare / Zero / Run work with (Send to machine in a design's CAM tab opens it there with that
+  setup); while a program plays it is locked to the design that sent it, and other designs' assistants are refused
+  machine moves until it ends (Hold, Pause and STOP always work). The Machine tab turns amber for a tool change and a
+  toast says so wherever you are; an approval asked for in a tab you're not looking at raises a toast with Review.
+- At most 4 assistants run at once; the one you look at starts (or wakes) when its tab is shown and picks up its
+  conversation again.
+
+### Fixed
+- The Open list showed a design's CAM script (`name.cam`) as a design of its own.
+
 ## [1.3.0] — 2026-10-22
 
 ### Fixed

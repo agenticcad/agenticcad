@@ -627,8 +627,13 @@ def _write_overrides(code: str, table: dict, span: tuple[int, int] | None) -> st
 
 class CadAgent:
     def __init__(self, workspace: Path, emit: Emit,
-                 screenshot_fn: Callable[[dict[str, Any]], Awaitable[str]]):
+                 screenshot_fn: Callable[[dict[str, Any]], Awaitable[str]], doc_dir: Path | None = None):
         self.workspace = workspace
+        # one open design (a tab): its working files - model.py, cam.py, state.json, history/ - live in doc_dir; the
+        # libraries, settings, exports, fixtures and machines stay shared in the workspace
+        self.doc_dir = Path(doc_dir) if doc_dir else workspace
+        (self.doc_dir / "history").mkdir(parents=True, exist_ok=True)
+        self.doc_id: str = "d1"
         self._agent_turn = False              # True while the agent is answering (builds use draft threads)
         self.sim = None                       # last CAM simulation (cam_sim.SimResult)
         self.sim_ops: list[int] = []
@@ -668,7 +673,7 @@ class CadAgent:
         self.camera = None                     # machine_link.CameraRelay
         self.slice_layers: dict[str, Any] | None = None       # its parsed G-code, viewer payload
         self.program: cam.Program | None = None
-        cam_path = workspace / "cam.py"
+        cam_path = self.doc_dir / "cam.py"
         if cam_path.exists():
             self.cam_code = cam_path.read_text()
         # startup progress (the splash screen): steps are appended as they start; `done` when the first design is built
@@ -713,6 +718,8 @@ class CadAgent:
     def list_designs(self) -> list[dict[str, Any]]:
         out = []
         for p in sorted(self.designs_dir.glob("*.py"), key=lambda p: -p.stat().st_mtime):
+            if p.name.endswith(".cam.py"):                 # a design's CAM script, not a design
+                continue
             out.append({"name": p.stem, "modified": int(p.stat().st_mtime), "size": p.stat().st_size})
         return out
 
@@ -791,7 +798,7 @@ class CadAgent:
     # ------------------------------------------------------------------ CAM
     async def set_cam_code(self, code: str, rebuild: bool = True, source: str = "agent") -> cam.Program | None:
         self.cam_code = code
-        (self.workspace / "cam.py").write_text(code)
+        (self.doc_dir / "cam.py").write_text(code)
         if not code.strip() or not rebuild:
             self.program = None
             self.sim = None
@@ -970,7 +977,7 @@ class CadAgent:
             prog = await self.set_cam_code(code, source="user")
         except cam.CamError:                                       # it doesn't build: cam.py goes back as it was
             self.cam_code = before
-            (self.workspace / "cam.py").write_text(before)
+            (self.doc_dir / "cam.py").write_text(before)
             raise
         self.notes.append(f"The user added an operation in the CAM workspace: `{line}` (appended to cam.py under the "
                           "'operations added in the CAM tab' comment). Keep it when you rewrite the script.")
@@ -1029,6 +1036,10 @@ class CadAgent:
         elif action in ("change_tool", "origin_anchor", "auto_z_probe", "set_origin", "shift_origin", "origin_at", "lower_to", "raise_z",
                         "goto", "cleaning_position", "switch", "console", "jog_a", "rotary_zero", "shrink_a"):
             mc._need(armed=True, idle=action != "switch", homed=action != "switch")
+            owner = (mc.job or {}).get("owner") or {}
+            if mc.job_active and owner.get("doc") and owner["doc"] != self.doc_id:
+                raise ml.Refused(f"{owner.get('name') or 'another design'}'s program is running on the machine: it belongs to that "
+                                 "design until the program ends (Hold, Pause and STOP still work from anywhere)")
             if mc.jog_busy or mc.job_active:
                 raise ml.Refused("the machine is busy: wait for it to finish")
             if action in ("jog_a", "rotary_zero", "shrink_a"):
@@ -1115,7 +1126,7 @@ class CadAgent:
             names = ", ".join(o["name"] for o in prep["ops"])
             return (f"Run on the machine: {names} (setup {info['setup']}, {info['wcs']}) · about {info['time_min']} min"
                     + (f" · AIR CUT +{prep['air_cut']:g} mm" if prep["air_cut"] else "") + (" · 4TH AXIS" if rot else "") + ". " + "; ".join(chk["notes"])
-                    + ". The machine runs it on its own once started."), lambda: mc.run_program(label, prep, info, rotary=rot, ack=ack)
+                    + ". The machine runs it on its own once started."), lambda: mc.run_program(label, prep, {**info, "owner": {"doc": self.doc_id, "name": self.design_name or "untitled"}}, rotary=rot, ack=ack)
         if action == "switch":
             what, on, pw = str(f("what", "")), bool(f("on")), f("power")
             if what not in mc.profile.switches:
@@ -1278,19 +1289,24 @@ class CadAgent:
                    "bodies": {b.path: b.shape for b in self.model.bodies},
                    "tools": self.library.tool_map(), "machines": self.library.machines()})
         buf = io.StringIO()
+        ck.BUILD_LOCK.acquire()
         cam.reset_overrides()
         try:
             with contextlib.redirect_stdout(buf):
                 exec(compile(code, "cam.py", "exec"), ns)
         except Exception:
+            ck.BUILD_LOCK.release()
             tb = "\n".join(l for l in traceback.format_exc().splitlines() if "agent.py" not in l)
             raise cam.CamError(tb + ("\nstdout:\n" + buf.getvalue() if buf.getvalue() else ""))
-        prog = ns.get("program")
-        if not isinstance(prog, cam.Program):
-            raise cam.CamError("CAM script must assign `program = Program(setup, ...)`")
-        if not prog.ops:
-            raise cam.CamError("program has no operations (use program.add(...))")
-        prog.unused_overrides = cam.unused_overrides()
+        try:
+            prog = ns.get("program")
+            if not isinstance(prog, cam.Program):
+                raise cam.CamError("CAM script must assign `program = Program(setup, ...)`")
+            if not prog.ops:
+                raise cam.CamError("program has no operations (use program.add(...))")
+            prog.unused_overrides = cam.unused_overrides()
+        finally:
+            ck.BUILD_LOCK.release()
         return prog
 
     def cam_context(self) -> str:
@@ -1816,7 +1832,7 @@ class CadAgent:
                 "fixtures": fixture_lib.list_fixtures(self.workspace)}
 
     def _write_state(self) -> None:
-        (self.workspace / "state.json").write_text(json.dumps({"design": self.design_name, "config": self.config}))
+        (self.doc_dir / "state.json").write_text(json.dumps({"design": self.design_name, "config": self.config}))
 
     # ------------------------------------------------------------------ model
     async def build(self, code: str, source: str = "agent", record: bool = True) -> ck.Model:
@@ -1829,11 +1845,11 @@ class CadAgent:
                     self.config = None
             model = await asyncio.to_thread(ck.run_script, code, self.quality, self.workspace, self.parts, self._thread_mode(), self.config)
             self.model = model
-            (self.workspace / "model.py").write_text(code)
+            (self.doc_dir / "model.py").write_text(code)
             hid = None
             if record:
                 hid = str(int(time.time() * 1000))
-                (self.workspace / "history" / f"{hid}.py").write_text(code)
+                (self.doc_dir / "history" / f"{hid}.py").write_text(code)
             await self.emit({"type": "model", "mesh": model.mesh, "code": code,
                              "summary": model.summary(6), "source": source, "history_id": hid,
                              "history_len": len(self._history_files())})
@@ -1855,9 +1871,9 @@ class CadAgent:
             code = script_edit.apply_edits(self.model.code, edits, append)
             model = await asyncio.to_thread(ck.run_script, code, self.quality, self.workspace, self.parts, self._thread_mode(), self.config)
             self.model = model
-            (self.workspace / "model.py").write_text(code)
+            (self.doc_dir / "model.py").write_text(code)
             hid = str(int(time.time() * 1000))
-            (self.workspace / "history" / f"{hid}.py").write_text(code)
+            (self.doc_dir / "history" / f"{hid}.py").write_text(code)
             await self.emit({"type": "model", "mesh": model.mesh, "code": code, "summary": model.summary(6), "source": source,
                              "history_id": hid, "history_len": len(self._history_files())})
             await self.emit(self.design_state())
@@ -1939,7 +1955,7 @@ class CadAgent:
         await self.emit({"type": "info", "text": what})
 
     def _history_files(self) -> list[Path]:
-        return sorted((self.workspace / "history").glob("*.py"))
+        return sorted((self.doc_dir / "history").glob("*.py"))
 
     async def undo(self) -> None:
         """Revert to the previous build; the undone script is moved to history/undone/."""
@@ -1948,7 +1964,7 @@ class CadAgent:
             await self.emit({"type": "error", "text": "Nothing to undo."})
             return
         undone, prev = files[-1], files[-2]
-        undone_dir = self.workspace / "history" / "undone"
+        undone_dir = self.doc_dir / "history" / "undone"
         undone_dir.mkdir(exist_ok=True)
         undone.rename(undone_dir / undone.name)
         try:
@@ -1968,7 +1984,7 @@ class CadAgent:
 
     def _load_initial(self) -> None:
         self._startup_step("Reading the workspace")
-        state_path = self.workspace / "state.json"
+        state_path = self.doc_dir / "state.json"
         name = None
         if state_path.exists():
             try:
@@ -1977,7 +1993,7 @@ class CadAgent:
             except Exception:
                 name = None
         # model.py is the working copy (may hold unsaved edits); the design file is what was last saved
-        path = self.workspace / "model.py"
+        path = self.doc_dir / "model.py"
         code = path.read_text() if path.exists() else None
         if name and (self.designs_dir / f"{name}.py").exists():
             self.design_name = name
@@ -2003,7 +2019,7 @@ class CadAgent:
                 self.design_name, self.saved_code = None, None
         if fresh and self.design_name is None:
             self.saved_code = code                 # an untouched empty design is not unsaved work
-        (self.workspace / "model.py").write_text(code)
+        (self.doc_dir / "model.py").write_text(code)
         if self.cam_code.strip():          # rebuild the CAM program from the working copy
             self._startup_step("Rebuilding the CAM program")
             try:
@@ -2011,7 +2027,7 @@ class CadAgent:
             except Exception:  # noqa: BLE001
                 self.program = None
         if not self._history_files():
-            (self.workspace / "history" / f"{int(time.time() * 1000)}.py").write_text(code)
+            (self.doc_dir / "history" / f"{int(time.time() * 1000)}.py").write_text(code)
 
     # ------------------------------------------------------------------ extensions (ext_builtin + <workspace>/extensions)
     def ext_ctx(self, state: dict[str, Any] | None = None, event: str | None = None, selection: dict[str, Any] | None = None) -> ext_mod.Ctx:
@@ -3111,13 +3127,15 @@ class CadAgent:
             strict_mcp_config=True,                # only the servers configured here (cad + Settings ▸ MCP), not the user's claude.ai connectors
             permission_mode="dontAsk",
             include_partial_messages=True,
-            cwd=str(self.workspace),
+            cwd=str(self.doc_dir),                 # each open design's session works in its own folder
             setting_sources=[],
             model=st.get("model") or os.environ.get("AGENTICCAD_MODEL") or None,
             max_turns=int(st.get("max_turns") or 60),
             # keep the CAD tools loaded up front instead of deferred behind ToolSearch
             env={"ENABLE_TOOL_SEARCH": "false", **({"ANTHROPIC_API_KEY": st["api_key"]} if st.get("api_key") else {})},
             max_buffer_size=8 * 1024 * 1024,   # screenshots + big tool results (default 1 MB is too small)
+            # a tab whose assistant was put to sleep (more open tabs than live assistants) picks its conversation up again
+            **({"resume": self.session_id} if self.session_id and "resume" not in kw else {}),
             **kw,
         )
         cli = find_claude_cli()                 # not bundled in the desktop app; GUI PATH is minimal
@@ -3129,7 +3147,8 @@ class CadAgent:
 
     async def stop(self) -> None:
         if self.client:
-            await self.client.disconnect()
+            c, self.client = self.client, None              # a stopped (sleeping) tab's assistant starts again when shown
+            await c.disconnect()
 
     async def interrupt(self) -> None:
         if self.client and self.busy:
