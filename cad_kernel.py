@@ -135,6 +135,7 @@ class Model:
     config: str | None = None     # the configuration (named parameter overrides) this model was built with
     configurations: list[str] = field(default_factory=list)   # configuration names the script declares
     motion: dict[str, Any] | None = None        # joints / couplings / drive declared by the script (motion.py)
+    patterns: list[dict[str, Any]] = field(default_factory=list)   # pattern(): [{base, instances, offsets}] (copies of one part)
     explode: dict[str, Any] = field(default_factory=dict)
     appearance: dict[str, Any] = field(default_factory=dict)
 
@@ -231,6 +232,42 @@ def _unwrap(obj: Any) -> Any:
     return obj
 
 
+class Pattern:
+    """One part placed several times - a sheet of badges, a row of brackets: `pattern(part, cols=4, rows=2,
+    pitch=(35, 60))` or `pattern(part, offsets=[(0, 0), (40, 0), (0, 30)])`. Put it in `result` like a shape; the copies
+    become bodies NAME, NAME@2, NAME@3 ... that share the part's exact geometry (built once, meshed once), and the
+    model remembers the pattern so CAM can machine the part once and run it at every copy (Setup(tiles=...))."""
+
+    def __init__(self, shape: Shape, offsets):
+        if not isinstance(_unwrap(shape), Shape):
+            raise CadError(f"pattern(): the part must be a build123d shape, got {type(shape).__name__}")
+        offs = []
+        for o in offsets:
+            o = tuple(float(v) for v in o)
+            if len(o) not in (2, 3):
+                raise CadError("pattern(): each offset is (dx, dy) or (dx, dy, dz)")
+            offs.append(o + (0.0,) * (3 - len(o)))
+        if not offs:
+            raise CadError("pattern(): no copies")
+        if len(set(offs)) != len(offs):
+            raise CadError("pattern(): two copies at the same place")
+        self.shape, self.offsets = _unwrap(shape), offs
+
+    def __len__(self):
+        return len(self.offsets)
+
+
+def pattern(shape: Shape, offsets=None, *, cols: int = 1, rows: int = 1, pitch=(0.0, 0.0)) -> Pattern:
+    """A part placed several times (see Pattern). Grid: cols x rows at pitch (dx, dy), the part as given at the first
+    place (front-left), row by row. Or the places themselves: offsets=[(dx, dy) | (dx, dy, dz), ...]."""
+    if offsets is None:
+        if int(cols) < 1 or int(rows) < 1:
+            raise CadError("pattern(): cols and rows are at least 1")
+        px, py = (float(pitch), float(pitch)) if isinstance(pitch, (int, float)) else (float(pitch[0]), float(pitch[1]))
+        offsets = [(c * px, r * py, 0.0) for r in range(int(rows)) for c in range(int(cols))]
+    return Pattern(shape, offsets)
+
+
 def coerce_bodies(obj: Any, prefix: str = "", out: list[tuple[str, Shape]] | None = None) -> list[tuple[str, Shape]]:
     """Flatten `result` into [(path, shape)]; dict keys become tree path segments."""
     if out is None:
@@ -238,6 +275,14 @@ def coerce_bodies(obj: Any, prefix: str = "", out: list[tuple[str, Shape]] | Non
     obj = _unwrap(obj)
     if obj is None:
         return out                                   # `result = None` → empty design
+    if isinstance(obj, Pattern):                     # copies share the part's geometry (moved, not rebuilt)
+        base = prefix.rstrip("/") or "Body1"
+        o0 = obj.offsets[0]
+        for k, off in enumerate(obj.offsets):
+            s = obj.shape.moved(b3d.Location(off)) if any(off) else obj.shape.moved(b3d.Location((0, 0, 0)))
+            s._ac_pattern = (base, k, tuple(a - b for a, b in zip(off, o0)))
+            out.append((base if k == 0 else f"{base}@{k + 1}", s))
+        return out
     if isinstance(obj, dict):
         for k, v in obj.items():
             coerce_bodies(v, f"{prefix}{k}/", out)
@@ -319,6 +364,8 @@ def script_namespace() -> dict[str, Any]:
     exec("from build123d import *\nimport math\nfrom math import *\nimport build123d as b3d\n", ns)
     ns["import_step"] = import_step
     ns["from_library"] = from_library
+    ns["pattern"] = pattern
+    ns["Pattern"] = Pattern
     ns.update(thr.namespace())
     ns.update(gears.namespace())
     ns.update(features.namespace())
@@ -480,8 +527,20 @@ def build_model(pairs: list[tuple[str, Shape]] | Shape, code: str = "", quality:
     total_volume = sum(b.volume for b in bodies)
 
     body_payloads = []
+    base_payload: dict[str, tuple] = {}               # pattern base path -> (its payload, its body)
+    patterns: dict[str, dict] = {}
     for body, faces in zip(bodies, face_lists):
-        payload = tessellate_body(body, faces, lin, ang, warnings)
+        pat = getattr(body.shape, "_ac_pattern", None)
+        if pat is not None and pat[1] > 0 and pat[0] in base_payload:
+            bp, bb = base_payload[pat[0]]
+            payload = _moved_payload(bp, bb, body, pat[2])
+        else:
+            payload = tessellate_body(body, faces, lin, ang, warnings)
+            if pat is not None and pat[1] == 0:
+                base_payload[pat[0]] = (payload, body)
+        if pat is not None:
+            g = patterns.setdefault(pat[0], {"base": pat[0], "instances": [], "offsets": []})
+            g["instances"].append(body.path); g["offsets"].append([round(v, 6) for v in pat[2]])
         body_payloads.append(payload)
 
     tree = build_tree(bodies)
@@ -493,8 +552,27 @@ def build_model(pairs: list[tuple[str, Shape]] | Shape, code: str = "", quality:
         "quality": quality,
         "exact": True,   # display mesh derived from an exact B-rep; export STEP for the true geometry
     }
-    return Model(bodies=bodies, code=code, faces=infos, mesh=mesh,
-                 bbox_min=tuple(gmin), bbox_max=tuple(gmax), volume=total_volume, warnings=warnings)
+    mesh["patterns"] = list(patterns.values())
+    m = Model(bodies=bodies, code=code, faces=infos, mesh=mesh,
+              bbox_min=tuple(gmin), bbox_max=tuple(gmax), volume=total_volume, warnings=warnings)
+    m.patterns = list(patterns.values())
+    return m
+
+
+def _moved_payload(bp: dict, base: Body, body: Body, off) -> dict:
+    """A pattern copy's display mesh: the base's triangles moved by `off` (no new tessellation), its own face/edge ids."""
+    dx, dy, dz = off
+    pos = bp["positions"]
+    moved = [round(v + (dx, dy, dz)[i % 3], 5) for i, v in enumerate(pos)]
+    fd = (body.face_ids[0] - base.face_ids[0]) if body.face_ids and base.face_ids else 0
+    edges = [[round(v + (dx, dy, dz)[i % 3], 5) for i, v in enumerate(pl)] for pl in bp["edges"]]
+    edge_info = []
+    for eid, edge in zip(body.edge_ids, body.shape.edges()):
+        edge_info.append(edge_meta(eid, edge))
+    return {"id": body.id, "name": body.name, "path": body.path, "positions": moved, "normals": bp["normals"],
+            "indices": bp["indices"], "faceRanges": [[f + fd, a, n] for f, a, n in bp["faceRanges"]],
+            "edges": edges, "edgeInfo": edge_info, "bboxMin": list(body.bbox_min), "bboxMax": list(body.bbox_max),
+            "patternOf": base.path}
 
 
 def collect_sketches(ns: dict[str, Any]) -> list[dict[str, Any]]:

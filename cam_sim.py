@@ -173,7 +173,7 @@ def _bite_stats(op, mv, pts, idx, kinds, eng, rapid_rate) -> tuple[dict, dict]:
     material removal rate (mm3/min: volume a sample removes / its step x the move's feed) against the tool's rated
     MRR (stepdown x stepover width x feed), how the time splits into rapids, cutting feeds and feed moves that removed
     nothing - and per move the max ap and MRR (for Program.limit_feeds)."""
-    n = len(op.moves)
+    n = len(mv)
     ap_move = np.full(n, -np.inf); mrr_move = np.zeros(n); vol_move = np.zeros(n)
     if len(idx):
         np.maximum.at(ap_move, idx, eng[:, 0])
@@ -267,11 +267,12 @@ def _sim_zmap(program, sel, part, resolution, frames, tol, machine_model=None, p
             side = -1; has_bottom = True
         else:
             out.notes.append(f"{op.name}: side setup ({st.orient}) is not simulated in the height-map model")
-            plans.append((i, op, 0, None)); continue
-        P = st.to_model(np.array([m[1:4] for m in op.moves], dtype=float)) if op.moves else np.zeros((0, 3))
-        mv = [[m[0], *p, m[4]] for m, p in zip(op.moves, P)]
-        plans.append((i, op, side, mv))
-    total = sum(len(op.moves) for _, op, _, _ in plans)
+            plans.append((i, op, 0, None, [])); continue
+        tm, src = cam.tile_moves(op, program.op_tiles(op), st.clearance_z)  # every tile, as the post runs them
+        P = st.to_model(np.array([m[1:4] for m in tm], dtype=float)) if tm else np.zeros((0, 3))
+        mv = [[m[0], *p, m[4]] for m, p in zip(tm, P)]
+        plans.append((i, op, side, mv, src))
+    total = sum(len(mv) if mv is not None else len(op.moves) for _, op, _, mv, _ in plans)
     marks = _frame_marks(total, frames)
     done = 0
     mark_i = 0
@@ -296,9 +297,9 @@ def _sim_zmap(program, sel, part, resolution, frames, tol, machine_model=None, p
     rapid_rate = float(getattr(program.setup.machine, "rapid", 2000.0) or 2000.0)
 
     snap(0)
-    for i, op, side, mv in plans:
+    for i, op, side, mv, src in plans:
         if side == 0 or not mv:
-            done += len(op.moves)
+            done += len(mv) if mv else len(op.moves)
             while mark_i < len(marks) and marks[mark_i] <= done:
                 snap(marks[mark_i]); mark_i += 1
             continue
@@ -309,7 +310,7 @@ def _sim_zmap(program, sel, part, resolution, frames, tol, machine_model=None, p
         start = 0
         while start < len(pts):
             next_mark = marks[mark_i] if mark_i < len(marks) else None
-            if next_mark is not None and next_mark - done <= len(op.moves):
+            if next_mark is not None and next_mark - done <= len(mv):
                 end_move = next_mark - done - 1            # last move index (in this op) of this piece
                 end = int(np.searchsorted(idx, end_move, side="right"))
             else:
@@ -326,8 +327,18 @@ def _sim_zmap(program, sel, part, resolution, frames, tol, machine_model=None, p
             start = end
             if next_mark is not None and end_move_done(idx, end, done, next_mark):
                 snap(next_mark); mark_i += 1
-        done += len(op.moves)
+        done += len(mv)
         b, per_move = _bite_stats(op, mv, pts, idx, kinds, eng, rapid_rate)
+        if len(mv) != len(op.moves):                       # tiles: each op move gets its worst over the tiles
+            sa = np.asarray(src); keep = sa >= 0
+            fold = {}
+            for k, arr in per_move.items():
+                f = np.zeros(len(op.moves)); np.maximum.at(f, sa[keep], np.asarray(arr)[keep]); fold[k] = f
+            per_move = fold
+            b["tiles"] = int(len(program.op_tiles(op)))
+            for key in ("move", "mrr_move"):
+                j = b[key] - 1
+                b[key] = int(src[j]) + 1 if 0 <= j < len(src) and src[j] >= 0 else b[key]
         bites.append(b); out.per_move[i] = per_move
         if pmaps is not None:
             g = _gouge_z(pmaps, zhi, zlo, tol, has_bottom)[0]
@@ -426,31 +437,38 @@ def _stamp_z_run(zhi, zlo, P, K, I, tool, side, res, x0, y0, rapid_hits, op_name
                     j = int(np.argmax(np.where(hit, depth, -1)))
                     rapid_hits.append({"op": op_name, "move": int(owner[j]) + 1, "depth": round(float(depth[j]), 3)})
         if eng is not None and not rap.all():
+            # exact per-sample engagement: for every cell, the stock as ALL earlier samples of this chunk left it (a
+            # grouped running min/max over the samples touching the cell, in sample order), not only the one before
             m_ = d.shape[0]
             hi = zhi.ravel()[flat]; lo = zlo.ravel()[flat]
             mat = hi > lo
             rows = np.broadcast_to(np.arange(m_)[:, None], d.shape)[ok]
-            depth = np.where(mat, (hi - vals) if side > 0 else (vals - lo), -np.inf)
-            per = np.full(m_, -np.inf); np.maximum.at(per, rows, depth); per[rap] = -np.inf
-            # the surface the previous sample left under these cells: what is new for this sample is below it
-            prev_idx = np.arange(s, s + m_) - 1                # -1 for the first sample of the run: nothing before it
-            PX = np.where(prev_idx[:, None] >= 0, P[np.maximum(prev_idx, 0), 0:1], np.inf)
-            PY = np.where(prev_idx[:, None] >= 0, P[np.maximum(prev_idx, 0), 1:2], np.inf)
-            dprev = np.hypot(x0 + CX * res - PX, y0 + CY * res - PY)
-            okp = ok & (dprev < R - 1e-4) & (prev_idx[:, None] >= 0)
-            profp = _profile(tool, np.where(okp, dprev, 0.0))
-            zprev = np.broadcast_to(P[np.maximum(prev_idx, 0), 2:3], d.shape)
             tipz = np.broadcast_to(P[s:s + m_, 2:3], d.shape)[ok]
-            surf_prev = np.where(okp & np.isfinite(profp), (zprev + profp) if side > 0 else (zprev - profp), np.inf if side > 0 else -np.inf)[ok]
+            order = np.lexsort((rows, flat))
+            f_s, v_s = flat[order], vals[order]
+            gstart = np.r_[True, f_s[1:] != f_s[:-1]] if len(f_s) else np.zeros(0, bool)
+            gid = (np.cumsum(gstart) - 1).astype(float)
+            BIG = 4096.0                                   # > any z range here: keeps each cell's run separate
             if side > 0:
-                ceiling = np.minimum(hi, surf_prev)
-                inc = np.where(mat, ceiling - vals, -np.inf)
+                cm = np.minimum.accumulate(v_s - gid * BIG) + gid * BIG if len(v_s) else v_s
+                prev = np.empty_like(cm); prev[1:] = cm[:-1]
+                if len(prev): prev[gstart] = np.inf
+                ceil_s = np.minimum(hi[order], prev)
+                inc_s = ceil_s - v_s
+                ax_s = ceil_s - tipz[order]
             else:
-                floor_ = np.maximum(lo, surf_prev)
-                inc = np.where(mat, vals - floor_, -np.inf)
+                cm = np.maximum.accumulate(v_s + gid * BIG) - gid * BIG if len(v_s) else v_s
+                prev = np.empty_like(cm); prev[1:] = cm[:-1]
+                if len(prev): prev[gstart] = -np.inf
+                ceil_s = np.maximum(lo[order], prev)
+                inc_s = v_s - ceil_s
+                ax_s = tipz[order] - ceil_s
+            ms = mat[order]
+            inc = np.empty_like(inc_s); inc[order] = np.where(ms, inc_s, -np.inf)
+            axial = np.empty_like(ax_s); axial[order] = ax_s
             cut = inc > 1e-6
-            axial = np.where(cut, (hi - tipz) if side > 0 else (tipz - lo), -np.inf)
-            ap = np.full(m_, -np.inf); np.maximum.at(ap, rows, axial); ap[rap] = -np.inf
+            per = np.full(m_, -np.inf); np.maximum.at(per, rows, inc); per[rap] = -np.inf
+            ap = np.full(m_, -np.inf); np.maximum.at(ap, rows, np.where(cut, axial, -np.inf)); ap[rap] = -np.inf
             vol = np.zeros(m_); np.add.at(vol, rows[cut], inc[cut] * res * res); vol[rap] = 0.0
             eng[s:s + m_, 0] = np.maximum(eng[s:s + m_, 0], ap)
             eng[s:s + m_, 1] += vol

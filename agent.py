@@ -216,6 +216,10 @@ with BuildPart() as bp:
 result = bp.part
 ```
 Algebra mode also works: `part = Box(10,10,10) - Cylinder(3, 20); part = fillet(part.edges().filter_by(Axis.Z), 1)`.
+The same part several times (a sheet of badges, tiling, "make 8 of these"): never copy bodies with Pos()*part in a loop.
+Use `result = {"badge": pattern(part, cols=4, rows=2, pitch=(35, 60))}` (or pattern(part, offsets=[(dx, dy), ...])):
+one definition, the copies share its exact geometry (bodies badge, badge@2 ... built and meshed once) and the model
+records the pattern so CAM machines the part once and runs it at every copy. Change the part and every copy follows.
 Useful: Sphere, Cone, Torus, Wedge, revolve(), sweep(), loft(), offset(), split(bisect_by=Plane.XY),
 offset(amount=-1, openings=face) for hollowing, Text(), Polygon(), Slot*, RegularPolygon, Trapezoid,
 Rot()/Pos() for algebra transforms, ShapeList.group_by(), .filter_by(GeomType.CYLINDER).
@@ -261,6 +265,20 @@ program = Program(top); program.add(face(top, t, ...)); program.add(pocket(bot, 
 ```
 The program runs setups in op order; the post selects G54, G55… per setup and pauses for the operator (GRBL M0,
 Makera M600) to flip and re-zero. A program runs on ONE machine (the first Setup's).
+TILES (the design has a pattern(), or the user wants several copies cut from one plate): compute every op ONCE on the
+base part and give the setup the tiles - never build ops per copy or shift/copy moves yourself:
+```
+part = bodies["badge"]                                       # the pattern's base body (at its own place)
+st = Setup(m, stock, origin="stock-top-left", tiles=tiles_of(model, "badge"))   # or tiles=[(0, 0), (35, 0), ...] model mm
+program = Program(st); program.add(face(st, t, ...)); program.add(contour(st, t, outline_of_one_part, ...))
+```
+Each op then runs at every tile in turn (all tiles with one tool before the next tool change); time, bounds, the
+simulation and the G-code all include the tiles, the program stays the size of one part. Regions for the base part
+only; stock is the whole plate. An op computed over the WHOLE plate (facing or roughing the block in one go) is added
+with `program.add(op, tiles=False)`: it runs once. tile_wcs=True puts each tile in its own work
+offset (G54, G55 ... up to 9) for an operator who zeros each one - NOT on a Makera (its firmware ties work-offset Z to the
+tool length reference, so G55+ can't be set safely mid-job): there the tiles run in G54 with offsets, the same file
+size (no controller here has subprograms).
 4th axis (rotary A about X; needs a machine with `rotary`, e.g. "Makera Z1 + 4th axis"): the part is turned so its
 axis is the setup X axis (Y = Z = 0 on the centreline; the WCS origin defaults to "rotary-axis-left" on the axis,
 which is where Makera's 4th-axis probing sets zero). Stock.cylinder(d, length, x0=..., axis=(y, z)) for bar stock.

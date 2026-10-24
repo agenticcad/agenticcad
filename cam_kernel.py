@@ -337,6 +337,13 @@ class Setup:
     axis: tuple[float, float] | None = None
     a: float = 0.0
     wcs: str | None = None                  # G54..G59; Program assigns one per setup when None
+    # the same part at several places (a sheet of badges): the ops are computed ONCE, on the part at its own place, and
+    # the program runs every op at each tile in turn (all tiles with one tool before the next tool). tiles = MODEL-frame
+    # offsets [(dx, dy[, dz]), ...] from that part, the first usually (0, 0); tiles_of(model, "badge") reads them from
+    # a pattern() in the design. tile_wcs=True: each tile in its own work offset (G54, G55, ...) that the operator zeros;
+    # by default one work offset and the tiles are offsets in the program (one file either way: no subprograms).
+    tiles: Any = None
+    tile_wcs: bool = False
     # how the work is held: a fixture by name (fixture_lib: vises, clamps, plates), where it sits on the table
     # (fixture_at = (x, y) from the table centre, default: the fixture's usual place; fixture_rot degrees about Z) and its
     # parameters (opening, seat, ...). The stock's bottom-centre sits at the fixture's work origin; None = stock centred on
@@ -350,6 +357,11 @@ class Setup:
 
     def __post_init__(self):
         self.model_stock = self.stock
+        self.tiles = _norm_tiles(self.tiles)
+        if len(self.tiles) > 1 and self.rotary:
+            raise CamError("tiles: a 4th-axis setup machines one part (tile a flat setup)")
+        if self.tile_wcs and len(self.tiles) > 9:
+            raise CamError(f"tile_wcs: {len(self.tiles)} tiles but a controller has 9 work offsets (G54..G59.3)")
         fx = _FIXTURES["table"].get(self.name)        # fixtures({...}) line in cam.py (the CAM tab's picker) wins over the script
         if fx is not None:
             self.fixture = fx.get("name", self.fixture) or None
@@ -559,6 +571,17 @@ class Setup:
         M[:3, :3] = self._R()
         return M
 
+    def tile_offsets(self) -> list[tuple[float, float, float]]:
+        """The tiles as setup-frame offsets (the setup's rotation applied; a flipped setup mirrors Y)."""
+        R = self.matrix()[:3, :3]
+        return [tuple(float(v) for v in np.asarray(t, dtype=float) @ R.T) for t in self.tiles]
+
+    def tile_wcs_names(self) -> list[str]:
+        """tile_wcs: the work offset each tile runs in, from the setup's own (G54, G55, ... G59, G59.1 .. G59.3)."""
+        names = [f"G{n}" for n in range(54, 60)] + ["G59.1", "G59.2", "G59.3"]
+        k0 = names.index(self.wcs) if self.wcs in names else 0
+        return names[k0:k0 + len(self.tiles)]
+
     def to_setup(self, pts, a: float | None = None) -> np.ndarray:
         P = np.atleast_2d(np.asarray(pts, dtype=float))
         M = self.matrix(a)
@@ -622,6 +645,7 @@ class Op:
     cut_overrides: dict = field(default_factory=dict)         # cut settings changed in the CAM tab
     post_tol: float | None = None                              # arc-fit / line-merge tolerance for the post (None: by kind)
     color_override: bool = False                              # the colour comes from the CAM tab
+    tiled: bool = True                                        # runs at each of its setup's tiles (False: once - the moves cover them all)
 
     @property
     def uses_a(self) -> bool:
@@ -2298,7 +2322,7 @@ PUBLIC_API = [
     "regular_polygon","Stock.from_model", "Stock.block", "Stock.cylinder", "Setup", "Setup.view", "Program", "face", "contour", "pocket",
               "adaptive", "drill", "parallel3d", "chamfer_edges", "vcarve", "rest_region", "section", "silhouette", "outline", "face_outline", "stock_minus", "holes", "face_polygon",
               "circle", "rect", "feeds", "apply_feeds", "rotary_rough", "rotary_finish", "rotary_wrap", "rotary_profile",
-              "gear_teeth", "radial_map"]
+              "gear_teeth", "radial_map", "tiles_of"]
 
 
 def api_reference() -> str:
@@ -2456,9 +2480,12 @@ class Program:
         self.ops: list[Op] = list(ops)
         self.name = name
 
-    def add(self, op: Op) -> Op:
+    def add(self, op: Op, tiles: bool = True) -> Op:
+        """Add an operation. tiles=False: with a tiled setup, this op runs ONCE (its moves already cover every tile:
+        a face or roughing pass computed over the whole plate) instead of at each tile."""
         if op.setup is None:
             op.setup = self.setup
+        op.tiled = bool(tiles)
         if not op.key:
             op.key = op.name
         c = (_OV["table"].get(op.key) or {}).get("color")
@@ -2467,6 +2494,11 @@ class Program:
             _OV["used"].add(op.key)
         self.ops.append(op)
         return op
+
+    def op_tiles(self, op: Op) -> list[tuple[float, float, float]]:
+        """The setup-frame offsets an op runs at: its setup's tiles, or once (no offset) for tiles=False ops."""
+        st = self.setup_of(op)
+        return st.tile_offsets() if op.tiled else [(0.0, 0.0, 0.0)]
 
     def setup_of(self, op: Op) -> Setup:
         return op.setup or self.setup
@@ -2501,8 +2533,19 @@ class Program:
         """A program runs on one machine: the program setup's. Setups give frames, orientation and work offsets."""
         return self.setup.machine
 
+    def op_minutes(self, op: Op) -> float:
+        """One op's time with its setup's tiles: once per tile, plus the lift-and-move between tiles."""
+        st = self.setup_of(op)
+        offs = self.op_tiles(op)
+        t1 = op.time_minutes(self.machine)
+        if len(offs) <= 1:
+            return t1
+        mv, _ = tile_moves(op, offs, st.clearance_z)
+        tmp = Op(op.name, op.kind, op.tool, moves=mv)
+        return tmp.time_minutes(self.machine)
+
     def time_minutes(self) -> float:
-        return sum(op.time_minutes(self.machine) for op in self.ops)
+        return sum(self.op_minutes(op) for op in self.ops)
 
     def bounds(self, setup: Setup | None = None):
         ops = [op for op in self.ops if op.moves and (setup is None or self.setup_of(op) is setup)]
@@ -2511,7 +2554,9 @@ class Program:
         lo = [1e18] * 3; hi = [-1e18] * 3
         for op in ops:
             a, b = op.bounds()
-            lo = [min(x, y) for x, y in zip(lo, a)]; hi = [max(x, y) for x, y in zip(hi, b)]
+            offs = self.op_tiles(op)
+            for i in range(3):
+                lo[i] = min(lo[i], a[i] + min(o[i] for o in offs)); hi[i] = max(hi[i], b[i] + max(o[i] for o in offs))
         return tuple(lo), tuple(hi)
 
     def check(self) -> list[str]:
@@ -2529,6 +2574,13 @@ class Program:
                 w.append(f"{t.label()} ({t.spec()}): no tip Ø set, so it is modelled as a perfectly sharp point; a real tip "
                          "cuts wider by that much at every depth. Set it in Settings ▸ Tools (e.g. 0.1 for a 0.1 mm V-bit), or "
                          "tick Sharp point there if it really has none")
+        for st in self.setups:
+            if len(st.tiles) > 1 and st.tile_wcs:
+                if m.post == "makera":
+                    w.append(MAKERA_TILE_WCS)
+                else:
+                    w.append(f"{st.name}: {len(st.tiles)} tiles in their own work offsets ({', '.join(st.tile_wcs_names())}): "
+                             f"set each one on the machine before running (the G-code header lists them as {st.wcs} + offset)")
         for st in self.setups:
             tag = f"{st.name}: " if len(self.setups) > 1 else ""
             b = self.bounds(st)
@@ -2614,6 +2666,10 @@ class Program:
                     if st.rotary else f"orient {st.orient}, stock {stk.size[0]:.1f} × {stk.size[1]:.1f} × {stk.size[2]:.1f} mm, top z={stk.top:.2f}")
             lines.append(f"{st.name} [{st.wcs}]: {kind}; WCS origin {st.origin} = setup ({ox:.2f}, {oy:.2f}, {oz:.2f}); "
                          f"safe z={st.safe_z:.2f}")
+            if len(st.tiles) > 1:
+                lines.append(f"  tiles: {len(st.tiles)} — every op computed once and run at each tile "
+                             + ("in its own work offset " + ", ".join(st.tile_wcs_names()) if st.tile_wcs else f"in {st.wcs} with offsets")
+                             + "; offsets " + ", ".join(f"({t[0]:g}, {t[1]:g})" for t in st.tiles[:6]) + (" …" if len(st.tiles) > 6 else ""))
             for i, op in enumerate(self.ops, 1):
                 if self.setup_of(op) is not st:
                     continue
@@ -2624,8 +2680,9 @@ class Program:
                 if op.uses_a:
                     av = [mv[5] for mv in op.moves if len(mv) > 5]
                     aa = f" A {min(av):.0f}..{max(av):.0f}°"
+                nt = len(self.op_tiles(op))
                 lines.append(f"  {i}. {op.name} [{op.kind}] {op.tool.label()} ({op.tool.spec()}) — {len(op.moves)} moves, "
-                             f"cut {cut:.0f} mm, {op.time_minutes(self.machine):.1f} min, {zr}{aa} "
+                             f"cut {cut:.0f} mm, {self.op_minutes(op):.1f} min{f' ({nt} tiles)' if nt > 1 else ''}, {zr}{aa} "
                              + " ".join(f"{k}={v}" for k, v in op.params.items()))
         w = self.check()
         if w:
@@ -2648,7 +2705,10 @@ class Program:
                                "origin_name": st.origin if isinstance(st.origin, str) else "custom",
                                "size": [round(float(st.stock.xmax - st.stock.xmin), 3), round(float(st.stock.ymax - st.stock.ymin), 3),
                                         round(float(st.stock.zmax - st.stock.zmin), 3)],
-                               "safe_z_wcs": round(float(st.safe_z - st.origin_point()[2]), 3)})
+                               "safe_z_wcs": round(float(st.safe_z - st.origin_point()[2]), 3),
+                               "tiles": [list(t) for t in st.tiles], "tile_wcs": st.tile_wcs,
+                               "tile_wcs_names": st.tile_wcs_names() if st.tile_wcs else None,
+                               "link_z": round(float(st.to_model([(0.0, 0.0, st.clearance_z)])[0][2]), 4)})
         ops = []
         for op in self.ops:
             st = self.setup_of(op)
@@ -2672,7 +2732,9 @@ class Program:
                                 "values": op.cut_defaults, "overrides": op.cut_overrides},
                         "color_override": op.color_override,
                         "base_tool": asdict(op.base_tool) if op.base_tool is not None else None,
-                        "moves": moves, "time": round(op.time_minutes(self.machine), 2), "params": op.params, "uses_a": op.uses_a})
+                        "moves": moves, "time": round(self.op_minutes(op), 2), "time_one": round(op.time_minutes(self.machine), 2),
+                        "tiles": len(self.op_tiles(op)), "tile_offsets": [list(t) for t in st.tiles] if op.tiled and len(st.tiles) > 1 else None,
+                        "params": op.params, "uses_a": op.uses_a})
         return {
             "name": self.name, "machine": st0.machine.name,
             "stock": st0.model_stock.to_dict(), "origin": [float(ox), float(oy), float(oz)], "safe_z": st0.safe_z,
@@ -2961,6 +3023,8 @@ def _emit(prog: Program, dialect: str) -> str:
     max_line = caps["max_line"]
     out: list[str] = []
     g93 = False                                        # inverse-time feed mode is active (fan dialects, rotary moves)
+    if mk and any(st.tile_wcs and len(st.tiles) > 1 for st in prog.setups):
+        raise CamError(MAKERA_TILE_WCS)
 
     def comment(text: str):
         text = text.replace("(", "[").replace(")", "]")
@@ -3010,6 +3074,15 @@ def _emit(prog: Program, dialect: str) -> str:
     comment(f"AgenticCAD {dialect} post: {prog.name}")
     comment(f"machine: {m0.name}")
     comment(f"est. {prog.time_minutes():.1f} min, {len(prog.setups)} setup(s)")
+    for _st in prog.setups:
+        if len(_st.tiles) > 1:
+            if _st.tile_wcs:
+                comment(f"{_st.name}: {len(_st.tiles)} tiles, each in its own work offset - set them before running:")
+                for _k, (_n, _t) in enumerate(zip(_st.tile_wcs_names(), _st.tile_offsets())):
+                    comment(f"  {_n}: zero it as usual (the first tile)" if _k == 0 and not any(_t) else
+                            f"  {_n} = {_st.wcs} + X{_fmt(_t[0])} Y{_fmt(_t[1])} Z{_fmt(_t[2])}")
+            else:
+                comment(f"{_st.name}: {len(_st.tiles)} tiles, all in {_st.wcs}; every operation runs at each tile")
     for t in sorted({op.tool.label() + f" D{_fmt(op.tool.diameter)}" for op in prog.ops}):
         comment("tool " + t)
     for w in prog.check():
@@ -3057,6 +3130,7 @@ def _emit(prog: Program, dialect: str) -> str:
         cur_a = eq
     last: list = [None, None, None, None]
     spindle_on = False
+    active_wcs = None                                  # the work offset the controller is in (tiles may change it)
     for op in prog.ops:
         st = prog.setup_of(op)
         m = m0
@@ -3099,6 +3173,7 @@ def _emit(prog: Program, dialect: str) -> str:
                 else:
                     comment(f"{st.name}: zero {st.wcs} at {st.origin}" + (" on the rotary centreline" if st.rotary else ""))
                 line(st.wcs)
+                active_wcs = st.wcs
                 if prev_setup is not None:
                     lift(clear)
             if st.rotary:
@@ -3115,7 +3190,17 @@ def _emit(prog: Program, dialect: str) -> str:
             last_f = None
         t = op.tool
         rpm = min(max(t.rpm, m.spindle["min"]), m.spindle["max"])
-        comment(f"{op.name} [{op.kind}] {t.label()} D{_fmt(t.diameter)}")
+        offs = prog.op_tiles(op)
+        wnames = st.tile_wcs_names() if st.tile_wcs and len(offs) > 1 else None
+        # the first tile's origin for the approach (tiles shift the moves; tile_wcs runs each tile in its own WCS)
+        aox, aoy = (ox, oy) if wnames else (ox - offs[0][0], oy - offs[0][1])
+        want0 = wnames[0] if wnames else st.wcs
+        if active_wcs is not None and want0 != active_wcs:     # back from the last tile's work offset: up first, then switch
+            lift(clear)
+            line(want0)
+            active_wcs = want0
+            last = [None, None, None, last[3]]
+        comment(f"{op.name} [{op.kind}] {t.label()} D{_fmt(t.diameter)}" + (f" x{len(offs)} tiles" if len(offs) > 1 else ""))
         if st.rotary and not op.uses_a:
             a_index(st.a, clear)                           # a 3+1 op after a continuous one: back to the setup's angle
             last[3] = cur_a
@@ -3140,7 +3225,7 @@ def _emit(prog: Program, dialect: str) -> str:
                 elif m.tool_change == "none" and cur_tool is not None:
                     comment(f"tool change to T{t.number} required: machine has tool_change=none")
                 line(f"T{t.number} M6" if dialect == "linuxcnc" else f"T{t.number} M06")
-                p = approach(op, ox, oy, clear)
+                p = approach(op, aox, aoy, clear)
                 line(f"S{int(rpm)} M3")
                 spindle_on = True
                 line(f"G43 H{t.number} Z{_fmt(safe)}")          # length offset of this tool, applied on the first Z move
@@ -3165,7 +3250,7 @@ def _emit(prog: Program, dialect: str) -> str:
                 else:
                     line(f"T{t.number}")
             if not fan:
-                p = approach(op, ox, oy, clear)
+                p = approach(op, aox, aoy, clear)
                 line(f"M3 S{int(rpm)}")
                 spindle_on = True
                 if m.coolant and not mk:
@@ -3175,7 +3260,7 @@ def _emit(prog: Program, dialect: str) -> str:
                 last = [p[0] if p else None, p[1] if p else None, safe, cur_a]
                 last_f = None
         elif not spindle_on:                              # same tool after an operator pause: restart the spindle
-            p = approach(op, ox, oy, clear)
+            p = approach(op, aox, aoy, clear)
             line(f"M3 S{int(rpm)}")
             spindle_on = True
             line(f"G0 Z{_fmt(safe)}")
@@ -3185,8 +3270,25 @@ def _emit(prog: Program, dialect: str) -> str:
         moves = op.moves
         tol_op = op.post_tol if op.post_tol else (FINE_POST_TOL if op.kind in FINE_POST_KINDS or t.type in ("vbit", "chamfer")
                                                   else m.arc_tolerance)
-        for item in _with_arcs(moves, tol_op if use_arcs else None, math.radians(caps["max_arc_sweep"]),
-                               caps["helical_arcs"]):
+        items = list(_with_arcs(moves, tol_op if use_arcs else None, math.radians(caps["max_arc_sweep"]), caps["helical_arcs"]))
+        base_o = (ox, oy, oz)
+        for ti, (tdx, tdy, tdz) in enumerate(offs):
+          # ---- tile ti: the op's moves again, shifted (or in the tile's own work offset); between tiles: up, over
+          if len(offs) > 1:
+              comment(f"tile {ti + 1}/{len(offs)}" + (f" {wnames[ti]}" if wnames else f" at {_fmt(tdx)} {_fmt(tdy)}"))
+          if ti:
+              lift(clear)
+              if wnames:
+                  line(wnames[ti])
+                  active_wcs = wnames[ti]
+              ox, oy, oz = base_o if wnames else (base_o[0] - tdx, base_o[1] - tdy, base_o[2] - tdz)
+              p0 = first_xy(op, ox, oy)
+              if p0 is not None:
+                  line(f"G0 X{_fmt(p0[0])} Y{_fmt(p0[1])}")
+              last = [p0[0] if p0 else None, p0[1] if p0 else None, None, last[3]]
+          else:
+              ox, oy, oz = base_o if wnames else (base_o[0] - tdx, base_o[1] - tdy, base_o[2] - tdz)
+          for item in items:
             if item[0] == "arc":
                 _, x, y, z, f, cx, cy, cw = item
                 x -= ox; y -= oy; z -= oz; cx -= ox; cy -= oy
@@ -3252,6 +3354,7 @@ def _emit(prog: Program, dialect: str) -> str:
                         fw = f" F{_fmt(f)}"; last_f = f
                 line("G1 " + " ".join(words) + fw)
             last = [x, y, z, a if a is not None else last[3]]
+        ox, oy, oz = base_o
         if op.uses_a:
             cur_a = last[3]
             if abs(a_out(cur_a)) >= 360.0:
@@ -3377,6 +3480,70 @@ def reset_overrides() -> None:
 
 
 _FIXTURES: dict = {"table": {}}
+
+
+MAKERA_TILE_WCS = ("tile_wcs: not on a Makera: its firmware makes the fitted tool the length reference whenever a work "
+                   "offset's Z is set (G10 L2 Pn Z), and only G54 survives a restart, so G55..G59 can't be set safely mid-job. "
+                   "Leave tile_wcs off: the tiles run in G54 with offsets in the program (the same file size - there are no "
+                   "subprograms either way)")
+
+
+def _norm_tiles(tiles) -> list[tuple[float, float, float]]:
+    if tiles is None:
+        return [(0.0, 0.0, 0.0)]
+    if hasattr(tiles, "offsets") and not isinstance(tiles, (list, tuple)):     # a cad_kernel.Pattern
+        tiles = tiles.offsets
+    if isinstance(tiles, dict) and "offsets" in tiles:                         # a model.patterns entry
+        tiles = tiles["offsets"]
+    out = []
+    for t in tiles:
+        t = tuple(float(v) for v in t)
+        if len(t) not in (2, 3):
+            raise CamError("tiles: each tile is (dx, dy) or (dx, dy, dz) from the part the ops are computed on")
+        out.append(t + (0.0,) * (3 - len(t)))
+    if not out:
+        raise CamError("tiles: at least one tile")
+    if len(set(out)) != len(out):
+        raise CamError("tiles: two tiles at the same place")
+    return out
+
+
+def tiles_of(model, base: str | None = None) -> list[tuple[float, float, float]]:
+    """The tile offsets of a pattern() in the design (by its base body's name; the only pattern when there is one), for
+    Setup(tiles=...). Compute the ops on the base body (bodies[base]) and every copy is machined the same."""
+    pats = getattr(model, "patterns", None) or []
+    if not pats:
+        raise CamError("tiles_of: the design has no pattern() (copies made by hand are separate bodies: use pattern() in the design)")
+    if base is None:
+        if len(pats) > 1:
+            raise CamError("tiles_of: the design has several patterns: name one (" + ", ".join(p["base"] for p in pats) + ")")
+        return [tuple(o) for o in pats[0]["offsets"]]
+    for p in pats:
+        if p["base"] == base or p["base"].split("/")[-1] == base:
+            return [tuple(o) for o in p["offsets"]]
+    raise CamError(f"tiles_of: no pattern with base '{base}' (patterns: {', '.join(p['base'] for p in pats)})")
+
+
+def tile_moves(op, offs, link_z: float):
+    """An op's moves at every tile, as the post runs them: tile k's moves shifted by offs[k], and between tiles a lift
+    to link_z then over to the next tile's first point. Returns (moves, src): src[i] = the op move it came from, -1 for
+    a link move."""
+    base = op.moves
+    if len(offs) <= 1 and not any(offs[0]):
+        return [list(m) for m in base], list(range(len(base)))
+    out, src = [], []
+    for k, (dx, dy, dz) in enumerate(offs):
+        if k and base and out:
+            last = out[-1]
+            out.append([RAPID, last[1], last[2], max(link_z, last[3]), 0.0] + list(last[5:]))
+            src.append(-1)
+            f = base[0]
+            out.append([RAPID, f[1] + dx, f[2] + dy, max(link_z, last[3]), 0.0] + list(f[5:]))
+            src.append(-1)
+        for i, m in enumerate(base):
+            out.append([m[0], m[1] + dx, m[2] + dy, m[3] + dz] + list(m[4:]))
+            src.append(i)
+    return out, src
 
 
 def fixtures(table: dict | None = None) -> None:

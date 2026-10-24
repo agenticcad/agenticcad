@@ -10,6 +10,8 @@
   html,body { margin:0; height:100%; overflow:hidden; background:var(--bg); color:var(--text); font:13px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Inter,sans-serif; }
   #app { display:flex; height:100%; }
   .oprow.cur { background:rgba(78,161,255,.14); box-shadow:inset 2px 0 0 var(--accent2); }
+  .tchip.tl { background:rgba(255,140,66,.14); color:var(--accent); border-color:rgba(255,140,66,.45); }
+  .ct-setup .sub.tiles { color:var(--accent); }
   .oprow.setuphead { color:var(--accent2); font-size:11px; text-transform:uppercase; letter-spacing:.06em; margin-top:6px; }
   .oprow .jump { margin-left:auto; opacity:.55; cursor:pointer; padding:0 4px; } .oprow .jump:hover { opacity:1; color:var(--accent2); }
   /* ---- rendered simulation HUD */
@@ -646,6 +648,13 @@
   .mop.cur { background:rgba(255,140,66,.10); box-shadow:inset 2px 0 0 var(--accent); } .mop.done .nm, .mop.done .tm { color:var(--mut2); }
   .jobc .jt { display:flex; justify-content:space-between; align-items:flex-start; } .jobc .pct { font-size:30px; font-weight:700; letter-spacing:-.02em; margin:2px 0 8px; }
   .jobc .tm { text-align:right; display:flex; flex-direction:column; } .jobc .tm b { font:600 18px ui-monospace,Menlo,monospace; } .jobc .tm small { color:var(--muted); }
+  .jobc .tleft { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin:0 0 10px; }
+  .jobc .tleft > div { background:var(--panel2); border:1px solid var(--line); border-radius:9px; padding:8px 10px; min-width:0; }
+  .jobc .tleft > div.all { border-color:rgba(78,161,255,.45); }
+  .jobc .tleft small { display:block; font-size:10.5px; letter-spacing:.08em; text-transform:uppercase; color:var(--muted); }
+  .jobc .tleft b { display:block; font:700 26px/1.15 ui-monospace,Menlo,monospace; letter-spacing:-.02em; margin:2px 0; }
+  .jobc .tleft > div.all b { color:var(--accent2); }
+  .jobc .tleft span { display:block; font-size:11.5px; color:var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .segbar { display:flex; gap:2px; height:7px; margin-bottom:8px; } .segbar > div { background:var(--s3); border-radius:3px; overflow:hidden; } .segbar i { display:block; height:100%; background:var(--accent2); }
   .jobc.failed, .jobc.aborted { border-color:rgba(255,90,95,.5); } .jobc.done { border-color:rgba(62,207,122,.45); } .jobc.awaiting, .jobc.paused { border-color:rgba(242,201,76,.45); }
   .mvp-check { font-size:12.5px; display:flex; flex-direction:column; gap:6px; min-width:340px; max-width:520px; } .mvp-check ul { margin:0; padding-left:18px; }
@@ -764,6 +773,19 @@
   .tl2-pa { display:flex; gap:6px; flex-wrap:wrap; }
   .tl2-th { display:block; width:34px; height:22px; object-fit:cover; border-radius:4px; margin-top:4px; }
   .ct-th { width:30px; height:18px; object-fit:cover; border-radius:3px; flex:none; }
+  .ct-thw { display:inline-flex; flex:none; cursor:zoom-in; }
+  /* Machine ▸ Prepare: the tools as a picture list (click to change, hover the picture for the big view) */
+  .tl-list { max-height:268px; overflow:auto; margin:2px -4px 8px; padding:0 4px; display:flex; flex-direction:column; gap:3px; }
+  .tl-row { display:grid; grid-template-columns:64px 1fr auto auto; gap:10px; align-items:center; padding:5px 6px; border:1px solid var(--line); border-radius:8px; background:var(--panel2); cursor:pointer; }
+  .tl-row:hover { border-color:var(--line2); background:var(--s3); } .tl-row.off { cursor:default; } .tl-row.off:hover { background:var(--panel2); border-color:var(--line); }
+  .tl-row.fit { border-color:rgba(62,207,122,.55); box-shadow:inset 3px 0 0 var(--ok); }
+  .tl-pic { width:64px; height:42px; border-radius:6px; overflow:hidden; background:#07080a; display:grid; place-items:center; cursor:zoom-in; }
+  .tl-pic img { width:100%; height:100%; object-fit:cover; } .tl-pic .nopic { color:var(--mut2); font-size:11px; }
+  .tl-txt { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12.5px; } .tl-txt small { display:block; color:var(--muted); font-size:11px; overflow:hidden; text-overflow:ellipsis; }
+  .tl-tag { font-size:11px; color:var(--muted); white-space:nowrap; } .tl-fit { font-style:normal; color:var(--ok); font-weight:600; }
+  #tool-zoom { position:fixed; z-index:60; width:360px; background:#15181e; border:1px solid var(--line2); border-radius:12px; padding:10px; box-shadow:0 20px 50px rgba(0,0,0,.6); pointer-events:none; display:none; }
+  #tool-zoom img { width:100%; max-height:300px; object-fit:contain; border-radius:8px; background:#07080a; display:block; }
+  #tool-zoom .tz-b { display:flex; gap:10px; align-items:flex-end; margin-top:8px; } #tool-zoom .tz-b b { display:block; font-size:13px; } #tool-zoom .tz-b small { color:var(--muted); font-size:11.5px; display:block; margin-top:2px; }
   .tc-photo { display:block; width:100%; max-height:150px; object-fit:contain; border-radius:8px; background:#0b0d10; margin:0 0 10px; }
   #mp-tc-photo:empty { display:none; } #mp-tc-photo .tc-photo { max-height:110px; margin:0 0 8px; }
   .mvp-check .tc-photo { max-height:180px; }
@@ -956,9 +978,9 @@
 <div class="mstep" data-step="prep" id="mstep-prep">
   <div class="mcard" id="mp-machine"></div>
   <div class="mcard"><div class="h">Tool</div>
-    <div class="row"><div id="mp-tool-chips" class="chips"></div></div>
+    <div id="mp-tool-list" class="tl-list"></div>
     <div id="mp-tc-photo"></div>
-    <div class="row"><span class="muted">Change to T</span><input type="number" id="mp-tc-num" min="0" max="9999" step="1" value="0" class="inp" style="width:72px"><button class="btn" id="mp-tc-go" data-act="tc" title="Makera's tool change (M6 Tn): Z up, park, wait for you, then the machine measures the tool on its setter. Same number: re-measure (M491). Every tool, the probes included.">Change tool…</button></div>
+    <div class="row"><span class="muted">Or any tool: T</span><input type="number" id="mp-tc-num" min="0" max="9999" step="1" value="0" class="inp" style="width:72px"><button class="btn" id="mp-tc-go" data-act="tc" title="Makera's tool change (M6 Tn): Z up, park, wait for you, then the machine measures the tool on its setter. Same number: re-measure (M491). Every tool, the probes included.">Change tool…</button></div>
     <p class="muted sm">Every tool — the probes too — is measured on the setter before the machine moves with it.</p></div>
   <div class="mcard"><div class="h">Accessories</div><div class="row"><label class="tgl"><input type="checkbox" id="mv-dust"><span class="sw"></span>Dust collector</label><label class="tgl"><input type="checkbox" id="mv-light"><span class="sw"></span>Light</label></div>
     <div class="row"><label class="tgl" title="The spindle fan blows chips down through the bed (Makera's M811 S% / M812)"><input type="checkbox" id="mv-fan"><span class="sw"></span>Spindle fan</label>
@@ -1813,7 +1835,26 @@ function clearCam() {
   if (toolObj) { camGroup.remove(toolObj); toolObj = null; }
   if (fixtureObj) { camGroup.remove(fixtureObj); fixtureObj.traverse(o => o.geometry && o.geometry.dispose()); fixtureObj = null; }
 }
+// tiles (Setup(tiles=...)): the server sends each op's moves once plus the setup's tile offsets; they are expanded here
+// exactly as the post runs them (tile by tile, a lift to the setup's link height and over between tiles), so drawing,
+// play and the simulation see every tile. op.moves_one keeps the single-tile moves.
+function expandTiles(p) {
+  for (const op of (p && p.ops) || []) {
+    const st = (p.setups || [])[op.setup || 0], tiles = op.tile_offsets;
+    if (!st || !tiles || tiles.length < 2 || !op.moves.length || op.moves_one) continue;
+    const up = ((st.tool_axis || [0, 0, 1])[2]) >= 0, base = op.moves, out = [];
+    tiles.forEach(([dx, dy, dz], k) => {
+      if (k && out.length) {
+        const last = out[out.length - 1], z = up ? Math.max(st.link_z, last[3]) : Math.min(st.link_z, last[3]), f = base[0];
+        out.push([0, last[1], last[2], z, 0, ...last.slice(5)]); out.push([0, f[1] + dx, f[2] + dy, z, 0, ...f.slice(5)]);
+      }
+      for (const m of base) out.push([m[0], m[1] + dx, m[2] + dy, m[3] + (dz || 0), ...m.slice(4)]);
+    });
+    op.moves_one = base; op.moves = out;
+  }
+}
 function loadProgram(p) {
+  expandTiles(p);
   clearCam(); hideFixturePreview(); program = p; for (const k of Object.keys(fxPending)) delete fxPending[k];
   const has = !!p;
   for (const id of ['cam-sep', 'tp-toggle', 'stock-toggle']) document.getElementById(id).style.display = has ? '' : 'none';
@@ -2012,7 +2053,8 @@ function renderCamTab() {
     const fx = stp.fixture, held = fx && fx.name ? `in the ${fx.name}` : fx && (fx.extra || []).length ? `on the table · ${fx.extra.map(f => f.name).join(', ')}` : 'on the table';
     const h = document.createElement('div'); h.className = 'ct-setup' + (camSel.kind === 'setup' && camSel.si === si ? ' sel' : '');
     h.innerHTML = `<span class="car">${closed ? '▸' : '▾'}</span><span class="nm">Setup ${si + 1} · ${esc(stp.name)}</span><span class="wcs">${esc(stp.wcs || '')}</span>
-      <div class="sub">${stp.rotary ? `Ø${(2 * (stp.max_radius || 0)).toFixed(1)} × ${sz[0].toFixed(1)} on the 4th axis` : `${sz[0].toFixed(1)} × ${sz[1].toFixed(1)} × ${sz[2].toFixed(1)} · ${esc(held)}`}</div>`;
+      <div class="sub">${stp.rotary ? `Ø${(2 * (stp.max_radius || 0)).toFixed(1)} × ${sz[0].toFixed(1)} on the 4th axis` : `${sz[0].toFixed(1)} × ${sz[1].toFixed(1)} × ${sz[2].toFixed(1)} · ${esc(held)}`}</div>
+      ${(stp.tiles || []).length > 1 ? `<div class="sub tiles">${stp.tiles.length} tiles · every operation computed once, run at each ${stp.tile_wcs ? `in its own work offset (${esc((stp.tile_wcs_names || []).join(', '))})` : 'in ' + esc(stp.wcs || 'G54') + ' with offsets'}</div>` : ''}`;
     h.querySelector('.car').onclick = e => { e.stopPropagation(); closed ? setupClosed.delete(stp.name) : setupClosed.add(stp.name); renderCamTab(); };
     h.onclick = () => { camSel = { kind: 'setup', si }; renderCamTab(); applyCamVisibility(); };
     tree.appendChild(h);
@@ -2022,7 +2064,7 @@ function renderCamTab() {
       const nov = Object.keys(opOverrideSet(op)).length;
       r.className = 'ct-op' + (camSel.kind === 'op' && camSel.key === op.key ? ' sel' : '') + (vis ? '' : ' hid') + (i === curOpIdx ? ' cur' : ''); r.dataset.op = i;
       r.innerHTML = `<span class="dot" style="background:${op.color}"></span><span class="nm">${esc(op.name)}${nov ? '<i class="ed" title="settings changed in the CAM tab"></i>' : ''}</span>
-        <span class="eye" title="${vis ? 'Hide (not shown, not simulated)' : 'Show'}">${vis ? '◉' : '○'}</span><span class="kind">${esc(op.kind)}</span><span class="tchip">T${op.tool ? op.tool.number : '?'}</span><span class="tm">${op.time.toFixed(1)}m</span>`;
+        <span class="eye" title="${vis ? 'Hide (not shown, not simulated)' : 'Show'}">${vis ? '◉' : '○'}</span><span class="kind">${esc(op.kind)}</span><span class="tchip">T${op.tool ? op.tool.number : '?'}</span>${op.tiles > 1 ? `<span class="tchip tl" title="computed once, run at each of the setup's ${op.tiles} tiles (${(op.time_one || 0).toFixed(1)} min each)">×${op.tiles}</span>` : ''}<span class="tm">${op.time.toFixed(1)}m</span>`;
       r.title = Object.entries(op.params || {}).map(([k, v]) => `${k}=${Array.isArray(v) ? v.join('×') : (typeof v === 'number' ? +v.toFixed(3) : v)}`).join('  ');
       r.onclick = () => { camSel = op.key ? { kind: 'op', key: op.key, i } : { kind: 'setup', si }; renderCamTab(); applyCamVisibility(); };
       r.querySelector('.eye').onclick = e => { e.stopPropagation(); if (!camOps[i]) return; camOps[i].visible = !camOps[i].visible; camOps[i].visible ? opHidden.delete(op.key) : opHidden.add(op.key); applyCamVisibility(); if (simRes) clearSim(); setupSim(); renderCamTab(); };
@@ -2047,7 +2089,7 @@ function renderCamTools() {                       // the tools the selected setu
   }
   el.innerHTML = `<div class="ct-h">Tools · ${seq.map(n => 'T' + n).join(' → ')}</div>` + [...seen.values()].map(op => {
     const t = op.tool, lib = (library.tools || []).find(x => x.number === t.number && x.name === t.name), bad = t.shape && t.shape.error;
-    return `<div class="ct-tool" title="${esc(t.type)} Ø${t.diameter}${t.flutes ? ' · ' + t.flutes + ' flutes' : ''}${t.shank_diameter ? ' · shank Ø' + t.shank_diameter : ''} · ${lib ? 'in the tool library' : 'defined in cam.py'}${bad ? ' · shape: ' + esc(t.shape.error) : ''}">${t.photo ? `<img class="ct-th" src="${toolPhotoUrl(t)}" alt="">` : toolSil(t.shape, 8, 20)}<div><b>T${t.number}</b> ${esc(t.name)}</div><small>${bad ? '<span class="wa">shape?</span>' : lib ? '✓' : 'cam.py'}</small></div>`;
+    return `<div class="ct-tool" title="${esc(t.type)} Ø${t.diameter}${t.flutes ? ' · ' + t.flutes + ' flutes' : ''}${t.shank_diameter ? ' · shank Ø' + t.shank_diameter : ''} · ${lib ? 'in the tool library' : 'defined in cam.py'}${bad ? ' · shape: ' + esc(t.shape.error) : ''}"><span class="ct-thw" data-tz="${t.number}">${t.photo ? `<img class="ct-th" src="${toolPhotoUrl(t)}" alt="">` : toolSil(t.shape, 8, 20)}</span><div><b>T${t.number}</b> ${esc(t.name)}</div><small>${bad ? '<span class="wa">shape?</span>' : lib ? '✓' : 'cam.py'}</small></div>`;
   }).join('');
 }
 function camSelSetup() { return camSel.kind === 'setup' || camSel.kind === 'add' ? camSel.si : camSel.kind === 'op' ? ((program.ops.find(o => o.key === camSel.key) || {}).setup || 0) : 0; }
@@ -6536,12 +6578,28 @@ function mvPrep(st) {
       <span>Homed</span><span>${st.homed ? '✓ this session' : st.homing ? 'homing…' : '<button class="btn sm" data-act="home">Home</button> needed once per session'}</span>
       <span>Tool</span><span>${tl == null ? '–' : `T${tl}${mvToolName(tl) ? ' · ' + esc(mvToolName(tl)) : ''} · ${st.tool_ok ? 'measured ✓' : '<span class="wa">not measured</span>'}`}</span></div>
       <div class="acts"><button class="btn ghost sm" data-act="disconnect">Disconnect</button></div>`);
-  const chips = [...need.map(n => [n, `T${n}`]), [0, 'Probe'], [st.probe3d_tool || 9999, '3D probe']]
-    .map(([n, l]) => `<button class="chipb ${n === tl ? 'on' : ''}" data-act="tcpick" data-n="${n}" title="${esc(mvToolName(n))}">${l}</button>`).join('');
-  setHTML(mvEl('mp-tool-chips'), chips + (need.length ? `<span class="muted sm">this setup uses ${need.map(n => 'T' + n).join(' → ')}</span>` : ''));
   const ready = conn && st.armed && st.homed && s.state === 'Idle' && !(st.routine && ['running', 'awaiting'].includes(st.routine.stage));
+  // the tools as a picture list: this setup's tools in the order it uses them, the probes, then the rest of the library.
+  // Click a row (or its Change button) for Makera's whole tool change to that tool (the usual confirmation first);
+  // hover the picture for a big view with the packet details.
+  const p3 = st.probe3d_tool || 9999, order = [], seenN = new Set(), add = (n, tag) => { if (!seenN.has(n)) { seenN.add(n); order.push([n, tag]); } };
+  need.forEach((n, k) => add(n, k === 0 ? 'this setup · 1st' : `this setup · ${k + 1}${['', 'st', 'nd', 'rd'][k + 1] || 'th'}`));
+  add(0, 'probe'); add(p3, 'probe');
+  [...(library.tools || [])].sort((a, b) => a.number - b.number).forEach(t => add(t.number, ''));
+  const why = !conn ? 'connect first' : !st.armed ? 'turn Control on' : !st.homed ? 'home first' : s.state !== 'Idle' ? `the machine is ${s.state}` : !ready ? 'wait for the machine' : '';
+  setHTML(mvEl('mp-tool-list'), order.map(([n, tag]) => {
+    const t = toolByNumber(n), u = toolPhotoUrl(t), sh = mvToolShape(n), fitted = n === tl;
+    const name = n === 0 ? 'Wired probe' : n === p3 ? '3D probe' : (t ? t.name : `T${n}`);
+    const pic = u ? `<img src="${u}" alt="">` : sh ? toolSil(sh, 18, 40)
+      : `<svg class="nopic" width="22" height="34" viewBox="0 0 22 34"><rect x="8" y="1" width="6" height="20" rx="2" fill="#6f7782"/><rect x="10" y="20" width="2" height="9" fill="#8a929d"/><circle cx="11" cy="30" r="3" fill="${n === 0 ? '#e08a4a' : '#4ea1ff'}"/></svg>`;
+    return `<div class="tl-row ${fitted ? 'fit' : ''} ${ready ? '' : 'off'}" data-act="${ready ? 'tcpick-go' : ''}" data-n="${n}" title="${ready ? (fitted ? `T${n} is fitted: re-measure it (M491)` : `Change to T${n}`) : why}">
+      <span class="tl-pic" data-tz="${n}">${pic}</span>
+      <span class="tl-txt"><b>T${n}</b> ${esc(name)}${t && toolSpec(t) && n !== 0 && n !== p3 ? `<small>${esc(toolSpec(t))}</small>` : ''}</span>
+      <span class="tl-tag">${fitted ? '<i class="tl-fit">fitted</i>' : tag ? esc(tag) : ''}</span>
+      <button class="btn sm ${fitted ? 'ghost' : ''}" data-act="tcpick-go" data-n="${n}" ${ready ? '' : 'disabled'}>${fitted ? 'Re-measure' : 'Change'}</button></div>`;
+  }).join('') || '<div class="muted sm">no tools in the library yet (Settings ▸ Tools)</div>');
   mvEl('mp-tc-go').disabled = !ready;
-  setHTML(mvEl('mp-tc-photo'), mvPhoto(Math.round(+mvEl('mp-tc-num').value)));
+  setHTML(mvEl('mp-tc-photo'), '');
   ['dust', 'light'].forEach(k => { const c = mvEl('mv-' + k); c.disabled = !conn; if (st.switches && k in st.switches) c.checked = st.switches[k]; });
   const fan = mvEl('mv-fan'), fpw = mvEl('mv-fan-pw'), fon = !!(st.switches && st.switches.spindle_fan);
   fan.disabled = !conn; fan.checked = fon; fpw.disabled = !conn;
@@ -6703,12 +6761,29 @@ function mvRun(st) {
     const pct = job.stage === 'uploading' ? Math.round((job.upload || 0) * 100) : Math.round(job.percent || 0);
     const t = Math.round(job.seconds || 0), tt = `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`;
     const left = job.time_min && pct > 0 && pct < 100 ? Math.max(0, job.time_min * (1 - pct / 100)) : null;
+    // time left: this operation and the whole program, from each op's estimate (lines are not evenly spread over time),
+    // scaled by how the run is going so far against its estimate (feed overrides, a slow machine)
+    const opMin = k => { const pi = runIdx[k]; return program && program.ops[pi] ? program.ops[pi].time : null; };
+    let opLeft = null, allLeft = null;
+    if (jops.length && jops.every((_, k) => opMin(k) != null) && !['done', 'failed', 'aborted'].includes(job.stage)) {
+      const k0 = cur != null ? cur : 0, o = jops[k0];
+      const frac = cur != null ? Math.min(1, Math.max(0, (job.line - o.start) / Math.max(1, o.end - o.start))) : 0;
+      const doneEst = jops.slice(0, k0).reduce((a, _, k) => a + opMin(k), 0) + opMin(k0) * frac;
+      const ratio = doneEst > 2 && t > 60 ? Math.min(2, Math.max(0.5, (t / 60) / doneEst)) : 1;
+      opLeft = opMin(k0) * (1 - frac) * ratio;
+      allLeft = (opMin(k0) * (1 - frac) + jops.slice(k0 + 1).reduce((a, _, k) => a + opMin(k0 + 1 + k), 0)) * ratio;
+    }
+    const fmtM = m => { if (m == null) return '–'; const s2 = Math.round(m * 60); const h = Math.floor(s2 / 3600), mm = Math.floor(s2 % 3600 / 60), ss = s2 % 60;
+      return h ? `${h} h ${String(mm).padStart(2, '0')}` : `${mm}:${String(ss).padStart(2, '0')}`; };
+    const tleft = opLeft != null ? `<div class="tleft"><div><small>This operation</small><b>${fmtM(opLeft)}</b><span>left${cur != null && jops[cur] ? ' · ' + esc(jops[cur].name) : ''}</span></div>
+      <div class="all"><small>Whole program</small><b>${fmtM(allLeft)}</b><span>left${allLeft != null ? ' · done ≈ ' + new Date(Date.now() + allLeft * 60000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}</span></div></div>` : '';
     const label = { uploading: 'Uploading', starting: 'Starting', running: 'Running', awaiting: 'Tool change', paused: 'Paused', done: 'Finished', failed: 'Failed', aborted: 'Stopped' }[job.stage] || job.stage;
     const segs = jops.map((o, k) => { const w = (o.end - o.start + 1) / Math.max(1, job.lines) * 100; const pi = runIdx[k]; const c = program && program.ops[pi] ? program.ops[pi].color : '#4ea1ff';
       const done = job.line >= o.end || job.stage === 'done' ? 1 : job.line >= o.start ? (job.line - o.start) / Math.max(1, o.end - o.start) : 0;
       return `<div style="flex:${w}"><i style="width:${(done * 100).toFixed(1)}%;background:${c}"></i></div>`; }).join('');
     prog = `<div class="mcard jobc ${job.stage}"><div class="jt"><div><span class="muted">${cur != null && jops[cur] ? `${esc(jops[cur].name)} · operation ${cur + 1} of ${jops.length}` : label}</span>
-        <div class="pct">${job.stage === 'done' ? 'Done' : pct + '%'}</div></div><div class="tm"><b>${tt}</b>${left != null ? `<small>~${Math.ceil(left)} min left</small>` : ''}</div></div>
+        <div class="pct">${job.stage === 'done' ? 'Done' : pct + '%'}</div></div><div class="tm"><b>${tt}</b><small>${tleft ? 'running' : left != null ? `~${Math.ceil(left)} min left` : ''}</small></div></div>
+      ${tleft}
       <div class="segbar">${segs || `<div style="flex:1"><i style="width:${pct}%"></i></div>`}</div>
       <div class="muted sm">${job.stage === 'uploading' ? `${pct}% sent to the machine` : `line ${(job.line || 0).toLocaleString()} of ${job.lines.toLocaleString()}`} · ${esc(job.name)} on the machine's SD card${jobOn ? ' · keeps running if Wi-Fi drops' : ''}${job.air_cut ? ` · <span class="acc">air cut +${job.air_cut} mm</span>` : ''}</div>
       ${job.msg && !['running', 'uploading'].includes(job.stage) ? `<div class="sm">${esc(job.msg)}</div>` : ''}
@@ -6729,7 +6804,7 @@ function mvRun(st) {
     const k = runIdx.indexOf(o.i), inJob = job && k >= 0;
     const state = !inJob ? '' : job.stage === 'done' || (cur != null && k < cur) ? 'done' : k === cur && jobOn ? 'cur' : jobOn ? 'queued' : '';
     return `<div class="mop ${state}" data-act="${jobOn ? '' : 'opsel'}" data-i="${o.i}">${jobOn ? '' : `<span class="cb ${MVP.sel.has(o.i) ? 'on' : ''}"></span>`}<span class="dot" style="background:${o.color}"></span>
-      <span class="nm">${esc(o.name)}</span><span class="kind">${esc(o.kind)}</span><span class="tchip">T${o.tool ? o.tool.number : '?'}</span><span class="tm">${o.time.toFixed(1)}m</span>
+      <span class="nm">${esc(o.name)}</span><span class="kind">${esc(o.kind)}</span><span class="tchip">T${o.tool ? o.tool.number : '?'}</span>${o.tiles > 1 ? `<span class="tchip tl" title="runs at each of ${o.tiles} tiles">×${o.tiles}</span>` : ''}<span class="tm">${o.time.toFixed(1)}m</span>
       <span class="st">${state === 'done' ? '<i class="ok">✓</i>' : state === 'cur' ? '<i class="spin"></i>' : state === 'queued' ? 'queued' : ''}</span></div>`;
   };
   const selT = ops.filter(o => MVP.sel.has(o.i)).reduce((a, o) => a + o.time, 0);
@@ -6990,6 +7065,25 @@ const MREQ_TITLE = { control_on: 'Control on', control_off: 'Control off', home:
   change_tool: 'Tool change', confirm_tool: 'Confirm the tool', origin_anchor: 'Origin = Anchor 1', auto_z_probe: 'Auto Z probe', set_origin: 'Set the work origin',
   shift_origin: 'Move X0 Y0', lower_to: 'Lower Z', raise_z: 'Raise Z', goto: 'Go to', probe_3d: '3D probe', run_ops: 'Run on the machine', switch: 'Accessory', console: 'Console line',
   jog_a: 'Turn the 4th axis', rotary_zero: 'Zero on the 4th axis', shrink_a: 'Shrink A' };
+// hover a tool's picture (Machine ▸ Prepare list, CAM ▸ Tools) for a big view: its photo, silhouette and packet details
+(() => {
+  const z = document.createElement('div'); z.id = 'tool-zoom'; document.body.appendChild(z);
+  let cur = null;
+  document.addEventListener('mouseover', e => {
+    const el = e.target.closest && e.target.closest('[data-tz]');
+    if (!el) { if (cur) { z.style.display = 'none'; cur = null; } return; }
+    if (el === cur) return; cur = el;
+    const n = +el.dataset.tz, t = toolByNumber(n), u = toolPhotoUrl(t), sh = mvToolShape(n);
+    const name = n === 0 ? 'Wired probe' : n === 9999 ? '3D probe' : (t ? t.name : `T${n}`);
+    z.innerHTML = `${u ? `<img src="${u}" alt="">` : ''}<div class="tz-b">${sh ? toolSil(sh, 34, 96) : ''}<div><b>T${n} · ${esc(name)}</b>${t && toolSpec(t) ? `<small>${esc(toolSpec(t))}</small>` : ''}${t && t.notes ? `<small>${esc(t.notes)}</small>` : ''}${!u ? '<small>no photo yet: Settings ▸ Tools ▸ Photo</small>' : ''}</div></div>`;
+    const r = el.getBoundingClientRect(), W = 380, H = u ? 420 : 180;
+    let x = r.right + 12, y = r.top - 20;
+    if (x + W > innerWidth - 8) x = Math.max(8, r.left - W - 12);
+    if (y + H > innerHeight - 8) y = Math.max(8, innerHeight - H - 8);
+    z.style.left = x + 'px'; z.style.top = y + 'px'; z.style.display = 'block';
+  });
+  document.addEventListener('scroll', () => { z.style.display = 'none'; cur = null; }, true);
+})();
 function mreqToolBlock(n) {                       // the tool a request is about: its photo (to pick it out of the drawer), silhouette and packet line
   if (n == null || isNaN(+n)) return '';
   n = +n; const t = toolByNumber(n), sh = mvToolShape(n);
