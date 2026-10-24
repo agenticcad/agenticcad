@@ -3305,7 +3305,7 @@ def _emit(prog: Program, dialect: str) -> str:
                 fw = ""
                 if f and f != last_f:
                     fw = f" F{_fmt(f)}"; last_f = f
-                zw = f" Z{_fmt(z)}" if last[2] is None or abs(z - last[2]) > 1e-6 else ""
+                zw = f" Z{_fmt(z)}" if last[2] is None or _fmt(z) != _fmt(last[2]) else ""
                 if caps["arc_format"] == "r":
                     line(f"{'G2' if cw else 'G3'} X{_fmt(x)} Y{_fmt(y)}{zw} R{_fmt(math.hypot(sx - cx, sy - cy))}{fw}")
                 else:
@@ -3316,9 +3316,10 @@ def _emit(prog: Program, dialect: str) -> str:
             a = item[5] if len(item) > 5 else None
             x -= ox; y -= oy; z -= oz
             words = []
-            if last[0] is None or abs(x - last[0]) > 1e-6: words.append(f"X{_fmt(x)}")
-            if last[1] is None or abs(y - last[1]) > 1e-6: words.append(f"Y{_fmt(y)}")
-            if last[2] is None or abs(z - last[2]) > 1e-6: words.append(f"Z{_fmt(z)}")
+            # a word only when the value the controller reads changes (sub-micron jitter between moves is not a move)
+            if last[0] is None or _fmt(x) != _fmt(last[0]): words.append(f"X{_fmt(x)}")
+            if last[1] is None or _fmt(y) != _fmt(last[1]): words.append(f"Y{_fmt(y)}")
+            if last[2] is None or _fmt(z) != _fmt(last[2]): words.append(f"Z{_fmt(z)}")
             da = 0.0
             if a is not None and (last[3] is None or abs(a - last[3]) > 1e-6):
                 da = a - (last[3] if last[3] is not None else a)

@@ -5,6 +5,38 @@ patch bumps fix things, a major bump changes something scripts or workspaces rel
 
 ## [Unreleased]
 
+## [1.4.0a2] — 2026-10-25 (test build: AgenticCAD Tabs)
+
+### Added
+- **pattern() in designs.** `result = {"badge": pattern(part, cols=4, rows=2, pitch=(35, 60))}` (or `offsets=[...]`):
+  one part placed several times. The copies (badge, badge@2 ...) share its exact geometry, their display meshes are
+  the part's moved (no re-tessellation), and the model records the pattern. The assistant uses it instead of copying
+  bodies.
+- **Tiles in CAM.** `Setup(..., tiles=tiles_of(model, "badge"))`: every operation is computed once, on the part, and
+  runs at each tile - all tiles with one tool before the next tool change. `program.add(op, tiles=False)` for an op
+  computed over the whole plate (facing, roughing the block). Time, bounds, the simulation (each tile cut; its
+  statistics folded back onto the op's moves), the viewer (each op's moves sent once with the offsets) and the G-code
+  all include the tiles. On a Makera the tiles run in G54 with offsets; `tile_wcs=True` puts each tile in its own
+  work offset (G54 .. G59.3, the header lists what to set) on other controllers and is refused on a Makera, whose
+  firmware makes the fitted tool the length reference whenever a work offset's Z is set and keeps only G54 across a
+  restart. No controller here has subprograms, so the file is the same size either way. Checked on the 8-badge sheet:
+  the same 122,298 cutting lines as the hand-copied program (to 0.001 mm), from 635,021 moves instead of 2,108,565,
+  posted in 25 s instead of 89 s.
+- **Machine ▸ Prepare: the tools as a picture list** - this setup's tools in the order it uses them, the probes,
+  then the library - with Change (Re-measure for the fitted one); the usual confirmation, then Makera's whole tool
+  change. Hover a tool's picture (here and in CAM ▸ Tools) for a big view with the packet details.
+- **Time left while a program runs**, big: this operation and the whole program (with the clock time it should
+  finish), from each operation's estimate and scaled by how the run is going against it.
+
+### Fixed
+- **The simulation's removal rates double-counted.** A sample was compared with the one before it only, so material
+  an earlier pass in the same batch had already cut was counted again (a face op "removed" 36.6 cm³ of a 14 cm³
+  layer). Each sample now meets the stock as every earlier sample left it; the operations' volumes add up exactly to
+  the stock removed, and MRR / BITE read true.
+- G-code writes a coordinate only when its printed value changes (sub-micron differences between moves made
+  redundant words).
+- tile_wcs: the operation after a tiled one switches back to its own work offset (lifting first) before it moves.
+
 ## [1.4.0a1] — 2026-10-24 (test build: AgenticCAD Tabs)
 
 A separate test app, **AgenticCAD Tabs**, installed next to AgenticCAD: several designs open at once, in tabs. Its
