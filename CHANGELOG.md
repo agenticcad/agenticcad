@@ -5,6 +5,28 @@ patch bumps fix things, a major bump changes something scripts or workspaces rel
 
 ## [Unreleased]
 
+## [1.4.1] — 2026-11-02
+
+### Fixed
+- **The simulation showed a channel cut through the part that the program never cuts.** Between keyframes the viewer
+  cuts the stock itself as the tool moves, and it joined each operation's last point to the next operation's first
+  with a straight cut (the next operation's tool, from the end of one pocket at depth to the next one's start), and
+  across setups even joined points in two frames. The G-code lifts first and the simulation itself samples each
+  operation on its own, so this was only in the picture - but it looked like a gouge. An operation's first move now
+  starts where it is; the drawn tool no longer glides through the part between operations either.
+- **Gouges reported on walls inside the part.** A pocket whose last pass runs along a wall inside the part (the
+  latch's flange relief round its cup) flagged single cells all the way round the wall, 6 mm deep: a cell on the wall
+  holds both sides of it. A cell whose neighbour reaches the cut's depth is no longer a gouge; real gouges, a cutter
+  wide, are still found.
+
+### Added
+- **`free_region(shape, z_top, z_bottom, within=...)`**: where a pocket can clear every level of a band without
+  touching the part - sliced at both ends, at every flat face in the band and every 0.5 mm between. A pocket cuts its
+  region at every level, so a region taken from one section misses islands and bosses that rise into the band and
+  anything that changes inside it: the latch's recess floor pocket took 0.5 mm off its thrust boss and its housing
+  holes were bored to the countersinks' diameter all the way through. The assistant now builds pocket regions with it,
+  and treats a GOUGES line from the simulation as a broken program.
+
 ## [1.4.0] — 2026-11-02
 
 **Several designs open at once, in tabs** - tried out as the separate test app AgenticCAD Tabs (1.4.0a1, 1.4.0a2) and

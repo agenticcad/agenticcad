@@ -232,7 +232,7 @@ There is a second script per design, the CAM script, built with `build_cam`. It 
   part (= model.shape), bodies (dict name -> shape), tools (dict: by number, by name, by 'T1'),
   machines (dict name -> Machine), and everything from cam_kernel: Stock, Setup, Program, face, contour, pocket,
   drill, parallel3d, adaptive, rotary_rough, rotary_finish, rotary_wrap, rotary_profile, gear_teeth, section, silhouette,
-  stock_minus, holes, face_polygon, circle, rect, feeds, apply_feeds.
+  stock_minus, free_region, holes, face_polygon, circle, rect, feeds, apply_feeds.
 It must assign `program` (a Program). Call `cam_context` first to see the machines/tools/model facts.
 ```
 stock = Stock.from_model(model, margin=3, top=1.0)          # also accepts a body shape; or Stock.block(80, 50, 12, top=8)
@@ -333,7 +333,13 @@ Contours get tangential arc lead-in/out by default (lead=radius; lead=0 disables
 longest straight edge. The post fits G2/G3 arcs (machine.arcs, machine.arc_tolerance, machine.arc_format 'ij'|'r', machine.helical_arcs; never while A moves) within what the machine's controller takes (cam.CONTROLLERS by post: Makera = I/J only, 63-character lines; GRBL 80) and merges collinear moves.
 Materials for feeds(): aluminium, brass, mild-steel, acrylic, hdpe, delrin, plywood, mdf, hardwood, softwood, foam, fr4, carbon-fibre. section(shape, z) returns
 polygons with holes (holes = islands for pocket, inner profiles for contour side="outside"); stock_minus(setup,
-shape, z, expand=tool.diameter) = what to clear at level z (expand lets the tool run off the stock edge); face_polygon(model.get_face(id)) uses a face the user clicked. Depths:
+shape, z, expand=tool.diameter) = what to clear at level z (expand lets the tool run off the stock edge); face_polygon(model.get_face(id)) uses a face the user clicked.
+A pocket cuts its region at EVERY level from z_top to z_bottom, so its region must be free of the part through the whole
+band, not at one height: use free_region(view, z_top, z_bottom, within=...) (the area clear of the part at every
+level of the band; within = the recess / hole / outline it may work in). Never pocket a single section's holes (the
+interiors of section(view, z)) over a band: that misses islands and bosses inside them and anything that changes
+within the band (a countersink cone, a counterbore, a step), and cuts them away. After build_cam, simulate_cam: any
+GOUGES line is a broken program - fix the region (free_region, a shallower band, a separate op per level), never send it. Depths:
 z_bottom below the stock bottom means cutting into the spoilboard (fine for through-cuts with a sacrificial
 board, warn otherwise). Tool numbers matter for tool changes (GRBL: machine.tool_change='pause' emits M6/M0; Haas and LinuxCNC posts emit Tn M06 + G43 Hn, so tool offsets must exist on the control). Built-in machines include the Makera Z1 and Carvera Air, Haas VF-2 / VF-2SS / VF-4 / Mini Mill / TM-1, and generic LinuxCNC mills.
 Prefer the tool library's feeds/stepdown; override per op only with a reason. The user's own per-op tweaks from

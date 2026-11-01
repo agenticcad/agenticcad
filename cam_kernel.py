@@ -903,6 +903,35 @@ def stock_minus(setup: Setup, shape: Shape, z: float, expand: float = 0.0, tol: 
     return _as_multi(setup.stock.rect(expand).difference(section(shape, z, tol)))
 
 
+def free_region(shape: Shape, z_top: float, z_bottom: float, within=None, step: float = 0.5, tol: float = 0.02) -> MultiPolygon:
+    """Where a pocket can clear EVERY level from z_top down to z_bottom without cutting the shape: `within` (default:
+    the shape's outline seen from above) minus the shape's material anywhere in that band. Use it for a pocket's
+    region instead of one section: a section at one height misses what changes inside the band — an island or boss
+    that rises into it, a countersink cone that widens below it, a step — and pocketing that section over the whole
+    band cuts them away (the boat latch's recess floor took 0.5 mm off its thrust boss; its M4 holes were bored to the
+    countersink's diameter all the way through). The band is sliced at both ends, at every flat face inside it and
+    every `step` mm between; sections are cached, so rebuilding is cheap."""
+    if z_top < z_bottom:
+        z_top, z_bottom = z_bottom, z_top
+    eps = 0.01
+    zs = {round(z_bottom + eps, 4), round(z_top - eps, 4)}
+    n = max(1, int(math.ceil((z_top - z_bottom) / max(step, 0.05))))
+    zs |= {round(z_bottom + (z_top - z_bottom) * k / n, 4) for k in range(1, n)}
+    for f in shape.faces():                                 # flat faces inside the band: slice just above and below them
+        try:
+            if f.geom_type != b3d.GeomType.PLANE or abs(abs(f.normal_at().Z) - 1.0) > 1e-6:
+                continue
+        except Exception:  # noqa: BLE001
+            continue
+        z = f.center().Z
+        for zz in (z - eps, z + eps):
+            if z_bottom < zz < z_top:
+                zs.add(round(zz, 4))
+    material = unary_union([section(shape, z, tol) for z in sorted(zs)])
+    area = unary_union(_polys(within)) if within is not None else outline(shape, tol)
+    return _as_multi(area.difference(material))
+
+
 @dataclass
 class Hole:
     x: float; y: float; diameter: float; z_top: float; z_bottom: float; through: bool
@@ -2372,7 +2401,7 @@ def _raster_triangles(P: np.ndarray, I: np.ndarray, zmap: np.ndarray, minx: floa
 
 PUBLIC_API = [
     "regular_polygon","Stock.from_model", "Stock.block", "Stock.cylinder", "Setup", "Setup.view", "Program", "face", "contour", "pocket",
-              "adaptive", "drill", "parallel3d", "chamfer_edges", "vcarve", "rest_region", "section", "silhouette", "outline", "face_outline", "stock_minus", "holes", "face_polygon",
+              "adaptive", "drill", "parallel3d", "chamfer_edges", "vcarve", "rest_region", "section", "silhouette", "outline", "face_outline", "stock_minus", "free_region", "holes", "face_polygon",
               "circle", "rect", "feeds", "apply_feeds", "rotary_rough", "rotary_finish", "rotary_wrap", "rotary_profile",
               "gear_teeth", "radial_map", "tiles_of"]
 

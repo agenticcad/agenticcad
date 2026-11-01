@@ -528,6 +528,12 @@ def _part_maps_z(part, res, x0, y0, nx, ny):
     return top, -nbot
 
 
+def _nb_extreme(H, op, pad):
+    """Per cell, the min (op=np.minimum) or max of its 4 neighbours' values; `pad` beyond the grid."""
+    P = np.pad(H, 1, constant_values=pad)
+    return op(op(P[:-2, 1:-1], P[2:, 1:-1]), op(P[1:-1, :-2], P[1:-1, 2:]))
+
+
 def _gouge_z(pmaps, zhi, zlo, tol, has_bottom):
     top, bot = pmaps
     has = np.isfinite(top)                               # the part occupies this column
@@ -535,8 +541,13 @@ def _gouge_z(pmaps, zhi, zlo, tol, has_bottom):
     # ignore the outermost cell ring of the part: an outline cut that runs exactly along the edge is not a gouge
     core = has.copy()
     core[1:, :] &= has[:-1, :]; core[:-1, :] &= has[1:, :]; core[:, 1:] &= has[:, :-1]; core[:, :-1] &= has[:, 1:]
-    g_top = core & ((~mat) | (zhi < top - tol))           # cut below the part's top surface (or right through it)
-    g_bot = (core & mat & (zlo > bot + tol)) if has_bottom else np.zeros_like(has)
+    # a cell on a wall inside the part (a step in its top or bottom surface) holds both sides of the wall: the cut that
+    # stops at the wall's far side is right, so a cell whose neighbour reaches the cut's depth is not a gouge (a pocket
+    # whose last pass runs along a round wall otherwise "gouges" single cells all the way round it)
+    nb_top_min, nb_bot_max = _nb_extreme(top, np.minimum, np.inf), _nb_extreme(bot, np.maximum, -np.inf)
+    with np.errstate(invalid="ignore"):
+        g_top = core & ((~mat) | (zhi < top - tol)) & ~(mat & (nb_top_min <= zhi + tol))   # below the part's top (or through it)
+        g_bot = (core & mat & (zlo > bot + tol) & ~(nb_bot_max >= zlo - tol)) if has_bottom else np.zeros_like(has)
     gouge = g_top | g_bot
     with np.errstate(invalid="ignore"):                   # inf - inf outside the part, never selected
         d_top = np.where(mat, top - zhi, top - bot)

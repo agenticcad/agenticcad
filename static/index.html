@@ -2408,6 +2408,11 @@ function renderSim() { const { k, f } = simK(); applySimAt(k, f); }
 function simSeek(sec, keepPlaying) { sim.clock = Math.max(0, Math.min(sim.T, sec)); simRange.value = sim.T ? Math.round(sim.clock / sim.T * 1000) : 0; renderSim(); if (!keepPlaying) simStop(); }
 function simStop() { sim.playing = false; if (sim.raf) cancelAnimationFrame(sim.raf); sim.raf = null; document.getElementById('sim-play').textContent = '▶'; syncRibbon(); }
 function fmtT(sec) { sec = Math.max(0, Math.round(sec)); const h = Math.floor(sec / 3600), m = Math.floor(sec % 3600 / 60), s2 = sec % 60; return (h ? h + ':' + String(m).padStart(2, '0') : m) + ':' + String(s2).padStart(2, '0'); }
+// where move k starts: the end of the move before it in the same operation. An operation's first move (a rapid to its
+// start at clearance) starts from itself: between operations the machine lifts first (the post's retract), so joining the
+// last point of one operation to the first of the next would cut a straight trench through the part that the program
+// never cuts (and, across setups, join points in two different frames).
+function simPrev(k) { const cur = sim.index[k]; return k > 0 && cur && cur[1] > 0 ? sim.index[k - 1] : cur; }
 function simOpAt(k) { if (!sim.total) return null; const i = Math.min(Math.max(0, k), sim.total - 1); return sim.index[i] ? sim.index[i][0] : null; }
 function applySim(k) { applySimAt(k, 0); }
 function applySimAt(k, f) {
@@ -2426,7 +2431,7 @@ function applySimAt(k, f) {
   if (k < sim.total && (k > 0 || f > 0 || sim.playing || sim.clock > 0 || sim.T === 0 ? true : false)) {
     // the move in progress is move k (travelling from the end of move k-1); its op is the current op
     const [oi, mi] = sim.index[k]; const c = camOps[oi]; const nxt = c.op.moves[mi]; const t = c.op.tool;
-    const [oip, mip] = k > 0 ? sim.index[k - 1] : sim.index[k]; const mv = camOps[oip].op.moves[mip];
+    const [oip, mip] = simPrev(k); const mv = camOps[oip].op.moves[mip];
     // interpolated tool position between the end of move k-1 and the end of move k (the real motion, not a jump per move)
     const pos = new THREE.Vector3(mv[1] + (nxt[1] - mv[1]) * f, mv[2] + (nxt[2] - mv[2]) * f, mv[3] + (nxt[3] - mv[3]) * f);
     const st = program.setups ? program.setups[c.op.setup || 0] : null;
@@ -2770,7 +2775,7 @@ function liveStampTo(k, f) {                          // stamp moves live.upto .
     const [oi, mi] = sim.index[gi], c = camOps[oi], mv = c.op.moves[mi], st = program.setups ? program.setups[c.op.setup || 0] : null;
     const ax = st && st.tool_axis ? st.tool_axis[2] : 1, side = ax > 0.999 ? 1 : (ax < -0.999 ? -1 : 0);
     if (!side) return;
-    const [oip, mip] = gi > 0 ? sim.index[gi - 1] : sim.index[gi]; const pv = camOps[oip].op.moves[mip];
+    const [oip, mip] = simPrev(gi); const pv = camOps[oip].op.moves[mip];
     const ex = pv[1] + (mv[1] - pv[1]) * frac, ey = pv[2] + (mv[2] - pv[2]) * frac, ez = pv[3] + (mv[3] - pv[3]) * frac;
     liveStampSegment(pv[1], pv[2], pv[3], ex, ey, ez, c.op.tool, side);
   };
@@ -2859,7 +2864,7 @@ function hudUpdate(k, f) {
     if (performance.now() - hudToolAt < 1800) cap = `Tool change · T${t.number} ${t.name}`;
     else if (st && (program.setups.length > 1 || st.rotary)) cap = `${st.name} · ${cap}`;
     if (st && st.rotary && performance.now() - hudToolAt >= 1800) {                  // rotary programs: the A angle in progress
-      const [oip, mip] = k > 0 ? sim.index[k - 1] : sim.index[k], mv = camOps[oip].op.moves[mip], nxt = c.op.moves[sim.index[k][1]];
+      const [oip, mip] = simPrev(k), mv = camOps[oip].op.moves[mip], nxt = c.op.moves[sim.index[k][1]];
       const a0 = mv.length > 5 ? mv[5] : st.a, a1 = nxt.length > 5 ? nxt[5] : st.a, a = a0 + (a1 - a0) * (f || 0);
       cap += ` · A ${(((a % 360) + 360) % 360).toFixed(1)}°`;
     }

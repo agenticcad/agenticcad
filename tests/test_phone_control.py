@@ -131,8 +131,11 @@ def test_secure_phone_page_serves_with_the_apps_own_certificate(tmp_path, monkey
     monkeypatch.setenv("AGENTICCAD_NO_REMOTE", "1")
     import asyncio
     import importlib
+    import json
     import socket
-    import httpx
+    import ssl
+    import urllib.error
+    import urllib.request
     import server
     importlib.reload(server)
     s_ = socket.socket(); s_.bind(("127.0.0.1", 0)); port = s_.getsockname()[1]; s_.close()
@@ -151,18 +154,18 @@ def test_secure_phone_page_serves_with_the_apps_own_certificate(tmp_path, monkey
             cert = st["push"]["cert"]
             assert "127.0.0.1" in cert["hosts"] and cert["hosts"][0].endswith(".local")
             ca = str(server._push().ca_crt)
-            async with httpx.AsyncClient(verify=ca) as h:                   # trusting only our CA, as the phone will
-                r = await h.get(f"https://127.0.0.1:{port + 1}/m")
-                assert r.status_code == 200 and b"Notifications" in r.content
-                r = await h.get(f"https://127.0.0.1:{port + 1}/m/api/push", headers={"X-Key": key})
-                assert r.json()["secure"] is True
-                r = await h.get(f"http://127.0.0.1:{port}/m/api/push", headers={"X-Key": key})
-                assert r.json()["secure"] is False and r.json()["https_running"] is True
-            async with httpx.AsyncClient(verify=False) as h:
-                pass
-            with pytest.raises(httpx.ConnectError):                         # not trusted by the system: our CA only
-                async with httpx.AsyncClient() as h:
-                    await h.get(f"https://127.0.0.1:{port + 1}/m")
+            def get(url, ctx=None, headers=None):                          # stdlib only (CI installs requirements.txt)
+                with urllib.request.urlopen(urllib.request.Request(url, headers=headers or {}), context=ctx, timeout=5) as r:
+                    return r.status, r.read()
+            ours = ssl.create_default_context(cafile=ca)                     # trusting only our CA, as the phone will
+            st_, body = await asyncio.to_thread(get, f"https://127.0.0.1:{port + 1}/m", ours)
+            assert st_ == 200 and b"Notifications" in body
+            _, body = await asyncio.to_thread(get, f"https://127.0.0.1:{port + 1}/m/api/push", ours, {"X-Key": key})
+            assert json.loads(body)["secure"] is True
+            _, body = await asyncio.to_thread(get, f"http://127.0.0.1:{port}/m/api/push", None, {"X-Key": key})
+            assert json.loads(body)["secure"] is False and json.loads(body)["https_running"] is True
+            with pytest.raises(urllib.error.URLError):                       # not trusted by the system: our CA only
+                await asyncio.to_thread(get, f"https://127.0.0.1:{port + 1}/m", ssl.create_default_context())
             # the certificate survives a restart (same CA), the leaf is kept while its names still fit
             ca_pem = server._push().ca_crt.read_bytes(); leaf_pem = server._push().srv_crt.read_bytes()
             await server._remote_start()
