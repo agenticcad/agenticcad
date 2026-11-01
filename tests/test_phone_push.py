@@ -58,24 +58,24 @@ def test_vapid_authorization_is_a_valid_es256_jwt_for_the_push_service(tmp_path)
 
 def test_local_ca_and_server_certificate_fit_apple_rules_and_reissue_only_the_leaf(tmp_path):
     st = pp.PushStore(tmp_path)
-    info = st.ensure_certs(["mikes-mac.local", "192.168.1.86", "127.0.0.1"])
+    info = st.ensure_certs(["studio-mac.local", "192.168.0.20", "127.0.0.1"])
     ca = x509.load_pem_x509_certificate(st.ca_crt.read_bytes())
     leaf = x509.load_pem_x509_certificate(st.srv_crt.read_bytes())
     assert ca.extensions.get_extension_for_class(x509.BasicConstraints).value.ca is True
     leaf.verify_directly_issued_by(ca)                               # signed by our CA
-    assert info["hosts"] == ["mikes-mac.local", "192.168.1.86", "127.0.0.1"]
+    assert info["hosts"] == ["studio-mac.local", "192.168.0.20", "127.0.0.1"]
     assert ExtendedKeyUsage_has_server_auth(leaf)
     assert leaf.not_valid_after_utc - leaf.not_valid_before_utc <= dt.timedelta(days=825)   # Apple's limit
     assert (st.dir / "ca.key").stat().st_mode & 0o077 == 0
     ca_pem, leaf_pem = st.ca_crt.read_bytes(), st.srv_crt.read_bytes()
-    st.ensure_certs(["mikes-mac.local", "192.168.1.86", "127.0.0.1"])
+    st.ensure_certs(["studio-mac.local", "192.168.0.20", "127.0.0.1"])
     assert st.srv_crt.read_bytes() == leaf_pem                        # nothing to do
-    st.ensure_certs(["mikes-mac.local", "10.0.0.5", "127.0.0.1"])     # the LAN address changed
+    st.ensure_certs(["studio-mac.local", "10.0.0.5", "127.0.0.1"])     # the LAN address changed
     assert st.srv_crt.read_bytes() != leaf_pem and st.ca_crt.read_bytes() == ca_pem
     assert "10.0.0.5" in st.leaf_hosts()
     assert pp.b64u(st.ca_der()[:4]) and x509.load_der_x509_certificate(st.ca_der()).subject == ca.subject
     st.new_ca()
-    st.ensure_certs(["mikes-mac.local"])
+    st.ensure_certs(["studio-mac.local"])
     assert st.ca_crt.read_bytes() != ca_pem                           # start over: a new CA
 
 
