@@ -691,6 +691,7 @@ class CadAgent:
         self.camera = None                     # machine_link.CameraRelay
         self.slice_layers: dict[str, Any] | None = None       # its parsed G-code, viewer payload
         self.program: cam.Program | None = None
+        self._cam_stop = None                       # threading.Event of the CAM build in progress (Stop sets it)
         cam_path = self.doc_dir / "cam.py"
         if cam_path.exists():
             self.cam_code = cam_path.read_text()
@@ -822,11 +823,26 @@ class CadAgent:
             self.sim = None
             await self.emit({"type": "cam", "program": None, "code": code, "source": source})
             return None
-        prog = await asyncio.to_thread(self._run_cam, code)
+        # a Stop (interrupt) ends the build at its next stop point instead of leaving a thread running for minutes;
+        # the program's payload, summary and G-code line count are worked out in the thread too, not on the event loop
+        import threading
+        ev = self._cam_stop = threading.Event()
+        tok = cam.STOP.set(ev)
+        try:
+            prog = await asyncio.to_thread(self._run_cam, code)
+
+            def finish():
+                prog.gcode_lines = prog.gcode().count("\n")
+                return prog.to_payload(), prog.summary()
+            payload, summary = await asyncio.to_thread(finish)
+        finally:
+            cam.STOP.reset(tok)
+            if self._cam_stop is ev:
+                self._cam_stop = None
         self.program = prog
         self.sim = None                                   # a new program invalidates the old simulation
-        await self.emit({"type": "cam", "program": prog.to_payload(), "code": code, "source": source,
-                         "summary": prog.summary(), "gcode_lines": prog.gcode().count("\n")})
+        await self.emit({"type": "cam", "program": payload, "code": code, "source": source,
+                         "summary": summary, "gcode_lines": prog.gcode_lines})
         return prog
 
     # ------------------------------------------------------------------ machine model scripts
@@ -3169,6 +3185,8 @@ class CadAgent:
             await c.disconnect()
 
     async def interrupt(self) -> None:
+        if self._cam_stop is not None:                    # a CAM build in progress stops too
+            self._cam_stop.set()
         if self.client and self.busy:
             await self.client.interrupt()
 

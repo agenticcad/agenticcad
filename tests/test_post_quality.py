@@ -25,6 +25,23 @@ def test_collinear_merge_never_accumulates_error():
     assert cam._merge_collinear(flat2d, 0.01)[-2] == (50.0, 0.0)
 
 
+
+def test_collinear_merge_is_fast_on_long_noisy_runs():
+    """A rest pass posted for hours: every point added to a straight run re-checked the whole run (n^2). 200,000
+    points along a slowly bending line with sub-tolerance noise now merge in well under a few seconds, and every
+    dropped point still lies within the tolerance of the chord that replaces it."""
+    import random, time
+    rnd = random.Random(3)
+    pts = [(i * 0.01, 0.002 * math.sin(i / 3000.0) * 40 + rnd.uniform(-0.001, 0.001), -1.0) for i in range(200_000)]
+    t = time.time()
+    out = cam._merge_collinear3(pts, 0.005)
+    assert time.time() - t < 10 and 2 < len(out) < 20_000 and out[0] == pts[0] and out[-1] == pts[-1]
+    idx = {p: k for k, p in enumerate(pts)}
+    for a, b in zip(out[::50], out[1::50]):                                 # spot-check chords
+        i, j = idx[a], idx[b]
+        ax, ay = a[0], a[1]; vx, vy = b[0] - ax, b[1] - ay; L = math.hypot(vx, vy)
+        assert all(abs((p[0] - ax) * vy - (p[1] - ay) * vx) / L <= 0.005 + 1e-9 for p in pts[i:j + 1])
+
 def test_straight_runs_with_rounding_noise_post_as_lines_not_huge_arcs(cam_setup):
     setup, tools, _ = cam_setup
     # a long straight raster line with 4-decimal rounding noise: one G1, no R>1000 arc

@@ -5,9 +5,26 @@ patch bumps fix things, a major bump changes something scripts or workspaces rel
 
 ## [Unreleased]
 
-## [1.4.0a2] — 2026-10-25 (test build: AgenticCAD Tabs)
+## [1.4.0] — 2026-11-02
+
+**Several designs open at once, in tabs** - tried out as the separate test app AgenticCAD Tabs (1.4.0a1, 1.4.0a2) and
+now AgenticCAD itself. The app opens the tab view on its usual data folder and ports. On the first start it copies
+the designs (and the files they import) saved only in the test app's folder into its own, without overwriting
+anything; the AgenticCAD Tabs app and its folder can then be deleted.
 
 ### Added
+- **A tab per open design.** Each tab is a whole design: its model, its own CAM program and simulation, its own
+  assistant (a separate Claude Code session working in the tab's own folder) and its view. File ▸ New and Open, and
+  the **+** on the tab strip, open designs in new tabs (an open design is switched to, not opened twice). Tabs show
+  when their assistant is working, when something waits for you, and unsaved changes; closing asks about both.
+  The open tabs come back when the app starts.
+- **The machine is its own tab**, shared by every design. **Program from [design ▾]** at the top picks which open
+  design's CAM program Prepare / Zero / Run work with (Send to machine in a design's CAM tab opens it there with that
+  setup); while a program plays it is locked to the design that sent it, and other designs' assistants are refused
+  machine moves until it ends (Hold, Pause and STOP always work). The Machine tab turns amber for a tool change and a
+  toast says so wherever you are; an approval asked for in a tab you're not looking at raises a toast with Review.
+- At most 4 assistants run at once; the one you look at starts (or wakes) when its tab is shown and picks up its
+  conversation again.
 - **pattern() in designs.** `result = {"badge": pattern(part, cols=4, rows=2, pitch=(35, 60))}` (or `offsets=[...]`):
   one part placed several times. The copies (badge, badge@2 ...) share its exact geometry, their display meshes are
   the part's moved (no re-tessellation), and the model records the pattern. The assistant uses it instead of copying
@@ -29,6 +46,19 @@ patch bumps fix things, a major bump changes something scripts or workspaces rel
   finish), from each operation's estimate and scaled by how the run is going against it.
 
 ### Fixed
+- **Writing the G-code could take hours.** Merging straight stretches re-checked every point of a stretch for each
+  point added to it, so a rest pass made of hundreds of thousands of tiny moves never finished (the boat latch's
+  program sat in it for over half an hour). The merge now jumps ahead and bisects, checking all the skipped points
+  at once: that program's G-code takes 4.6 s. Every dropped point still lies within the tolerance of its line.
+- **A section could lose part of the model after the first one.** OCCT's booleans may raise the tolerances of the
+  shapes they cut, in place; a slice of the boat latch's lift ring gave its 253 mm² once and nothing after that, so
+  later sections (and the pockets made from them) missed the ring. Sections and the clearance check now run
+  non-destructively and repeat exactly.
+- **Stop now stops a CAM build.** The assistant's Stop ended its turn but the build carried on in the background; it
+  now ends at the next operation or section. The program's summary and G-code count are worked out off the event
+  loop, so the app stays responsive while a big program finishes.
+- **CAM ▸ Tools lists every setup's tools** (the order per setup, and which setups use each tool), not only the
+  first setup's.
 - **The simulation's removal rates double-counted.** A sample was compared with the one before it only, so material
   an earlier pass in the same batch had already cut was counted again (a face op "removed" 36.6 cm³ of a 14 cm³
   layer). Each sample now meets the stock as every earlier sample left it; the operations' volumes add up exactly to
@@ -36,29 +66,13 @@ patch bumps fix things, a major bump changes something scripts or workspaces rel
 - G-code writes a coordinate only when its printed value changes (sub-micron differences between moves made
   redundant words).
 - tile_wcs: the operation after a tiled one switches back to its own work offset (lifting first) before it moves.
-
-## [1.4.0a1] — 2026-10-24 (test build: AgenticCAD Tabs)
-
-A separate test app, **AgenticCAD Tabs**, installed next to AgenticCAD: several designs open at once, in tabs. Its
-own data folder (seeded on first start by copying AgenticCAD's tools, machines, fixtures, saved designs and imports
-- AgenticCAD's folder is only read), its own ports (8865, phone page 8890) and its own bundle id.
-
-### Added
-- **A tab per open design.** Each tab is a whole design: its model, its own CAM program and simulation, its own
-  assistant (a separate Claude Code session working in the tab's own folder) and its view. File ▸ New and Open, and
-  the **+** on the tab strip, open designs in new tabs (an open design is switched to, not opened twice). Tabs show
-  when their assistant is working, when something waits for you, and unsaved changes; closing asks about both.
-  The open tabs come back when the app starts.
-- **The machine is its own tab**, shared by every design. **Program from [design ▾]** at the top picks which open
-  design's CAM program Prepare / Zero / Run work with (Send to machine in a design's CAM tab opens it there with that
-  setup); while a program plays it is locked to the design that sent it, and other designs' assistants are refused
-  machine moves until it ends (Hold, Pause and STOP always work). The Machine tab turns amber for a tool change and a
-  toast says so wherever you are; an approval asked for in a tab you're not looking at raises a toast with Review.
-- At most 4 assistants run at once; the one you look at starts (or wakes) when its tab is shown and picks up its
-  conversation again.
-
-### Fixed
 - The Open list showed a design's CAM script (`name.cam`) as a design of its own.
+
+### Faster
+- **Rebuilding a CAM program reuses its sections.** Sections are most of a build (an OCCT boolean each, 0.3-1 s),
+  and the assistant rebuilds the same script against the same model many times; they are now kept per shape and
+  height, and a setup's view of the part is the same object from build to build. The Latch sheet Z1 program: first
+  build 23 s, a rebuild 0.4 s (plus 3.6 s of G-code), the same G-code.
 
 ## [1.3.0] — 2026-10-22
 

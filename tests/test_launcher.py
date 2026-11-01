@@ -28,6 +28,23 @@ def test_free_port_prefers_requested_then_falls_back():
         assert port != taken and port > 0
 
 
+
+def test_designs_from_the_tabs_test_build_are_copied_once(tmp_path):
+    tabs, data = tmp_path / "AgenticCAD Tabs", tmp_path / "AgenticCAD"
+    (tabs / "designs").mkdir(parents=True); (tabs / "imports" / "logos").mkdir(parents=True); (data / "designs").mkdir(parents=True)
+    (tabs / "designs" / "sheet_tiled.py").write_text("tiled")
+    (tabs / "designs" / "sheet_tiled.cam.py").write_text("cam")
+    (tabs / "designs" / "bracket.py").write_text("old copy")
+    (tabs / "imports" / "logos" / "logo.step").write_text("step")
+    (data / "designs" / "bracket.py").write_text("main's own")
+    got = launcher._import_tabs_test_build(tabs, data)
+    assert got == ["designs/sheet_tiled.cam.py", "designs/sheet_tiled.py", "imports/logos/logo.step"]
+    assert (data / "designs" / "bracket.py").read_text() == "main's own"                 # never overwritten
+    assert (data / "imports" / "logos" / "logo.step").read_text() == "step"
+    (tabs / "designs" / "later.py").write_text("x")
+    assert launcher._import_tabs_test_build(tabs, data) == [] and not (data / "designs" / "later.py").exists()   # once
+    assert launcher._import_tabs_test_build(tmp_path / "none", tmp_path / "fresh") == []
+
 def test_find_claude_cli_env_override_and_candidates(tmp_path, monkeypatch):
     fake = tmp_path / "claude"; fake.write_text("#!/bin/sh\n"); fake.chmod(0o755)
     monkeypatch.setenv("AGENTICCAD_CLAUDE", str(fake))

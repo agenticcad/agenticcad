@@ -692,7 +692,8 @@
   #cam-tools:empty { display:none; }
   .ct-h { font-size:10.5px; letter-spacing:.06em; text-transform:uppercase; color:var(--mut2); font-weight:600; margin-bottom:6px; }
   .ct-tool { display:flex; gap:8px; align-items:center; padding:2px 0; font-size:12px; } .ct-tool div { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-  .ct-tool small { color:var(--muted); font-size:11px; margin-left:6px; }
+  .ct-tool small { color:var(--muted); font-size:11px; margin-left:6px; white-space:nowrap; }
+  .ct-seq { font-size:11.5px; color:var(--muted); margin:-2px 0 4px; } .ct-seq.on { color:var(--text); }
   /* inspector */
   #cam-insp { overflow:auto; flex:1; }
   .ci-head { padding:14px 16px 12px; border-bottom:1px solid var(--line); }
@@ -2080,18 +2081,27 @@ function renderCamTab() {
   tree.appendChild(as);
   renderCamTools(); renderCamInsp(); renderTimeline();
 }
-function renderCamTools() {                       // the tools the selected setup uses, in order, with what the library knows
+function renderCamTools() {                       // every tool the program uses: the order per setup (the selected one first in weight), one card per tool
   const el = document.getElementById('cam-tools'), si = camSelSetup();
-  const seq = [], seen = new Map();
-  for (const op of program.ops.filter(o => (o.setup || 0) === si && o.tool)) {
+  const setups = program.setups || [{}];
+  const seqs = setups.map(() => []), seen = new Map(), where = new Map();
+  for (const op of program.ops.filter(o => o.tool)) {
+    const k = o_setup(op), seq = seqs[k] || (seqs[k] = []);
     if (!seq.length || seq[seq.length - 1] !== op.tool.number) seq.push(op.tool.number);
     if (!seen.has(op.tool.number)) seen.set(op.tool.number, op);
+    (where.get(op.tool.number) || where.set(op.tool.number, new Set()).get(op.tool.number)).add(k);
   }
-  el.innerHTML = `<div class="ct-h">Tools · ${seq.map(n => 'T' + n).join(' → ')}</div>` + [...seen.values()].map(op => {
+  const many = seqs.filter(q => q.length).length > 1;
+  const head = many
+    ? `<div class="ct-h">Tools</div>` + seqs.map((q, k) => q.length ? `<div class="ct-seq${k === si ? ' on' : ''}">Setup ${k + 1}${setups[k] && setups[k].name ? ' · ' + esc(setups[k].name) : ''}: ${q.map(n => 'T' + n).join(' → ')}</div>` : '').join('')
+    : `<div class="ct-h">Tools · ${(seqs.find(q => q.length) || []).map(n => 'T' + n).join(' → ')}</div>`;
+  el.innerHTML = head + [...seen.values()].map(op => {
     const t = op.tool, lib = (library.tools || []).find(x => x.number === t.number && x.name === t.name), bad = t.shape && t.shape.error;
-    return `<div class="ct-tool" title="${esc(t.type)} Ø${t.diameter}${t.flutes ? ' · ' + t.flutes + ' flutes' : ''}${t.shank_diameter ? ' · shank Ø' + t.shank_diameter : ''} · ${lib ? 'in the tool library' : 'defined in cam.py'}${bad ? ' · shape: ' + esc(t.shape.error) : ''}"><span class="ct-thw" data-tz="${t.number}">${t.photo ? `<img class="ct-th" src="${toolPhotoUrl(t)}" alt="">` : toolSil(t.shape, 8, 20)}</span><div><b>T${t.number}</b> ${esc(t.name)}</div><small>${bad ? '<span class="wa">shape?</span>' : lib ? '✓' : 'cam.py'}</small></div>`;
+    const ss = many ? ' · ' + [...where.get(t.number)].sort().map(k => 'S' + (k + 1)).join(' ') : '';
+    return `<div class="ct-tool" title="${esc(t.type)} Ø${t.diameter}${t.flutes ? ' · ' + t.flutes + ' flutes' : ''}${t.shank_diameter ? ' · shank Ø' + t.shank_diameter : ''} · ${lib ? 'in the tool library' : 'defined in cam.py'}${bad ? ' · shape: ' + esc(t.shape.error) : ''}"><span class="ct-thw" data-tz="${t.number}">${t.photo ? `<img class="ct-th" src="${toolPhotoUrl(t)}" alt="">` : toolSil(t.shape, 8, 20)}</span><div><b>T${t.number}</b> ${esc(t.name)}</div><small>${bad ? '<span class="wa">shape?</span>' : lib ? '✓' : 'cam.py'}${ss}</small></div>`;
   }).join('');
 }
+function o_setup(op) { return op.setup || 0; }
 function camSelSetup() { return camSel.kind === 'setup' || camSel.kind === 'add' ? camSel.si : camSel.kind === 'op' ? ((program.ops.find(o => o.key === camSel.key) || {}).setup || 0) : 0; }
 function renderCamInsp() {
   const el = document.getElementById('cam-insp'); if (!el) return;

@@ -53,18 +53,27 @@ function hint(t){document.getElementById('hint').textContent=t}
 </script></body></html>"""
 
 
-def _seed_from_main(main: Path, data: Path) -> None:
-    """First start of the tabs edition: copy the main app's libraries and saved designs (read only: the main app's
-    folder is never written). The phone link, its certificates and the open working copy are not copied."""
+def _import_tabs_test_build(tabs_dir: Path, data: Path) -> list[str]:
+    """Once, on the first start after the tabs test build (AgenticCAD Tabs, 1.4.0a1-a2) became the main app: copy the
+    saved designs (and the STEP / image files they import) that exist only in the test build's folder into this one.
+    Nothing is overwritten and the test build's folder is only read."""
     import shutil
-    if not main.exists():
-        return
-    for name in ("tools.json", "settings.json", "machine.json", "model.py", "cam.py", "state.json"):
-        if (main / name).is_file():
-            shutil.copy2(main / name, data / name)
-    for name in ("designs", "imports", "tool_photos", "machines", "fixtures", "library", "extensions", "kit"):
-        if (main / name).is_dir():
-            shutil.copytree(main / name, data / name, dirs_exist_ok=True)
+    mark = data / ".imported-tabs-test-build"
+    if mark.exists() or not tabs_dir.is_dir():
+        return []
+    copied = []
+    for sub in ("designs", "imports"):
+        src = tabs_dir / sub
+        if not src.is_dir():
+            continue
+        for f in sorted(src.rglob("*")):
+            dst = data / sub / f.relative_to(src)
+            if f.is_file() and not dst.exists():
+                dst.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(f, dst)
+                copied.append(f"{sub}/{f.relative_to(src)}")
+    mark.write_text("\n".join(copied) + "\n")
+    return copied
 
 
 def main() -> None:
@@ -73,19 +82,15 @@ def main() -> None:
     os.chdir(root)
 
     import platformdirs
-    tabs = os.environ.get("AGENTICCAD_EDITION") == "tabs"     # the side-by-side test build: several designs in tabs
-    app_name = "AgenticCAD Tabs" if tabs else "AgenticCAD"
+    app_name = "AgenticCAD"
     data = Path(os.environ.get("AGENTICCAD_WORKSPACE") or platformdirs.user_data_dir(app_name, "AgenticCAD"))
-    fresh = not data.exists() or not any(data.iterdir())
     data.mkdir(parents=True, exist_ok=True)
-    if tabs and fresh and not os.environ.get("AGENTICCAD_WORKSPACE"):
-        _seed_from_main(Path(platformdirs.user_data_dir("AgenticCAD", "AgenticCAD")), data)
-    if tabs:
-        os.environ.setdefault("AGENTICCAD_PHONE_PORT", "8890")   # the phone page of the main app keeps 8790
+    if not os.environ.get("AGENTICCAD_WORKSPACE"):
+        _import_tabs_test_build(Path(platformdirs.user_data_dir("AgenticCAD Tabs", "AgenticCAD")), data)
     os.environ["AGENTICCAD_WORKSPACE"] = str(data)
     os.environ.setdefault("AGENTICCAD_PACKAGED", "1")
     os.environ.setdefault("MPLBACKEND", "Agg")
-    port = _free_port(int(os.environ.get("PORT") or (8865 if tabs else 8765)))
+    port = _free_port(int(os.environ.get("PORT") or 8765))
     os.environ["PORT"] = str(port)
     base = f"http://127.0.0.1:{port}"
     state: dict = {"srv": None, "url": None}
@@ -109,7 +114,7 @@ def main() -> None:
                 break
             except Exception:
                 time.sleep(0.05)
-        state["url"] = base + (("/tabs" if tabs else "/") if cli else "/setup")
+        state["url"] = base + ("/tabs" if cli else "/setup")
         if window is not None:
             say("Opening the workspace")
             window.load_url(state["url"])

@@ -82,7 +82,7 @@
   document.getElementById('savekey').onclick = () => { const k = document.getElementById('key').value.trim(); if (k) setKey(k); };
   document.getElementById('clearkey').onclick = () => setKey('');
   document.getElementById('check').onclick = () => check(true);
-  go.onclick = () => location.href = '/';
+  go.onclick = () => location.href = '/tabs';
   check(false); setInterval(() => check(false), 5000);
 </script>
 </body></html>

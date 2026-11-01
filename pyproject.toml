@@ -6,7 +6,7 @@
 # PEP 621/639 metadata: Briefcase's Windows installer reads the licence file list from here.
 [project]
 name = "agenticcad"
-version = "1.4.0a2"
+version = "1.4.0"
 description = "Agent-native CAD/CAM: describe it, point at it, export STEP, STL and G-code"
 license = "PolyForm-Noncommercial-1.0.0"
 license-files = ["packaging/INSTALLER-TERMS.txt", "LICENSE"]   # Windows MSI licence page: Briefcase merges these into LICENSE.rtf
@@ -15,7 +15,7 @@ requires-python = ">=3.12"
 [tool.briefcase]
 project_name = "AgenticCAD"
 bundle = "au.com.prodevelop"
-version = "1.4.0a2"
+version = "1.4.0"
 url = "https://agenticcad.github.io/agenticcad/"
 author = "Mike Orzel"
 author_email = "agenticcad@prodevelop.com.au"
@@ -75,59 +75,5 @@ requires = ["pythonnet>=3.0", "pywin32"]
 
 # ---- the side-by-side test build (branch multi-design): several designs in tabs. Its own bundle id, data folder
 # and ports, so it installs next to AgenticCAD without touching it.
-[tool.briefcase.app.agenticcad-tabs]
-formal_name = "AgenticCAD Tabs"
-description = "AgenticCAD test build: several designs open in tabs"
-long_description = """AgenticCAD is a CAD/CAM workspace with a Claude agent inside it. Describe a part and the agent
-writes it as build123d code; the exact OCCT kernel builds it and the viewer shows it live. Point at faces to steer
-it, tweak by hand with a Fusion-style ribbon, then export STEP/STL, shop drawings or GRBL G-code.
-
-Requires Claude Code (installed and signed in separately). Free for non-commercial use.
-"""
-icon = "src/agenticcad/resources/agenticcad"
-sources = [
-    "src/agenticcad_tabs",
-    "src/agenticcad",
-    "server.py", "agent.py", "cad_kernel.py", "cam_kernel.py", "cam_rotary.py", "cam_sim.py", "cam_data.py", "drawing.py", "features.py", "analysis.py", "motion.py", "sketch_solver.py", "extensions.py", "ext_builtin", "machine_models.py", "machine_script.py", "machine_link.py", "phone_push.py", "tool_shape.py", "machine_scripts", "machine_data", "fixture_lib.py", "fixture_scripts",
-    "gears.py", "library.py", "script_edit.py", "slicer.py", "threads.py", "units.py", "version.py", "designkit",
-    "static", "CHANGELOG.md",
-]
-requires = [
-    "bd_warehouse==0.3.0",
-    "build123d==0.11.1",
-    "claude-agent-sdk==0.2.152",
-    "cryptography==50.0.1",
-    "certifi==2026.7.22",
-    "fastapi==0.141.1",
-    "httpx2==2.12.0",
-    "numpy==2.5.2",
-    "pydantic==2.13.5",
-    "shapely==2.1.2",
-    "uvicorn==0.52.4",
-    "websockets==17.1",
-    "platformdirs==4.11.12",
-    "pywebview==6.2.1",
-    # pure-python dependency of pywebview published only as an sdist; Briefcase installs wheels only
-    "./wheels/proxy_tools-0.1.0-py3-none-any.whl",
-]
-# The Claude Agent SDK wheel ships a 200 MB Claude Code binary. We do not redistribute it: the desktop app
-# uses the user's own Claude Code install (found on PATH / in the official install locations).
-cleanup_paths = [
-    "**/claude_agent_sdk/_bundled",
-    "**/__pycache__",
-]
-
-[tool.briefcase.app.agenticcad-tabs.macOS]
-# PKG installer (not DMG; CI passes `-p pkg`) so macOS shows the licence with Agree / Disagree; our LICENSE and welcome
-# page overlay the template
-installer_resources = "packaging/macos-installer"
-universal_build = false
-min_os_version = "14.0"   # numpy/scipy arm64 wheels are macosx_14_0
-requires = ["pyobjc-core", "pyobjc-framework-Cocoa", "pyobjc-framework-WebKit", "pyobjc-framework-Security"]
-
-[tool.briefcase.app.agenticcad-tabs.windows]
-console_app = false
-requires = ["pythonnet>=3.0", "pywin32"]
-
 [tool.briefcase.app.agenticcad.linux]
 supported = false

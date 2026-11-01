@@ -412,6 +412,8 @@ def _gcode_lines(p) -> int:
     of every tab that connects asks)."""
     if p is None:
         return 0
+    if getattr(p, "gcode_lines", None) is not None and not _gcode_n.get(id(p)):
+        _gcode_n[id(p)] = (p, p.gcode_lines)              # counted when it was built
     hit = _gcode_n.get(id(p))
     if hit is None or hit[0] is not p:
         if len(_gcode_n) > 64:

@@ -144,7 +144,11 @@ class Model:
         """All bodies as one compound (exact; solids stay separate)."""
         if len(self.bodies) == 1:
             return self.bodies[0].shape
-        return Compound(children=[b.shape for b in self.bodies])
+        key = tuple(id(b.shape) for b in self.bodies)        # one compound per set of bodies: the CAM caches its views
+        hit = self.__dict__.get("_compound")                 # and sections by shape, so `part` keeps its identity
+        if hit is None or hit[0] != key:
+            hit = self.__dict__["_compound"] = (key, Compound(children=[b.shape for b in self.bodies]))
+        return hit[1]
 
     def get_face(self, fid: int) -> Face:
         """The exact B-rep Face for a global face id (as shown in the viewer / inspect_model)."""
@@ -389,6 +393,23 @@ def design_kit(workspace: Path | None):
 import threading as _threading
 # One geometry build at a time across every open design: the OCCT kernel and the module-level bindings below
 # (WORKSPACE, LIBRARY) are not safe for two scripts at once. Re-entrant: a build may build (from_library, imports).
+def common(a: Shape, b: Shape) -> Compound:
+    """a ∩ b without touching a or b. OCCT's booleans may otherwise raise the tolerances of their inputs in place, so a
+    body that has been intersected (sectioned, checked for interference) can come out different the next time: a slice
+    of the boat-latch lift ring returned its 253 mm2 cross-section once and nothing after that."""
+    from OCP.BRepAlgoAPI import BRepAlgoAPI_Common
+    from OCP.TopTools import TopTools_ListOfShape
+    op = BRepAlgoAPI_Common()
+    args, tools = TopTools_ListOfShape(), TopTools_ListOfShape()
+    args.Append(a.wrapped); tools.Append(b.wrapped)
+    op.SetArguments(args); op.SetTools(tools)
+    op.SetNonDestructive(True)
+    op.Build()
+    if not op.IsDone():
+        raise CadError("intersection failed")
+    return Compound(op.Shape())
+
+
 BUILD_LOCK = _threading.RLock()
 
 
@@ -1047,9 +1068,7 @@ def clearance(model: Model, a: str | int, b: str | int) -> dict[str, Any]:
     res = {"a": ba.path, "b": bb_.path, "min_distance": round(d, 4)}
     if d < 1e-6:
         try:
-            inter = ba.shape.intersect(bb_.shape)
-            items = inter if isinstance(inter, list) else [inter]
-            vol = sum(float(getattr(i, "volume", 0.0)) for i in items)
+            vol = sum(float(x.volume) for x in common(ba.shape, bb_.shape).solids())
             res["interference_volume_mm3"] = round(vol, 3)
             res["status"] = "INTERFERING" if vol > 1e-6 else "touching"
         except Exception:

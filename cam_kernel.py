@@ -30,6 +30,46 @@ class CamError(Exception):
     pass
 
 
+class BuildStopped(CamError):
+    """The build was stopped (the assistant's Stop, or a newer build of the same design)."""
+
+
+import contextvars
+from collections import OrderedDict
+
+# set by the app around a CAM build (asyncio.to_thread carries it into the worker thread); long loops call stop_point()
+STOP: contextvars.ContextVar = contextvars.ContextVar("cam_stop", default=None)
+
+
+def stop_point() -> None:
+    ev = STOP.get()
+    if ev is not None and ev.is_set():
+        raise BuildStopped("CAM build stopped")
+
+
+# Sections are the slow part of most CAM scripts (an OCCT boolean each, 0.3-1 s on a few hundred faces) and the
+# assistant rebuilds the same script against the same model many times: results are kept per (shape, z, tol). The
+# shape is held in the entry, so its hash (TShape + location) cannot be reused by another shape while cached.
+_SECTION_CACHE: OrderedDict = OrderedDict()
+_VIEW_CACHE: OrderedDict = OrderedDict()
+
+
+def _cached(cache: OrderedDict, key, keep, make, limit: int):
+    hit = cache.get(key)
+    if hit is not None:
+        cache.move_to_end(key)
+        return hit[1]
+    v = make()
+    cache[key] = (keep, v)
+    while len(cache) > limit:
+        cache.popitem(last=False)
+    return v
+
+
+def clear_caches() -> None:
+    _SECTION_CACHE.clear(); _VIEW_CACHE.clear()
+
+
 # =============================================================================
 # Library data: tools, machines
 # =============================================================================
@@ -594,12 +634,16 @@ class Setup:
         return P @ M[:3, :3].T + M[:3, 3]
 
     def view(self, shape, a: float | None = None):
-        """The shape as the machine sees it in this setup (setup frame), for section/holes/stock_minus/parallel3d."""
+        """The shape as the machine sees it in this setup (setup frame), for section/holes/stock_minus/parallel3d.
+        The same shape in the same frame gives the same view object, so its sections are reused across builds."""
         if self.rotary:
             y0, z0 = self.axis
-            return b3d.Rot(self.a if a is None else a, 0, 0) * (b3d.Pos(0, -y0, -z0) * shape)
+            ang = self.a if a is None else a
+            return _cached(_VIEW_CACHE, (hash(shape), "a", float(y0), float(z0), float(ang)), shape,
+                           lambda: b3d.Rot(ang, 0, 0) * (b3d.Pos(0, -y0, -z0) * shape), 64)
         rx, ry, rz = self._rot
-        return b3d.Rot(0, 0, rz) * (b3d.Rot(0, ry, 0) * (b3d.Rot(rx, 0, 0) * shape))
+        return _cached(_VIEW_CACHE, (hash(shape), "r", float(rx), float(ry), float(rz)), shape,
+                       lambda: b3d.Rot(0, 0, rz) * (b3d.Rot(0, ry, 0) * (b3d.Rot(rx, 0, 0) * shape)), 64)
 
     def origin_point(self) -> tuple[float, float, float]:
         if isinstance(self.origin, str):
@@ -800,11 +844,19 @@ def face_polygon(face: Face, tol: float = 0.02) -> Polygon:
 
 def section(shape: Shape, z: float, tol: float = 0.02) -> MultiPolygon:
     """Cross-section of the shape at height z (XY polygons with holes). Empty if nothing there."""
-    try:
-        sk = b3d.section(shape, section_by=Plane.XY.offset(z))
+    stop_point()
+    return _cached(_SECTION_CACHE, (hash(shape), round(float(z), 9), float(tol)), shape,
+                   lambda: _section(shape, z, tol), 4000)
+
+
+def _section(shape: Shape, z: float, tol: float) -> MultiPolygon:
+    try:                                    # the shape ∩ a plane face covering it; non-destructive (see ck.common)
+        bb = shape.bounding_box(optimal=False)
+        size = 2 * (max(abs(v) for v in list(bb.min) + list(bb.max)) + bb.diagonal)
+        sk = ck.common(shape, Face.make_rect(size, size, Plane.XY.offset(z)))
     except Exception as e:  # noqa: BLE001
         raise CamError(f"section at z={z} failed: {e}")
-    polys = [face_polygon(f, tol) for f in sk.faces()] if sk is not None else []
+    polys = [face_polygon(f, tol) for f in sk.faces()]
     u = unary_union([p for p in polys if not p.is_empty])
     return _as_multi(u)
 
@@ -2475,6 +2527,8 @@ class Program:
     together. A change of setup is an operator step (flip or re-clamp the part, re-zero) unless both setups are on
     the 4th axis with the same mounting, in which case the post just turns A to the next index angle."""
 
+    gcode_lines: int | None = None                # set by the app when it builds the program
+
     def __init__(self, setup: Setup, ops: Iterable[Op] = (), name: str = "program"):
         self.setup = setup
         self.ops: list[Op] = list(ops)
@@ -2855,28 +2909,49 @@ def _merge_collinear(pts, tol):
 
 
 def _merge_chord(pts, tol, dims):
-    if len(pts) < 3:
+    """Greedy chords: from each kept point, the farthest point whose chord has every point in between within `tol`
+    of it and between its ends. The farthest end is found by galloping (2, 4, 8 ... points ahead) then bisecting, each
+    candidate checked against all the points it skips at once, so a long straight run of tiny segments costs
+    O(n log n) rather than re-checking the whole run for every point added (which took hours on rest passes)."""
+    n = len(pts)
+    if n < 3:
         return list(pts)
+    P = np.asarray([p[:dims] for p in pts], dtype=float)
+    tol2 = tol * tol
+
+    def ok(a, c):
+        v = P[c] - P[a]
+        ln = math.sqrt(float(v @ v))
+        if ln < 1e-12:
+            return False
+        if c - a < 2:
+            return True
+        W = P[a + 1:c] - P[a]
+        along = W @ v / ln
+        if along.min() < -1e-9 or along.max() > ln + 1e-9:
+            return False
+        return bool(((W * W).sum(axis=1) - along * along).max() <= tol2)
+
     out = [pts[0]]
     a = 0
-    i = 2
-    while i < len(pts):
-        A, C = pts[a], pts[i]
-        v = [C[d] - A[d] for d in range(dims)]
-        ln = math.sqrt(sum(x * x for x in v))
-        ok = ln >= 1e-12
-        if ok:
-            for b in pts[a + 1:i]:
-                w = [b[d] - A[d] for d in range(dims)]
-                along = sum(x * y for x, y in zip(w, v)) / ln
-                perp = math.sqrt(max(sum(x * x for x in w) - along * along, 0.0))
-                if perp > tol or along < -1e-9 or along > ln + 1e-9:
-                    ok = False; break
-        if not ok:
-            a = i - 1
-            out.append(pts[a])
-        i += 1
-    out.append(pts[-1])
+    while a < n - 1:
+        c, step, bad = a + 1, 1, None
+        while c < n - 1:
+            t = min(c + step, n - 1)
+            if ok(a, t):
+                c, step = t, step * 2
+            else:
+                bad = t
+                break
+        if bad is not None:
+            while bad - c > 1:
+                mid = (c + bad) // 2
+                if ok(a, mid):
+                    c = mid
+                else:
+                    bad = mid
+        out.append(pts[c])
+        a = c
     return out
 
 
@@ -2911,6 +2986,7 @@ def _with_arcs(moves, tol, max_sweep: float = math.pi, helical: bool = True):
         if m[0] == RAPID or i == 0:
             yield tuple(m); i += 1; continue
         # candidate run: feed moves at one feed rate, starting from the previous position
+        stop_point()
         f = m[4]
         j = i
         while j < n and moves[j][0] != RAPID and moves[j][4] == f:
@@ -3760,6 +3836,7 @@ def _overridable(fn, kind: str):
 
     @functools.wraps(fn)
     def wrapper(*args, **kw):
+        stop_point()
         if _OV["depth"]:                                   # an op built inside another (rotary_wrap -> pocket): pass through
             return fn(*args, **kw)
         b = sig.bind(*args, **kw)
