@@ -1277,7 +1277,7 @@ async def machine_post(body: MachineBody):
                                                    **{k: v for k, v in info.items() if k != "cam_code"}}}
         elif a == "run_ops":                              # upload the chosen operations to the machine and play them
             prep, info, label = await asyncio.to_thread(_program_for_ops, body)   # big programs: keep the loop (and status) running
-            info["owner"] = {"doc": _doc_var.get() or _default_doc(), "name": agent.design_name or "untitled"}
+            info["owner"] = {"doc": _doc_var.get() or _default_doc(), "name": agent.design_name}
             res = await machine.run_program(label, prep, info, rotary=info["rotary"], ack=bool(body.ack))
         elif a in ("check_file", "run_file"):              # any .nc file, through the same checks as CAM operations
             if not body.text:

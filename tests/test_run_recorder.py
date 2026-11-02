@@ -56,3 +56,11 @@ def test_a_broken_recorder_never_stops_the_job(tmp_path):
     mc.recorder = Boom()
     mc._rec("sample", None, 0.0, {})
     assert mc.recorder is None and "run recording stopped: OSError: disk full" in mc.events[-1]
+
+
+def test_an_unsaved_design_is_filed_under_its_program(tmp_path):
+    rec = run_recorder.RunRecorder(tmp_path, {"program": "latch sheet Z1", "owner": {"doc": "d1", "name": None}},
+                                   {"name": "latch.nc", "ops": []}, "G0 X0\n")
+    rec.close("done")
+    runs = run_recorder.list_runs(tmp_path, "latch sheet Z1")
+    assert len(runs) == 1 and runs[0]["design"] == "latch sheet Z1" and runs[0]["design_saved"] is False

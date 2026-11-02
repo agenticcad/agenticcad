@@ -5,6 +5,16 @@ patch bumps fix things, a major bump changes something scripts or workspaces rel
 
 ## [Unreleased]
 
+## [1.5.1] — 2026-11-02
+
+### Added
+- **An installer for Intel Macs** (`AgenticCAD-1.5.1-macOS-x64.pkg`, macOS 14 or later) next to the Apple silicon one.
+  Intel Macs get cryptography 48.0.1, the last release with Intel Mac wheels; everything else is the same.
+
+### Fixed
+- A run of an unsaved design was recorded under "untitled" with every other unsaved design's runs; it is now filed
+  under its program's name (and the record says the design wasn't saved).
+
 ## [1.5.0] — 2026-11-02
 
 ### Added

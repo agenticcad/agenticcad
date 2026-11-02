@@ -1180,7 +1180,7 @@ class CadAgent:
             names = ", ".join(o["name"] for o in prep["ops"])
             return (f"Run on the machine: {names} (setup {info['setup']}, {info['wcs']}) · about {info['time_min']} min"
                     + (f" · AIR CUT +{prep['air_cut']:g} mm" if prep["air_cut"] else "") + (" · 4TH AXIS" if rot else "") + ". " + "; ".join(chk["notes"])
-                    + ". The machine runs it on its own once started."), lambda: mc.run_program(label, prep, {**info, "owner": {"doc": self.doc_id, "name": self.design_name or "untitled"}}, rotary=rot, ack=ack)
+                    + ". The machine runs it on its own once started."), lambda: mc.run_program(label, prep, {**info, "owner": {"doc": self.doc_id, "name": self.design_name}}, rotary=rot, ack=ack)
         if action == "switch":
             what, on, pw = str(f("what", "")), bool(f("on")), f("power")
             if what not in mc.profile.switches:

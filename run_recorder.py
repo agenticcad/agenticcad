@@ -34,15 +34,15 @@ class RunRecorder:
     def __init__(self, root: Path, info: dict, job: dict, text: str, cam_code: str | None = None, extra: dict | None = None):
         owner = info.get("owner") or {}
         self.t0 = time.time()
-        design = owner.get("name") or info.get("program") or "untitled"
+        design = owner.get("name") or info.get("program") or "untitled"     # an unsaved design is filed under its program
         self.dir = Path(root) / _slug(design) / (time.strftime("%Y%m%d-%H%M%S") + "_" + _slug(info.get("program") or job.get("name", "program")))
         self.dir.mkdir(parents=True, exist_ok=True)
         (self.dir / "program.nc").write_text(text)
         if cam_code:
             (self.dir / "cam.py").write_text(cam_code)
         self.meta: dict[str, Any] = {
-            "design": design, "doc": owner.get("doc"), "program": info.get("program"), "setup": info.get("setup"),
-            "wcs": info.get("wcs"), "file": job.get("name"), "started": time.strftime("%Y-%m-%dT%H:%M:%S"), "t0": self.t0,
+            "design": design, "design_saved": bool(owner.get("name")), "doc": owner.get("doc"), "program": info.get("program"),
+            "setup": info.get("setup"), "wcs": info.get("wcs"), "file": job.get("name"), "started": time.strftime("%Y-%m-%dT%H:%M:%S"), "t0": self.t0,
             "lines": job.get("lines"), "air_cut": job.get("air_cut"), "rotary": job.get("rotary"), "tools": job.get("tools"),
             "est_min": info.get("time_min"), "notes": job.get("notes"), "outcome": "running",
             "ops": [{k: o.get(k) for k in ("name", "kind", "key", "start", "end", "tool", "time")} for o in job.get("ops", [])],
