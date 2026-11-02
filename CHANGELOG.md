@@ -5,6 +5,10 @@ patch bumps fix things, a major bump changes something scripts or workspaces rel
 
 ## [Unreleased]
 
+### Security
+- certifi 2026.10.23 (from 2026.7.22): drops the emSign root CAs whose intermediate keys were compromised
+  (GHSA-6q48-6c7w-9gw2). It is the trust store for the app's HTTPS connections.
+
 ## [1.5.1] — 2026-11-02
 
 ### Added
