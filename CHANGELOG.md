@@ -5,6 +5,29 @@ patch bumps fix things, a major bump changes something scripts or workspaces rel
 
 ## [Unreleased]
 
+## [1.5.0] — 2026-11-02
+
+### Added
+- **Probe ops: the 3D probe sets or checks the work origin from inside the program** (Makera Z1 / Carvera post).
+  `probe_surface` sets Z from a flat face, `probe_hole` sets X/Y at a hole's centre (Makera's own pocket-centre
+  routine, M480.9), `probe_edge` sets X or Y from a side face. With `check=tol` they only verify the feature, and the
+  machine halts (probe failed) if it is out by more than `tol`. The post changes to the probe (T9999 by default,
+  `Machine.probe`) and never starts the spindle with it in. The usual use is at the start of a setup after a flip:
+  zero roughly by hand, then the program sets the origin from a register hole and checks the diagonal one. The
+  controller has no arithmetic, so the program sets from one feature and checks the others. It cannot average two
+  holes or correct a rotated part, but a check catches one. The simulation checks every probe move for air: a hole
+  not cut yet, or a spot already machined away, shows as a collision. The Run panel still refuses G38, G10 and M480
+  in programs, except for the post's own PROBE blocks, and an air cut leaves the probes out.
+- **Every program sent to the machine is recorded with its design**, for planned-vs-actual analysis later. Under
+  `runs/<design>/<date-time>_<program>/` the app keeps:
+  - the exact uploaded G-code and the CAM script it came from;
+  - the machine status as the app saw it, about 4 times a second: line, operation, position, feed (actual,
+    requested, override), spindle (rpm, target, override, temperature, power-supply temperature) and tool;
+  - the run's events: tool changes, pauses, alarms, probe touches;
+  - a summary with each operation's estimated and actual time.
+
+  The files stay local, and only the last 40 runs of each design are kept. A recorder problem never stops a job.
+
 ## [1.4.1] — 2026-11-02
 
 ### Fixed

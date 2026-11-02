@@ -494,11 +494,22 @@ def next_tool(ops: list[dict], op_idx: int | None, fitted: int | None, tools: li
     return want, o
 
 
-def prepare_program(gcode: str, op_names: list[str], air_cut: float = 0.0) -> dict:
+# the only probing a program may carry: what the CAM post writes for its probe ops, between "; PROBE BEGIN <op>" and
+# "; PROBE END" with the 3D probe fitted (cam_kernel._probe_gcode). Single-axis G38.2 / G38.3 touches, G10 L20 P0 (the
+# current point gets these work coordinates), Makera's pocket-centre routine M480.9, and absolute G0 / G1 moves.
+PROBE_LINE = re.compile(r"^(G38\.[23] [XYZ]-?\d*\.?\d+ F\d*\.?\d+"
+                        r"|G10 L20 P0(?: X-?\d*\.?\d+)?(?: Y-?\d*\.?\d+)?(?: Z-?\d*\.?\d+)?"
+                        r"|M480\.9 X\d*\.?\d+ Y\d*\.?\d+ Z\d*\.?\d+ D\d*\.?\d+"
+                        r"|G[01](?: [XYZ]-?\d*\.?\d+)+(?: F\d*\.?\d+)?)$")
+
+
+def prepare_program(gcode: str, op_names: list[str], air_cut: float = 0.0, probe_tool: int = 9999) -> dict:
     """G-code from the CAM post -> what the Z1 plays: comments and blank lines removed (the machine stores lines in 64-byte
     slots), optionally lifted `air_cut` mm (every Z except machine-coordinate G53 moves), each operation's line range
     (from the post's "; <name> [kind] ..." header comments, in order) and the work-coordinate extents of the moves.
-    Raises Refused for what the Z1 must not get: lines too long, relative moves, homing/probing, blocked commands."""
+    Raises Refused for what the Z1 must not get: lines too long, relative moves, homing/probing, blocked commands.
+    Probe ops: the post's PROBE blocks (PROBE_LINE only, with T`probe_tool` fitted) are the one place G38 / G10 / M480.9
+    pass; an air cut leaves them out (a probe touches nothing in the air, and must not set the origin there)."""
     out: list[str] = []
     ops: list[dict] = []
     k = 0
@@ -506,28 +517,61 @@ def prepare_program(gcode: str, op_names: list[str], air_cut: float = 0.0) -> di
     ext = {"x": [1e9, -1e9], "y": [1e9, -1e9], "z": [1e9, -1e9], "a": [1e9, -1e9]}
     tools: list[int] = []
     uses_a = False
+    probes: list[dict] = []
+    in_probe: dict | None = None
     for raw in gcode.splitlines():
         s_ = raw.strip()
         if s_.startswith(";"):
-            if k < len(op_names) and s_[1:].strip().startswith(op_names[k] + " ["):
+            c_ = s_[1:].strip()
+            if c_.startswith("PROBE BEGIN"):
+                if in_probe is not None:
+                    raise Refused("a PROBE block inside another one")
+                if not tools or tools[-1] != probe_tool:
+                    raise Refused(f"a PROBE block without the 3D probe (T{probe_tool}) fitted by the program")
+                in_probe = {"op": c_[len("PROBE BEGIN"):].strip(), "lines": 0, "sets": [], "skipped": bool(air_cut)}
+                probes.append(in_probe)
+            elif c_.startswith("PROBE END"):
+                if in_probe is None:
+                    raise Refused("PROBE END without PROBE BEGIN")
+                in_probe = None
+            elif k < len(op_names) and c_.startswith(op_names[k] + " ["):
                 ops.append({"name": op_names[k], "start": len(out) + 1, "tool": None})
                 k += 1
             continue
         s_ = re.sub(r"\(.*?\)", "", s_.split(";")[0]).strip().upper()
         if not s_:
             continue
+        if in_probe is not None:
+            if not PROBE_LINE.match(s_):
+                raise Refused(f"the PROBE block of {in_probe['op']!r} contains {s_!r}: only the post's probe moves run there")
+            if s_.startswith(("G10", "M480")):
+                got = [w_.lower() for w_ in "XYZ" if f" {w_}" in s_] if s_.startswith("G10") else ["x", "y"]
+                in_probe["sets"] = list(dict.fromkeys(in_probe["sets"] + got))
+            in_probe["lines"] += 1
+            if air_cut:
+                continue
+            if s_.startswith(("G0 ", "G1 ")):                 # the probe's own moves count in the extents
+                for w_, v in _WORD.findall(s_[3:]):
+                    if w_ in "XYZ":
+                        e_ = ext[w_.lower()]
+                        e_[0] = min(e_[0], float(v)); e_[1] = max(e_[1], float(v))
+            out.append(s_)
+            continue
         if BLOCKED.search(s_):
             raise Refused(f"the program contains {s_!r}, which is never sent to a Z1")
         if re.search(r"\bG91\b(?!\.)", s_):
             raise Refused("the program uses relative moves (G91); only absolute programs are run")
-        if re.search(r"\bG(38(\.\d)?|92|10)\b|\$H|\bM49[0-9]", s_):           # G28 is the Z1's park (clearance) move: fine
-            raise Refused(f"the program contains {s_!r}: homing, probing and offset changes stay with the Machine workspace")
+        if re.search(r"\bG(38(\.\d)?|92|10)\b|\$H|\bM49[0-9]|\bM48[0-9]", s_):    # G28 is the Z1's park (clearance) move: fine
+            raise Refused(f"the program contains {s_!r}: homing, probing and offset changes stay with the Machine workspace"
+                          " (a CAM probe op's PROBE block is the exception)")
         m6 = re.search(r"\bM0?6\b", s_)
         tw = re.search(r"\bT(\d+)", s_)
         if m6 and tw:
             tools.append(int(tw.group(1)))
             if ops and ops[-1]["tool"] is None:
                 ops[-1]["tool"] = int(tw.group(1))
+        if tools and tools[-1] == probe_tool and re.search(r"\bM0?[34]\b", s_):
+            raise Refused(f"the program starts the spindle with the 3D probe (T{probe_tool}) fitted")
         g53 = re.search(r"\bG53\b", s_)
         if air_cut and not g53:
             s_ = re.sub(r"Z(-?\d*\.?\d+)", lambda mm: "Z" + f"{float(mm.group(1)) + air_cut:.3f}".rstrip("0").rstrip("."), s_)
@@ -550,8 +594,11 @@ def prepare_program(gcode: str, op_names: list[str], air_cut: float = 0.0) -> di
             o["tool"] = ops[i - 1]["tool"]
     if k != len(op_names):
         raise Refused(f"found {k} of {len(op_names)} operations in the program (headers missing)")
+    if in_probe is not None:
+        raise Refused(f"the PROBE block of {in_probe['op']!r} never ends")
     return {"text": "\n".join(out) + "\n", "lines": len(out), "ops": ops, "tools": tools,
-            "extents": {w_: v for w_, v in ext.items() if v[0] <= v[1]}, "air_cut": air_cut, "uses_a": uses_a}
+            "extents": {w_: v for w_, v in ext.items() if v[0] <= v[1]}, "air_cut": air_cut, "uses_a": uses_a,
+            "probes": probes}
 
 
 def program_filename(name: str) -> str:
@@ -587,6 +634,8 @@ class MachineControl:
         self._job_task: asyncio.Task | None = None
         self._rt_task: asyncio.Task | None = None
         self.events: list[str] = []
+        self.runs_dir = None                  # where programs are recorded (run_recorder; the server sets it)
+        self.recorder = None                  # the RunRecorder of the job running now
         self._watch: asyncio.Task | None = None
         # the work origin as this session set it: {"xy": {ref, how, t, wco}, "z": {ref, how, t}}; empty = set before
         # this session (or by something the app didn't see), so a setup can't rely on it without zeroing
@@ -704,6 +753,18 @@ class MachineControl:
     def _note(self, text: str) -> None:
         self.events.append(time.strftime("%H:%M:%S ") + text)
         del self.events[:-100]
+        self._rec("event", "note", text)
+
+    def _rec(self, what: str, *args, **kw) -> None:
+        """Call the run recorder; a recorder that fails is dropped, the job carries on."""
+        r = self.recorder
+        if r is None:
+            return
+        try:
+            getattr(r, what)(*args, **kw)
+        except Exception as e:  # noqa: BLE001 - recording never stops a job
+            self.recorder = None
+            self.events.append(time.strftime("%H:%M:%S ") + f"run recording stopped: {type(e).__name__}: {e}")
 
     async def _notify(self, kind: str, **info) -> None:
         if not self.notify:
@@ -1701,6 +1762,19 @@ class MachineControl:
                          + (f"; {changes} more change{'s' if changes != 1 else ''} follow ({' → '.join('T' + str(t) for t in prep['tools'])})" if changes else ""))
         if len(seq) > 1:
             notes.append("stay at the machine for the tool changes with a hand near the stop button")
+        prb = prep.get("probes") or []
+        if prb:
+            pt = self.profile.probe3d_tool
+            if prep.get("air_cut"):
+                notes.append(f"{len(prb)} probe op{'s' if len(prb) != 1 else ''} left out of the air cut (the change to the 3D probe, "
+                             f"T{pt}, still stops the file)")
+            else:
+                sets = list(dict.fromkeys(a_ for q in prb for a_ in q["sets"]))
+                checks = sum(1 for q in prb if not q["sets"])
+                notes.append(f"probes with the 3D probe (T{pt}, spindle off): " + ", ".join(
+                    ([f"sets {'/'.join(sets).upper()} of the work origin"] if sets else []) + ([f"{checks} check{'s' if checks != 1 else ''}"] if checks else []))
+                    + ". A touch that finds nothing, a check out of tolerance, or the probe meeting anything on the way HALTS the "
+                      "machine (probe failed): then Unlock, re-zero by hand and run again")
         wco = [m - w for m, w in zip(st["mpos"], st["wpos"])]
         for ax, i in (("x", 0), ("y", 1)):
             e = prep["extents"].get(ax)
@@ -1742,12 +1816,28 @@ class MachineControl:
         """Upload `prep["text"]` as /sd/gcodes/<name> and play it. `prep` comes from prepare_program(). Tool changes in
         the file (M6 Tn) are the machine's own routine: the job pauses as 'awaiting' with a Fit Tn card at each one."""
         chk = self.check_job(prep, rotary=rotary, ack=ack)
+        info = dict(info or {})
+        cam_code = info.pop("cam_code", None)
         fname = program_filename(name)
         path = "/sd/gcodes/" + fname
         self.last_action = time.time()
         self.job = {"name": fname, "path": path, "stage": "uploading", "upload": 0.0, "lines": prep["lines"],
                     "ops": prep["ops"], "tools": prep["tools"], "air_cut": prep["air_cut"], "rotary": bool(rotary or prep.get("uses_a")), "line": 0, "percent": 0,
                     "seconds": 0, "op": None, "msg": "uploading", "notes": chk["notes"], "started": time.time(), **(info or {})}
+        self.recorder = None
+        if self.runs_dir is not None:
+            try:
+                import run_recorder
+                try:
+                    from version import __version__ as app_version
+                except ImportError:
+                    app_version = None
+                self.recorder = run_recorder.RunRecorder(self.runs_dir, info, self.job, prep["text"], cam_code,
+                                                         {"app_version": app_version, "machine": self.profile.name,
+                                                          "probes": prep.get("probes") or []})
+                self.job["record"] = str(self.recorder.dir)
+            except Exception as e:  # noqa: BLE001 - recording never stops a job
+                self.events.append(time.strftime("%H:%M:%S ") + f"run not recorded: {type(e).__name__}: {e}")
         self._note(f"program {fname}: {prep['lines']} lines, {len(prep['ops'])} operation(s)" + (f", air cut +{prep['air_cut']:g} mm" if prep["air_cut"] else ""))
         self._job_task = asyncio.create_task(self._job_flow(path, prep["text"].encode()))
         return self.payload()
@@ -1783,6 +1873,7 @@ class MachineControl:
                     seen_run, last_progress = True, time.time()
                     j.update(line=int(pr["lines"] or 0), percent=pr.get("percent") or 0, seconds=pr.get("seconds") or 0)
                     j["op"] = next((i for i, o in enumerate(j["ops"]) if o["start"] <= j["line"] <= o["end"]), j.get("op"))
+                self._rec("sample", st, self.link.status_t, j, self.link.log)
                 if s == "Alarm":
                     h = st.get("halt") or {}
                     raise Refused(f"the machine alarmed: {h.get('reason', 'halted')} ({h.get('advice', 'Unlock, then home')})")
@@ -1791,7 +1882,8 @@ class MachineControl:
                     want, o = next_tool(j["ops"], j.get("op"), fitted, j["tools"])
                     j["changing"] = True
                     if j["stage"] != "awaiting" and not j.get("confirmed"):
-                        j.update(stage="awaiting", want_tool=want, msg=f"tool change: fit T{want}, then press the front button (or Confirm): the machine measures it")
+                        what = f"the 3D probe (T{want})" if want == self.profile.probe3d_tool else f"T{want}"
+                        j.update(stage="awaiting", want_tool=want, msg=f"tool change: fit {what}, then press the front button (or Confirm): the machine measures it")
                         await self._push()
                         await self._notify("tool_change", tool=want, what=f"T{want}", msg=j["msg"], nonce=self._new_wait(),
                                            program=j["name"], op=((o or {}).get("name") or (o or {}).get("kind")))
@@ -1824,6 +1916,8 @@ class MachineControl:
             j.update(stage="failed", msg="stopped watching (cancelled)")
         self.confirm_nonce = None
         self._note(f"program {j['name']}: {j['stage']} — {j['msg']}")
+        self._rec("close", j["stage"], j["msg"], j)
+        self.recorder = None
         await self._push()
         await self._notify("program_done" if j["stage"] == "done" else "program_failed", program=j["name"], msg=j["msg"],
                            air_cut=bool(j.get("air_cut")))

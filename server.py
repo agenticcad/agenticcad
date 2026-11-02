@@ -186,6 +186,7 @@ for _i in (_ids or ["d1"]):
     _make_doc(_i)
 agent = _AgentProxy()
 machine = machine_link.MachineControl(bus.emit_all)    # one machine for every design; its events go to every page
+machine.runs_dir = WORKSPACE / "runs"                  # every program sent is recorded there (run_recorder)
 _live = machine_link.makera_live_config()               # this machine's calibrated anchor, if MakeraStudio has fetched it
 if "coordinate.anchor1_x" in _live and "coordinate.anchor1_y" in _live:
     machine.profile.anchor1 = (_live["coordinate.anchor1_x"], _live["coordinate.anchor1_y"])
@@ -1205,6 +1206,13 @@ def _program_for_ops(body: MachineBody) -> tuple[dict, dict, str]:
     return prep, info, label
 
 
+@app.get("/api/runs")
+async def runs_list(design: str | None = None):
+    """Recorded machine runs (run_recorder), newest first."""
+    import run_recorder
+    return {"runs": run_recorder.list_runs(WORKSPACE / "runs", design)}
+
+
 @app.get("/api/machine")
 async def machine_get():
     saved = json.loads(MACHINE_FILE.read_text()) if MACHINE_FILE.exists() else {}
@@ -1265,7 +1273,8 @@ async def machine_post(body: MachineBody):
             chk = machine.check_job(prep, rotary=info["rotary"], ack=bool(body.ack))
             return {**machine.payload(), "check": {"label": machine_link.program_filename(label), "lines": prep["lines"],
                                                    "ops": prep["ops"], "tools": prep["tools"], "extents": prep["extents"],
-                                                   "notes": chk["notes"], "uses_a": prep["uses_a"], **info}}
+                                                   "notes": chk["notes"], "uses_a": prep["uses_a"],
+                                                   **{k: v for k, v in info.items() if k != "cam_code"}}}
         elif a == "run_ops":                              # upload the chosen operations to the machine and play them
             prep, info, label = await asyncio.to_thread(_program_for_ops, body)   # big programs: keep the loop (and status) running
             info["owner"] = {"doc": _doc_var.get() or _default_doc(), "name": agent.design_name or "untitled"}

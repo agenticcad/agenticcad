@@ -328,6 +328,20 @@ Makera Z1 / Carvera Air post (machine.post == "makera"): M6 Tn runs the whole ma
 position, waits for the button, measures the tool length), lines ≤ 63 characters, no canned cycles or coolant,
 feeds on A moves are converted to the firmware's own rule. The Z1 is light (150 W, 1/8" collet): aluminium < 1 mm
 per pass; keep tools ≤ the 3.175 mm collet unless the user has another collet.
+Probing (Makera post only): probe_surface / probe_hole / probe_edge are ops like any other, run with the machine's 3D
+probe (machine.probe: tool 9999, ball Ø 2 by default; the post changes to it and never starts the spindle). Without
+check they SET the work origin from the feature: probe_surface(setup, x, y, z) sets Z (the face is at z, default the
+stock top), probe_hole(setup, x, y, diameter, z_top) sets X/Y at the hole's centre (Makera's own pocket-centre
+routine), probe_edge(setup, toward='+x', wall=x_face, at=y, z=z) sets X from a side face. With check=tol they only
+VERIFY the feature is within tol mm and halt the machine if not. The controller has no arithmetic: a program cannot
+average two holes or turn itself to a measured angle, so set from ONE feature and check others (a diagonal hole, an
+edge) - a check catches a plate that went down rotated or a wrong-size stock. Put them at the START of the setup they
+zero (the hand zero before them only has to be within `search`, 2-3 mm), on faces the earlier setups already made and
+nothing has cut since; a typical flip: probe_surface on an untouched spot of the top, probe_hole on one register hole,
+probe_hole(..., check=0.1) on the diagonal one. The probe drops into holes to `depth` below z_top (default 3 mm): the
+hole must be at least that deep and wider than the ball by 1 mm. simulate_cam checks every probe move for air
+(COLLISIONS "3D probe ... hits stock": a hole that isn't cut yet, a spot that was machined away, a wrong height).
+There is no probe op on other posts or on 4th-axis setups: say so and use Machine ▸ Zero instead.
 Notes: coordinates are setup-frame (= model coordinates for a plain top setup; Z up); the post subtracts the WCS origin.
 Contours get tangential arc lead-in/out by default (lead=radius; lead=0 disables) and start mid-way along the
 longest straight edge. The post fits G2/G3 arcs (machine.arcs, machine.arc_tolerance, machine.arc_format 'ij'|'r', machine.helical_arcs; never while A moves) within what the machine's controller takes (cam.CONTROLLERS by post: Makera = I/J only, 63-character lines; GRBL 80) and merges collinear moves.
@@ -1047,7 +1061,7 @@ class CadAgent:
             o.update(key=src.key, kind=src.kind, color=src.color, time=round(src.time_minutes(st.machine), 2))
         label = f"{prog.name}_op{idx[0] + 1}" + (f"-{idx[-1] + 1}" if len(idx) > 1 else "") + ("_air" if air else "")
         info = {"program": prog.name, "setup": st.name, "wcs": st.wcs, "ops_index": idx,
-                "time_min": round(sum(o.time_minutes(st.machine) for o in chosen), 1)}
+                "time_min": round(sum(o.time_minutes(st.machine) for o in chosen), 1), "cam_code": self.cam_code}
         return prep, info, label
 
     # ------------------------------------------------------------------ the machine, from the chat

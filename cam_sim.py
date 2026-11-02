@@ -268,7 +268,10 @@ def _sim_zmap(program, sel, part, resolution, frames, tol, machine_model=None, p
         else:
             out.notes.append(f"{op.name}: side setup ({st.orient}) is not simulated in the height-map model")
             plans.append((i, op, 0, None, [])); continue
-        tm, src = cam.tile_moves(op, program.op_tiles(op), st.clearance_z)  # every tile, as the post runs them
+        if op.kind == "probe":                            # probe ops run once; the touches stopped short of their faces
+            tm, src = op.sim_moves or op.moves, list(range(len(op.moves)))
+        else:
+            tm, src = cam.tile_moves(op, program.op_tiles(op), st.clearance_z)  # every tile, as the post runs them
         P = st.to_model(np.array([m[1:4] for m in tm], dtype=float)) if tm else np.zeros((0, 3))
         mv = [[m[0], *p, m[4]] for m, p in zip(tm, P)]
         plans.append((i, op, side, mv, src))
@@ -305,6 +308,12 @@ def _sim_zmap(program, sel, part, resolution, frames, tol, machine_model=None, p
             continue
         tool = op.tool
         pts, idx, kinds = _samples([m[:4] for m in mv], res / 2, False)
+        if op.kind == "probe":
+            _probe_air(collisions, zhi, zlo, pts, kinds, idx, tool, side, res, x0, y0, op.name, mv)
+            done += len(mv)
+            while mark_i < len(marks) and marks[mark_i] <= done:
+                snap(marks[mark_i]); mark_i += 1
+            continue
         eng = np.full((len(pts), 3), -np.inf); eng[:, 1] = 0.0
         # process in pieces that end at frame marks so snapshots are exact
         start = 0
@@ -513,6 +522,27 @@ def _buried_z(hits, zhi, P, K, I, tool, res, x0, y0, op_name):
                          "part": f"tool above its {fl:g} mm flutes", "what": "stock", "depth": round(depth, 2)}
     if worst is not None:
         hits.append(worst)
+
+
+def _probe_air(hits, zhi, zlo, P, K, I, tool, side, res, x0, y0, op_name, mv):
+    """A probe op's moves, its touches stopped short of the faces they should find, must pass through air: material
+    anywhere on them is the probe meeting the part where the program expects none (the firmware halts the job on a
+    probe triggered by a move, or the touch finds the wrong face). Nothing is removed."""
+    if len(P) == 0:
+        return
+    zc, lc = zhi.copy(), zlo.copy()
+    _stamp_z(zc, lc, P, K, I, tool, side, res, x0, y0, [], op_name)
+    with np.errstate(invalid="ignore"):                  # material is zlo..zhi where zhi > zlo: what the probe took
+        before = np.where(np.isfinite(zhi) & np.isfinite(zlo), np.maximum(zhi - zlo, 0.0), 0.0)
+        after = np.where(np.isfinite(zc) & np.isfinite(lc), np.maximum(zc - lc, 0.0), 0.0)
+        d = before - after
+    if d.max() <= 0.05:
+        return
+    iy, ix = np.unravel_index(int(np.argmax(d)), d.shape)
+    cx, cy = x0 + ix * res, y0 + iy * res
+    k = int(np.argmin(np.hypot(P[:, 0] - cx, P[:, 1] - cy)))
+    hits.append({"op": op_name, "move": int(I[k]) + 1, "pos": [round(float(v), 2) for v in P[k]],
+                 "part": "3D probe (the job halts: probe triggered)", "what": "stock", "depth": round(float(d.max()), 2)})
 
 
 def _part_maps_z(part, res, x0, y0, nx, ny):

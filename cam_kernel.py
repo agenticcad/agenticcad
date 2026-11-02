@@ -196,6 +196,11 @@ CONTROLLERS = {
 }
 
 
+# 3D probe defaults: MakeraStudio's tool number for the add-on 3D probe (the firmware powers the probe port after M6 T9999)
+# and the M480 routines' default ball Ø (ATCHandler: D2)
+PROBE_DEFAULTS = {"tool": 9999, "ball": 2.0, "stylus": 20.0, "feed": 100.0}
+
+
 @dataclass
 class Machine:
     name: str
@@ -225,6 +230,12 @@ class Machine:
     max_stepdown: dict = field(default_factory=dict)
     # machine model overrides (Settings ▸ Machines ▸ Model): {"nose": [{name, r, h}...], "spoilboard": mm, "clearance": mm, "stickout": mm}
     model: dict | None = None
+    # the 3D probe the probe ops use (PROBE_DEFAULTS fill what is missing): {"tool": its T number, "ball": effective ball
+    # Ø (mm, the calibrated one), "stylus": stylus length below the body (mm), "feed": touch feed (mm/min)}
+    probe: dict | None = None
+
+    def probe_spec(self) -> dict:
+        return {**PROBE_DEFAULTS, **(self.probe or {})}
 
     def capabilities(self) -> dict:
         """What the post may emit for this machine: its controller's limits (CONTROLLERS, by post) combined with the
@@ -690,6 +701,7 @@ class Op:
     post_tol: float | None = None                              # arc-fit / line-merge tolerance for the post (None: by kind)
     color_override: bool = False                              # the colour comes from the CAM tab
     tiled: bool = True                                        # runs at each of its setup's tiles (False: once - the moves cover them all)
+    sim_moves: list | None = None                             # probe ops: the moves the simulation checks for air (touches stopped short)
 
     @property
     def uses_a(self) -> bool:
@@ -1100,7 +1112,7 @@ RAMP_DEG = 3.0                      # default entry ramp angle along the path (0
 RAMP_FEED = 0.6                     # ramps and helices run at up to this fraction of the cutting feed (see ramp_feed)
 ENTRY_GAP = 0.05                    # ramps / helices start this far above the material the op cuts (rapid to 0.5 above it)
 COLORS = {"face": "#7fd1ff", "contour": "#4ea1ff", "pocket": "#4cd37a", "drill": "#ffd166", "parallel3d": "#c58cff", "engrave": "#ff9f7a", "adaptive": "#ff9f43", "rest": "#8ef0d0",
-          "chamfer": "#f2a65a", "vcarve": "#e07bd8"}
+          "chamfer": "#f2a65a", "vcarve": "#e07bd8", "probe_set": "#ff5c8a", "probe_check": "#ffb3c7"}
 
 
 def face(setup: Setup, tool: Tool, z_top: float | None = None, z_bottom: float | None = None, region=None,
@@ -1975,6 +1987,240 @@ def drill(setup: Setup, tool: Tool, points, z_top: float | None = None, z_bottom
     return op
 
 
+# =============================================================================
+# Probing: the 3D probe sets or checks the work origin from inside the program (Makera firmware)
+# =============================================================================
+# A probe op runs with the machine's 3D probe in the spindle (a tool change to it, never the spindle) and posts as a
+# block of firmware probe moves between "; PROBE BEGIN" / "; PROBE END" comments, the only place the Run panel lets
+# G38 / G10 / M480 through. What the firmware gives (MakeraZ1Firmware, read 2026-11-02):
+#   G38.2 <axis><distance> F: a probe move RELATIVE to where the head is; it halts the machine (PROBE_FAIL) when the
+#     distance runs out with nothing touched, or when the probe is already triggered as it starts. G38.3: the same
+#     without the "nothing touched" error. While the probe is fitted any X/Y move, or Z move down, that triggers it
+#     halts the machine too (zprobe halt_on_probe_during_motion, on by default): a probe that meets material where the
+#     program expects air stops the job.
+#   G10 L20 P0 X Y Z: the current point becomes these coordinates in the active work offset (no arithmetic needed).
+#   M480.9 X<d> Y<d> Z<depth> D<ball Ø>: Makera's pocket-centre routine (MakeraStudio sends it from the Probe dialog):
+#     from inside a hole below its edge it touches both X walls, goes to the middle and sets X0 there, then the same
+#     in Y. It pauses the file like a tool change (inner playing), so it runs from a program. The post follows it with
+#     G10 L20 to give that centre its coordinates in the setup.
+# The controller has no variables or arithmetic, so a program can set the origin from one feature and CHECK others (a
+# check halts the machine when a face is not within `check` mm of where it should be) but cannot average two holes or
+# turn the program to a measured angle (no G68): a plate that went down rotated is caught by a check, not corrected.
+PROBE_KINDS = ("surface", "hole", "edge")
+
+
+def probe_tool(machine: Machine) -> Tool:
+    """The machine's 3D probe as a tool (Machine.probe / PROBE_DEFAULTS): a ball stylus; the spindle never runs it."""
+    p = machine.probe_spec()
+    ball = float(p["ball"])
+    return Tool(int(p["tool"]), "3D probe", "ball", ball, 1, ball, rpm=0, feed=float(p["feed"]), plunge=float(p["feed"]),
+                stepdown=0.0, stepover=0.0, neck_diameter=round(ball * 0.6, 3), reach=float(p["stylus"]),
+                notes="probe ops: a tool change to the probe; the spindle never starts")
+
+
+def _probe_setup(setup: Setup, what: str) -> tuple[Tool, dict]:
+    stop_point()
+    m = setup.machine
+    if m.post != "makera":
+        raise CamError(f"{what}: probe ops are posted for the Makera firmware (Z1 / Carvera) only; {m.name} uses the {m.post} post")
+    if setup.rotary:
+        raise CamError(f"{what}: probe ops on a 4th-axis setup are not supported (use Machine ▸ Zero on the 4th axis)")
+    return probe_tool(m), m.probe_spec()
+
+
+def _probe_check_tol(check) -> float | None:
+    if check is None or check is False:
+        return None
+    tol = float(check)
+    if not (0.02 <= tol <= 2.0):
+        raise CamError("check: the tolerance is 0.02 .. 2 mm (how far the face may be from where it should be)")
+    return tol
+
+
+def _probe_op(setup: Setup, tool: Tool, name: str, mode: str) -> tuple[Op, PathBuilder]:
+    op = Op(name, "probe", tool, color=COLORS["probe_set" if mode == "set" else "probe_check"])
+    op.tiled = False
+    op.key = name
+    pb = PathBuilder(setup, tool, op)
+    return op, pb
+
+
+def _probe_down(pb: PathBuilder, x: float, y: float, z: float, f: float):
+    """Over (x, y) at safe Z, then down to z at the touch feed (the firmware halts if the probe meets anything)."""
+    pb.rapid_xy(x, y)
+    pb._add(FEED, x, y, z, f)
+
+
+def _probe_sim(op: Op, touches: list[int], back: float = 0.6):
+    """The moves the simulation checks for air: each touch stopped `back` mm short of the face it should find (a probe
+    meeting material anywhere else is the job halting, or the wrong feature)."""
+    sim = [list(m) for m in op.moves]
+    for k in touches:
+        prev = sim[k - 1]
+        d = [sim[k][i] - prev[i] for i in (1, 2, 3)]
+        n = math.sqrt(sum(v * v for v in d))
+        if n > 1e-9:
+            sim[k][1:4] = [sim[k][1 + i] - d[i] / n * min(back, n) for i in range(3)]
+    op.sim_moves = sim
+
+
+def probe_surface(setup: Setup, x: float, y: float, z: float | None = None, check: float | None = None,
+                  search: float = 3.0, name: str = "Probe surface") -> Op:
+    """3D probe: touch a flat face from above at (x, y) and set Z (the face is at `z`, default the stock top), or
+    with check=tol only verify it is within tol mm (the machine halts if not). Search: how far from z it may be."""
+    tool, ps = _probe_setup(setup, name)
+    tol = _probe_check_tol(check)
+    z = setup.stock.top if z is None else float(z)
+    if not (0.5 <= search <= 10):
+        raise CamError(f"{name}: search is 0.5 .. 10 mm")
+    if tol is not None and tol >= search:
+        raise CamError(f"{name}: the check tolerance must be smaller than the search distance")
+    f = float(ps["feed"])
+    op, pb = _probe_op(setup, tool, name, "check" if tol else "set")
+    start = z + search
+    _probe_down(pb, x, y, start, f * 3)
+    pb._add(FEED, x, y, z, f)
+    pb.retract()
+    _probe_sim(op, [len(op.moves) - 2])
+    op.params.update(probe="surface", mode="check" if tol else "set", at=[x, y], z=z, search=search, sets=[] if tol else ["z"],
+                     check=tol, start=[x, y, start], feed=f)
+    return op
+
+
+def probe_hole(setup: Setup, x: float, y: float, diameter: float, z_top: float | None = None, depth: float | None = None,
+               check: float | None = None, search: float = 2.0, name: str = "Probe hole") -> Op:
+    """3D probe: find the centre of a round hole (nominal centre x, y, Ø diameter, top z_top) from inside it, `depth`
+    below its top, and set X/Y there; or with check=tol touch its four walls and halt the machine if any is more than
+    tol from where it should be. Search: how far off the hole may be (the origin you zeroed by hand)."""
+    tool, ps = _probe_setup(setup, name)
+    tol = _probe_check_tol(check)
+    z_top = setup.stock.top if z_top is None else float(z_top)
+    rb = tool.diameter / 2
+    gap = diameter / 2 - rb                       # ball centre to the wall, from the middle of the hole
+    if gap < 0.5:
+        raise CamError(f"{name}: a Ø{diameter:g} hole is too small for the Ø{tool.diameter:g} probe ball (needs 1 mm play)")
+    if depth is None:
+        depth = max(2.0, tool.diameter + 1.0)
+    if not (0.5 <= depth <= 10):
+        raise CamError(f"{name}: depth is 0.5 .. 10 mm below the top of the hole")
+    if not (0.5 <= search <= 10):
+        raise CamError(f"{name}: search is 0.5 .. 10 mm")
+    if tol is not None and tol >= gap:
+        raise CamError(f"{name}: the check tolerance must be smaller than the ball's play in the hole ({gap:.2f} mm)")
+    f = float(ps["feed"])
+    op, pb = _probe_op(setup, tool, name, "check" if tol else "set")
+    zp = z_top - depth
+    _probe_down(pb, x, y, zp, f * 3)
+    touches = []
+    for dx, dy in ((-1, 0), (1, 0), (0, -1), (0, 1)):         # the routine's order: both X walls, then both Y walls
+        pb._add(FEED, x + dx * gap, y + dy * gap, zp, f)
+        touches.append(len(op.moves) - 1)
+        pb._add(FEED, x, y, zp, f * 3)
+    pb.retract()
+    _probe_sim(op, touches)
+    op.params.update(probe="hole", mode="check" if tol else "set", at=[x, y], diameter=diameter, z_top=z_top, depth=depth,
+                     z=zp, gap=round(gap, 4), search=search, sets=[] if tol else ["x", "y"], check=tol, feed=f)
+    return op
+
+
+def probe_edge(setup: Setup, toward: str, wall: float, at: float, z: float, check: float | None = None,
+               search: float = 3.0, name: str = "Probe edge") -> Op:
+    """3D probe: touch a vertical face square to X or Y and set that axis. toward '+x' moves in +X onto the face at
+    X = wall (the part's -X side); `at` is the Y (for x) or X (for y) where it touches, `z` the height. check=tol:
+    only verify the face is within tol (the machine halts if not)."""
+    tool, ps = _probe_setup(setup, name)
+    tol = _probe_check_tol(check)
+    if toward not in ("+x", "-x", "+y", "-y"):
+        raise CamError(f"{name}: toward is '+x', '-x', '+y' or '-y' (the direction the probe moves onto the face)")
+    if not (0.5 <= search <= 10):
+        raise CamError(f"{name}: search is 0.5 .. 10 mm")
+    if tol is not None and tol >= search:
+        raise CamError(f"{name}: the check tolerance must be smaller than the search distance")
+    s = 1.0 if toward[0] == "+" else -1.0
+    ax = toward[1]
+    rb = tool.diameter / 2
+    start = wall - s * (rb + search)
+    f = float(ps["feed"])
+    op, pb = _probe_op(setup, tool, name, "check" if tol else "set")
+    p0 = (start, at) if ax == "x" else (at, start)
+    p1 = (wall - s * rb, at) if ax == "x" else (at, wall - s * rb)
+    _probe_down(pb, p0[0], p0[1], z, f * 3)
+    pb._add(FEED, p1[0], p1[1], z, f)
+    pb._add(FEED, p0[0], p0[1], z, f * 3)
+    pb.retract()
+    _probe_sim(op, [len(op.moves) - 3])
+    op.params.update(probe="edge", mode="check" if tol else "set", toward=toward, wall=wall, at=at, z=z, search=search,
+                     sets=[] if tol else [ax], check=tol, start=list(p0), feed=f)
+    return op
+
+
+def _probe_sets(prog, st) -> list[str]:
+    """The axes a setup's probe ops set (in order), before its first cutting op."""
+    out: list[str] = []
+    for o in prog.ops:
+        if prog.setup_of(o) is not st:
+            continue
+        if o.kind != "probe":
+            break
+        out += [a for a in o.params.get("sets", []) if a not in out]
+    return out
+
+
+def _probe_gcode(op: Op, ox: float, oy: float, oz: float, safe_wcs: float) -> list[str]:
+    """The firmware lines of one probe op, in work coordinates (setup frame minus the origin). The probe is already
+    over its first point at a safe height."""
+    p, out = op.params, [f"G0 Z{_fmt(safe_wcs)}"]
+    f = p["feed"]
+    tol = p.get("check")
+    F = lambda v: _fmt(v)                                                        # noqa: E731
+    # the setup-frame (x, y, z) -> work coordinates
+    wx = lambda v: v - ox                                                        # noqa: E731
+    wy = lambda v: v - oy                                                        # noqa: E731
+    wz = lambda v: v - oz                                                        # noqa: E731
+
+    def touch(word: str, dist: float):
+        """A touch `dist` mm along the axis (signed): G38.2 for the whole way, or for a check G38.3 short of the
+        window and G38.2 across it - the first stops early (and the second then halts: already triggered) if the face
+        is nearer than dist - tol; the second halts with nothing touched if it is further than dist + tol."""
+        if tol is None:
+            out.append(f"G38.2 {word}{F(dist)} F{F(f)}")
+        else:
+            s = 1.0 if dist > 0 else -1.0
+            out.append(f"G38.3 {word}{F(dist - s * tol)} F{F(f)}")
+            out.append(f"G38.2 {word}{F(2 * s * tol)} F{F(f / 2)}")
+
+    if p["probe"] == "surface":
+        x, y = p["at"]
+        out.append(f"G1 Z{F(wz(p['z'] + p['search']))} F{F(3 * f)}")
+        touch("Z", -(p["search"] + (p["search"] if tol is None else 0.0)))
+        if tol is None:
+            out.append(f"G10 L20 P0 Z{F(wz(p['z']))}")
+    elif p["probe"] == "hole":
+        x, y = p["at"]
+        out.append(f"G1 Z{F(wz(p['z_top'] + 1.0))} F{F(3 * f)}")
+        out.append(f"G1 Z{F(wz(p['z']))} F{F(f)}")
+        if tol is None:
+            d = p["gap"] + p["search"]
+            out.append(f"M480.9 X{F(d)} Y{F(d)} Z{F(p['depth'])} D{F(op.tool.diameter)}")
+            out.append(f"G10 L20 P0 X{F(wx(x))} Y{F(wy(y))}")
+        else:
+            for word, s in (("X", -1), ("X", 1), ("Y", -1), ("Y", 1)):
+                touch(word, s * p["gap"])
+                out.append(f"G0 X{F(wx(x))} Y{F(wy(y))}")
+    else:
+        ax = p["toward"][1].upper()
+        s = 1.0 if p["toward"][0] == "+" else -1.0
+        out.append(f"G1 Z{F(wz(p['z']))} F{F(3 * f)}")
+        touch(ax, s * p["search"] * (2.0 if tol is None else 1.0))
+        if tol is None:
+            v = p["wall"] - s * op.tool.diameter / 2
+            out.append(f"G10 L20 P0 {ax}{F(wx(v) if ax == 'X' else wy(v))}")
+        st = p["start"]
+        out.append(f"G0 {ax}{F(wx(st[0]) if ax == 'X' else wy(st[1]))}")
+    out.append(f"G0 Z{F(safe_wcs)}")
+    return out
+
+
 def _cone(tool: Tool, what: str):
     """A V / chamfer tool's cone: (shape, tip radius, tan of the half angle) - or CamError for any other tool."""
     if tool.type not in ("vbit", "chamfer") or not (0 < tool.angle < 180):
@@ -2403,7 +2649,7 @@ PUBLIC_API = [
     "regular_polygon","Stock.from_model", "Stock.block", "Stock.cylinder", "Setup", "Setup.view", "Program", "face", "contour", "pocket",
               "adaptive", "drill", "parallel3d", "chamfer_edges", "vcarve", "rest_region", "section", "silhouette", "outline", "face_outline", "stock_minus", "free_region", "holes", "face_polygon",
               "circle", "rect", "feeds", "apply_feeds", "rotary_rough", "rotary_finish", "rotary_wrap", "rotary_profile",
-              "gear_teeth", "radial_map", "tiles_of"]
+              "gear_teeth", "radial_map", "tiles_of", "probe_surface", "probe_hole", "probe_edge", "probe_tool"]
 
 
 def api_reference() -> str:
@@ -2717,7 +2963,12 @@ class Program:
                 if ar > float(m.rotary["max_speed"]) * 1.001:
                     w.append(f"{op.name}: asks the 4th axis for {ar:.0f} deg/min, above its {m.rotary['max_speed']:.0f} deg/min: "
                              "the controller will slow those moves (the time estimate is short)")
-            if not (m.spindle["min"] <= t.rpm <= m.spindle["max"]):
+            if op.kind == "probe":
+                cut_before = [o.name for o in self.ops[:self.ops.index(op)] if self.setup_of(o) is st and o.kind != "probe"]
+                if op.params.get("sets") and cut_before:
+                    w.append(f"{op.name}: sets {'/'.join(op.params['sets']).upper()} after {cut_before[-1]} already cut in {st.name} "
+                             "with the old origin: probe at the start of the setup")
+            elif not (m.spindle["min"] <= t.rpm <= m.spindle["max"]):
                 w.append(f"{op.name}: {t.label()} rpm {t.rpm} outside spindle range {m.spindle}")
             w += [f"{op.name}: {x}" for x in op.warnings]
         # stacked roughing bands that leave different skins on their walls: a later band with less leave has the
@@ -3265,6 +3516,10 @@ def _emit(prog: Program, dialect: str) -> str:
                            f"{st.name}: {'flip' if st.orient == 'bottom' else 're-clamp'} part, orient {st.orient}")
                     comment(msg)
                     comment(f"zero {st.wcs} at {st.origin}, then resume")
+                    sets = _probe_sets(prog, st)
+                    if sets:
+                        comment(f"the probe ops then set {'/'.join(sets).upper()}: a zero within "
+                                f"{min(o.params['search'] for o in prog.ops if prog.setup_of(o) is st and o.kind == 'probe'):g} mm will do")
                     if mk:
                         line("M600")
                     elif hs:
@@ -3309,6 +3564,24 @@ def _emit(prog: Program, dialect: str) -> str:
         if st.rotary and not op.uses_a:
             a_index(st.a, clear)                           # a 3+1 op after a continuous one: back to the setup's angle
             last[3] = cur_a
+        if op.kind == "probe":
+            # the 3D probe: a tool change to it (the firmware measures it like any tool) and NEVER the spindle
+            if not mk:
+                raise CamError(f"{op.name}: probe ops are posted for the Makera firmware only, not the {dialect} post")
+            if spindle_on or (cur_tool is not None and cur_tool != t.number):
+                line("M5")
+            spindle_on = False
+            if cur_tool != t.number:
+                line(f"M6 T{t.number}")
+                cur_tool = t.number
+            approach(op, aox, aoy, clear)
+            comment(f"PROBE BEGIN {op.name}")
+            for pl in _probe_gcode(op, ox, oy, oz, safe):
+                line(pl)
+            comment("PROBE END")
+            last = [None, None, None, cur_a]
+            last_f = None
+            continue
         if cur_tool != t.number:
             if mk:
                 if cur_tool is not None:
