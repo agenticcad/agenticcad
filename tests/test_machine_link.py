@@ -101,6 +101,7 @@ async def _setup(**kw):
 def _measured(mc, emu):
     """Jog-mechanics tests: treat the emulator's fitted tool as measured (the change-tool test does it for real)."""
     mc.measured = {"tool": emu.tool, "touch_z": emu.setter_z, "offset": -17.297, "t": 0}
+    mc.probe_tap = {"measured_t": 0}                       # and, for the 3D probe, its stylus tap-tested
 
 
 def _probed(mc, wcs=None):

@@ -5,6 +5,7 @@ Every program the Machine workspace sends is recorded under <workspace>/runs/<de
                 it ended, and per-op actual time from the samples
   program.nc    the exact text uploaded to the machine (line numbers in the samples index it)
   cam.py        the CAM script it came from (when the run came from CAM operations)
+  model.py      the design script it was cut from (from 1.7.0), for simulating the run afterwards (estimated spindle power)
   samples.jsonl.gz  one row per machine status the app saw (~4 Hz): t (s from start), state, line, op index, machine
                 position, work position, feed [current, requested, override %], spindle [rpm, target, override %, temp C, power temp C],
                 tool number; with spindle-load polling on (M957), the spindle drive's PWM duty as a 6th spindle value - the real
@@ -41,9 +42,11 @@ class RunRecorder:
         (self.dir / "program.nc").write_text(text)
         if cam_code:
             (self.dir / "cam.py").write_text(cam_code)
+        if info.get("model_code"):                          # the design as it was, so the run can be simulated later (power.py)
+            (self.dir / "model.py").write_text(info["model_code"])
         self.meta: dict[str, Any] = {
             "design": design, "design_saved": bool(owner.get("name")), "doc": owner.get("doc"), "program": info.get("program"),
-            "setup": info.get("setup"), "wcs": info.get("wcs"), "file": job.get("name"), "started": time.strftime("%Y-%m-%dT%H:%M:%S"), "t0": self.t0,
+            "setup": info.get("setup"), "wcs": info.get("wcs"), "config": info.get("config"), "file": job.get("name"), "started": time.strftime("%Y-%m-%dT%H:%M:%S"), "t0": self.t0,
             "lines": job.get("lines"), "air_cut": job.get("air_cut"), "rotary": job.get("rotary"), "tools": job.get("tools"),
             "est_min": info.get("time_min"), "notes": job.get("notes"), "outcome": "running",
             "ops": [{k: o.get(k) for k in ("name", "kind", "key", "start", "end", "tool", "time")} for o in job.get("ops", [])],

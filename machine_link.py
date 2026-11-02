@@ -39,6 +39,13 @@ Safety model (MachineControl):
     console sends M480.x. recover() is the one way back from a hold or alarm (not e-stop / hard alarms).
   * Work offsets: `$#` / `$G` are read (read_offsets) at connect and after every origin change; self.origins keeps
     what set each WCS this session.
+  * Setups after a flip: align(spec) measures and ADJUSTS by default (one approval, the 3D probe): rough X0 Y0 (e.g. from
+    the side-A WCS), Z0 by a G38.3 touch on the top, the centre of 2+ register holes (G38.3 into each, then M480.9), a
+    least-squares turn + shift (fit_rigid; the controller can't rotate, so the app computes it). Within the limits the WCS
+    X0 Y0 goes on the true nominal origin and alignment(wcs) gives the turn the post must apply to that setup (check_job
+    refuses a program for that WCS posted without it, prep["aligned"]); outside them nothing is adjusted and the result
+    says which limit and by how much - no alarm. A hole not under the probe is looked for along its arc; a missing one
+    stops cleanly with X0 Y0 put back (M480.9 writes X0 Y0 of the active WCS at each hole on the way).
 
 4th axis (Makera's rotary module, the firmware's "delta" actuator: delta_max_rate 3600 deg/min, delta_acceleration 360):
   * The status carries A (and B) as the 4th and 5th coordinates (mpos_ab / wpos_ab). A is shown and jogged only when
@@ -570,6 +577,40 @@ VERIFIED_Z = ("probe", "touch-off")      # Z0 sources lower_to / probe start hei
 WCS_NAMES = ("G54", "G55", "G56", "G57", "G58", "G59", "G59.1", "G59.2", "G59.3")   # P1..P9 (Robot.cpp MAX_WCS 9)
 ARM_IDLE_S = 300.0                                           # Control turns itself off after this long unused
 STALE_S = 2.0                                                # status older than this: treat the link as lost
+# align(): measuring a setup after a flip and adjusting its WCS (see MachineControl.align)
+ALIGN_LIMITS = {"rot_deg": 2.0, "shift_mm": 3.0, "spacing_mm": 0.15}   # within these the WCS is adjusted, else left rough
+ALIGN_SEARCH_DEG = 6.0                   # a hole not under the probe is looked for along its arc (rotation unknown) this far
+ALIGN_Z_ABOVE, ALIGN_Z_BELOW = 10.0, 15.0   # the top is searched for (G38.3 from the top of travel) down to rough Z - 15;
+                                         # a touch more than 10 mm above rough Z is something else (a clamp): stop
+ALIGN_ABOVE = 5.0                        # each hole: lower_to this far above the top, then G38.3 into it
+ALIGN_ROT_EPS = 0.01                     # degrees: a turn smaller than this needs no rotated program
+
+
+def fit_rigid(nominal: list, measured: list) -> dict:
+    """Least-squares rigid transform (rotation about the work origin + translation, no scale) taking the nominal hole
+    centres (work XY) to the measured ones (machine XY): measured ≈ origin + R(rot) · nominal. 2D Procrustes on the
+    centred point sets: rot = atan2(Σ p×m, Σ p·m), origin = m̄ - R p̄ (exact for 2 holes of the right spacing).
+    Returns {"rot_deg", "origin": [x, y] (machine XY of work 0,0), "residuals": [[ex, ey], ..] (measured - fit),
+    "residual_max", "spacing_err": [|m_i - m_0| - |p_i - p_0| for i >= 1], "spacing_max"}."""
+    import math
+    n = len(nominal)
+    if n < 1 or n != len(measured):
+        raise ValueError("fit_rigid: as many measured points as nominal ones, at least one")
+    pcx, pcy = sum(p[0] for p in nominal) / n, sum(p[1] for p in nominal) / n
+    mcx, mcy = sum(m[0] for m in measured) / n, sum(m[1] for m in measured) / n
+    dot = cross = 0.0
+    for (px, py), (mx, my) in zip(nominal, measured):
+        px, py, mx, my = px - pcx, py - pcy, mx - mcx, my - mcy
+        dot += px * mx + py * my
+        cross += px * my - py * mx
+    rot = math.atan2(cross, dot) if n > 1 and (abs(dot) + abs(cross)) > 1e-12 else 0.0
+    c, s = math.cos(rot), math.sin(rot)
+    ox, oy = mcx - (c * pcx - s * pcy), mcy - (s * pcx + c * pcy)
+    res = [[mx - (ox + c * px - s * py), my - (oy + s * px + c * py)] for (px, py), (mx, my) in zip(nominal, measured)]
+    sp = [math.dist(measured[i], measured[0]) - math.dist(nominal[i], nominal[0]) for i in range(1, n)]
+    return {"rot_deg": math.degrees(rot), "origin": [ox, oy], "residuals": res,
+            "residual_max": max((math.hypot(*r) for r in res), default=0.0), "spacing_err": sp,
+            "spacing_max": max((abs(v) for v in sp), default=0.0)}
 
 
 def hard_halt(code: int | None) -> bool:
@@ -815,6 +856,9 @@ class MachineControl:
         self.rotary_found: dict | None = None   # {"axis_my", "axis_mz", "pad_mz", "t"}: machine Y / Z of the chuck centreline
         self.on_rotary_found: Callable[[dict], Any] | None = None
         self._a_seen = False
+        # align(): the last alignment per WCS (what the post applies to that setup) and the one in progress / last run
+        self.alignments: dict[str, dict] = {}
+        self.align_state: dict | None = None
 
     @property
     def origin(self) -> dict:
@@ -919,6 +963,7 @@ class MachineControl:
         self.measured = self.routine = self.job = None
         self.origins, self.active_wcs, self.wcs_table, self.origin_log = {}, "G54", None, []
         self.tlo_ref = self.surface_touch = None
+        self.alignments, self.align_state = {}, None
         self._apply_load_poll()
         self.probes = []
         self.rotary_found = None
@@ -1090,7 +1135,10 @@ class MachineControl:
                 # the 4th axis: shown only when known (has_fourth); A in work and machine degrees; the module's position
                 "fourth": self.has_fourth(), "a": self.a_pos(st),
                 "rotary": {"module": self.rotary_module, "offset": self.rotation_offset, "axis_my": self.axis_machine_y(),
-                           "found": self.rotary_found}}
+                           "found": self.rotary_found},
+                # align(): per WCS the last alignment (valid = still what the WCS holds: the post applies its rotation),
+                # and the run in progress / last run (stage, step, result)
+                "alignments": {w: self.alignment(w) for w in self.alignments}, "align": self.align_state}
 
     def position_reliable(self, st: dict | None = None) -> bool:
         st = st if st is not None else self._status()
@@ -1304,13 +1352,24 @@ class MachineControl:
                      f"{time.strftime('%H:%M', time.localtime(o[k]['t']))}" + (" (CHANGED since)" if o[k].get("changed") else "")
                      for k in ("xy", "z") if o.get(k)]
             org.append(f"{w}{' (active)' if w == self.active_wcs else ''}: " + ("; ".join(parts) if parts else "not set this session"))
+        als = []
+        for w in self.alignments:
+            al = self.alignment(w)
+            if al["adjusted"]:
+                als.append(f"{w} aligned at {time.strftime('%H:%M', time.localtime(al['t']))}: plate turned {al['rot_deg']:+.3f}° "
+                           f"(CCW +), origin moved {al['dx']:+.3f}, {al['dy']:+.3f} mm; "
+                           + (f"programs for {w} must be posted turned by {al['rot_deg']:+.3f}° (the setup's align)" if al["valid"]
+                              else f"NO LONGER VALID ({al['why']})"))
+            else:
+                als.append(f"{w} alignment NOT applied at {time.strftime('%H:%M', time.localtime(al['t']))}: {al['why']}")
         return (f"{self.profile.name} at {self.link.host}: state {st.get('state')}{rel}, machine position {f(mp)}, "
                 f"work position ({self.active_wcs}) {f(wp)}{fourth}, "
                 f"tool T{tl.get('number')} (length offset {tl.get('offset')}{tlo}), spindle {sp.get('rpm')} rpm"
                 + (f", drive {pwm:.2f}" if isinstance(pwm, float) else "")
                 + f", Control {'on' if self.armed else 'off'}, homed this session: {'yes' if self.homed else 'no'}"
                 + ("" if self.fresh() else " (status is stale)")
-                + ". Work offsets this session: " + " | ".join(org))
+                + ". Work offsets this session: " + " | ".join(org)
+                + (". Alignments: " + " | ".join(als) if als else ""))
 
     # -- guards
     def _need(self, armed: bool = True, idle: bool = True, homed: bool = False) -> dict:
@@ -1553,6 +1612,36 @@ class MachineControl:
         st = self._status() or {}
         tl = (st.get("tool") or {}).get("number")
         return bool(self.measured) and self.measured["tool"] == tl
+
+    def _need_probe_tapped(self) -> None:
+        """The 3D probe's own G38 moves (probe_descend, align) only stop if the probe really triggers: the firmware's
+        3D-probe routines power its receiver (M494.1) and ours don't, so before the first descent with the probe as
+        fitted (this measurement), the user taps the stylus while the app watches the probe pin (probe_tap_test)."""
+        m = self.measured or {}
+        tap = getattr(self, "probe_tap", None) or {}
+        if tap.get("measured_t") != m.get("t"):
+            raise Refused("tap-test the 3D probe first (probe_tap_test): tap the stylus sideways while the app watches the probe "
+                          "pin - a probe that doesn't trigger would be driven into the part")
+
+    async def probe_tap_test(self, timeout: float = 20.0) -> dict:
+        """Watch the probe pin (diagnose |P:probe,setter) until it changes while the user taps the stylus: proves the 3D
+        probe as fitted triggers what G38 stops on. Nothing moves."""
+        st = self._need(armed=False, idle=True, homed=False)
+        self._need_tool_measured()
+        tl = (st.get("tool") or {}).get("number")
+        if tl != self.profile.probe3d_tool:
+            raise Refused(f"the tap test is for the 3D probe (T{self.profile.probe3d_tool}): the machine says T{tl}")
+        base = (await self.diagnose()).get("P", [None])[0]
+        t0 = time.time()
+        while time.time() - t0 < timeout:
+            await asyncio.sleep(0.15)
+            v = (await self.diagnose()).get("P", [None])[0]
+            if v is not None and base is not None and v != base:
+                self.probe_tap = {"measured_t": (self.measured or {}).get("t"), "t": time.time(), "idle": base, "triggered": v}
+                self._note(f"3D probe tap test passed (pin {base} -> {v})")
+                return {**self.payload(), "tap": self.probe_tap}
+        raise Refused(f"no trigger seen in {timeout:.0f} s: is the probe switched on (its LED), charged and paired? "
+                      "Don't probe with it until a tap shows")
 
     def _need_tool_measured(self) -> None:
         if not self.tool_ok():
@@ -2143,11 +2232,12 @@ class MachineControl:
         return self.payload()
 
     def check_probe_3d(self, kind: str, x: float = 20.0, y: float = 20.0, depth: float = 2.0, dia: float = 2.0,
-                       max_drop: float | None = PROBE3D_MAX_DROP, hole_dia: float | None = None) -> dict:
+                       max_drop: float | None = PROBE3D_MAX_DROP, hole_dia: float | None = None, top: float = 0.0) -> dict:
         """Validate a 3D-probe routine from where the head is now; returns the routine's info (command, guard, summary).
         dia: the probe's BALL diameter. hole_dia (pocket_center): the hole's Ø - the X/Y search is hole/2 + 2.
         Start heights: the Z-touching routines (corners, boss) 1 .. 10.5 mm above a probed Z0 or a probe_descend touch;
-        pocket_center inside the hole, below a probed Z0 (it probes sideways at the height it starts)."""
+        pocket_center inside the hole, below a probed Z0 (it probes sideways at the height it starts); `top`: the work Z
+        of the surface the hole is in when Z0 isn't on it (align() with a setup whose Z0 is elsewhere)."""
         if kind not in PROBE3D:
             raise Refused(f"unknown 3D probe routine {kind!r} (one of {', '.join(PROBE3D)})")
         for v in (x, y, depth, dia) + ((max_drop,) if max_drop is not None else ()) + ((hole_dia,) if hole_dia is not None else ()):
@@ -2202,11 +2292,11 @@ class MachineControl:
         if sub == 9:
             if not z0["verified"]:
                 raise Refused(f"pocket_center starts inside the hole below its edge, judged from a probed Z0 - {z0['why']}. Probe Z0 on the top first")
-            if wz is None or wz > -0.3:
+            if wz is None or wz > top - 0.3:
                 raise Refused(f"pocket_center probes sideways at the height it starts (M480.9 has no Z move): the probe must be INSIDE the "
                               f"hole/pocket, below its edge - it is {'?' if wz is None else format(wz, '.2f')} mm above {self.active_wcs} Z0. Go down into it first with "
                               "probe_descend(to_z=-<depth>) (G38.3: stops on contact without an alarm)")
-            where = f"{-wz:.2f} mm below {self.active_wcs} Z0 (inside the hole)"
+            where = f"{top - wz:.2f} mm below the top (work Z {top:g} in {self.active_wcs}; inside the hole)"
         else:
             touch = self.surface_touch
             if z0["verified"] and wz is not None:
@@ -2237,12 +2327,12 @@ class MachineControl:
                           "z_floor": (ref_mz - PROBE3D_FLOOR_BELOW) if ref_mz is not None else None}}
 
     async def probe_3d(self, kind: str, x: float = 20.0, y: float = 20.0, depth: float = 2.0, dia: float = 2.0,
-                       max_drop: float | None = PROBE3D_MAX_DROP, hole_dia: float | None = None) -> dict:
+                       max_drop: float | None = PROBE3D_MAX_DROP, hole_dia: float | None = None, top: float = 0.0) -> dict:
         """Makera's 3D-probe routine (M480.n) from where the head is now. The firmware moves, probes and overwrites the
         work origin itself; we check before (check_probe_3d), then watch: the head must stay in the routine's area and Z
         may not get PROBE3D_FLOOR_BELOW under the probed reference before the first touch - either HALTS the machine.
         Whatever the routine leaves in the offsets is recorded, finished or not."""
-        info = self.check_probe_3d(kind, x, y, depth, dia, max_drop, hole_dia)
+        info = self.check_probe_3d(kind, x, y, depth, dia, max_drop, hole_dia, top)
         cmd = info.pop("command")
         info.pop("summary")
         self.last_action = time.time()
@@ -2311,6 +2401,8 @@ class MachineControl:
         tl = (st.get("tool") or {}).get("number")
         if tl not in (0, self.profile.probe3d_tool):
             raise Refused(f"a probe descent needs a probe fitted (T{self.profile.probe3d_tool} the 3D probe, or T0): the machine says T{tl}")
+        if tl == self.profile.probe3d_tool:
+            self._need_probe_tapped()
         for v in (max_dist, feed) + ((to_z,) if to_z is not None else ()):
             if not isinstance(v, (int, float)) or isinstance(v, bool) or v != v:
                 raise Refused("probe descent: numbers")
@@ -2339,10 +2431,12 @@ class MachineControl:
         return {"command": f"G38.3 Z-{dist:.3f} F{feed:g}", "dist": dist, "to_z": to_z, "mode": mode, "start": [mx, my, mz],
                 "feed": feed, "tool": tl, "summary": summary}
 
-    async def probe_descend(self, to_z: float | None = None, max_dist: float = 20.0, feed: float = 100.0, wait: bool = True) -> dict:
+    async def probe_descend(self, to_z: float | None = None, max_dist: float = 20.0, feed: float = 100.0, wait: bool = True,
+                            miss_ok: bool = False) -> dict:
         """Lower the probe with G38.3 (check_probe_descend), watched as a routine ('probe descent'): the result says
         whether it touched and where; a surface touch is kept (self.surface_touch) as the reference the corner routines'
-        start check accepts. wait: return when it has finished."""
+        start check accepts. wait: return when it has finished. miss_ok (a search in steps, align()): finding nothing in
+        surface mode is a result (touched False), not a failure. An 'into' touch fails with routine["touched"] True."""
         info = self.check_probe_descend(to_z, max_dist, feed)
         cmd = info.pop("command")
         self.last_action = time.time()
@@ -2350,7 +2444,7 @@ class MachineControl:
             raise Refused(f"{self.routine['kind']} is still running")
         since = time.time()
         self.routine = {"kind": "probe descent", "command": cmd, "stage": "running", "msg": f"probe descent: {cmd}",
-                        "wco_before": self._wco(), "wcs": self.active_wcs, **info}
+                        "wco_before": self._wco(), "wcs": self.active_wcs, "miss_ok": bool(miss_ok), **info}
         self._rt_task = asyncio.create_task(self._watch_descend(self.routine, since, info["dist"] / info["feed"] * 60.0 * 2 + 8.0))
         await self.link.line(cmd)
         self._note(f"{cmd} sent (probe descent, {info['mode']})")
@@ -2386,6 +2480,7 @@ class MachineControl:
                 await self.link.line(f"G53 G1 Z{pz + back:.3f} F300")
                 self.jog_busy = {"target": [px, py, pz + back], "t0": time.time(), "deadline": time.time() + back / 300 * 60 * 2 + 5}
                 if r["mode"] == "into":
+                    r.update(touched=True, touch=[px, py, pz], touch_wz=wz)
                     raise Refused(f"the probe touched something at machine Z {pz:.3f} (work Z {wz:.2f}) before work Z {r['to_z']:g}: it is NOT "
                                   "over the hole/pocket (or the hole is shallower). It backed off 1 mm; centre it over the hole first")
                 r.update(stage="done", touched=True, touch=[px, py, pz],
@@ -2395,6 +2490,8 @@ class MachineControl:
                 if r["mode"] == "into":
                     r.update(stage="done", touched=False, msg=f"reached work Z {wz:.2f} without touching: the probe is inside the hole/pocket "
                                                               "- pocket_center can start here")
+                elif r.get("miss_ok"):
+                    r.update(stage="done", touched=False, end=[px, py, pz], msg=f"nothing touched within {r['dist']:g} mm (the probe is at machine Z {pz:.3f})")
                 else:
                     r.update(stage="failed", touched=False, msg=f"nothing touched within {r['dist']:g} mm (the probe is at machine Z {pz:.3f}): "
                                                                  "the surface is further down, or the probe isn't triggering - check it before going on")
@@ -2405,6 +2502,511 @@ class MachineControl:
         except asyncio.CancelledError:
             r.update(stage="failed", msg=r.get("abort_msg") or "stopped watching (cancelled)")
         await self._push()
+
+    # -- align(): measure a setup after a flip and ADJUST its work offset (2026-11-02: side B went down 0.17° turned, its
+    #    probe check halted the machine, recovery took many cards and the rotation was worked out by hand). One approval;
+    #    the app does every step with the guarded pieces (goto_xy_raised, probe_descend, lower_to, probe_3d pocket_center,
+    #    raise_z_top) and computes what the controller can't (it has no rotation): the best-fit turn and shift of the
+    #    plate from 2+ hole centres. Within the limits the WCS X0 Y0 goes on the true nominal origin and the turn is kept
+    #    in self.alignments for the post; outside them nothing is adjusted and the numbers say why - no alarm either way.
+    @staticmethod
+    def _xy_of(v, what: str) -> tuple[float, float]:
+        if isinstance(v, dict):
+            v = (v.get("x"), v.get("y"))
+        if not isinstance(v, (list, tuple)) or len(v) != 2:
+            raise Refused(f"{what}: work X, Y ({{'x': .., 'y': ..}})")
+        for q in v:
+            if not isinstance(q, (int, float)) or isinstance(q, bool) or q != q or abs(q) > 500:
+                raise Refused(f"{what}: numbers (mm)")
+        return float(v[0]), float(v[1])
+
+    def _align_spec(self, spec: dict) -> dict:
+        """Validate and normalise an align spec (see align)."""
+        import math
+        if not isinstance(spec, dict):
+            raise Refused("align: a spec {wcs, surface, z_top, holes, rough, limits}")
+        name = wcs_name(spec.get("wcs")) or self.active_wcs
+        if spec.get("surface") is None:
+            raise Refused("align needs `surface`: the work X, Y of an untouched spot on the top (Z0 is probed there)")
+        surface = self._xy_of(spec["surface"], "surface")
+        z_top = spec.get("z_top", 0.0)
+        z_top = 0.0 if z_top is None else z_top
+        if not isinstance(z_top, (int, float)) or isinstance(z_top, bool) or z_top != z_top or abs(z_top) > 100:
+            raise Refused("z_top: the work Z of the top surface after zeroing (mm, default 0)")
+        ball = spec.get("ball", 2.0)
+        if not isinstance(ball, (int, float)) or not (0.5 <= ball <= PROBE3D_BALL_MAX):
+            raise Refused(f"ball: the 3D probe's ball diameter, 0.5 .. {PROBE3D_BALL_MAX:g} mm")
+        holes = spec.get("holes")
+        if not isinstance(holes, (list, tuple)) or len(holes) < 2:
+            raise Refused("align needs 2 or more holes [{x, y, dia, depth}] (the first is the reference)")
+        if len(holes) > 8:
+            raise Refused("align: at most 8 holes")
+        hs = []
+        for i, h in enumerate(holes):
+            if not isinstance(h, dict):
+                raise Refused(f"hole {i + 1}: {{x, y, dia, depth}}")
+            x, y = self._xy_of(h, f"hole {i + 1}")
+            d, dep = h.get("dia"), h.get("depth", 3.0)
+            for v, w in ((d, "dia"), (dep, "depth")):
+                if not isinstance(v, (int, float)) or isinstance(v, bool) or v != v:
+                    raise Refused(f"hole {i + 1}: {w} must be a number (mm)")
+            if not (ball + 1.0 <= d <= 150.0):
+                raise Refused(f"hole {i + 1}: dia {d:g} - the hole's diameter, {ball + 1:g} .. 150 mm (bigger than the {ball:g} mm ball)")
+            if not (0.5 <= dep <= 10.0):
+                raise Refused(f"hole {i + 1}: depth {dep:g} - how far below the top to probe its wall, 0.5 .. 10 mm")
+            hs.append({"x": x, "y": y, "dia": float(d), "depth": float(dep)})
+        for i in range(len(hs)):
+            for j in range(i):
+                if math.dist((hs[i]["x"], hs[i]["y"]), (hs[j]["x"], hs[j]["y"])) < max(hs[i]["dia"], hs[j]["dia"]):
+                    raise Refused(f"holes {j + 1} and {i + 1} overlap")
+        if math.dist((hs[0]["x"], hs[0]["y"]), (hs[-1]["x"], hs[-1]["y"])) < 10.0 and len(hs) == 2:
+            raise Refused("the two holes are too close together to measure a rotation (10 mm at least; far apart is best)")
+        for h in hs:
+            if math.hypot(surface[0] - h["x"], surface[1] - h["y"]) < h["dia"] / 2 + 2.0:
+                raise Refused("the surface point is on a hole: pick an untouched spot of the top")
+        lim = dict(ALIGN_LIMITS)
+        lim["search_deg"] = ALIGN_SEARCH_DEG
+        for k, v in (spec.get("limits") or {}).items():
+            if k not in lim:
+                raise Refused(f"limits: {', '.join(lim)} (got {k!r})")
+            if not isinstance(v, (int, float)) or isinstance(v, bool) or v != v or v < 0:
+                raise Refused(f"limits.{k}: a number >= 0")
+            lim[k] = float(v)
+        if lim["search_deg"] > 15.0:
+            raise Refused("limits.search_deg: at most 15°")
+        rough = spec.get("rough")
+        if rough is not None and not isinstance(rough, dict):
+            raise Refused("rough: {'from': 'G54'} (that WCS's X0 Y0 / Z0) or machine {'x', 'y'[, 'z']}")
+        return {"wcs": name, "surface": surface, "z_top": float(z_top), "ball": float(ball), "holes": hs, "limits": lim,
+                "rough": rough}
+
+    def check_align(self, spec: dict) -> dict:
+        """Validate align(spec) from the state now; returns the plan (summary for the one approval card, the start
+        estimate, the search window). Refused up front for anything that would stop it part-way: Control, homing, the
+        3D probe fitted and measured, a start estimate for X0 Y0 and the top's height, the travel."""
+        import math
+        sp = self._align_spec(spec)
+        st = self._need(armed=True, idle=True, homed=True)
+        self._need_tool_measured()
+        tl = (st.get("tool") or {}).get("number")
+        pt = self.profile.probe3d_tool
+        if tl != pt:
+            raise Refused(f"align uses the 3D probe (T{pt}) fitted and measured: the machine says T{tl}. Change tool → {pt}")
+        self._need_probe_tapped()
+        if self.jog_busy or self.job_active or (self.routine and self.routine["stage"] in ("running", "awaiting")):
+            raise Refused("wait for the machine to finish")
+        if self.align_state and self.align_state.get("stage") == "running":
+            raise Refused("an alignment is already running")
+        name = sp["wcs"]
+        o = self.origin_payload(st, name)
+        xy = o.get("xy") or {}
+        # where work 0,0 of the setup is to start with: this WCS's own X0 Y0 when it was set this session as an origin
+        # (an earlier align / rough, origin_at, set at the head, a program's probe op), else `rough`
+        est_src = None
+        if xy and not xy.get("changed") and (xy.get("source") in ("align", "rough", "computed", "typed", "anchor") or xy.get("ref") == "probed"):
+            w_ = self.wcs_wco(name, st)
+            if w_:
+                est_src = {"xy": [w_[0], w_[1]], "how": f"{name} X0 Y0 set by {xy.get('how')} ({xy.get('source')})", "rough": False}
+        rough = sp["rough"]
+        rough_z = None
+        if est_src is None or (rough and rough.get("force")):      # force: use `rough` even over this session's X0 Y0
+            if not rough:
+                raise Refused(f"{name} has no X0 Y0 set this session: give `rough` - {{'from': 'G54'}} when the flip keeps the stock "
+                              "centre over the same point (a symmetric flip with a stock-centre origin), or machine {'x', 'y'} of the "
+                              "setup's origin to within a millimetre or two")
+            if rough.get("from") is not None:
+                src = wcs_name(rough["from"])
+                if src == name:
+                    raise Refused("rough.from: another WCS (the earlier setup's)")
+                w_ = self.wcs_wco(src, st)
+                if not w_:
+                    raise Refused(f"{src}'s offsets haven't been read from the machine ($#): reconnect or refresh them")
+                if self.wcs_table and src in self.wcs_table and all(abs(v) < 1e-9 for v in self.wcs_table[src][:3]):
+                    raise Refused(f"{src} has never been set on this machine (0, 0, 0): it can't give a rough zero")
+                est_src = {"xy": [w_[0], w_[1]], "how": f"rough X0 Y0 from {src}", "rough": True, "from": src}
+                rough_z = w_[2]
+            else:
+                rx, ry = self._xy_of(rough, "rough (machine X, Y)")
+                est_src = {"xy": [rx, ry], "how": f"rough X0 Y0 at machine X{rx:.3f} Y{ry:.3f}", "rough": True}
+            if isinstance(rough.get("z"), (int, float)) and not isinstance(rough.get("z"), bool):
+                rough_z = float(rough["z"])
+        # how high the top is (machine Z of the probe tip on it): this WCS's probed Z0, else the rough one
+        z0 = self.z0_state(name)
+        wco = self.wcs_wco(name, st)
+        if z0["verified"] and wco:
+            z_est, z_how = wco[2] + sp["z_top"], f"{name} Z0 ({z0['why']})"
+        elif rough_z is not None:
+            z_est, z_how = rough_z, ("rough Z from " + est_src.get("from", "rough.z"))
+        else:
+            src2 = wcs_name((rough or {}).get("from")) if (rough or {}).get("from") else None
+            w2 = self.wcs_wco(src2, st) if src2 else None
+            if not w2:
+                raise Refused(f"the height of the top is unknown: {z0['why']}; give rough {{'from': <WCS>}} or rough.z")
+            z_est, z_how = w2[2], f"rough Z from {src2}"
+        z_lo, z_hi = z_est - ALIGN_Z_BELOW, z_est + ALIGN_Z_ABOVE
+        if z_lo < -self.profile.travel["z"] + self.profile.margin:
+            z_lo = -self.profile.travel["z"] + self.profile.margin
+        if z_hi > self.profile.top - 2.0:
+            raise Refused(f"the top would be at machine Z {z_est:.2f}, too close to the top of travel: check the rough zero")
+        # the start estimate: no turn (or the WCS's own last valid alignment)
+        prev = self.alignment(name)
+        rot0 = prev["rot_deg"] if prev and prev.get("valid") and not est_src["rough"] else 0.0
+        c, s_ = math.cos(math.radians(rot0)), math.sin(math.radians(rot0))
+        ox, oy = est_src["xy"]
+        to_m = lambda x, y: (ox + c * x - s_ * y, oy + s_ * x + c * y)
+        lim = sp["limits"]
+        pts = [("the surface point", to_m(*sp["surface"]), 3.0)] + [
+            (f"hole {i + 1}", to_m(h["x"], h["y"]), h["dia"] / 2 + 3.5 + lim["shift_mm"]
+             + math.hypot(h["x"], h["y"]) * math.sin(math.radians(lim["search_deg"]))) for i, h in enumerate(sp["holes"])]
+        for what, (mx_, my_), pad in pts:
+            for ax, v in (("x", mx_), ("y", my_)):
+                lo, hi = -self.profile.travel[ax] + self.profile.margin, self.profile.top
+                if v - pad < lo - 1e-9 or v + pad > hi + 1e-9:
+                    raise Refused(f"{what} would be at machine {ax.upper()} {v:.1f} (± {pad:.1f} searching), outside {lo:.1f} .. {hi:.1f}: "
+                                  "check the rough zero and the hole positions")
+        n = len(sp["holes"])
+        hd = ", ".join(f"Ø{h['dia']:g} at ({h['x']:g}, {h['y']:g})" for h in sp["holes"])
+        summary = (f"Align {name} with the 3D probe (T{pt}), one approval for the whole sequence: "
+                   + (f"select {name}; " if name != self.active_wcs else "")
+                   + (f"{name} X0 Y0 roughly from {est_src.get('from')} (machine X{ox:.3f} Y{oy:.3f}), recorded as rough; " if est_src["rough"]
+                      else f"start from {est_src['how']}; ")
+                   + f"touch the top at work ({sp['surface'][0]:g}, {sp['surface'][1]:g}) with G38.3 from the top of travel (it stops on contact, "
+                   f"no alarm; searching machine Z {z_hi:.1f} .. {z_lo:.1f}, around {z_how}) and set {name} Z0 there (top = work Z {sp['z_top']:g}; "
+                   f"T{pt} becomes the tool-length reference); then each of the {n} holes ({hd}; the first is the reference): up to the top "
+                   f"of travel, over it, lower_to {ALIGN_ABOVE:g} mm, G38.3 into it to {sp['holes'][0]['depth']:g} mm below the top, Makera's pocket "
+                   f"centre (M480.9, which writes {name} X0 Y0 at each hole on the way), up again. A hole not under the probe is looked for "
+                   f"along its arc (±{lim['search_deg']:g}°). Then the best-fit turn + shift of the plate: within ±{lim['rot_deg']:g}°, "
+                   f"{lim['shift_mm']:g} mm and {lim['spacing_mm']:g} mm hole spacing / fit, {name} X0 Y0 goes on the true origin and "
+                   f"{name}'s programs are posted turned to match; outside them {name} X0 Y0 is put back to the start (rough) and nothing "
+                   "is adjusted - you decide. " + self.origin_facts("xyz", None, name))
+        return {"wcs": name, "p": WCS_NAMES.index(name) + 1, "spec": sp, "start": est_src, "rot0": rot0, "z_est": z_est,
+                "z_window": [z_lo, z_hi], "z_how": z_how, "summary": summary}
+
+    def alignment(self, wcs=None) -> dict | None:
+        """The last alignment of `wcs` (default: the active one), or None. "valid": it was applied (adjusted) and the WCS
+        X0 Y0 is still the one it set - only then does the post turn that setup's program ("cam_align" is exactly what
+        Setup.align takes: the turn only, the WCS already holds the shift)."""
+        name = wcs_name(wcs) or self.active_wcs
+        al = self.alignments.get(name)
+        if not al:
+            return None
+        out = dict(al)
+        if not al.get("adjusted"):
+            out.update(valid=False, why=f"not applied: {al.get('why')}")
+            return out
+        xy = self.origin_payload(self._status(), name).get("xy") or {}
+        if xy.get("source") != "align" or abs((xy.get("t") or 0) - al["t"]) > 1e-6:
+            out.update(valid=False, why=f"{name} X0 Y0 was set again after the alignment ({xy.get('how') or 'unknown'})")
+        elif xy.get("changed"):
+            out.update(valid=False, why=f"{name} X0 Y0 changed after the alignment")
+        else:
+            out.update(valid=True, why=f"{name} X0 Y0 is the aligned origin")
+        return out
+
+    async def _settle(self, timeout: float = 30.0) -> dict:
+        """Until the move in hand (a probe's back-off) has finished and the machine is Idle with a fresh status."""
+        t0 = time.time()
+        while time.time() - t0 < timeout:
+            await asyncio.sleep(0.05)
+            st = self._status() or {}
+            if st.get("state") == "Alarm":
+                h = st.get("halt") or {}
+                raise Refused(f"the machine alarmed: {h.get('reason', 'halted')} ({h.get('advice', 'recover')})")
+            if not self.jog_busy and st.get("state") == "Idle":
+                break
+        else:
+            raise Refused("the machine didn't come to rest: check it")
+        await self._reports_after(time.time(), 1)
+        return self._status()
+
+    async def _select_wcs(self, name: str) -> None:
+        if name == self.active_wcs:
+            return
+        t_sel = time.time()
+        await self.link.line(name)
+        self._wcs_sel_t = t_sel
+        self._note(f"{name} selected (was {self.active_wcs})")
+        self.active_wcs = name
+        await self._reports_after(t_sel)
+
+    async def _set_wcs(self, name: str, x: float | None = None, y: float | None = None, z: float | None = None) -> list | None:
+        """G10 L2 P<n> with the given machine offsets (the active WCS: waits until the status shows them). Returns the
+        offsets (MPos - WPos) before. Nothing moves; a Z clears TLO (the fitted tool becomes the length reference)."""
+        before = self.wcs_wco(name)
+        cmd = f"G10 L2 P{WCS_NAMES.index(name) + 1}" + "".join(f" {a}{v:.3f}" for a, v in (("X", x), ("Y", y), ("Z", z)) if v is not None)
+        t_sent = time.time()
+        await self.link.line(cmd)
+        self.last_action = time.time()
+        if name == self.active_wcs:
+            want = [x, y, z]
+            while time.time() - t_sent < 3.0:
+                await asyncio.sleep(0.1)
+                w_ = self._wco()
+                if self.link.status_t > t_sent and w_ and all(v is None or abs(w_[i] - v) < 0.002 for i, v in enumerate(want)):
+                    break
+        self._bg(self._refresh_offsets())
+        return before
+
+    async def _find_top(self, plan: dict) -> float:
+        """From the top of travel over the surface point: G38.3 down in steps (stops on contact, no alarm) to the bottom of
+        the search window, then a slow second touch. Returns the machine Z of the probe tip on the top."""
+        z_lo, z_hi = plan["z_window"]
+        touch = None
+        while True:
+            mz = (self._status() or {}).get("mpos", [0, 0, 0])[2]
+            remaining = mz - z_lo
+            if remaining < 1.0:
+                break
+            await self.probe_descend(None, max_dist=min(DESCEND_MAX, remaining), feed=150.0, wait=True, miss_ok=True)
+            r = self.routine
+            if r.get("touched"):
+                touch = r["touch"][2]
+                break
+            await self._settle()
+        if touch is None:
+            raise Refused(f"no surface found down to machine Z {z_lo:.2f} ({ALIGN_Z_BELOW:g} mm under {plan['z_how']}): the plate is lower "
+                          "than that, the surface point is off the plate, or the probe isn't triggering")
+        await self._settle()
+        if touch > z_hi:
+            raise Refused(f"the probe touched something at machine Z {touch:.3f}, {touch - plan['z_est']:.1f} mm above where the top "
+                          f"should be ({plan['z_how']}): a clamp or a chip under the probe? Pick another surface point")
+        await self.probe_descend(None, max_dist=8.0, feed=50.0, wait=True)       # slow second touch from 5 mm above
+        pz = self.routine["touch"][2]
+        await self._settle()
+        if abs(pz - touch) > 0.3:
+            raise Refused(f"the two touches on the top differ by {abs(pz - touch):.3f} mm ({touch:.3f}, {pz:.3f}): something moved - check the plate and the probe")
+        return pz
+
+    async def _probe_hole(self, mxy: tuple[float, float], h: dict, plan: dict) -> dict:
+        """One hole: over its estimated centre at the top of travel, lower_to 5 above the top, G38.3 into it, pocket centre
+        (M480.9), up. {"miss": True, "touch_wz"} when the descent touched (not over the hole); else the measured centre
+        (machine XY, from the slow PRB touches) and diameter."""
+        sp = plan["spec"]
+        top = sp["z_top"]
+        await self.goto_xy_raised(mxy[0], mxy[1], GOTO_FEED_MAX, wait=True)
+        await self.lower_to(top + ALIGN_ABOVE, wait=True)
+        await asyncio.sleep(0.2)
+        try:
+            await self.probe_descend(to_z=top - h["depth"], max_dist=20.0, feed=100.0, wait=True)
+        except Refused:
+            r = self.routine or {}
+            if not r.get("touched"):
+                raise
+            await self._settle()
+            await self.raise_z_top(GOTO_FEED_MAX, wait=True)
+            return {"miss": True, "at": list(mxy), "touch_wz": r.get("touch_wz")}
+        await self._settle()
+        await self.probe_3d("pocket_center", dia=sp["ball"], hole_dia=h["dia"], top=top)
+        await asyncio.shield(self._rt_task)
+        r = self.routine
+        if r["stage"] != "done":
+            raise Refused(r["msg"])
+        t = r.get("touches") or []
+        if len(t) >= 8:
+            cx, cy = (t[1][0] + t[3][0]) / 2.0, (t[5][1] + t[7][1]) / 2.0
+        else:                                             # (the firmware's own centre: X0 Y0 it just set)
+            cx, cy = r["origin"]
+        size = r.get("size") or {}
+        dia = sum(size.values()) / len(size) if size else None
+        await self.raise_z_top(GOTO_FEED_MAX, wait=True)
+        return {"miss": False, "at": list(mxy), "centre": [cx, cy], "dia": dia, "routine_origin": r.get("origin")}
+
+    async def align(self, spec: dict, wait: bool = True) -> dict:
+        """Measure where a setup really is and ADJUST its work offset - the default outcome, not an alarm.
+        spec = {"wcs": "G55", "surface": {"x", "y"} (work XY of an untouched spot on the top, nominal), "z_top": work Z of
+        that top after zeroing (0), "holes": [{"x", "y" (nominal work XY), "dia", "depth" (how far below the top to probe
+        the wall, default 3)}, ...] (2+; the first is the reference), "rough": {"from": "G54"} or machine {"x", "y"[, "z"]}
+        (used when the WCS has no X0 Y0 this session), "limits": {"rot_deg": 2, "shift_mm": 3, "spacing_mm": 0.15,
+        "search_deg": 6}, "ball": 2}.
+        Sequence (check_align first, one approval): select the WCS; a rough X0 Y0 if it has none (recorded `rough`); touch
+        the top (G38.3, searched from the top of travel) and set Z0 there (`probe`); each hole: over it, lower_to 5, G38.3
+        into it (a touch = not over it: hole 1 is looked for along its arc about the start origin, hole 2 about hole 1,
+        within ±search_deg; later holes come from the fit), pocket centre, up. Then fit_rigid: within the limits X0 Y0 =
+        the true nominal origin (G10 L2, origin_log source `align`) and self.alignments[wcs] keeps the turn for the post;
+        outside them X0 Y0 goes back to the start and is recorded as rough. Returns {"adjusted", "rot_deg", "dx", "dy",
+        "residuals", "spacing_err", "origin_machine", "summary", ...}; a step that fails (no surface, a hole not found, an
+        alarm) raises Refused saying where it stopped, with X0 Y0 put back when the machine still answers.
+        wait=False: runs in the background; the result lands in align_state / payload()["align"]."""
+        plan = self.check_align(spec)
+        self.last_action = time.time()
+        self.align_state = {"wcs": plan["wcs"], "stage": "running", "step": "starting", "t0": time.time(), "result": None, "msg": plan["summary"]}
+        if wait:
+            return await self._align_run(plan)
+
+        async def bg():
+            try:
+                await self._align_run(plan)
+            except (Refused, ConnectionError, OSError):
+                pass                                      # (align_state has it)
+        self._bg(bg())
+        return self.payload()
+
+    async def _align_run(self, plan: dict) -> dict:
+        import math
+        name, sp, lim = plan["wcs"], plan["spec"], plan["spec"]["limits"]
+        stt = self.align_state
+        step = lambda s: (stt.update(step=s), self._note(f"align {name}: {s}"))
+        start_xy = list(plan["start"]["xy"])
+        touched_xy = False                                # a pocket-centre routine has written X0 Y0 (put it back on a stop)
+
+        async def put_back(why: str) -> str:
+            """X0 Y0 back to the start (the pocket-centre routines wrote it at each hole); recorded as rough."""
+            if not touched_xy:
+                return ""
+            st_ = self._status() or {}
+            if not self.connected or st_.get("state") != "Idle":
+                return (f" {name} X0 Y0 was NOT put back (the machine is {st_.get('state') or 'not answering'}): the pocket-centre "
+                        "routine left it at the last hole's centre - it is recorded as not trusted; re-zero before cutting")
+            before = await self._set_wcs(name, x=start_xy[0], y=start_xy[1])
+            self._record_origin(xy=("rough", f"align {why}: X0 Y0 put back to the start ({plan['start']['how']})"), wco_xy=start_xy,
+                                source="rough", before=before, wcs=name)
+            return f" {name} X0 Y0 is back at the start (machine X{start_xy[0]:.3f} Y{start_xy[1]:.3f}), recorded as rough."
+
+        try:
+            step(f"select {name}")
+            await self._select_wcs(name)
+            if plan["start"]["rough"]:
+                step(f"rough X0 Y0 ({plan['start']['how']})")
+                before = await self._set_wcs(name, x=start_xy[0], y=start_xy[1])
+                self._record_origin(xy=("rough", f"align: {plan['start']['how']}"), wco_xy=start_xy, source="rough", before=before, wcs=name)
+            rot0 = math.radians(plan["rot0"])
+            to_m = lambda o_, th, x, y: (o_[0] + math.cos(th) * x - math.sin(th) * y, o_[1] + math.sin(th) * x + math.cos(th) * y)
+            # Z0 on the top
+            step("touch the top")
+            sx, sy = to_m(start_xy, rot0, *sp["surface"])
+            await self.goto_xy_raised(sx, sy, GOTO_FEED_MAX, wait=True)
+            pz = await self._find_top(plan)
+            before = await self._set_wcs(name, z=pz - sp["z_top"])
+            self._record_origin(z=("top", f"align: 3D-probe touch on the top at work ({sp['surface'][0]:g}, {sp['surface'][1]:g})"),
+                                source="probe", before=before, wcs=name)
+            await self.raise_z_top(GOTO_FEED_MAX, wait=True)
+            # the holes
+            nominal, measured, holes_out, misses = [], [], [], 0
+            for k, h in enumerate(sp["holes"]):
+                p_ = (h["x"], h["y"])
+                if k == 0:                                   # around the start origin
+                    pivot, th = start_xy, rot0
+                    base = to_m(start_xy, rot0, *p_)
+                    arm = math.hypot(*p_)
+                elif k == 1:                                 # around the reference hole, the turn unknown
+                    pivot, th = measured[0], rot0
+                    base = to_m(measured[0], rot0, p_[0] - nominal[0][0], p_[1] - nominal[0][1])
+                    arm = math.dist(p_, nominal[0])
+                else:
+                    f_ = fit_rigid(nominal, measured)
+                    base = to_m(f_["origin"], math.radians(f_["rot_deg"]), *p_)
+                    pivot, arm = None, 0.0
+                cands = [(0.0, base)]
+                if pivot is not None and arm > 1.0 and lim["search_deg"] > 0:
+                    stepr = 2 * 0.8 * (h["dia"] - sp["ball"]) / 2.0 / arm
+                    j = 1
+                    while j * stepr <= math.radians(lim["search_deg"]) + 1e-9 and j <= 12:
+                        for sgn in (1, -1):
+                            d_ = sgn * j * stepr
+                            vx, vy = base[0] - pivot[0], base[1] - pivot[1]
+                            cands.append((math.degrees(d_), (pivot[0] + math.cos(d_) * vx - math.sin(d_) * vy,
+                                                             pivot[1] + math.sin(d_) * vx + math.cos(d_) * vy)))
+                        j += 1
+                got = None
+                for n_try, (d_deg, mxy) in enumerate(cands):
+                    step(f"hole {k + 1} of {len(sp['holes'])}" + (f" (looking {d_deg:+.1f}° along its arc)" if n_try else ""))
+                    res = await self._probe_hole(mxy, h, plan)
+                    touched_xy = touched_xy or not res["miss"]
+                    if not res["miss"]:
+                        got = res
+                        break
+                    misses += 1
+                    if res.get("touch_wz") is not None and res["touch_wz"] < sp["z_top"] - 0.5:
+                        raise Refused(f"hole {k + 1}: the probe went {sp['z_top'] - res['touch_wz']:.2f} mm in and touched bottom before "
+                                      f"{h['depth']:g} mm: the hole is shallower than that (give a smaller depth) or it is a different feature")
+                if got is None:
+                    where = ("from the start origin" if k == 0 else "from hole 1" if k == 1 else f"where holes 1-{k} put it")
+                    raise Refused(f"hole {k + 1} (Ø{h['dia']:g} at work {h['x']:g}, {h['y']:g}) is not where it should be: the probe touched "
+                                  f"the top {len(cands)} time{'s' if len(cands) != 1 else ''} " + (f"searching ±{lim['search_deg']:g}° {where}" if len(cands) > 1 else where)
+                                  + (" - the start origin is more than a hole radius out, or the plate is turned further than that" if k < 2 else
+                                     " - the hole is missing or not as deep as asked, or its nominal position is wrong"))
+                nominal.append(p_)
+                measured.append(got["centre"])
+                holes_out.append({"nominal": [h["x"], h["y"]], "machine": [round(got["centre"][0], 4), round(got["centre"][1], 4)],
+                                  "dia": h["dia"], "dia_measured": round(got["dia"], 3) if got["dia"] else None})
+            # fit and decide
+            step("fit")
+            f_ = fit_rigid(nominal, measured)
+            rot = f_["rot_deg"]
+            ox, oy = f_["origin"]
+            dx, dy = ox - start_xy[0], oy - start_xy[1]
+            for ho, r_ in zip(holes_out, f_["residuals"]):
+                ho["residual"] = [round(r_[0], 4), round(r_[1], 4)]
+            shift = math.hypot(dx, dy)
+            out = {"wcs": name, "rot_deg": round(rot, 4), "dx": round(dx, 4), "dy": round(dy, 4), "shift": round(shift, 4),
+                   "origin_machine": [round(ox, 4), round(oy, 4)], "start_origin": [round(v, 4) for v in start_xy],
+                   "start": plan["start"]["how"], "residuals": [[round(a, 4), round(b, 4)] for a, b in f_["residuals"]],
+                   "residual_max": round(f_["residual_max"], 4), "spacing_err": [round(v, 4) for v in f_["spacing_err"]],
+                   "spacing_max": round(f_["spacing_max"], 4), "holes": holes_out, "misses": misses,
+                   "z0_machine": round(pz - sp["z_top"], 4), "top_touch": round(pz, 4), "limits": dict(lim),
+                   "cam_align": {"rot_deg": round(rot, 4), "dx": 0.0, "dy": 0.0}}
+            over = []
+            if abs(rot) > lim["rot_deg"] + 1e-9:
+                over.append(f"turned {abs(rot):.2f}° (limit {lim['rot_deg']:g}°)")
+            if shift > lim["shift_mm"] + 1e-9:
+                over.append(f"origin {shift:.2f} mm from the start (limit {lim['shift_mm']:g} mm)")
+            if f_["spacing_max"] > lim["spacing_mm"] + 1e-9:
+                i_ = max(range(len(f_["spacing_err"])), key=lambda i: abs(f_["spacing_err"][i]))
+                over.append(f"hole {i_ + 2} is {f_['spacing_err'][i_]:+.3f} mm off its spacing from hole 1 (limit {lim['spacing_mm']:g} mm): "
+                            "the holes aren't where the setup says, or one was measured wrong")
+            elif f_["residual_max"] > lim["spacing_mm"] + 1e-9:
+                over.append(f"the holes fit a rigid turn only to {f_['residual_max']:.3f} mm (limit {lim['spacing_mm']:g} mm)")
+            turn = ("not turned" if abs(rot) < 0.005 else
+                    f"turned {abs(rot):.2f}° {'counter-clockwise' if rot > 0 else 'clockwise'} (seen from above)")
+            off = f"{shift:.2f} mm off (X {dx:+.3f}, Y {dy:+.3f} from {plan['start']['how']})"
+            if not over:
+                step("set X0 Y0 on the true origin")
+                before = await self._set_wcs(name, x=ox, y=oy)
+                self._record_origin(xy=("nominal origin", f"align: {len(nominal)} holes, plate turned {rot:+.3f}°"), wco_xy=[ox, oy],
+                                    source="align", before=before, wcs=name)
+                rec_t = self.origins[name]["xy"]["t"]
+                needs_turn = abs(rot) >= ALIGN_ROT_EPS
+                out.update(adjusted=True, why=None, t=rec_t,
+                           summary=f"plate {turn} and {off}: {name} X0 Y0 set at machine X{ox:.3f} Y{oy:.3f} (the true nominal origin), "
+                                   f"Z0 on the top (machine Z {pz - sp['z_top']:.3f}); "
+                                   + (f"the setup in {name} is rotated by {rot:+.3f}° to match (the post turns its XY about {name} 0,0)"
+                                      if needs_turn else "no turn needed")
+                                   + f". Holes fit to {f_['residual_max']:.3f} mm, spacing error {f_['spacing_max']:.3f} mm.")
+                self.alignments[name] = out
+                stt.update(stage="done", step="done", result=out, msg=out["summary"])
+            else:
+                step("outside the limits: put X0 Y0 back")
+                why = "; ".join(over)
+                back = await put_back("not applied")
+                out.update(adjusted=False, why=why, t=time.time(),
+                           summary=f"NOT adjusted - {why}. Measured: plate {turn}, {off}; the true origin would be machine X{ox:.3f} "
+                                   f"Y{oy:.3f}.{back} Z0 is on the top (probed). Nothing else changed and nothing alarmed: re-seat the plate "
+                                   "and align again, or raise the limit if this is what you want to cut")
+                self.alignments[name] = out
+                stt.update(stage="refused", step="done", result=out, msg=out["summary"])
+            self._note(f"align {name}: {out['summary']}")
+            self._bg(self._refresh_offsets())
+            await self._push()
+            return {**out, "final": self.describe()}
+        except asyncio.CancelledError:
+            stt.update(stage="failed", msg=f"alignment of {name} stopped (cancelled) at '{stt.get('step')}'")
+            raise
+        except (Refused, ConnectionError, OSError) as e:
+            msg = str(e) if isinstance(e, Refused) else f"{type(e).__name__}: {e}"
+
+            st_ = self._status() or {}
+            if st_.get("state") == "Alarm" and "alarm" not in msg.lower():
+                msg += " (the machine is in Alarm: recover first)"
+            try:
+                await self._settle(5.0)
+                back = await put_back("stopped")
+            except (Refused, ConnectionError, OSError) as e2:
+                back = f" {name} X0 Y0 was not put back ({e2})" if touched_xy else ""
+            full = f"alignment of {name} stopped at '{stt.get('step')}': {msg}.{back}"
+            stt.update(stage="failed", msg=full)
+            self._note(full)
+            await self._push()
+            raise Refused(full) from None
 
     # -- programs: upload to the machine's SD, then play (as MakeraStudio does); the machine runs them on its own
     @property
@@ -2470,6 +3072,7 @@ class MachineControl:
                           "from the machine ($#): reconnect or refresh the offsets, then check again")
         if not rotary:
             self._check_setup_zeroed(prep, names, notes, ack)
+            self._check_aligned(prep, names, notes, ack)
         for ax, i in (("x", 0), ("y", 1)):
             e = prep["extents"].get(ax)
             if not e:
@@ -2519,6 +3122,11 @@ class MachineControl:
                 have.add("z")
             by_probe = {a for q in (prep.get("probes") or []) if q.get("before_cut") and not q.get("skipped")
                         and (q.get("wcs") or names[0]) == w for a in q["sets"]}
+            # a rough X0 Y0 (align's start, or an alignment that wasn't applied) is only good enough for a program whose
+            # own probe ops set X/Y before cutting
+            rough = (o.get("xy") or {}).get("source") == "rough"
+            if rough and not by_probe >= {"x", "y"}:
+                have -= {"x", "y"}
             missing = sorted({"x", "y", "z"} - have)
             t = self.wcs_table or {}
             if t.get(w) and all(abs(v) < 1e-9 for v in t[w][:3]) and not by_probe >= {"x", "y", "z"} and not ack:
@@ -2529,6 +3137,7 @@ class MachineControl:
                 if not ack:
                     raise Refused(f"the program runs in {w}, but {'/'.join(why)} of its origin {'was' if len(why) == 1 else 'were'} not set or "
                                   "probed this session" + (f" ({', '.join(changed)} changed since)" if changed else "")
+                                  + (f" (X0 Y0 is only rough: {(o.get('xy') or {}).get('how')})" if rough and {"x", "y"} & set(missing) else "")
                                   + f": zero that setup first (probe_3d / auto_z_probe / origin_at with p={w})"
                                   + (" - a rough zero is enough, the program's probe ops then set it exactly" if by_probe else "")
                                   + ", or tick 'I checked it'")
@@ -2542,6 +3151,29 @@ class MachineControl:
                 zr = o.get("z") or {}
                 notes.append(f"runs in {w}: X/Y by {(o.get('xy') or o.get('x') or {}).get('how', '?')}, Z0 by {zr.get('how', '?')}"
                              + ("" if zr.get("verified") else " (typed, not probed)"))
+
+    def _check_aligned(self, prep: dict, names: list[str], notes: list[str], ack: bool) -> None:
+        """A WCS that align() set on a turned plate needs its program posted turned by the same angle (the controller can't
+        rotate): the app says what it applied in prep["aligned"] = {"G55": rot_deg}. Refused when it's missing or
+        different, unless the user ticked 'I checked it'."""
+        applied_all = prep.get("aligned") or {}
+        for w in names:
+            al = self.alignment(w)
+            if not al or not al.get("valid"):
+                continue
+            rot, applied = al["rot_deg"], applied_all.get(w)
+            if applied is None and abs(rot) < ALIGN_ROT_EPS:
+                notes.append(f"{w} aligned: plate square (turned {rot:+.3f}°), origin on the measured holes")
+                continue
+            if applied is None or abs(float(applied) - rot) > 0.002:
+                if not ack:
+                    raise Refused(f"{w} was aligned on a plate turned {rot:+.3f}°, but this program was posted "
+                                  + ("without that turn" if applied is None else f"turned {float(applied):+.3f}°")
+                                  + f": post the setup in {w} with align={{'rot_deg': {rot:.4f}, 'dx': 0, 'dy': 0}} (the alignment's cam_align), "
+                                  "or tick 'I checked it'")
+                notes.append(f"{w} aligned (turned {rot:+.3f}°) but the program isn't turned to match - acknowledged")
+            else:
+                notes.append(f"{w} aligned: the program is turned {rot:+.3f}° about {w} 0,0 to match the plate")
 
     async def run_program(self, name: str, prep: dict, info: dict | None = None, rotary: bool = False, ack: bool = False) -> dict:
         """Upload `prep["text"]` as /sd/gcodes/<name> and play it. `prep` comes from prepare_program(). Tool changes in

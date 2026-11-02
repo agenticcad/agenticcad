@@ -497,7 +497,8 @@ def _descents(moves):
 def test_pocket_and_contour_ramp_in_instead_of_plunging(machines, plate):
     st = cam.Setup(machines["Makera Z1"], cam.Stock.from_model(plate, margin=3, top=1))
     t = flat(); top = st.stock.top
-    op = cam.pocket(st, t, cam.circle(0, 0, 11), z_top=top - 1, z_bottom=top - 7, stepdown=2.0)
+    op = cam.pocket(st, t, cam.circle(0, 0, 11), z_top=top - 1, z_bottom=top - 7, stepdown=2.0, finish=False)
+    # (finish=False: the roughing entries; the finishing passes come down in cleared ground, see test_cam_finish)
     # no plunge ends below the op's top: every entry ramps down along a ring at the ramp angle (a helix on a small ring)
     assert all(mv[3] >= top - 1 + cam.ENTRY_GAP - 1e-6 for mv in op.moves if mv[0] == cam.PLUNGE)
     assert op.params["ramp"] == cam.RAMP_DEG and max(_descents(op.moves)) <= cam.RAMP_DEG + 0.2
@@ -506,7 +507,7 @@ def test_pocket_and_contour_ramp_in_instead_of_plunging(machines, plate):
     g = cam.Program(st, [op]).gcode().splitlines()
     assert sum(l.startswith(("G2 ", "G3 ")) for l in g) >= 6 and len(g) < 120
     # ramp=0 keeps the straight plunge
-    op0 = cam.pocket(st, t, cam.circle(0, 0, 11), z_top=top - 1, z_bottom=top - 7, stepdown=2.0, ramp=0)
+    op0 = cam.pocket(st, t, cam.circle(0, 0, 11), z_top=top - 1, z_bottom=top - 7, stepdown=2.0, ramp=0, finish=False)
     assert any(mv[3] < top - 1 for mv in op0.moves if mv[0] == cam.PLUNGE)
     # contour: one entry per ring, the passes run on without retracting, nothing descends steeper than the ramp
     c = cam.contour(st, t, cam.rect(-30, -20, 30, 20), z_top=top - 1, z_bottom=top - 7, stepdown=2.0)
@@ -526,7 +527,7 @@ def test_face_plunges_clear_of_the_stock(machines, plate):
 def test_pocket_finishes_each_region_before_the_next(machines, plate):
     st = cam.Setup(machines["Makera Z1"], cam.Stock.from_model(plate, margin=3, top=1))
     t = flat()
-    op = cam.pocket(st, t, [cam.rect(-28, 2, -8, 14), cam.rect(8, -14, 28, -2)], z_top=12, z_bottom=6, stepdown=2.0)
+    op = cam.pocket(st, t, [cam.rect(-28, 2, -8, 14), cam.rect(8, -14, 28, -2)], z_top=12, z_bottom=6, stepdown=2.0, finish=False)
     assert op.params["regions"] == 2 and op.params["passes"] == 3
     runs = []
     for mv in op.moves:

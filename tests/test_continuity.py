@@ -108,3 +108,33 @@ async def test_a_run_waits_for_a_simulation_and_shows_its_errors(ag):
     assert summary.startswith("SIMULATION ERRORS") and "0.90 mm of metal" in summary and "not this run's" not in summary
     with pytest.raises(ml.Refused, match="simulate these ops first"):    # op 2 was never simulated
         ag._machine_plan("run_ops", {"ops": [1]})
+
+
+ALIGN_CAM = ("m = machines['Makera Z1']\nstock = Stock.block(160, 120, 10, bottom=0)\n"
+             "a = Setup(m, stock, origin='stock-top-center', orient='bottom', name='A')\n"
+             "b = Setup(m, stock, origin='stock-top-center', name='B')\nt = tools[2]\n"
+             "holes = register_holes(a, rect(-50, -30, 50, 30), later=b, tool=t)\n"
+             "program = Program(a, name='two')\nprogram.add(register_hole_ops(a, t, holes, dia=8.0))\n"
+             "program.add(pocket(b, t, rect(-20, -10, 20, 10), z_top=10, z_bottom=8, finish=False))\n")
+
+
+async def test_align_is_planned_from_the_programs_register_holes(ag):
+    import machine_link as ml
+    from tests.test_agent_tools import CAM_CODE
+    T = ag.tool_handlers
+    await T["build_cam"]({"code": CAM_CODE})
+    with pytest.raises(ml.Refused, match="one setup"):
+        ag.align_spec()
+    r = text(await T["build_cam"]({"code": ALIGN_CAM}))
+    assert "ALIGNMENT: B aligns on" in r
+    spec = ag.align_spec()
+    assert spec["wcs"] == ag.program.setups[1].wcs and len(spec["holes"]) >= 2 and spec["rough"] == {"from": ag.program.setups[0].wcs}
+    assert set(spec["surface"]) == {"x", "y"}
+    with pytest.raises(ml.Refused, match="no later setup"):
+        ag.align_spec("Z")
+
+
+async def test_a_two_setup_program_without_register_holes_is_told_to_add_them(ag):
+    r = text(await ag.tool_handlers["build_cam"]({"code": ALIGN_CAM.replace("program.add(register_hole_ops(a, t, holes, dia=8.0))\n",
+                                                                             "program.add(pocket(a, t, rect(-20, -10, 20, 10), z_top=0, z_bottom=-2, finish=False))\n")}))
+    assert "ALIGNMENT MISSING" in r and "register_holes" in r

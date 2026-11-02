@@ -69,8 +69,9 @@ SEED: list[dict[str, Any]] = [
              "user what was refused and why.",
      "why": "2026-11-02 17:02: lower_to -3 was refused and the same move went out as raw console G-code.", "tags": ["machine"]},
     {"title": "A flipped plate goes down turned",
-     "rule": "After a flip, probe two register holes on the diagonal and turn the setup by the measured angle (setup orient "
-             "rotation) before cutting; set XY from one hole and check the others.",
+     "rule": "A program with more than one setup gets register holes through the waste in the first setup (register_holes / "
+             "register_hole_ops: they land on themselves after the flip). After the flip, run Align setup: it probes the top "
+             "and the holes, and adjusts the origin and the rotation itself. Don't hand-compute or edit the angle into cam.py.",
      "why": "2026-11-02 latch: the plate went down 0.17° clockwise after a front-to-back flip (0.4 mm at the far hole).",
      "tags": ["cam", "probe", "flip"]},
 ]

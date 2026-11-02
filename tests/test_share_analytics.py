@@ -231,3 +231,11 @@ def test_the_consolidation_settings_and_undo(client):
     assert client.get("/api/dreams").json()["enabled"] is False
     assert client.post("/api/dreams", json={"action": "enable"}).json()["enabled"] is True
     assert client.post("/api/dreams", json={"action": "undo"}).status_code == 400          # nothing to undo yet
+
+
+def test_the_power_estimate_says_why_when_it_cant(client):
+    d = _fake_run(client.ws / "runs", True)
+    (d / "cam.py").unlink()                                                    # a file run: no CAM script to simulate
+    r = client.get("/api/runs/power", params={"id": f"{d.parent.name}/{d.name}"}).json()
+    assert "no CAM script" in r["error"]
+    assert client.get("/api/runs/power", params={"id": "../x"}).status_code == 404

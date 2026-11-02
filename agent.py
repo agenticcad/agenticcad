@@ -346,6 +346,10 @@ probe_hole(..., check=0.1) on the diagonal one. The probe drops into holes to `d
 hole must be at least that deep and wider than the ball by 1 mm. simulate_cam checks every probe move for air
 (COLLISIONS "3D probe ... hits stock": a hole that isn't cut yet, a spot that was machined away, a wrong height).
 There is no probe op on other posts or on 4th-axis setups: say so and use Machine ▸ Zero instead.
+Plan alignment with the program: a program with more than one setup gets register holes through the waste in the first
+setup (register_holes(setup, parts) picks spots clear of the parts that land on themselves after the flip;
+register_hole_ops(...) bores them through), and after the flip the machine action align (Align setup) probes the top and
+those holes and ADJUSTS the origin and rotation itself - offer that, not hand-computed angles. A single setup gets none.
 Lessons learnt (the `lessons` tool): rules written after earlier failures. cam_context and build_cam hand you the ones that
 apply - follow each and say in one line how the script meets it; simulate_cam names any lesson the program breaks. When a
 run fails or is stopped, the simulation catches something your script should have avoided, the app refuses something you
@@ -1072,6 +1076,29 @@ class CadAgent:
                           "'operations added in the CAM tab' comment). Keep it when you rewrite the script.")
         return prog
 
+    def align_spec(self, setup: str | None = None, rough: dict | None = None) -> dict:
+        """What Align setup measures for a later setup of the program: its register holes and a clean spot on its top
+        (Program.alignment_features), starting from the first setup's X0 Y0 unless told otherwise - right for a
+        stock-centre origin and a symmetric flip, which is how register holes are placed."""
+        import machine_link
+        prog = self.program
+        if prog is None:
+            raise machine_link.Refused("no CAM program: align works from the program's register holes")
+        feats = prog.alignment_features() if hasattr(prog, "alignment_features") else []
+        if not feats:
+            raise machine_link.Refused("this program has one setup (nothing to align) or no register holes / probe holes "
+                                       "to align on: add register_hole_ops in the first setup")
+        f = next((x for x in feats if setup in (None, x["setup"], x["wcs"])), None)
+        if f is None:
+            raise machine_link.Refused(f"no later setup called {setup!r}: {', '.join(x['setup'] for x in feats)}")
+        if len(f.get("holes") or []) < 2 or not f.get("surface"):
+            raise machine_link.Refused(f"{f['setup']}: align needs two holes and a clean spot on the top; the program gives "
+                                       f"{len(f.get('holes') or [])} hole(s)" + ("" if f.get("surface") else " and no spot"))
+        first = prog.setups[0]
+        sx, sy = f["surface"] if isinstance(f["surface"], (list, tuple)) else (f["surface"]["x"], f["surface"]["y"])
+        return {"wcs": f["wcs"], "surface": {"x": sx, "y": sy}, "z_top": f.get("z_top", 0.0), "holes": f["holes"],
+                "rough": rough or {"from": first.wcs}}
+
     def program_for_ops(self, ops: list[int], air: float = 0.0) -> tuple[dict, dict, str]:
         """The CAM program's chosen operations (one setup) as the Z1 will play them: (prepared program, info, file label)."""
         import machine_link
@@ -1091,11 +1118,28 @@ class CadAgent:
         if not (0.0 <= air <= 50.0):
             raise machine_link.Refused("air-cut lift: 0 .. 50 mm")
         sub = cam.Program(st, chosen, name=prog.name)
-        prep = machine_link.prepare_program(sub.gcode(), [o.name for o in chosen], air_cut=air)
+        # a setup aligned on the machine this session (Align setup: probed register holes) is posted turned by the
+        # measured angle - the plate after a flip never goes down square, and cam.py stays as designed
+        al = None
+        mc = getattr(self, "machine", None)
+        if mc is not None and getattr(mc, "connected", False) and hasattr(mc, "alignment") and not st.rotary:
+            a = mc.alignment(st.wcs) or {}
+            if a.get("valid") and a.get("cam_align"):        # the turn only: the WCS already holds the shift
+                al = dict(a["cam_align"])
+        before = st.align
+        st.align = al or before
+        try:
+            prep = machine_link.prepare_program(sub.gcode(), [o.name for o in chosen], air_cut=air)
+        finally:
+            st.align = before
+        if al:
+            prep["aligned"] = {st.wcs: float(al.get("rot_deg") or 0.0)}
         for o, src in zip(prep["ops"], chosen):
             o.update(key=src.key, kind=src.kind, color=src.color, time=round(src.time_minutes(st.machine), 2))
         label = f"{prog.name}_op{idx[0] + 1}" + (f"-{idx[-1] + 1}" if len(idx) > 1 else "") + ("_air" if air else "")
-        info = {"program": prog.name, "setup": st.name, "wcs": st.wcs, "ops_index": idx,
+        mp = self.doc_dir / "model.py"
+        info = {"program": prog.name, "setup": st.name, "wcs": st.wcs, "ops_index": idx, "align": al, "config": self.config,
+                "model_code": mp.read_text() if mp.exists() else None,
                 "time_min": round(sum(o.time_minutes(st.machine) for o in chosen), 1), "cam_code": self.cam_code}
         return prep, info, label
 
@@ -1105,8 +1149,8 @@ class CadAgent:
     MACHINE_NOW = ("status", "hold", "pause", "stop_program", "halt", "check_ops", "connect", "disconnect")
     MACHINE_ASK = ("control_on", "control_off", "home", "unlock", "resume", "resume_program", "change_tool", "confirm_tool",
                    "origin_anchor", "auto_z_probe", "set_origin", "shift_origin", "origin_at", "lower_to", "raise_z", "goto",
-                   "cleaning_position", "probe_3d", "probe_descend", "recover", "run_ops", "switch", "console", "jog_a", "rotary_zero",
-                   "shrink_a")
+                   "cleaning_position", "probe_3d", "probe_descend", "probe_tap_test", "align", "recover", "run_ops", "switch", "console",
+                   "jog_a", "rotary_zero", "shrink_a")
 
     def _setup_is_rotary(self, info: dict) -> bool:
         """Is the setup a program_for_ops() picked on the 4th axis? (its origin must then be zeroed on the axis)"""
@@ -1221,6 +1265,13 @@ class CadAgent:
             args3 = (str(f("kind", "")), float(f("x", 20)), float(f("y", 20)), float(f("depth", 2)), float(f("dia", 2)))
             info = mc.check_probe_3d(*args3, None, hole)
             return info["summary"], lambda: mc.probe_3d(*args3, hole_dia=hole)
+        if action == "probe_tap_test":
+            return ("Tap test for the 3D probe: nothing moves. Within 20 s, tap the stylus sideways - the app watches the probe "
+                    "pin and allows probing with it once it has seen a trigger."), mc.probe_tap_test
+        if action == "align":
+            spec = self.align_spec(f("setup"), f("rough"))
+            info = mc.check_align(spec)
+            return info["summary"], lambda: mc.align(spec)
         if action == "probe_descend":
             to_z = f("to_z")
             to_z = float(to_z) if to_z is not None else None
@@ -1238,6 +1289,7 @@ class CadAgent:
                                  "are chained in) and fix what it reports: the run is checked against that simulation")
             sim_txt = ("SIMULATION ERRORS - approve only if you accept them: " + " | ".join(gate["errors"]) + ". ") if gate["errors"] else ""
             return (sim_txt + f"Run on the machine: {names} (setup {info['setup']}, {info['wcs']}) · about {info['time_min']} min"
+                    + (f" · turned {info['align']['rot_deg']:+.3f}° as aligned" if info.get("align") else "")
                     + (f" · AIR CUT +{prep['air_cut']:g} mm" if prep["air_cut"] else "") + (" · 4TH AXIS" if rot else "") + ". " + "; ".join(chk["notes"])
                     + ". The machine runs it on its own once started."), lambda: mc.run_program(label, prep, {**info, "owner": {"doc": self.doc_id, "name": self.design_name}}, rotary=rot, ack=ack)
         if action == "switch":
@@ -1449,6 +1501,8 @@ class CadAgent:
         except Exception:  # noqa: BLE001
             self._journal(action, a, "done")
         final = (res.get("final") or (res.get("recover") or {}).get("final")) if isinstance(res, dict) else None
+        if action == "align" and isinstance(res, dict):
+            return ("Aligned and adjusted. " if res.get("adjusted") else "Measured, NOT adjusted (outside the limits: the user decides). ") + (res.get("summary") or "")
         if final:                                          # the move waited until it finished: no status polling needed
             return "Approved and done. " + final
         running = action in ("change_tool", "probe_3d", "auto_z_probe", "run_ops", "home", "jog_a") or (action == "rotary_zero" and a.get("what", "z_probe") == "z_probe")
@@ -1566,6 +1620,24 @@ class CadAgent:
         if len({id(prog.setup_of(o)) for o in prog.ops}) > 1:
             tags.add("flip")
         return tags
+
+    def alignment_advice(self, prog) -> str:
+        """Multi-setup programs need something to align the later setups on (register holes through the waste, cut in the
+        first setup); a single setup doesn't, so nothing is said there."""
+        flat = [s for s in prog.setups if not s.rotary]
+        if len(flat) < 2:
+            return ""
+        try:
+            feats = prog.alignment_features() if hasattr(prog, "alignment_features") else []
+        except Exception:  # noqa: BLE001 - advice only
+            feats = []
+        if feats and all(f.get("holes") for f in feats):
+            return ("\n\nALIGNMENT: " + "; ".join(f"{f['setup']} aligns on {len(f['holes'])} register hole(s) "
+                                                  f"(Align setup after the flip measures and adjusts)" for f in feats))
+        return ("\n\nALIGNMENT MISSING: this program has " + str(len(flat)) + " setups and nothing to align the later ones on. "
+                "Add register holes in the first setup - register_holes(setup, parts) picks spots in the waste that land on "
+                "themselves after the flip, register_hole_ops(...) cuts them through - so Align setup can measure the flipped "
+                "plate and adjust (shift and rotation) instead of guessing. Say so to the user before going on.")
 
     def lessons_for(self, tags: set[str], heading: str) -> str:
         rows = lessons_mod.relevant(lessons_mod.load(self.workspace), tags)
@@ -2579,7 +2651,7 @@ class CadAgent:
                 return {"content": [{"type": "text", "text": f"CAM BUILD FAILED\n{type(e).__name__}: {e}"}], "is_error": True}
             les = agent.lessons_for(agent.cam_tags(prog), "LESSONS for this program - in your reply, say in one line each how the "
                                     "script meets it (or that it doesn't apply); fix the script first where it doesn't:")
-            return {"content": [{"type": "text", "text": prog.summary() + ("\n\n" + les if les else "")}]}
+            return {"content": [{"type": "text", "text": prog.summary() + agent.alignment_advice(prog) + ("\n\n" + les if les else "")}]}
 
         @tool("get_cam_code", "Return the current CAM script.", {})
         async def get_cam_code(args: dict[str, Any]) -> dict[str, Any]:
@@ -3235,7 +3307,7 @@ class CadAgent:
               "with the table back, exposing what Home covers; the user homes again after cleaning), probe_3d {kind e.g. outside_back_right, x, y, depth, "
               "dia: the probe's BALL Ø (2 for the Makera probe, never a hole size), hole_dia: pocket_center only, the hole's Ø; 3D probe "
               "T9999 fitted; corners/boss start 1-10 mm above a probed Z0 or a probe_descend touch, pocket_center starts INSIDE the "
-              "hole}, probe_descend {to_z: work Z to go down to (into a hole: no touch expected), or none: find the surface below and "
+              "hole}, probe_tap_test (the user taps the 3D probe's stylus; needed once per fitting before probe_descend / align), align {setup?: the later setup's name or WCS, rough?: {x,y} machine XY of its work 0,0 when it isn't the first setup's} (Align setup after a flip: probes the top and the program's register holes, fits shift and rotation and ADJUSTS the WCS, and that setup is then posted turned to match; outside the limits it adjusts nothing and says why - that's the user's call, not an error), probe_descend {to_z: work Z to go down to (into a hole: no touch expected), or none: find the surface below and "
               "back off 5 mm; max_dist} (G38.3 with the 3D probe, stops on contact without an alarm), run_ops {ops: 0-based indices in ONE setup, air: lift mm for an air cut, ack: true only when the user "
               "has vouched for a rotary setup's origin}, switch {what: "
               "dust|light|probe_laser|spindle_fan, on, power: fan speed 0-100 %}, console {line: reads and settings only ($#, $G, M957, "

@@ -449,3 +449,35 @@ def test_spindle_drive_effort_from_m957_is_opt_in_and_stays_out_of_the_log():
         finally:
             await mc.disconnect(); await emu.stop()
     run(go())
+
+
+def test_the_3d_probe_must_be_tap_tested_before_it_descends(monkeypatch):
+    async def go():
+        emu, mc, _ = await _setup()
+        try:
+            await _ready(mc, emu)
+            emu.tool = 9999
+            await asyncio.sleep(0.4)
+            _measured(mc, emu)
+            mc.probe_tap = None
+            _probed(mc)
+            with pytest.raises(ml.Refused, match="tap-test the 3D probe"):
+                mc.check_probe_descend()
+            pins = iter([0, 0, 0, 1])
+            async def diag(timeout=2.0):
+                return {"P": [next(pins, 1), 0]}
+            monkeypatch.setattr(mc, "diagnose", diag)
+            res = await mc.probe_tap_test(timeout=5)
+            assert res["tap"]["triggered"] == 1
+            mc.check_probe_descend()                                   # now allowed
+            mc.measured = {**mc.measured, "t": 99}                    # the probe re-fitted / re-measured: tap again
+            with pytest.raises(ml.Refused, match="tap-test"):
+                mc.check_probe_descend()
+            async def dead(timeout=2.0):
+                return {"P": [0, 0]}
+            monkeypatch.setattr(mc, "diagnose", dead)
+            with pytest.raises(ml.Refused, match="no trigger seen"):
+                await mc.probe_tap_test(timeout=0.5)
+        finally:
+            await mc.disconnect(); await emu.stop()
+    run(go())

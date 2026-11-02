@@ -522,6 +522,13 @@
   body:not([data-ws=design]) #leftcol, body.sketching #leftcol { display:none; }
   #leftcol #tree, #leftcol #params-card { position:static; width:auto; max-height:none !important; background:none; border:0; border-radius:0; padding:10px 6px; }
   #leftcol #params-card { border-top:1px solid var(--line); padding:10px; }
+  /* the Browser comes first: its own height (up to 60 % of the column, then it scrolls); Parameters takes what is left and
+     scrolls inside it, and folds away to its header */
+  #leftcol { overflow:hidden; } #leftcol #tree { flex:0 0 auto; max-height:60% !important; overflow:auto; min-height:64px; }
+  #leftcol #params-card { flex:1 1 auto; min-height:0; overflow:auto; } #leftcol #params-card.folded { flex:0 0 auto; }
+  #params-card .hd .fold { cursor:pointer; user-select:none; display:inline-flex; align-items:center; gap:4px; }
+  #params-card .hd .fold::before { content:'▾'; font-size:10px; transition:transform .12s; } #params-card.folded .hd .fold::before { transform:rotate(-90deg); }
+  #params-card.folded #params-body { display:none; }
   #leftcol #tree .hd, #leftcol #params-card .hd { font-size:11px; font-weight:600; letter-spacing:.06em; color:var(--mut2); }
   /* viewer overlays now start at the viewer's own top */
   #cubewrap { top:12px; } #simhud .hud-tl, #simhud .hud-tr { top:14px; } #sketch-items { top:60px; }
@@ -721,6 +728,9 @@
   .ar-kpi b { font:650 17px ui-monospace,Menlo,monospace; letter-spacing:-.02em; } .ar-kpi b em { font-style:normal; font-size:11px; color:var(--muted); font-weight:500; margin-left:3px; }
   .ar-kpi span { display:block; font-size:11px; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .ar-kpi.w b { color:var(--warn); } .ar-kpi.g b { color:var(--ok); } .ar-kpi.e b { color:var(--err); }
+  .ar-kpi.est { border-style:dashed; } .ar-kpi.est b { color:var(--mut2, #8c95a3); font-style:italic; }
+  .an-est { font-size:10px; font-weight:600; letter-spacing:.04em; text-transform:uppercase; color:var(--warn); border:1px dashed var(--warn); border-radius:4px; padding:0 4px; margin-left:6px; }
+  .ar-pw { width:100%; font-size:12px; border-collapse:collapse; margin-top:6px; } .ar-pw td { padding:2px 0; } .ar-pw td:nth-child(n+2) { text-align:right; white-space:nowrap; padding-left:8px; }
   .ar-find { display:flex; gap:9px; padding:7px 0; border-bottom:1px solid rgba(46,52,61,.6); font-size:12px; line-height:1.45; } .ar-find:last-child { border:0; }
   .ar-find i { width:7px; height:7px; border-radius:50%; margin-top:6px; flex:none; background:var(--accent2); } .ar-find.warn i { background:var(--warn); } .ar-find.good i { background:var(--ok); }
   .ar-find small { display:block; color:var(--muted); font-size:11.5px; }
@@ -961,7 +971,7 @@
     <div class="an-sec" id="an-trend-sec"><div class="an-h">Across runs <span class="muted" style="text-transform:none;letter-spacing:0;font-weight:400">time against estimate</span></div><div id="an-trend"></div></div>
   </div>
     <div id="tree"><div class="hd" style="display:flex;align-items:center">Browser<button class="btn small" id="tree-addbody" style="display:none">+ Body</button><button class="btn small" id="tree-addpart" style="margin-left:auto;padding:1px 6px" title="Insert a part from the library">+ Part</button></div><div id="treebody"></div><div id="sketchtree"></div></div>
-    <div id="params-card" style="display:none"><div class="hd">Parameters <span class="muted" id="params-hint" style="text-transform:none;letter-spacing:0"></span><select id="cfg-sel" title="Configuration: named sets of parameter values"></select></div><div id="params-body"></div></div>
+    <div id="params-card" style="display:none"><div class="hd"><span class="fold" id="params-fold" title="Show or hide the parameters">Parameters</span> <span class="muted" id="params-hint" style="text-transform:none;letter-spacing:0"></span><select id="cfg-sel" title="Configuration: named sets of parameter values"></select></div><div id="params-body"></div></div>
   </div>
   <div id="viewer">
     <div id="simhud" style="display:none"><div class="hud-tl"></div><div class="hud-tr"></div><div class="hud-bl"></div><div class="hud-br"></div></div>
@@ -1138,8 +1148,12 @@
       <span class="inp" style="width:96px"><b>depth</b><input type="number" id="mv-p3-d" value="2" min="0.5" max="10" step="0.5"></span><span class="inp" style="width:96px" title="the probe's ball diameter"><b>ball Ø</b><input type="number" id="mv-p3-dia" value="2" min="0.5" max="6" step="0.1"></span>
       <span class="inp" style="width:96px" id="mv-p3-hole-w" title="pocket / bore centre: the hole's diameter (sizes the search)"><b>hole Ø</b><input type="number" id="mv-p3-hole" min="1" max="160" step="0.1" placeholder="–"></span>
       <button class="btn sm pri" data-act="p3m">Probe</button></div>
+    <div class="row"><span class="muted sm">3D probe</span><button class="btn sm" data-act="tap" title="Nothing moves: tap the stylus sideways within 20 s and the app checks the probe triggers. Needed once per fitting before probing down or aligning.">Tap test</button></div>
     <div class="row"><span class="muted sm">Probe down (G38.3, stops on contact)</span><button class="btn sm" data-act="pdsurf" title="Find the surface below (up to 20 mm) and back off 5 mm above it">Find the surface</button><button class="btn sm" data-act="pdhole" title="Go down to the depth below Z0 inside a hole; stops (and backs off) if it touches on the way">Into the hole</button></div>
     <p class="muted sm" id="mm-p3-hint"></p></div>
+  <div class="mcard" id="mm-align-card"><div class="h">Align a flipped setup</div>
+    <div class="row"><select id="mm-align-setup" class="inp" style="flex:1" title="The later setup to align on the register holes the first setup cut"></select><button class="btn sm pri" data-act="align">Align…</button></div>
+    <p class="muted sm" id="mm-align-msg">With the 3D probe fitted and tap-tested: it probes the top and the register holes, works out how the plate went down (shift and turn) and adjusts the setup's origin - the program is then posted turned to match. Outside the limits it changes nothing and says why.</p></div>
   <div class="mcard"><div class="h">Console</div>
     <div class="row"><input id="mm-con" class="inp mono" placeholder="one line, e.g. G0 X10 Y10" spellcheck="false" style="flex:1"><button class="btn sm" id="mm-con-send" data-act="console">Send…</button></div>
     <p class="muted sm">One line at a time, sent as typed after you confirm it. Never sent: M490, M498.2, settings ($n=), tool changes (use Prepare).</p></div>
@@ -3389,6 +3403,9 @@ async function openConfigurations() {
 function renderParams() {
   const el = document.getElementById('params-body'), card = document.getElementById('params-card');
   card.style.display = paramsList.length ? '' : 'none'; setTimeout(placeParams, 0);
+  let fold = null; try { fold = localStorage.getItem('agenticcad.paramsFolded'); } catch (e) {}
+  card.classList.toggle('folded', fold == null ? paramsList.length > 15 : fold === '1');   // long lists start folded: the bodies come first
+  document.getElementById('params-fold').onclick = () => { const f = card.classList.toggle('folded'); try { localStorage.setItem('agenticcad.paramsFolded', f ? '1' : '0'); } catch (e) {} };
   renderCfgSelect();
   if (!paramsList.length) { el.innerHTML = ''; return; }
   el.innerHTML = '';
@@ -7021,6 +7038,9 @@ function mvManual(st) {
   if (st.fourth) mvEl('mstep-manual').querySelector('[data-act=rotz]').disabled = !(ready && s.tool && s.tool.number === 0 && st.tool_ok && st.rotary && st.rotary.offset);
   mvEl('mm-p3-hint').textContent = MV_P3_HINT[mvEl('mv-p3-kind').value.split('_')[0]];
   mvEl('mv-p3-hole-w').style.display = mvEl('mv-p3-kind').value === 'pocket_center' ? '' : 'none';
+  { const later = ((typeof program !== 'undefined' && program && program.setups) || []).filter(x => !x.rotary).slice(1).map(x => x.name), sel = mvEl('mm-align-setup');
+    mvEl('mm-align-card').style.display = later.length ? '' : 'none';
+    if (sel.dataset.k !== later.join('|')) { sel.dataset.k = later.join('|'); sel.innerHTML = later.map(n => `<option>${esc(n)}</option>`).join(''); } }
   const lp = mvEl('mv-loadpoll'); if (lp && st.spindle_load_poll) lp.checked = !!st.spindle_load_poll.on;
   const zf = mvEl('mv-zfloor'); if (document.activeElement !== zf) zf.value = st.z_floor;
   const log = mvEl('mv-log'), stick = log.scrollTop + log.clientHeight >= log.scrollHeight - 4;
@@ -7140,6 +7160,14 @@ async function mvRunFile(file) {
       if (await mvAsk('Lower Z', `<div>Lower Z only (X/Y stay) to <b>${h} mm above work Z0</b>: 300 mm/min to 10 mm above that, the last 10 mm at 100 mm/min. Only on a Z0 probed or touched off this session.</div><div class="muted">Watch the camera; Hold or STOP if it looks wrong.</div>`, 'Lower')) mvPost({ action: 'lower_to', z: h }); return; }
     if (a === 'p3') { const [kind] = CORNERS[MV.corner]; return mvProbe(kind, +b.dataset.x, +b.dataset.y, num('mz-depth'), num('mz-dia')); }
     if (a === 'p3m') return mvProbe(mvEl('mv-p3-kind').value, num('mv-p3-x'), num('mv-p3-y'), num('mv-p3-d'), num('mv-p3-dia'), opt('mv-p3-hole'));
+    if (a === 'tap') { if (await mvAsk('Tap test', '<div>Nothing moves. After Start, tap the 3D probe\'s stylus sideways within 20 s: the app watches the probe pin and allows probing down and aligning once it has seen a trigger.</div><div class="muted">No trigger: check the probe\'s LED, charge and pairing.</div>', 'Start')) mvPost({ action: 'probe_tap_test' }); return; }
+    if (a === 'align') { const setup = mvEl('mm-align-setup').value;
+      if (!setup) return;
+      if (!await mvAsk('Align setup', `<div><b>Align ${esc(setup)}</b> on the program's register holes: the 3D probe touches the top, then each hole's centre (one approval for the lot).</div><div>Within the limits (turn ≤ 2°, shift ≤ 3 mm, hole spacing within 0.15 mm) the setup's origin is <b>adjusted</b> and its program is posted turned to match; outside them nothing changes and the reason is shown.</div><div class="warn">Hand near STOP the first time.</div>`, 'Align')) return;
+      mvEl('mm-align-msg').textContent = 'Aligning…';
+      const r = await mvPost({ action: 'align', kind: setup });
+      const ar = r && r.align_result; mvEl('mm-align-msg').textContent = ar ? ((ar.adjusted ? 'Adjusted: ' : 'Not adjusted: ') + (ar.summary || ar.why || '')) : (r && r.error) || 'Align failed';
+      return; }
     if (a === 'pdsurf') { if (await mvAsk('Find the surface', '<div>The 3D probe goes straight down (G38.3, up to 20 mm) until it touches, then backs off 5 mm above the surface. No alarm if it finds nothing.</div><div class="warn">The 3D probe must be fitted and over the part.</div>', 'Probe down')) mvPost({ action: 'probe_descend', dist: 20 }); return; }
     if (a === 'pdhole') { const d = num('mv-p3-d'); if (await mvAsk('Into the hole', `<div>The 3D probe goes down to <b>${d} mm below work Z0</b> (G38.3). If it touches anything on the way it stops and backs off 1 mm: it isn't over the hole.</div>`, 'Go down')) mvPost({ action: 'probe_descend', to_z: -d, dist: d + 10 }); return; }
     if (a === 'anchor') { if (await mvAsk('Origin = Anchor 1', '<div>Work X0 Y0 = Anchor 1, the L-bracket\'s inside corner (G10 L2 P0, as MakeraStudio does). Z is not touched. Nothing moves.</div>', 'Set')) mvPost({ action: 'origin_anchor' }); return; }
@@ -7338,7 +7366,7 @@ window.addEventListener('message', e => {                 // the strip asks this
 });
 // ---------------------------------------------------------------- Analytics workspace: recorded runs, planned vs actual
 // (run_recorder records every program the Machine workspace sends; run_analysis matches it to the program by position)
-var AN = { runs: [], design: '', scope: 'design', id: null, a: null, metric: 'reached', view: null, t: null, hover: null, timer: null, asked: {} };
+var AN = { runs: [], design: '', scope: 'design', id: null, a: null, metric: 'reached', view: null, t: null, hover: null, timer: null, asked: {}, power: {} };
 const AN_OPC = ['#4ea1ff', '#ff8c42', '#3ecf7a', '#b18cff', '#f2c94c', '#ff5c8a', '#4fd1c5', '#e08cff', '#9fb4ff', '#ffb36b'];
 const anSlug = s => (String(s || '').replace(/[^A-Za-z0-9_.-]+/g, '_').replace(/^[_.]+|[_.]+$/g, '').slice(0, 40)) || 'untitled';
 const anMin = m => m == null ? '–' : m >= 60 ? `${Math.floor(m / 60)}:${String(Math.round(m % 60)).padStart(2, '0')} h` : `${m.toFixed(1)} min`;
@@ -7416,6 +7444,11 @@ async function anOpen(id, quiet) {
   if (!a.path.length) anEl('av-empty').textContent = 'No motion in this run could be placed on its program.';
   const s = a.summary; anEl('av-note').textContent = s.match_rate != null ? `${Math.round(s.match_rate * 100)}% of the run placed on the program${s.offset && s.offset.fitted ? ' · work offset fitted from the data' : ''}` : '';
   anReport(); anDraw(); anDrawTl(); anTrend(anScoped());
+  if (!AN.power[id] && a.run.outcome !== 'running') {          // ESTIMATED spindle power: a simulation of the run (first time ~1 min, then cached)
+    AN.power[id] = { loading: true };
+    api('/api/runs/power?id=' + encodeURIComponent(id)).then(p => { AN.power[id] = p; }).catch(e => { AN.power[id] = { error: e.message }; })
+      .finally(() => { if (AN.id === id) { anReport(); anDrawTl(); } });
+  }
 }
 function anPrep(a) {                                   // per-op colours, time range, path bounds
   a.T = a.timeline.length ? a.timeline[a.timeline.length - 1][0] : 1;
@@ -7524,11 +7557,11 @@ function anTip(i, ev) {
   new ResizeObserver(() => { if (ribbonTab() === 'analytics') anResize(); }).observe(anEl('analytics-view'));
 })();
 // ---- the timeline: operations, feed reached (+ override), spindle rpm / target, temperatures, machine state
-const AN_LANES = [['ops', 20], ['reached', 1.1], ['rpm', 0.7], ['temp', 1.1], ['state', 9]];
+const AN_LANES = [['ops', 20], ['reached', 1.1], ['rpm', 0.7], ['power', 0.8], ['temp', 1.1], ['state', 9]];
 function anDrawTl() {
   const c = anEl('av-tl'); if (!c || !c.width) return; const d = window.devicePixelRatio || 1, W = c.width / d, H = c.height / d, g = c.getContext('2d');
   g.setTransform(d, 0, 0, d, 0, 0); g.clearRect(0, 0, W, H); const a = AN.a; if (!a || !a.timeline.length) return;
-  const L = 118, R = 14, x = t => L + (t / a.T) * (W - L - R), unit = (H - 92) / 2.9;
+  const L = 118, R = 14, x = t => L + (t / a.T) * (W - L - R), unit = (H - 92) / AN_LANES.reduce((q, [, h]) => q + (h > 5 ? 0 : h), 0);
   let y0 = 2; const lane = {}; for (const [k, h] of AN_LANES) { const hh = h > 5 ? h : h * unit; lane[k] = [y0, hh]; y0 += hh + (h > 5 ? 4 : 8); }
   g.font = '11px -apple-system,BlinkMacSystemFont,sans-serif'; g.textBaseline = 'middle';
   const label = (k, text, sub) => { const [yy, hh] = lane[k]; g.fillStyle = '#8c95a3'; g.fillText(text, 10, yy + hh / 2 - (sub ? 6 : 0)); if (sub) { g.fillStyle = '#626b78'; g.fillText(sub, 10, yy + hh / 2 + 7); } };
@@ -7554,6 +7587,19 @@ function anDrawTl() {
   trace('reached', r => r[4] != null ? r[4] / 100 : null, 0, 1.2, '#f2c94c', [4, 3], false);
   label('reached', 'Feed reached', 'override dashed');
   Y = trace('rpm', 5, 0.85, 1.03, '#4ea1ff'); grid('rpm', Y, 1, '100%'); grid('rpm', Y, 0.9, '90%'); label('rpm', 'Spindle rpm', 'of target');
+  { // spindle power: an ESTIMATE (simulated removal rate × specific cutting energy), drawn dashed on its own scale
+    const P = AN.power[AN.id], [yy, hh] = lane.power;
+    if (P && P.series && P.series.length) {
+      const top = Math.max(5, Math.ceil((P.peak_w * 1.25) / 5) * 5), Yp = v => yy + hh - Math.min(v, top) / top * hh, B = new Map();
+      for (const [t, w] of P.series) { const b = Math.floor(x(t) / 3); let e = B.get(b); if (!e) B.set(b, e = [0, 0, -Infinity]); e[0] += w; e[1]++; e[2] = Math.max(e[2], w); }
+      const keys = [...B.keys()].sort((p, q) => p - q);
+      g.fillStyle = '#3ecf7a22'; for (const b of keys) { const e = B.get(b); g.fillRect(b * 3, Yp(e[2]), 3, yy + hh - Yp(e[2])); }
+      g.strokeStyle = '#3ecf7a'; g.lineWidth = 1.3; g.setLineDash([3, 2]); g.beginPath(); let prev = null;
+      for (const b of keys) { const e = B.get(b), px = b * 3 + 1.5, py = Yp(e[0] / e[1]); prev != null && b - prev <= 2 ? g.lineTo(px, py) : g.moveTo(px, py); prev = b; }
+      g.stroke(); g.setLineDash([]); grid('power', Yp, top / 2, `${top / 2} W`); grid('power', Yp, top, `${top} W`);
+    } else { g.fillStyle = '#626b78'; g.fillText(P && P.loading ? 'estimating…' : P && P.error ? 'no estimate for this run' : a.run.outcome === 'running' ? 'after the run' : '', L + 6, yy + hh / 2); }
+    label('power', 'Spindle power', 'ESTIMATE');
+  }
   Y = trace('temp', 6, 20, 75, '#ff8c42', null, false); trace('temp', 7, 20, 75, '#b18cff', null, false);
   g.strokeStyle = 'rgba(255,90,95,.6)'; g.setLineDash([5, 4]); g.beginPath(); g.moveTo(L, Y(70)); g.lineTo(W - R, Y(70)); g.stroke(); g.setLineDash([]); g.fillStyle = '#ff5a5f'; g.fillText('70 °C halt', W - R - 62, Y(70) - 7);
   grid('temp', Y, 50, '50°'); grid('temp', Y, 30, '30°'); label('temp', 'Temperature', 'spindle · power');
@@ -7608,8 +7654,14 @@ function anReport() {
     ${kpi('Feed reached', reached != null ? Math.round(reached * 100) : '–', '%', 'while cutting', reached != null && reached < 0.85 ? 'w' : reached != null ? 'g' : '')}
     ${kpi('Spindle peak', s.spindle_temp_max != null ? s.spindle_temp_max.toFixed(0) : '–', '°C', s.temp_slope_c_per_10min != null ? `${s.temp_slope_c_per_10min >= 0 ? '+' : ''}${s.temp_slope_c_per_10min} °C / 10 min` : 'halts at 70 °C', s.spindle_temp_max >= 62 ? 'e' : s.spindle_temp_max >= 55 ? 'w' : '')}
     ${kpi('Lowest rpm', s.rpm_min_ratio != null ? Math.round(s.rpm_min_ratio * 100) : '–', '%', 'of target, cutting', s.rpm_min_ratio != null && s.rpm_min_ratio < 0.92 ? 'w' : '')}
+    ${(() => { const P = AN.power[a.id]; return kpi('Spindle power · estimate', P && P.peak_w != null ? '~' + P.peak_w.toFixed(0) : '–', 'W',
+      P && P.peak_w != null ? `est. peak · mean ~${P.mean_w.toFixed(1)} W` : P && P.loading ? 'estimating…' : P && P.error ? 'not available' : 'after the run', 'est'); })()}
     ${kpi('Feed override', s.feed_ovr ? (s.feed_ovr[0] === s.feed_ovr[1] ? s.feed_ovr[0] : `${s.feed_ovr[0]}–${s.feed_ovr[1]}`) : '–', '%', s.feed_ovr && (s.feed_ovr[0] !== 100 || s.feed_ovr[1] !== 100) ? 'changed by hand' : 'untouched')}
   </div></div>
+  ${(() => { const P = AN.power[a.id]; if (!P || !P.ops) return P && P.error ? `<div class="ar-sec"><div class="an-h">Spindle power <span class="an-est">estimate</span></div><div class="ar-m">${esc(P.error)}</div></div>` : '';
+    return `<div class="ar-sec"><div class="an-h">Spindle power <span class="an-est">estimate</span></div>
+      <div class="ar-m">Not measured: the simulated removal rate of each move that ran × ${P.u} J/mm³ for ${esc(P.material)} (handbook; thin chips can cost up to ${P.band[1]} J/mm³, so read it as a range ${(P.peak_w * P.band[0] / P.u).toFixed(0)}–${(P.peak_w * P.band[1] / P.u).toFixed(0)} W at the peak). ${esc(P.basis.replace(/^simulated removal rate × specific cutting energy,? ?/, ''))}. Cutting power only - the motor's own losses come on top. Record spindle load (M957) can calibrate it.</div>
+      <table class="ar-pw">${P.ops.map(o => `<tr><td>${esc(o.name)}</td><td>~${o.mean_w.toFixed(1)} W</td><td class="muted">peak ~${o.peak_w.toFixed(1)} W</td></tr>`).join('')}</table></div>`; })()}
   <div class="ar-sec"><div class="an-h">Measured</div>
     ${good.map(t => `<div class="ar-find good"><i></i><div>${esc(t)}</div></div>`).join('')}
     ${finds.map(f => `<div class="ar-find ${f.severity === 'warn' ? 'warn' : ''}"><i></i><div>${esc(f.title)}<small>${esc(f.detail)}</small></div></div>`).join('')}

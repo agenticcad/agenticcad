@@ -320,7 +320,7 @@ def simulate(program: cam.Program, ops: list[int] | None = None, part=None, reso
 FINISHING_KINDS = ("parallel3d", "contour", "rotary_finish", "rotary_profile")   # ops planned as skims: a buried pass is a surprise
 
 
-def _bite_stats(op, mv, pts, idx, kinds, eng, rapid_rate) -> tuple[dict, dict]:
+def _bite_stats(op, mv, pts, idx, kinds, eng, rapid_rate, src=None) -> tuple[dict, dict]:
     """Per operation: the deepest axial engagement of one pass (and where) against the tool's stepdown, the highest
     material removal rate (mm3/min: volume a sample removes / its step x the move's feed) against the tool's rated
     MRR (stepdown x stepover width x feed), how the time splits into rapids, cutting feeds and feed moves that removed
@@ -363,14 +363,25 @@ def _bite_stats(op, mv, pts, idx, kinds, eng, rapid_rate) -> tuple[dict, dict]:
             air_s += t
             if d > 0.05:
                 air_moves.append(k)
-    worst = int(np.argmax(ap_move)) if n else 0
-    mx = float(ap_move[worst]) if n and np.isfinite(ap_move[worst]) else 0.0
-    wm = int(np.argmax(mrr_move)) if n else 0
+    # the planned depth per move: the op's (params "ap", e.g. a full-depth finish contour) or the tool's stepdown, and
+    # params "ap_moves" [[k0, k1, ap], ...] for ranges of op.moves planned deeper (a pocket's own full-depth wall finish)
     tool = op.tool
+    base = float((op.params or {}).get("ap") or tool.stepdown or 0.0)
+    allowed = np.full(n, base)
+    rng = (op.params or {}).get("ap_moves") or []
+    if rng and n:
+        opk = np.asarray(src, dtype=int) if src is not None and len(src) == n else np.arange(n)
+        for k0, k1, ap in rng:
+            allowed[(opk >= int(k0)) & (opk < int(k1))] = float(ap)
+    apz = np.where(np.isfinite(ap_move), ap_move, 0.0)
+    ratio = apz / np.maximum(allowed, 1e-9) if base > 0 or rng else apz
+    worst = int(np.argmax(ratio)) if n else 0
+    mx = float(apz[worst]) if n else 0.0
+    wm = int(np.argmax(mrr_move)) if n else 0
     rated = tool.rated_mrr()
     b = {"op": op.name, "kind": op.kind, "tool": tool.label(), "max": round(max(mx, 0.0), 3), "move": worst + 1,
          "at": [round(float(v), 2) for v in mv[worst][1:4]] if n else None,
-         "stepdown": float((op.params or {}).get("ap") or tool.stepdown),   # a planned full-depth finish pass is buried by design
+         "stepdown": float(allowed[worst]) if n else base,   # planned depth there: a full-depth finish pass is buried by design
          "mrr_max": round(float(mrr_move[wm]), 1), "mrr_move": wm + 1, "mrr_at": [round(float(v), 2) for v in mv[wm][1:4]] if n else None,
          "mrr_rated": round(rated, 1), "mrr_mean": round(float(vol_move.sum()) / (cut_s / 60.0), 1) if cut_s > 1e-6 else 0.0,
          "removed_mm3": round(float(vol_move.sum()), 2),
@@ -537,7 +548,7 @@ def _sim_zmap(program, order, part, resolution, frames, tol, machine_model=None,
             if next_mark is not None and end_move_done(idx, end, done, next_mark):
                 snap(next_mark); mark_i += 1
         done += len(mv)
-        b, per_move = _bite_stats(op, mv, pts, idx, kinds, eng, rapid_rate)
+        b, per_move = _bite_stats(op, mv, pts, idx, kinds, eng, rapid_rate, src if len(mv) != len(op.moves) else None)
         if len(mv) != len(op.moves):                       # tiles: each op move gets its worst over the tiles
             sa = np.asarray(src); keep_ = sa >= 0
             fold = {}

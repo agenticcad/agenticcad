@@ -1239,6 +1239,21 @@ async def runs_analysis(id: str):
     return a
 
 
+@app.get("/api/runs/power")
+async def runs_power(id: str):
+    """ESTIMATED spindle power for one run (power.py: simulated removal rate × specific cutting energy) - not measured."""
+    import power
+    import run_recorder
+    d = run_recorder.run_dir(WORKSPACE / "runs", id)
+    if d is None:
+        return JSONResponse({"error": "no such run"}, status_code=404)
+    mp = agent.doc_dir / "model.py"
+    try:
+        return await asyncio.to_thread(power.estimate, d, WORKSPACE, mp.read_text() if mp.exists() else None, agent.config)
+    except Exception as e:  # noqa: BLE001
+        return {"error": f"estimate failed: {type(e).__name__}: {e}"}
+
+
 @app.get("/api/machine")
 async def machine_get():
     saved = json.loads(MACHINE_FILE.read_text()) if MACHINE_FILE.exists() else {}
@@ -1296,6 +1311,12 @@ async def machine_post(body: MachineBody):
                                          body.y if body.y is not None else 20.0, body.depth or 2.0, body.dia or 2.0, hole_dia=body.hole_dia)
         elif a == "probe_descend":                       # G38.3 with the 3D probe: find the surface below, or go into a hole
             res = await machine.probe_descend(body.to_z, body.dist or 20.0)
+        elif a == "probe_tap_test":                      # the user taps the 3D probe's stylus; the app watches its pin
+            res = await machine.probe_tap_test()
+        elif a == "align":                               # Align setup: probe the top + the program's register holes, adjust
+            spec = await asyncio.to_thread(agent.align_spec, body.kind or None, {"x": body.x, "y": body.y} if body.x is not None and body.y is not None else None)
+            r = await machine.align(spec)
+            res = {**machine.payload(), "align_result": r}
         elif a == "recover":                             # back to a known state after a hold / stopped routine / alarm
             res = await machine.recover()
         elif a == "spindle_load_poll":                   # M957 drive effort while the spindle runs (recorded with runs)

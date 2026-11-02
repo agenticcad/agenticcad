@@ -28,6 +28,19 @@ cut after release, features left unmachined, scrappy paths), every cause was tra
   buried, faster where it is lightly loaded or in air, holding the tool's chip load with radial chip thinning. Each
   operation's **Load** (CAM tab ▸ Cut: 0.5 softer .. 1.5 harder) and the program's `load=` scale it; a feed override
   still wins.
+- **A finish pass by default.** Pockets rough leaving a little on the walls and the floor (0.2 / 0.1 mm), then finish:
+  the walls in one full-depth pass, the floor in one-way rows at one angle (`finish_angle`, along X by default) so every
+  floor shows the same even lay - or `finish_pattern="offset"` / `"spiral"`. Faces end with a one-way finishing pass.
+  `finish=False` (CAM tab ▸ Cut: "Finishing passes") leaves it out.
+- **Align setup** after a flip, with **register holes**: a program with more than one setup gets register holes through
+  the waste of the first setup (`register_holes` picks spots clear of the parts that land on themselves after the flip;
+  the CAM build says so when they're missing). After the flip, one approval probes the top and the holes, fits the
+  shift and the turn and **adjusts** the setup's origin; the setup is then posted turned to match, cam.py unchanged.
+  Outside the limits (2°, 3 mm, 0.15 mm hole spacing) it changes nothing and says why - no alarm. The 3D probe gets a
+  **tap test** (tap the stylus; the app watches its pin) before the app probes down with it.
+- **Spindle power, estimated** (Analytics): each run's moves simulated for their removal rate × the material's
+  specific cutting energy, as a tile, a timeline lane and per operation - always marked ESTIMATE (the latch job peaked
+  around 9 W of cutting power). Runs now keep the design they were cut from, so they can be simulated later.
 - **Helical bore** (`bore()`, and pockets bore round holes automatically): 4 × Ø8 register holes 17.9 → 8.1 min at the tool's own feed.
 - **Machine: Recover** (one step back to a known state after a hold or an alarm), **probe down** (G38.3: find the
   surface, or go into a hole) and the hole Ø for bore centring; **spindle load** (M957, the drive's effort - the real
@@ -40,8 +53,13 @@ cut after release, features left unmachined, scrappy paths), every cause was tra
 ### Changed
 - Toolpaths: tabs ramp on and off at 15° within the plunge feed (no more 2.7 mm drops at cutting feed) and sit on
   straight runs; finish walls after roughing are one full-depth pass; pockets cut lobe by lobe inside-out, stay down
-  inside cleared ground instead of retracting, and skip ground already cleared. The latch job: 247 → 194 min, 266 → 30
-  retracts, 86 → 0 steep drops, no new gouges.
+  inside cleared ground instead of retracting, and skip ground already cleared. Fitted feeds change smoothly (averaged
+  over a tool diameter, slowing before a corner rather than on it: 45,000 → 2,000 feed changes on the latch job, corner
+  peaks 870 → 740 mm³/min). The latch job: 247 → 194 min (208 with the new finish passes), 266 → 30 retracts, 86 → 0
+  steep drops, no new gouges. Adaptive clearing was measured against rings at the same load limit and loses on this
+  job (more air, bigger corner spikes), so it stays an option (`strategy="adaptive"`, with its own deep-cut depth
+  setting `adaptive_stepdown`) rather than a default.
+- Design workspace: the Browser comes first in the left column (bodies never squash), Parameters fold away.
 - Machine safety: Z0 only from a probe or a touch-off (setting Z clears the tool-length offset in the Z1's firmware);
   lower_to refuses a typed Z0 and does the last 10 mm at 100 mm/min; 3D-probe routines check their start height,
   record what the firmware set and no longer report a touch as "not triggered"; a program refuses a work offset that
