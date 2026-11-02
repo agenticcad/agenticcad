@@ -31,6 +31,8 @@ import drawing
 from cam_data import Library
 from library import PartLibrary, slug as lib_slug
 import script_edit
+import run_analysis
+import run_recorder
 import extensions as ext_mod
 import slicer
 import units as un
@@ -342,6 +344,14 @@ probe_hole(..., check=0.1) on the diagonal one. The probe drops into holes to `d
 hole must be at least that deep and wider than the ball by 1 mm. simulate_cam checks every probe move for air
 (COLLISIONS "3D probe ... hits stock": a hole that isn't cut yet, a spot that was machined away, a wrong height).
 There is no probe op on other posts or on 4th-axis setups: say so and use Machine ▸ Zero instead.
+Recorded runs (Analytics workspace): every program the Machine workspace sends is recorded (status ~4 Hz: position,
+real speed, spindle rpm and temperatures, overrides, events). machine_runs(action=list) lists them; action=analysis
+{id} gives planned vs actual per op (time against the estimate, feed reached = real speed / commanded feed, spindle
+droop, temperatures, overrides), move groups that lose time and measured findings. When asked to analyse a run, base
+every suggestion on those numbers and the run's cam.py (shown when it differs from the current one), and file them with
+report_suggestions: each with the evidence, the cam.py change and the expected gain. No load sensor exists: rpm droop
+is the only load signal. Say plainly when a run went as planned; don't invent problems. Apply a suggestion only when
+the user asks, then simulate.
 Notes: coordinates are setup-frame (= model coordinates for a plain top setup; Z up); the post subtracts the WCS origin.
 Contours get tangential arc lead-in/out by default (lead=radius; lead=0 disables) and start mid-way along the
 longest straight edge. The post fits G2/G3 arcs (machine.arcs, machine.arc_tolerance, machine.arc_format 'ij'|'r', machine.helical_arcs; never while A moves) within what the machine's controller takes (cam.CONTROLLERS by post: Makera = I/J only, 63-character lines; GRBL 80) and merges collinear moves.
@@ -754,6 +764,10 @@ class CadAgent:
         return {"type": "design", "name": self.design_name, "dirty": self.dirty, "config": self.config,
                 "configurations": list(self.model.configurations) if self.model else []}
 
+    def runs_design(self) -> str:
+        """The name this design's runs are recorded under (the recorder's rule: the saved name, else the program's)."""
+        return self.design_name or (self.program.name if self.program is not None else "") or "untitled"
+
     def list_designs(self) -> list[dict[str, Any]]:
         out = []
         for p in sorted(self.designs_dir.glob("*.py"), key=lambda p: -p.stat().st_mtime):
@@ -823,14 +837,21 @@ class CadAgent:
         self.notes.clear()
         await self.emit({"type": "chat_reset"})
 
-    async def import_design(self, name: str, code: str) -> str:
+    async def import_design(self, name: str, code: str, cam_code: str | None = None) -> str:
+        """A design script from a file (or a shared .zip, with its CAM script): built, then saved under `name`."""
         name = safe_name(name.removesuffix(".py"))
         await self.build(code, source="open", record=True)   # raises CadError if the script is broken
         (self.designs_dir / f"{name}.py").write_text(code)
+        if cam_code is not None:
+            (self.designs_dir / f"{name}.cam.py").write_text(cam_code)
+            try:
+                await self.set_cam_code(cam_code, rebuild=True)
+            except Exception as e:  # noqa: BLE001 - e.g. made for a machine or tools this library doesn't have: the design still comes in
+                await self.emit({"type": "cam_error", "text": f"The imported CAM program doesn't build here: {type(e).__name__}: {e}"})
         self.design_name = name
         self.saved_code = code
         self._write_state()
-        self.notes.append(f"The user imported design '{name}' from a file; the script changed.")
+        self.notes.append(f"The user imported design '{name}' from a file{' with its CAM program' if cam_code else ''}; the script changed.")
         await self.emit(self.design_state())
         return name
 
@@ -2978,7 +2999,50 @@ class CadAgent:
             text = await agent.machine_action(str(args.get("action") or ""), args.get("args") or {})
             return {"content": [{"type": "text", "text": text}]}
 
-        tools = [build_model, *([] if LEGACY_BUILD else [edit_model]), inspect_model, screenshot, export_model, get_code, save_design, machine_status, machine_control, cam_edit,
+        @tool("machine_runs",
+              "Recorded machine runs (Analytics). action=list {all: true for every design, default this design's}; "
+              "action=analysis {id}: planned vs actual for one run (per op, move groups, findings) and its cam.py if it "
+              "differs from the current CAM script.",
+              {"type": "object", "properties": {"action": {"type": "string"}, "id": {"type": "string"}, "all": {"type": "boolean"}},
+               "required": ["action"]})
+        async def machine_runs(args: dict[str, Any]) -> dict[str, Any]:
+            root = agent.workspace / "runs"
+            if args.get("action") == "analysis":
+                d = run_recorder.run_dir(root, str(args.get("id") or ""))
+                if d is None:
+                    return {"content": [{"type": "text", "text": "No run with that id (machine_runs action=list)."}]}
+                a = await asyncio.to_thread(run_analysis.analyse, d)
+                text = json.dumps(run_analysis.compact(a), default=str)
+                cam_then = (d / "cam.py").read_text() if (d / "cam.py").exists() else None
+                if cam_then is not None and cam_then.strip() != agent.cam_code.strip():
+                    text += "\n\nThe run's cam.py (the current CAM script differs):\n" + cam_then
+                elif cam_then is not None:
+                    text += "\n\nThe run's cam.py is the current CAM script."
+                return {"content": [{"type": "text", "text": text}]}
+            runs = run_recorder.list_runs(root, None if args.get("all") else agent.runs_design())
+            rows = [{k: r.get(k) for k in ("id", "design", "program", "setup", "started", "outcome", "est_min", "duration_min", "air_cut")}
+                    for r in runs[:30]]
+            return {"content": [{"type": "text", "text": json.dumps(rows) if rows else "No recorded runs" + ("" if args.get("all") else " for this design (all=true for every design)") + "."}]}
+
+        @tool("report_suggestions",
+              "File improvement suggestions for a recorded run; they show in the Analytics report as cards (Apply asks you "
+              "to make the change). suggestions: [{title, category: time|feed|spindle|temperature|probing|estimate|other, "
+              "evidence (the measured numbers it rests on), change (the cam.py change, concretely), gain (expected, e.g. "
+              "'-4 min'), op (operation name or null)}]. Replaces earlier suggestions for that run.",
+              {"type": "object", "properties": {"id": {"type": "string"}, "suggestions": {"type": "array", "items": {"type": "object"}}},
+               "required": ["id", "suggestions"]})
+        async def report_suggestions(args: dict[str, Any]) -> dict[str, Any]:
+            d = run_recorder.run_dir(agent.workspace / "runs", str(args.get("id") or ""))
+            if d is None:
+                return {"content": [{"type": "text", "text": "No run with that id."}]}
+            keep = ("title", "category", "evidence", "change", "gain", "op")
+            sug = [{k: str(x.get(k)) if x.get(k) is not None else None for k in keep} | {"n": i + 1}
+                   for i, x in enumerate(args.get("suggestions") or []) if isinstance(x, dict) and x.get("title")]
+            (d / "suggestions.json").write_text(json.dumps({"t": time.time(), "suggestions": sug}, indent=1))
+            await agent.emit({"type": "run_suggestions", "id": args.get("id"), "suggestions": sug})
+            return {"content": [{"type": "text", "text": f"{len(sug)} suggestion(s) shown in the Analytics report."}]}
+
+        tools = [build_model, *([] if LEGACY_BUILD else [edit_model]), inspect_model, screenshot, export_model, get_code, save_design, machine_status, machine_control, cam_edit, machine_runs, report_suggestions,
                  cam_context, build_cam, get_cam_code, export_gcode, simulate_cam, check_interference, check_motion, feeds_speeds, save_machine, save_tool, build_machine, get_machine_code, build_fixture, get_fixture_code,
                  get_parameters, set_parameters, measure_tool, mass_properties, make_drawings, library_tool, kit_tool, sketch_tool,
                  extension_tool, show_panel, configurations_tool] + ext_tools + slicing_tools

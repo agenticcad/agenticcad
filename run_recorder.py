@@ -6,7 +6,7 @@ Every program the Machine workspace sends is recorded under <workspace>/runs/<de
   program.nc    the exact text uploaded to the machine (line numbers in the samples index it)
   cam.py        the CAM script it came from (when the run came from CAM operations)
   samples.jsonl.gz  one row per machine status the app saw (~4 Hz): t (s from start), state, line, op index, machine
-                position, feed [current, requested, override %], spindle [rpm, target, override %, temp C, power temp C],
+                position, work position, feed [current, requested, override %], spindle [rpm, target, override %, temp C, power temp C],
                 tool number
   events.jsonl  the app's notes during the run (tool changes, pauses, alarms) and interesting console lines (probe
                 touches [PRB:...], errors, alarms), with t
@@ -72,7 +72,7 @@ class RunRecorder:
             self._last_status_t = status_t
             f, s = st.get("feed") or {}, st.get("spindle") or {}
             row = {"t": round(status_t - self.t0, 2), "s": st.get("state"), "ln": job.get("line"), "op": job.get("op"),
-                   "m": st.get("mpos"), "f": [f.get("current"), f.get("requested"), f.get("override")],
+                   "m": st.get("mpos"), "w": st.get("wpos"), "f": [f.get("current"), f.get("requested"), f.get("override")],
                    "sp": [s.get("rpm"), s.get("target"), s.get("override"), s.get("temp"), s.get("power_temp")],
                    "tl": (st.get("tool") or {}).get("number")}
             if st.get("mpos_ab"):
@@ -119,6 +119,15 @@ def _prune(design_dir: Path) -> None:
     runs = sorted(p for p in design_dir.iterdir() if p.is_dir())
     for p in runs[:-KEEP_PER_DESIGN]:
         shutil.rmtree(p, ignore_errors=True)
+
+
+def run_dir(root: Path, run_id: str) -> Path | None:
+    """The folder of run `<design>/<run>` (as list_runs gives it), only inside root."""
+    parts = run_id.split("/")
+    if len(parts) != 2 or any(not p or p in (".", "..") or p != _slug(p, 200) for p in parts):
+        return None
+    d = Path(root) / parts[0] / parts[1]
+    return d if (d / "run.json").exists() else None
 
 
 def list_runs(root: Path, design: str | None = None) -> list[dict]:

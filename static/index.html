@@ -661,6 +661,68 @@
   .mvp-check .warn { color:var(--warn); } .mvp-check code { font:12.5px ui-monospace,Menlo,monospace; background:var(--bg); padding:2px 6px; border-radius:5px; }
   .mv-log { overflow:auto; font:11px/1.45 ui-monospace,Menlo,monospace; color:var(--muted); white-space:pre-wrap; max-height:220px; }
 
+  /* =================================================================== Analytics workspace (recorded runs) */
+  body[data-ws=analytics] #hdr { display:none; }
+  #an-left { display:none; flex-direction:column; min-height:0; overflow:auto; }
+  body[data-ws=analytics] #an-left { display:flex; } body[data-ws=analytics] #leftcol #tree, body[data-ws=analytics] #leftcol #params-card, body[data-ws=analytics] #leftcol #cam-left { display:none; }
+  body[data-ws=analytics]:not(.sketching) #leftcol { display:flex; width:300px; overflow:hidden; }
+  body[data-ws=analytics] #analytics-view { display:flex !important; }
+  .an-sec { padding:12px 12px 6px; border-bottom:1px solid var(--line); } .an-sec:last-child { border-bottom:0; }
+  .an-h { font-size:11px; letter-spacing:.06em; text-transform:uppercase; color:var(--mut2); font-weight:600; margin:0 0 9px; display:flex; justify-content:space-between; align-items:center; gap:8px; }
+  .an-h select { background:var(--bg); color:var(--text); border:1px solid var(--line2); border-radius:6px; font:inherit; font-size:11.5px; text-transform:none; letter-spacing:0; padding:1px 4px; }
+  .an-run { border:1px solid var(--line); border-radius:10px; padding:9px 10px 8px; margin-bottom:8px; background:var(--panel2); cursor:pointer; }
+  .an-run:hover { border-color:var(--line2); } .an-run.on { border-color:rgba(255,140,66,.7); box-shadow:0 0 0 1px rgba(255,140,66,.35) inset; }
+  .an-run .r1 { display:flex; justify-content:space-between; align-items:baseline; gap:8px; } .an-run .r1 b { font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .an-run .r2 { color:var(--muted); font-size:11.5px; margin-top:1px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .an-run .tb { height:6px; border-radius:3px; background:var(--s3); margin:8px 0 4px; position:relative; }
+  .an-run .tb i { position:absolute; left:0; top:0; bottom:0; border-radius:3px; } .an-run .tb s { position:absolute; top:-3px; bottom:-3px; width:2px; background:#fff; opacity:.7; }
+  .an-run .r3 { display:flex; justify-content:space-between; font:11px ui-monospace,Menlo,monospace; color:var(--muted); }
+  .an-tag { font-size:10px; font-weight:700; letter-spacing:.05em; padding:1px 6px; border-radius:5px; white-space:nowrap; }
+  .an-tag.ok { color:var(--ok); background:rgba(62,207,122,.12); } .an-tag.al { color:var(--err); background:rgba(255,90,95,.12); } .an-tag.air { color:var(--accent2); background:rgba(78,161,255,.12); } .an-tag.run { color:var(--accent); background:rgba(255,140,66,.13); }
+  .an-empty { color:var(--muted); font-size:12px; line-height:1.55; padding:4px 2px 10px; }
+  #analytics-view { position:absolute; inset:0; z-index:3; flex-direction:column; background:var(--bg); }
+  .av-path { flex:1; position:relative; min-height:0; background:radial-gradient(110% 90% at 55% 30%, #1e232b 0%, #14171c 55%, #0e1014 100%); }
+  .av-path canvas { position:absolute; inset:0; width:100%; height:100%; cursor:crosshair; }
+  .av-bar { position:absolute; left:12px; top:10px; right:12px; display:flex; gap:8px; align-items:center; pointer-events:none; } .av-bar > * { pointer-events:auto; }
+  .av-seg { display:flex; gap:2px; background:rgba(26,30,37,.92); border:1px solid var(--line); border-radius:8px; padding:2px; font-size:12px; }
+  .av-seg i { font-style:normal; padding:3px 9px; border-radius:6px; color:var(--muted); cursor:pointer; } .av-seg i.on { background:var(--s3); color:var(--text); } .av-seg i:hover { color:var(--text); }
+  .av-note { margin-left:auto; font-size:11px; color:var(--mut2); background:rgba(13,15,19,.7); padding:2px 8px; border-radius:6px; }
+  .av-legend { position:absolute; left:12px; top:58px; background:rgba(13,15,19,.82); border:1px solid var(--line); border-radius:9px; padding:8px 10px; font-size:11px; color:var(--muted); min-width:230px; max-width:320px; }
+  .av-legend .grad { height:8px; border-radius:4px; margin:6px 0 3px; } .av-legend .lab { display:flex; justify-content:space-between; }
+  .av-legend .ops { display:flex; flex-direction:column; gap:3px; margin-top:5px; } .av-legend .ops span { display:flex; align-items:center; gap:6px; } .av-legend .ops i { width:9px; height:9px; border-radius:2px; flex:none; }
+  .av-tip { position:absolute; pointer-events:none; background:rgba(13,15,19,.94); border:1px solid var(--line2); border-radius:9px; padding:8px 10px; font-size:11.5px; line-height:1.5; min-width:190px; z-index:2; }
+  .av-tip .k { display:grid; grid-template-columns:auto auto; gap:0 12px; color:var(--muted); } .av-tip .k span:nth-child(even) { color:var(--text); text-align:right; font-variant-numeric:tabular-nums; }
+  .av-empty { position:absolute; inset:0; display:grid; place-items:center; color:var(--muted); font-size:13px; text-align:center; padding:20px; line-height:1.6; }
+  .av-tl { height:310px; flex:none; background:var(--panel); border-top:1px solid var(--line); position:relative; display:flex; flex-direction:column; }
+  .av-tlh { display:flex; justify-content:space-between; align-items:center; padding:8px 12px 0; height:26px; }
+  .av-read { font:11px ui-monospace,Menlo,monospace; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .av-tl canvas { flex:1; width:100%; min-height:0; cursor:crosshair; }
+  #insp-analytics { padding-bottom:20px; }
+  .ar-sec { padding:14px 16px; border-bottom:1px solid var(--line); }
+  .ar-t { font-size:15px; font-weight:600; } .ar-m { color:var(--muted); font-size:12px; margin-top:3px; line-height:1.5; }
+  .ar-kpis { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; }
+  .ar-kpi { background:var(--panel2); border:1px solid var(--line); border-radius:9px; padding:7px 9px 6px; min-width:0; }
+  .ar-kpi small { display:block; font-size:10px; letter-spacing:.05em; text-transform:uppercase; color:var(--mut2); }
+  .ar-kpi b { font:650 17px ui-monospace,Menlo,monospace; letter-spacing:-.02em; } .ar-kpi b em { font-style:normal; font-size:11px; color:var(--muted); font-weight:500; margin-left:3px; }
+  .ar-kpi span { display:block; font-size:11px; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .ar-kpi.w b { color:var(--warn); } .ar-kpi.g b { color:var(--ok); } .ar-kpi.e b { color:var(--err); }
+  .ar-find { display:flex; gap:9px; padding:7px 0; border-bottom:1px solid rgba(46,52,61,.6); font-size:12px; line-height:1.45; } .ar-find:last-child { border:0; }
+  .ar-find i { width:7px; height:7px; border-radius:50%; margin-top:6px; flex:none; background:var(--accent2); } .ar-find.warn i { background:var(--warn); } .ar-find.good i { background:var(--ok); }
+  .ar-find small { display:block; color:var(--muted); font-size:11.5px; }
+  .ar-ask { display:flex; gap:10px; align-items:center; background:linear-gradient(90deg,rgba(255,140,66,.10),rgba(255,140,66,.03)); border:1px solid rgba(255,140,66,.35); border-radius:10px; padding:9px 11px; }
+  .ar-ask div { flex:1; font-size:11.5px; color:var(--muted); } .ar-ask div b { display:block; color:var(--text); font-size:12.5px; font-weight:600; }
+  .ar-sug { border:1px solid var(--line); border-radius:10px; padding:10px 11px 9px; margin-top:9px; background:var(--panel2); }
+  .ar-sug .s1 { display:flex; gap:8px; align-items:baseline; } .ar-sug .s1 b { flex:1; font-weight:600; font-size:12.5px; line-height:1.35; }
+  .ar-sug .gain { font:600 11.5px ui-monospace,Menlo,monospace; color:var(--ok); white-space:nowrap; }
+  .ar-sug p { margin:5px 0 7px; color:var(--muted); font-size:11.5px; line-height:1.45; } .ar-sug p b { color:var(--text); font-weight:500; }
+  .ar-sug .acts { display:flex; gap:6px; align-items:center; } .ar-sug .acts .x { margin-left:auto; }
+  .ar-cat { font-size:9.5px; font-weight:700; letter-spacing:.07em; padding:1px 6px; border-radius:5px; text-transform:uppercase; color:var(--accent2); background:rgba(78,161,255,.12); }
+  .ar-tbl { width:100%; border-collapse:collapse; font-size:11.5px; }
+  .ar-tbl th { text-align:right; font-weight:500; color:var(--mut2); padding:3px 4px; border-bottom:1px solid var(--line); font-size:10.5px; } .ar-tbl th:first-child { text-align:left; }
+  .ar-tbl td { text-align:right; padding:4px 4px; border-bottom:1px solid rgba(46,52,61,.6); font-variant-numeric:tabular-nums; } .ar-tbl td:first-child { text-align:left; white-space:nowrap; max-width:150px; overflow:hidden; text-overflow:ellipsis; }
+  .ar-tbl td .sw { display:inline-block; width:8px; height:8px; border-radius:2px; margin-right:6px; } .ar-tbl tr { cursor:pointer; } .ar-tbl tr.on td { background:rgba(255,140,66,.08); }
+  .ar-tbl td.w { color:var(--warn); } .ar-tbl td.g { color:var(--ok); } .ar-tbl td.e { color:var(--err); }
+
   /* =================================================================== v2 CAM workspace */
   #cam-left { display:none; flex-direction:column; min-height:0; }
   body[data-ws=cam] #cam-left { display:flex; } body[data-ws=cam] #leftcol #tree, body[data-ws=cam] #leftcol #params-card { display:none; }
@@ -810,8 +872,9 @@
           <div data-act="open">Open…</div>
           <div data-act="save">Save <span>⌘S</span></div>
           <div data-act="saveas">Save as…</div>
+          <div data-act="share" title="A new email in your mail app with the design, its CAM program and a STEP attached, for you to address and send">Share by email…</div>
           <hr>
-          <div data-act="import">Import .py…</div>
+          <div data-act="import" title="A design script (.py) or a shared design (.zip, with its CAM program)">Import design…</div>
           <div data-act="importstep">Import STEP…</div>
           <div data-act="download">Download .py</div>
           <hr>
@@ -823,7 +886,7 @@
           <div data-act="library">Part library…</div>
     </div></div>
   <div id="tabprog" title="The machine runs one design's program at a time: pick which open design's CAM program to set up and run">Program from <select id="tabprog-sel"></select><span class="info" id="tabprog-info"></span><a id="tabprog-open">open design ↗</a></div>
-  <nav id="ws" role="tablist"><button type="button" data-rtab="design" class="on">Design</button><button type="button" data-rtab="cam" title="CAM is experimental: check every program in the simulation and with an air cut">CAM<span class="expbadge">Experimental</span></button><button type="button" data-rtab="machine">Machine</button></nav>
+  <nav id="ws" role="tablist"><button type="button" data-rtab="design" class="on">Design</button><button type="button" data-rtab="cam" title="CAM is experimental: check every program in the simulation and with an air cut">CAM<span class="expbadge">Experimental</span></button><button type="button" data-rtab="machine">Machine</button><button type="button" data-rtab="analytics" title="Recorded runs of this design: what the machine really did against the plan, and how to improve it">Analytics</button></nav>
   <div class="tb-right">
     <button id="mpill" class="mpill off" title="The machine: click for the Machine workspace"><i class="d"></i><b id="mpill-name">No machine</b><span id="mpill-state">not connected</span></button>
     <button id="asst-btn" class="tb-asst" title="The assistant: chat with the agent (⌘B hides the right column)"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l2.2 6.6L21 11l-6.8 2.4L12 20l-2.2-6.6L3 11l6.8-2.4z"/></svg>Assistant</button>
@@ -876,6 +939,11 @@
     <div id="cam-tree"></div>
     <div id="cam-tools"></div>
   </div>
+  <div id="an-left">
+    <div class="an-sec"><div class="an-h">Runs <select id="an-scope" title="Which runs to list"><option value="design">This design</option><option value="all">All designs</option></select></div>
+      <div id="an-runs"></div></div>
+    <div class="an-sec" id="an-trend-sec"><div class="an-h">Across runs <span class="muted" style="text-transform:none;letter-spacing:0;font-weight:400">time against estimate</span></div><div id="an-trend"></div></div>
+  </div>
     <div id="tree"><div class="hd" style="display:flex;align-items:center">Browser<button class="btn small" id="tree-addbody" style="display:none">+ Body</button><button class="btn small" id="tree-addpart" style="margin-left:auto;padding:1px 6px" title="Insert a part from the library">+ Part</button></div><div id="treebody"></div><div id="sketchtree"></div></div>
     <div id="params-card" style="display:none"><div class="hd">Parameters <span class="muted" id="params-hint" style="text-transform:none;letter-spacing:0"></span><select id="cfg-sel" title="Configuration: named sets of parameter values"></select></div><div id="params-body"></div></div>
   </div>
@@ -899,6 +967,14 @@
       <button class="btn active" id="layers-toggle" title="Show sliced layers" style="display:none">Layers</button>
     </div>
     <div id="tip"></div>
+    <div id="analytics-view" style="display:none">
+      <div class="av-path"><canvas id="av-canvas"></canvas>
+        <div class="av-bar"><div class="av-seg" id="av-metric"><i data-m="reached" class="on" title="Real speed / commanded feed (cutting moves)">Feed reached</i><i data-m="rpm" title="Spindle rpm / its target">Spindle</i><i data-m="temp" title="Spindle temperature">Temperature</i><i data-m="op" title="Which operation">Operation</i><i data-m="z" title="Depth">Depth</i></div>
+          <button class="btn sm" id="av-fit" title="Fit the path">⛶ Fit</button><span class="av-note" id="av-note"></span></div>
+        <div class="av-legend" id="av-legend"></div><div class="av-tip" id="av-tip" style="display:none"></div>
+        <div class="av-empty" id="av-empty">No run selected</div></div>
+      <div class="av-tl"><div class="av-tlh"><span class="an-h" style="margin:0">Timeline</span><span class="av-read" id="av-read"></span></div><canvas id="av-tl"></canvas></div>
+    </div>
     <div id="machine-view" style="display:none">
       <div class="mv-cam"><img id="mv-cam-img" alt=""><div id="mv-cam-off">Camera off</div>
         <div class="mv-cam-tl"><span class="mv-chip" id="mv-live"><i></i>Live · machine camera</span><span class="mv-chip" id="mv-cam-note"></span></div>
@@ -959,7 +1035,7 @@
     </div>
     <div id="hover">click a face to reference it in chat · shift-click for multiple</div>
     <div id="stats"></div>
-    <input type="file" id="filepick" accept=".py,text/x-python" style="display:none">
+    <input type="file" id="filepick" accept=".py,.zip,text/x-python,application/zip" style="display:none">
     <input type="file" id="steppick" accept=".step,.stp,.STEP,.STP" style="display:none">
     <button class="btn" id="side-show" title="Show panel (⌘B)">⟨</button>
   </div>
@@ -972,7 +1048,7 @@
       <div class="tab" data-pane="library" id="tab-library">Library</div>
       <button class="btn" id="side-collapse" title="Hide panel (⌘B)">⟩</button>
     </div>
-    <div class="pane" id="pane-inspect"><div id="insp-design"></div><div id="insp-machine" style="display:none">
+    <div class="pane" id="pane-inspect"><div id="insp-design"></div><div id="insp-analytics" style="display:none"></div><div id="insp-machine" style="display:none">
 <div id="mi-req"></div>
 <div id="mi-tc"></div>
 <nav class="msteps" id="msteps"></nav>
@@ -1615,6 +1691,7 @@ async function fileAction(act) {
     else if (act === 'open' && TAB.embedded) { const { designs } = await api('/api/designs'); const name = await pickBox('Open design (in a new tab)', designs); if (name) tabPost({ t: 'open_tab', name }); }
     else if (act === 'open') { const { designs } = await api('/api/designs'); const name = await pickBox('Open design', designs); if (name) { if (design.dirty && !await confirmBox('Discard unsaved changes?')) return; await api('/api/design/open', { name }); } }
     else if (act === 'download') { window.open('/api/design/download'); }
+    else if (act === 'share') { await shareDesign(); }
     else if (act === 'import') { document.getElementById('filepick').click(); }
     else if (act === 'step') { window.open('/api/export/step'); }
     else if (act === 'importstep') { document.getElementById('steppick').click(); }
@@ -1625,10 +1702,30 @@ async function fileAction(act) {
   } catch (e) { addMsg('error', e.message); }
 }
 document.getElementById('filepick').onchange = async ev => {
-  const f = ev.target.files[0]; if (!f) return;
-  try { const code = await f.text(); await api('/api/design/import', { name: f.name, code }); addMsg('system', `imported ${f.name}`); } catch (e) { addMsg('error', 'import failed: ' + e.message); }
-  ev.target.value = '';
+  const f = ev.target.files[0]; if (!f) return; ev.target.value = '';
+  try {
+    const zip = /\.zip$/i.test(f.name);
+    if (design.dirty && !await confirmBox('Discard unsaved changes and import this design?')) return;
+    const body = zip ? { name: f.name, data: await new Promise((ok, no) => { const r = new FileReader(); r.onload = () => ok(r.result); r.onerror = no; r.readAsDataURL(f); }) }
+                     : { name: f.name, code: await f.text() };
+    let j = await api('/api/design/import', body);
+    if (j.confirm) {                         // the scripts reach past geometry: they run as Python on this computer
+      const ok = await confirmBox(`${f.name} has code that does more than build geometry. Design and CAM scripts run as Python on this computer, so only import designs from people you trust.\n\n${j.confirm.join('\n')}\n\nImport it anyway?`);
+      if (!ok) return;
+      j = await api('/api/design/import', { ...body, confirm: true });
+    }
+    addMsg('system', `imported ${j.name}${j.cam ? ' with its CAM program' : ''}`);
+  } catch (e) { addMsg('error', 'import failed: ' + e.message); }
 };
+async function shareDesign() {
+  addMsg('system', 'packing the design to share…');
+  const j = await api('/api/design/share', {});
+  const file = j.file.split(/[\\/]/).pop(), app = j.app || 'your mail app';
+  if (['share', 'outlook', 'thunderbird', 'mapi', 'xdg'].includes(j.how)) addMsg('system', `opened a new email in ${app} with ${file} attached: address it and press Send`);
+  else if (j.how === 'open') addMsg('system', `${app} opened ${file} as a new message: add a subject, address it and press Send`);
+  else if (j.how === 'manual') addMsg('system', `opened a new email in ${app} with the subject and text; ${app === 'your mail app' ? 'it' : app} can't take the attachment from here, so drag in ${file} — it's selected in the window that opened (${j.file})${j.note ? ' · ' + j.note : ''}`);
+  else addMsg('system', `packed ${j.file}`);
+}
 function setDesign(d) {
   design = d; const el = document.getElementById('designname');
   el.textContent = (d.name || 'untitled') + (d.config ? ' · ' + d.config : ''); document.body.classList.toggle('dirty', !!d.dirty); document.title = `AgenticCAD · ${d.name || 'untitled'}${d.config ? ' · ' + d.config : ''}${d.dirty ? ' •' : ''}`;
@@ -1649,7 +1746,7 @@ function openModal(title, bodyEl, buttons) {
   });
 }
 function promptBox(title, def) { const d = document.createElement('div'); d.innerHTML = `<input value="${def || ''}">`; return openModal(title, d, [['Cancel', null], ['OK', () => d.querySelector('input').value.trim() || null, true]]); }
-function confirmBox(text) { const d = document.createElement('div'); d.textContent = text; return openModal('Confirm', d, [['Cancel', false], ['OK', true, true]]); }
+function confirmBox(text) { const d = document.createElement('div'); d.textContent = text; d.style.whiteSpace = 'pre-wrap'; return openModal('Confirm', d, [['Cancel', false], ['OK', true, true]]); }
 function pickBox(title, designs) {
   const d = document.createElement('div');
   if (!designs.length) d.innerHTML = '<div style="color:var(--muted)">No saved designs yet. Use File ▸ Save as…</div>';
@@ -5038,7 +5135,7 @@ document.addEventListener('click', e => { if (!e.target.closest('#ribbon .rgmore
 placeTree();
 // ribbon tabs (Design · CAM · Output · Extensions): one row per tab; compact (icons only) when the row would wrap
 function setRibbonTab(name, remember = true) {
-  if (!['design', 'cam', 'machine'].includes(name)) name = 'design';
+  if (!['design', 'cam', 'machine', 'analytics'].includes(name)) name = 'design';
   if (TAB.embedded && TAB.mode === 'machine') name = 'machine';
   else if (TAB.embedded && name === 'machine') { tabPost({ t: 'open_machine', setup: typeof MV !== 'undefined' ? MV.si : 0 }); return; }
   const rb = document.getElementById('ribbon');
@@ -5070,7 +5167,7 @@ document.querySelectorAll('#ribbon .rg').forEach(g => {
 document.addEventListener('click', e => { if (!e.target.closest('#ribbon .rg.fold')) document.querySelectorAll('#ribbon .rg.open').forEach(x => x.classList.remove('open')); });
 document.querySelectorAll('#ws [data-rtab]').forEach(b => b.onclick = () => setRibbonTab(b.dataset.rtab));
 window.addEventListener('resize', fitRibbon);
-(() => { let t = 'design'; try { t = localStorage.getItem(RIBBON_KEY) || 'design'; } catch (e) {} if (TAB.embedded && TAB.mode === 'machine') t = 'machine'; else if (t === 'machine' && TAB.embedded) t = 'design'; setRibbonTab(t, false); })();
+(() => { let t = 'design'; try { t = new URLSearchParams(location.search).get('ws') || localStorage.getItem(RIBBON_KEY) || 'design'; } catch (e) {} if (TAB.embedded && TAB.mode === 'machine') t = 'machine'; else if (t === 'machine' && TAB.embedded) t = 'design'; setRibbonTab(t, false); })();
 function activateTool(k) {
   if (k === 'sketch') { if (tool) endTool(); if (measuring) setMeasuring(false); sk ? endSketch() : startSketch(null); return; }
   if (k === 'measure') { if (tool) endTool(); setMeasuring(!measuring); return; }
@@ -6054,6 +6151,7 @@ function connect() {
         extRefreshAll();
         break;
       case 'design': setDesign(m); break;
+      case 'run_suggestions': anSuggestions(m); break;
       case 'slicer': setupPrinting(m); break;
       case 'sliced': loadSlice(m); break;
       case 'library_parts': libParts = m.parts; renderLibrary(); break;
@@ -6209,8 +6307,8 @@ stopBtn.onclick = () => send({ type: 'interrupt' });
 const _pane = new URLSearchParams(location.search).get('pane');
 // Right column: Inspector (what the workspace is working on: the command / selection in Design, the CAM program,
 // the machine's controls) · Assistant (chat) · Code. Each workspace remembers which of them was open.
-const INSPECTOR_PANE = { design: 'inspect', cam: 'cam', machine: 'inspect' };
-const wsSide = { design: 'chat', cam: 'inspect', machine: 'inspect' };
+const INSPECTOR_PANE = { design: 'inspect', cam: 'cam', machine: 'inspect', analytics: 'inspect' };
+const wsSide = { design: 'chat', cam: 'inspect', machine: 'inspect', analytics: 'inspect' };
 try { Object.assign(wsSide, JSON.parse(localStorage.getItem('agenticcad.wsSide') || '{}')); } catch {}
 function showPane(which) {                      // 'inspect' | 'chat' | 'code' | 'library' | 'cam'
   const ws = ribbonTab(), insp = INSPECTOR_PANE[ws] || 'inspect';
@@ -6220,6 +6318,7 @@ function showPane(which) {                      // 'inspect' | 'chat' | 'code' |
   document.querySelectorAll('.pane').forEach(p => p.classList.toggle('active', p.id === 'pane-' + pane));
   document.getElementById('insp-design').style.display = ws === 'design' ? '' : 'none';
   document.getElementById('insp-machine').style.display = ws === 'machine' ? '' : 'none';
+  document.getElementById('insp-analytics').style.display = ws === 'analytics' ? '' : 'none';
   document.getElementById('asst-btn').classList.toggle('on', which === 'chat' && !document.body.classList.contains('side-hidden'));
   if (which !== 'library') { wsSide[ws] = which; try { localStorage.setItem('agenticcad.wsSide', JSON.stringify(wsSide)); } catch {} }
   if (pane === 'code') setTimeout(() => cm.refresh(), 0);
@@ -6234,6 +6333,7 @@ function onWorkspace(ws) {                      // (called by setRibbonTab, also
   if (ws === 'design' && machineOn) { wsMachineWas = true; setMachine(false); }
   else if (ws === 'cam' && wsMachineWas) { wsMachineWas = false; if (!machineOn) setMachine(true); }
   if (window.__shellReady) showPane(wsSide[ws] || 'inspect');
+  if (typeof anShow === 'function') anShow(ws === 'analytics');
 }
 document.querySelectorAll('#tabs .tab').forEach(t => { t.dataset.side = t.dataset.pane; t.onclick = () => showPane(t.dataset.side); });
 document.getElementById('asst-btn').onclick = () => {
@@ -7150,6 +7250,323 @@ window.addEventListener('message', e => {                 // the strip asks this
   if (e.origin !== location.origin || !e.data || e.data.t !== 'show_chat') return;
   if (typeof showPane === 'function') showPane('chat');
 });
+// ---------------------------------------------------------------- Analytics workspace: recorded runs, planned vs actual
+// (run_recorder records every program the Machine workspace sends; run_analysis matches it to the program by position)
+var AN = { runs: [], design: '', scope: 'design', id: null, a: null, metric: 'reached', view: null, t: null, hover: null, timer: null, asked: {} };
+const AN_OPC = ['#4ea1ff', '#ff8c42', '#3ecf7a', '#b18cff', '#f2c94c', '#ff5c8a', '#4fd1c5', '#e08cff', '#9fb4ff', '#ffb36b'];
+const anSlug = s => (String(s || '').replace(/[^A-Za-z0-9_.-]+/g, '_').replace(/^[_.]+|[_.]+$/g, '').slice(0, 40)) || 'untitled';
+const anMin = m => m == null ? '–' : m >= 60 ? `${Math.floor(m / 60)}:${String(Math.round(m % 60)).padStart(2, '0')} h` : `${m.toFixed(1)} min`;
+const anClock = s => `${Math.floor(s / 3600)}:${String(Math.floor(s / 60) % 60).padStart(2, '0')}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
+const anPct = x => x == null ? '–' : `${Math.round(x * 100)}%`;
+function anEl(id) { return document.getElementById(id); }
+function anShow(on) {
+  if (!AN) { if (on) setTimeout(() => anShow(ribbonTab() === 'analytics'), 0); return; }   // start-up: the workspace is restored before this script part has run
+  if (!on) { clearInterval(AN.timer); AN.timer = null; return; }
+  anLoadRuns();
+  clearInterval(AN.timer); AN.timer = setInterval(() => { if (AN.a && AN.a.run.outcome === 'running') anOpen(AN.id, true); anLoadRuns(); }, 20000);
+  setTimeout(anResize, 0);
+}
+async function anLoadRuns() {
+  try { const j = await api('/api/runs'); AN.runs = j.runs || []; AN.design = j.design || ''; } catch (e) { AN.runs = []; }
+  anRenderRuns();
+}
+function anScoped() { return AN.scope === 'all' ? AN.runs : AN.runs.filter(r => r.id.split('/')[0] === anSlug(AN.design)); }
+function anOutcome(r) {
+  if (r.outcome === 'running') return ['RUNNING', 'run'];
+  if (r.air_cut) return ['AIR CUT', 'air'];
+  if (r.outcome === 'done') return ['DONE', 'ok'];
+  return [String(r.outcome || '?').toUpperCase(), 'al'];
+}
+function anRunTitle(r) { return `${r.setup || r.program || r.file || 'run'}${r.ops && r.ops.length ? ` · ${r.ops.length} op${r.ops.length === 1 ? '' : 's'}` : ''}`; }
+function anRenderRuns() {
+  const list = anScoped(), box = anEl('an-runs');
+  if (!list.length) {
+    box.innerHTML = AN.scope === 'design' && AN.runs.length
+      ? `<div class="an-empty">No runs of <b>${esc(AN.design)}</b> yet. Runs are filed under the design's saved name (or its program's while it is unsaved). <a href="#" id="an-all">Show all designs</a></div>`
+      : `<div class="an-empty">No runs recorded yet. Every program the Machine workspace sends is recorded here: the machine's position, real speed, spindle and temperatures against the plan.</div>`;
+    const a = anEl('an-all'); if (a) a.onclick = e => { e.preventDefault(); AN.scope = anEl('an-scope').value = 'all'; anRenderRuns(); };
+    anEl('an-trend-sec').style.display = 'none';
+    if (!AN.id) anRenderEmpty(); return;
+  }
+  box.innerHTML = list.slice(0, 40).map(r => {
+    const [tag, cls] = anOutcome(r), est = r.est_min, act = r.duration_min ?? ((Date.now() / 1000 - r.t0) / 60);
+    const ratio = est && r.outcome !== 'running' ? act / est : null, col = cls === 'al' ? 'var(--err)' : cls === 'air' ? 'var(--accent2)' : cls === 'run' ? 'var(--accent)' : ratio && ratio > 1.15 ? 'var(--warn)' : 'var(--ok)';
+    const full = est ? Math.max(act, est) : act, w = full ? Math.min(100, act / full * 100) : 0, mark = est && full ? est / full * 100 : null;
+    const when = (r.started || '').replace('T', ' ').slice(0, 16);
+    return `<div class="an-run${r.id === AN.id ? ' on' : ''}" data-id="${esc(r.id)}">
+      <div class="r1"><b title="${esc(r.program || '')}">${esc(anRunTitle(r))}</b><span class="an-tag ${cls}">${tag}</span></div>
+      <div class="r2">${esc(when)}${AN.scope === 'all' ? ' · ' + esc(r.design || '') : r.program ? ' · ' + esc(r.program) : ''}${r.air_cut ? ` · lifted ${r.air_cut} mm` : ''}</div>
+      <div class="tb"><i style="width:${w.toFixed(1)}%;background:${col}"></i>${mark != null ? `<s style="left:${mark.toFixed(1)}%"></s>` : ''}</div>
+      <div class="r3"><span>${anMin(act)}${est ? ' / est ' + anMin(est) : ''}</span><span style="color:${col}">${ratio ? (ratio >= 1 ? '+' : '−') + Math.abs(Math.round((ratio - 1) * 100)) + '%' : ''}</span></div></div>`;
+  }).join('');
+  box.querySelectorAll('.an-run').forEach(el => el.onclick = () => anOpen(el.dataset.id));
+  anTrend(list);
+  if (!AN.id || !AN.runs.some(r => r.id === AN.id)) anOpen(list[0].id);
+}
+function anTrend(list) {
+  const done = list.filter(r => r.est_min && r.duration_min && r.outcome !== 'running').slice(0, 14).reverse(), sec = anEl('an-trend-sec');
+  if (done.length < 2) { sec.style.display = 'none'; return; }
+  sec.style.display = '';
+  const W = 270, H = 80, bw = Math.min(16, (W - 20) / done.length - 4), max = Math.max(1.4, ...done.map(r => r.duration_min / r.est_min));
+  const y = v => H - 12 - (v / max) * (H - 20);
+  anEl('an-trend').innerHTML = `<svg width="${W}" height="${H}"><line x1="0" x2="${W}" y1="${y(1)}" y2="${y(1)}" stroke="#4a525e" stroke-dasharray="3 3"/>
+    <text x="${W - 2}" y="${y(1) - 3}" fill="#626b78" font-size="9" text-anchor="end">estimate</text>
+    ${done.map((r, i) => { const v = r.duration_min / r.est_min, x = 6 + i * ((W - 20) / done.length);
+      return `<rect x="${x}" y="${y(v)}" width="${bw}" height="${H - 12 - y(v)}" rx="2" fill="${r.air_cut ? '#4ea1ff' : v > 1.15 ? '#f2c94c' : '#3ecf7a'}" opacity="${r.id === AN.id ? 1 : .6}"><title>${esc(anRunTitle(r))} · ${Math.round(v * 100)}% of estimate</title></rect>`; }).join('')}</svg>`;
+}
+function anRenderEmpty() {
+  AN.a = null; anEl('av-empty').style.display = ''; anEl('av-empty').textContent = 'No run selected';
+  anEl('insp-analytics').innerHTML = `<div class="ar-sec"><div class="ar-t">Analytics</div><div class="ar-m">Pick a recorded run on the left: planned against actual for each operation, where the time went, the spindle and its temperature, and the assistant's suggestions.</div></div>`;
+  anDraw(); anDrawTl();
+}
+async function anOpen(id, quiet) {
+  if (!quiet) { AN.id = id; AN.t = null; anEl('av-empty').style.display = ''; anEl('av-empty').textContent = 'Analysing the run…';
+    document.querySelectorAll('#an-runs .an-run').forEach(el => el.classList.toggle('on', el.dataset.id === id)); }
+  let a;
+  try { a = await api('/api/runs/analysis?id=' + encodeURIComponent(id)); } catch (e) { if (AN.id === id) { anEl('av-empty').textContent = 'Could not analyse this run: ' + e.message; } return; }
+  if (AN.id !== id) return;
+  const keepView = quiet && AN.a; AN.a = a; anPrep(a); if (!keepView) AN.view = null;
+  anEl('av-empty').style.display = a.path.length ? 'none' : '';
+  if (!a.path.length) anEl('av-empty').textContent = 'No motion in this run could be placed on its program.';
+  const s = a.summary; anEl('av-note').textContent = s.match_rate != null ? `${Math.round(s.match_rate * 100)}% of the run placed on the program${s.offset && s.offset.fitted ? ' · work offset fitted from the data' : ''}` : '';
+  anReport(); anDraw(); anDrawTl(); anTrend(anScoped());
+}
+function anPrep(a) {                                   // per-op colours, time range, path bounds
+  a.T = a.timeline.length ? a.timeline[a.timeline.length - 1][0] : 1;
+  const xs = [], ys = [];
+  for (const [, , pts] of a.planned) for (const p of pts) { xs.push(p[0]); ys.push(p[1]); }
+  for (const p of a.path) { xs.push(p[0]); ys.push(p[1]); }
+  a.bb = xs.length ? [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)] : [0, 0, 1, 1];
+  a.zr = a.path.length ? [Math.min(...a.path.map(p => p[2])), Math.max(...a.path.map(p => p[2]))] : [0, 1];
+  a.byT = a.path.map((p, i) => [p[3], i]).sort((x, y) => x[0] - y[0]);
+}
+// ---- colours for the metrics
+function anRamp(stops, v) {                            // stops: [[value, [r,g,b]], ...] ascending
+  if (v == null || Number.isNaN(v)) return null;
+  if (v <= stops[0][0]) return stops[0][1]; if (v >= stops[stops.length - 1][0]) return stops[stops.length - 1][1];
+  for (let i = 1; i < stops.length; i++) if (v <= stops[i][0]) { const [a, ca] = stops[i - 1], [b, cb] = stops[i], f = (v - a) / (b - a); return ca.map((c, k) => Math.round(c + (cb[k] - c) * f)); }
+}
+const AN_RYG = [[0.5, [255, 90, 95]], [0.8, [242, 201, 76]], [0.97, [62, 207, 122]]];
+const AN_RPM = [[0.9, [255, 90, 95]], [0.96, [242, 201, 76]], [0.99, [62, 207, 122]]];
+const AN_TEMP = [[25, [78, 161, 255]], [45, [62, 207, 122]], [60, [242, 201, 76]], [70, [255, 90, 95]]];
+function anColor(p) {
+  const m = AN.metric; let c;
+  if (m === 'reached') c = p[9] === 0 ? null : anRamp(AN_RYG, p[5]);
+  else if (m === 'rpm') c = anRamp(AN_RPM, p[6]);
+  else if (m === 'temp') c = anRamp(AN_TEMP, p[7]);
+  else if (m === 'op') return p[4] == null ? '#5a6370' : AN_OPC[p[4] % AN_OPC.length];
+  else if (m === 'z') { const [lo, hi] = AN.a.zr, f = hi > lo ? (p[2] - lo) / (hi - lo) : 1; c = anRamp([[0, [177, 140, 255]], [0.5, [78, 161, 255]], [1, [180, 230, 255]]], f); }
+  return c ? `rgb(${c[0]},${c[1]},${c[2]})` : null;
+}
+function anLegend() {
+  const a = AN.a, el = anEl('av-legend'); if (!a) { el.style.display = 'none'; return; } el.style.display = '';
+  const g = (stops, lo, hi, l, r, mid) => `<div class="grad" style="background:linear-gradient(90deg,${stops.map(([v, c]) => `rgb(${c}) ${((v - lo) / (hi - lo) * 100).toFixed(0)}%`).join(',')})"></div><div class="lab"><span>${l}</span>${mid ? `<span>${mid}</span>` : ''}<span>${r}</span></div>`;
+  const m = AN.metric;
+  if (m === 'reached') el.innerHTML = `<b style="color:var(--text)">Feed reached</b> · real speed / commanded feed${g(AN_RYG, 0.5, 0.97, '≤ 50%', '≥ 97%', '80%')}<div style="margin-top:4px">Rapids (G0) grey. Where it's red the machine can't reach the feed: short moves, tight arcs.</div>`;
+  else if (m === 'rpm') el.innerHTML = `<b style="color:var(--text)">Spindle</b> · rpm / target (the Z1 has no load sensor: droop is the load)${g(AN_RPM, 0.9, 0.99, '≤ 90%', '≥ 99%', '96%')}`;
+  else if (m === 'temp') el.innerHTML = `<b style="color:var(--text)">Spindle temperature</b> · the machine halts at 70 °C${g(AN_TEMP, 25, 70, '25 °C', '70 °C', '45 °C')}`;
+  else if (m === 'z') el.innerHTML = `<b style="color:var(--text)">Depth</b> (work Z)${g([[0, [177, 140, 255]], [0.5, [78, 161, 255]], [1, [180, 230, 255]]], 0, 1, `${a.zr[0].toFixed(1)} mm`, `${a.zr[1].toFixed(1)} mm`)}`;
+  else el.innerHTML = `<b style="color:var(--text)">Operations</b><div class="ops">${a.ops.map((o, i) => `<span><i style="background:${AN_OPC[i % AN_OPC.length]}"></i>${esc(o.name)}</span>`).join('')}</div>`;
+}
+// ---- the path (top view, work XY)
+function anResize() {
+  for (const id of ['av-canvas', 'av-tl']) { const c = anEl(id); if (!c) continue; const r = c.getBoundingClientRect(), d = window.devicePixelRatio || 1;
+    if (r.width && (c.width !== Math.round(r.width * d) || c.height !== Math.round(r.height * d))) { c.width = Math.round(r.width * d); c.height = Math.round(r.height * d); } }
+  anDraw(); anDrawTl();
+}
+function anXf() {
+  const c = anEl('av-canvas'), d = window.devicePixelRatio || 1, W = c.width / d, H = c.height / d, a = AN.a;
+  if (!AN.view) { const [x0, y0, x1, y1] = a.bb, s = Math.min((W - 80) / Math.max(x1 - x0, 1), (H - 210) / Math.max(y1 - y0, 1));
+    AN.view = { s, cx: (x0 + x1) / 2, cy: (y0 + y1) / 2 - 45 / s }; }
+  const v = AN.view; return { W, H, d, X: x => W / 2 + (x - v.cx) * v.s, Y: y => H / 2 + 10 - (y - v.cy) * v.s };
+}
+function anDraw() {
+  const c = anEl('av-canvas'); if (!c || !c.width) return; const g = c.getContext('2d'); g.setTransform(1, 0, 0, 1, 0, 0); g.clearRect(0, 0, c.width, c.height);
+  anLegend(); const a = AN.a; if (!a) return;
+  const { d, X, Y } = anXf(); g.setTransform(d, 0, 0, d, 0, 0); g.lineCap = 'round'; g.lineJoin = 'round';
+  // the program's own path, faint
+  for (const [, gc, pts] of a.planned) { g.beginPath(); g.strokeStyle = gc === 0 ? 'rgba(140,149,163,.10)' : 'rgba(140,149,163,.22)'; g.lineWidth = 1;
+    if (gc === 0) g.setLineDash([3, 4]); else g.setLineDash([]);
+    pts.forEach((p, i) => i ? g.lineTo(X(p[0]), Y(p[1])) : g.moveTo(X(p[0]), Y(p[1]))); g.stroke(); }
+  g.setLineDash([]);
+  // what happened: consecutive samples joined when they are close (same pass), coloured by the metric; deeper on top
+  const P = a.path, order = P.map((p, i) => i).sort((i, j) => P[j][2] - P[i][2] || i - j);
+  g.lineWidth = 2.2;
+  for (const i of order) { if (i === 0) continue; const p = P[i], q = P[i - 1]; if (Math.hypot(p[0] - q[0], p[1] - q[1]) > 4 || p[4] !== q[4]) continue;
+    const col = anColor(q); if (!col) continue; g.strokeStyle = col; g.beginPath(); g.moveTo(X(q[0]), Y(q[1])); g.lineTo(X(p[0]), Y(p[1])); g.stroke(); }
+  // scrub marker
+  const k = AN.t != null ? anAt(AN.t) : null;
+  if (k != null) { const p = P[k]; g.fillStyle = '#fff'; g.strokeStyle = '#0d0f13'; g.lineWidth = 2; g.beginPath(); g.arc(X(p[0]), Y(p[1]), 5, 0, 7); g.fill(); g.stroke(); }
+  if (AN.hover != null) { const p = P[AN.hover]; g.strokeStyle = '#fff'; g.lineWidth = 1.5; g.beginPath(); g.arc(X(p[0]), Y(p[1]), 7, 0, 7); g.stroke(); }
+}
+function anAt(t) {                                     // path index nearest in time
+  const b = AN.a.byT; if (!b.length) return null; let lo = 0, hi = b.length - 1;
+  while (lo < hi) { const m = (lo + hi) >> 1; if (b[m][0] < t) lo = m + 1; else hi = m; }
+  if (lo > 0 && Math.abs(b[lo - 1][0] - t) < Math.abs(b[lo][0] - t)) lo--;
+  return Math.abs(b[lo][0] - t) < 30 ? b[lo][1] : null;
+}
+function anTip(i, ev) {
+  const tip = anEl('av-tip'); if (i == null) { tip.style.display = 'none'; return; }
+  const a = AN.a, p = a.path[i], o = a.ops[p[4]];
+  tip.innerHTML = `<b>${esc(o ? o.name : 'between operations')}</b> · ${anClock(p[3])}<div class="k">
+    <span>move</span><span>G${p[9]}</span><span>feed reached</span><span>${p[9] === 0 ? 'rapid' : anPct(p[5])}</span>
+    <span>spindle</span><span>${p[6] != null ? anPct(p[6]) + ' of target' : '–'}</span><span>temperature</span><span>${p[7] != null ? p[7].toFixed(1) + ' °C' : '–'}</span>
+    <span>feed override</span><span>${p[8] != null ? p[8] + '%' : '–'}</span><span>X Y Z</span><span>${p[0].toFixed(1)} ${p[1].toFixed(1)} ${p[2].toFixed(2)}</span></div>`;
+  const r = anEl('av-canvas').getBoundingClientRect(); tip.style.display = '';
+  tip.style.left = Math.min(ev.clientX - r.left + 14, r.width - 220) + 'px'; tip.style.top = Math.min(ev.clientY - r.top + 14, r.height - 170) + 'px';
+}
+(() => {
+  const c = anEl('av-canvas'); let drag = null;
+  c.addEventListener('mousemove', ev => {
+    if (!AN.a) return; const r = c.getBoundingClientRect();
+    if (drag) { AN.view.cx = drag.cx - (ev.clientX - drag.x) / AN.view.s; AN.view.cy = drag.cy + (ev.clientY - drag.y) / AN.view.s; anDraw(); return; }
+    const { X, Y } = anXf(), mx = ev.clientX - r.left, my = ev.clientY - r.top; let best = null, bd = 64;
+    AN.a.path.forEach((p, i) => { const dd = (X(p[0]) - mx) ** 2 + (Y(p[1]) - my) ** 2; if (dd < bd) { bd = dd; best = i; } });
+    if (best !== AN.hover) { AN.hover = best; anDraw(); } anTip(best, ev);
+  });
+  c.addEventListener('mouseleave', () => { AN.hover = null; anTip(null); anDraw(); });
+  c.addEventListener('mousedown', ev => { if (AN.a) drag = { x: ev.clientX, y: ev.clientY, cx: AN.view.cx, cy: AN.view.cy, moved: false }; });
+  window.addEventListener('mouseup', ev => { if (drag && Math.hypot(ev.clientX - drag.x, ev.clientY - drag.y) < 3 && AN.hover != null) { AN.t = AN.a.path[AN.hover][3]; anDrawTl(); anDraw(); } drag = null; });
+  c.addEventListener('wheel', ev => { if (!AN.a) return; ev.preventDefault(); const r = c.getBoundingClientRect(), { X, Y, W, H } = anXf();
+    const mx = ev.clientX - r.left, my = ev.clientY - r.top, wx = AN.view.cx + (mx - W / 2) / AN.view.s, wy = AN.view.cy - (my - H / 2 - 10) / AN.view.s;
+    const f = Math.exp(-ev.deltaY * 0.0015); AN.view.s *= f; AN.view.cx = wx - (mx - W / 2) / AN.view.s; AN.view.cy = wy + (my - H / 2 - 10) / AN.view.s; anDraw(); }, { passive: false });
+  anEl('av-fit').onclick = () => { AN.view = null; anDraw(); };
+  anEl('av-metric').addEventListener('click', ev => { const i = ev.target.closest('i'); if (!i) return; AN.metric = i.dataset.m;
+    anEl('av-metric').querySelectorAll('i').forEach(x => x.classList.toggle('on', x === i)); anDraw(); });
+  anEl('an-scope').onchange = ev => { AN.scope = ev.target.value; anRenderRuns(); };
+  window.addEventListener('resize', () => { if (ribbonTab() === 'analytics') anResize(); });
+  new ResizeObserver(() => { if (ribbonTab() === 'analytics') anResize(); }).observe(anEl('analytics-view'));
+})();
+// ---- the timeline: operations, feed reached (+ override), spindle rpm / target, temperatures, machine state
+const AN_LANES = [['ops', 20], ['reached', 1.1], ['rpm', 0.7], ['temp', 1.1], ['state', 9]];
+function anDrawTl() {
+  const c = anEl('av-tl'); if (!c || !c.width) return; const d = window.devicePixelRatio || 1, W = c.width / d, H = c.height / d, g = c.getContext('2d');
+  g.setTransform(d, 0, 0, d, 0, 0); g.clearRect(0, 0, W, H); const a = AN.a; if (!a || !a.timeline.length) return;
+  const L = 118, R = 14, x = t => L + (t / a.T) * (W - L - R), unit = (H - 92) / 2.9;
+  let y0 = 2; const lane = {}; for (const [k, h] of AN_LANES) { const hh = h > 5 ? h : h * unit; lane[k] = [y0, hh]; y0 += hh + (h > 5 ? 4 : 8); }
+  g.font = '11px -apple-system,BlinkMacSystemFont,sans-serif'; g.textBaseline = 'middle';
+  const label = (k, text, sub) => { const [yy, hh] = lane[k]; g.fillStyle = '#8c95a3'; g.fillText(text, 10, yy + hh / 2 - (sub ? 6 : 0)); if (sub) { g.fillStyle = '#626b78'; g.fillText(sub, 10, yy + hh / 2 + 7); } };
+  // op bands
+  const TL = a.timeline; let start = 0;
+  for (let i = 1; i <= TL.length; i++) { if (i === TL.length || TL[i][2] !== TL[start][2]) { const op = TL[start][2]; if (op != null) { const [yy, hh] = lane.ops;
+      g.fillStyle = AN_OPC[op % AN_OPC.length] + '55'; g.fillRect(x(TL[start][0]), yy, Math.max(1, x(TL[i - 1][0]) - x(TL[start][0])), hh);
+      const w = x(TL[i - 1][0]) - x(TL[start][0]), nm = a.ops[op] ? a.ops[op].name : ''; if (w > 40) { g.save(); g.beginPath(); g.rect(x(TL[start][0]), yy, w, hh); g.clip(); g.fillStyle = '#e6e9ee'; g.fillText(nm, x(TL[start][0]) + 5, yy + hh / 2); g.restore(); } } start = i; } }
+  label('ops', 'Operations');
+  // each trace is drawn per 3 px of time: the mean as a line over a faint min-max band (4 Hz samples are noisy: every move
+  // starts and ends below its feed)
+  const trace = (k, idx, lo, hi, col, dash, band = true, bw = 3) => { const [yy, hh] = lane[k], Y = v => yy + hh - (Math.min(Math.max(v, lo), hi) - lo) / (hi - lo) * hh;
+    const B = new Map(); for (let i = 0; i < TL.length; i++) { const r = TL[i], v = typeof idx === 'function' ? idx(r, i) : r[idx]; if (v == null) continue;
+      const b = Math.floor(x(r[0]) / bw); let e = B.get(b); if (!e) B.set(b, e = [0, 0, Infinity, -Infinity]); e[0] += v; e[1]++; e[2] = Math.min(e[2], v); e[3] = Math.max(e[3], v); }
+    const keys = [...B.keys()].sort((p, q) => p - q);
+    if (band) { g.fillStyle = col + '2a'; for (const b of keys) { const e = B.get(b); g.fillRect(b * bw, Y(e[3]), bw, Math.max(1, Y(e[2]) - Y(e[3]))); } }
+    g.strokeStyle = col; g.lineWidth = 1.4; g.setLineDash(dash || []); g.beginPath(); let prev = null;
+    for (const b of keys) { const e = B.get(b), px = b * bw + bw / 2, py = Y(e[0] / e[1]); prev != null && b - prev <= 2 ? g.lineTo(px, py) : g.moveTo(px, py); prev = b; }
+    g.stroke(); g.setLineDash([]); return Y; };
+  const grid = (k, Y, v, txt) => { g.strokeStyle = 'rgba(140,149,163,.16)'; g.lineWidth = 1; g.beginPath(); g.moveTo(L, Y(v)); g.lineTo(W - R, Y(v)); g.stroke(); if (txt) { g.fillStyle = '#626b78'; g.font = '10px -apple-system,BlinkMacSystemFont,sans-serif'; g.fillText(txt, L + 3, Y(v) - 6); g.font = '11px -apple-system,BlinkMacSystemFont,sans-serif'; } };
+  // feed reached: a time-smoothed line (4 Hz is noisy at the start/end of every move) and the override
+  let Y = trace('reached', 3, 0, 1.2, '#3ecf7a', null, false, 6); grid('reached', Y, 1, '100%'); grid('reached', Y, 0.5, '50%');
+  trace('reached', r => r[4] != null ? r[4] / 100 : null, 0, 1.2, '#f2c94c', [4, 3], false);
+  label('reached', 'Feed reached', 'override dashed');
+  Y = trace('rpm', 5, 0.85, 1.03, '#4ea1ff'); grid('rpm', Y, 1, '100%'); grid('rpm', Y, 0.9, '90%'); label('rpm', 'Spindle rpm', 'of target');
+  Y = trace('temp', 6, 20, 75, '#ff8c42', null, false); trace('temp', 7, 20, 75, '#b18cff', null, false);
+  g.strokeStyle = 'rgba(255,90,95,.6)'; g.setLineDash([5, 4]); g.beginPath(); g.moveTo(L, Y(70)); g.lineTo(W - R, Y(70)); g.stroke(); g.setLineDash([]); g.fillStyle = '#ff5a5f'; g.fillText('70 °C halt', W - R - 62, Y(70) - 7);
+  grid('temp', Y, 50, '50°'); grid('temp', Y, 30, '30°'); label('temp', 'Temperature', 'spindle · power');
+  // machine state: anything but Run (tool changes, holds, alarms)
+  { const [yy, hh] = lane.state; g.fillStyle = 'rgba(140,149,163,.12)'; g.fillRect(L, yy, W - L - R, hh);
+    for (let i = 0; i < TL.length - 1; i++) if (TL[i][1] !== 'Run') { g.fillStyle = /Alarm/.test(TL[i][1]) ? '#ff5a5f' : '#f2c94c'; g.fillRect(x(TL[i][0]), yy, Math.max(1, x(TL[i + 1][0]) - x(TL[i][0])), hh); }
+    label('state', 'Waits / holds'); }
+  // events
+  for (const e of a.events || []) { if (e.t == null || e.kind === 'note' && /^(program|play) /.test(e.text)) continue; const xx = x(e.t), yy = lane.state[0]; g.fillStyle = /ALARM|error|halt/i.test(e.text) ? '#ff5a5f' : '#e6e9ee'; g.beginPath(); g.moveTo(xx, yy + lane.state[1]); g.lineTo(xx - 4, yy - 3); g.lineTo(xx + 4, yy - 3); g.fill(); }
+  // time axis ticks
+  g.fillStyle = '#626b78'; const step = [60, 300, 600, 900, 1800, 3600].find(s => a.T / s < 9) || 7200;
+  for (let t = 0; t <= a.T; t += step) g.fillText(anClock(t).replace(/^0:/, ''), x(t) - 14, H - 9);
+  if (AN.t != null) { g.strokeStyle = '#fff'; g.lineWidth = 1; g.beginPath(); g.moveTo(x(AN.t), 0); g.lineTo(x(AN.t), H - 20); g.stroke(); }
+  AN.tlx = { L, R, W };
+}
+function anReadout(t) {
+  const a = AN.a; if (!a) return; let best = a.timeline[0];
+  for (const r of a.timeline) { if (r[0] > t) break; best = r; }
+  const o = a.ops[best[2]];
+  anEl('av-read').textContent = `${anClock(best[0])} · ${o ? o.name : best[1]} · feed ${best[3] != null ? anPct(best[3]) : '–'}${best[4] != null && best[4] !== 100 ? ` (override ${best[4]}%)` : ''} · rpm ${best[5] != null ? anPct(best[5]) : '–'} · ${best[6] != null ? best[6].toFixed(1) + ' °C' : ''}${best[7] != null ? ' / ' + best[7].toFixed(1) + ' °C' : ''}`;
+}
+(() => {
+  const c = anEl('av-tl'), tAt = ev => { const r = c.getBoundingClientRect(), { L, R, W } = AN.tlx || { L: 118, R: 14, W: r.width }; return Math.min(Math.max((ev.clientX - r.left - L) / (W - L - R), 0), 1) * AN.a.T; };
+  let down = false;
+  c.addEventListener('mousedown', ev => { if (!AN.a) return; down = true; AN.t = tAt(ev); anDrawTl(); anDraw(); anReadout(AN.t); });
+  c.addEventListener('mousemove', ev => { if (!AN.a) return; const t = tAt(ev); anReadout(t); if (down) { AN.t = t; anDrawTl(); anDraw(); } });
+  window.addEventListener('mouseup', () => { down = false; });
+  c.addEventListener('mouseleave', () => { if (AN.a) anReadout(AN.t ?? 0); });
+})();
+// ---- the report (Inspector)
+function anReport() {
+  const a = AN.a, s = a.summary, r = a.run, el = anEl('insp-analytics'), [tag, cls] = anOutcome(r);
+  const est = s.est_min, act = s.duration_min, over = est ? (act - est) / est : null;
+  const cutOps = a.ops.filter(o => o.cut_min > 0 && o.feed_reached != null), cutT = cutOps.reduce((q, o) => q + o.cut_min, 0);
+  const reached = cutT ? cutOps.reduce((q, o) => q + o.feed_reached * o.cut_min, 0) / cutT : null;
+  const kpi = (label, val, unit, sub, cl) => `<div class="ar-kpi ${cl || ''}"><small>${label}</small><b>${val}${unit ? `<em>${unit}</em>` : ''}</b><span>${sub || ''}</span></div>`;
+  const doneOps = a.ops.filter(o => o.done && o.est_min && o.actual_min);
+  const estDone = doneOps.reduce((q, o) => q + o.est_min, 0), actDone = doneOps.reduce((q, o) => q + o.actual_min, 0);
+  const finds = a.findings || [];
+  const good = [];
+  if (doneOps.length && Math.abs(actDone - estDone) <= Math.max(1, estDone * 0.05)) good.push(`The finished operations took ${anMin(actDone)} against ${anMin(estDone)} estimated: the CAM estimate is good for this machine.`);
+  if (reached != null && reached >= 0.93) good.push(`Cutting moves ran at ${anPct(reached)} of their programmed feed on average: the machine follows the plan.`);
+  if (s.rpm_min_ratio != null && s.rpm_min_ratio >= 0.97) good.push(`The spindle held its speed (lowest ${anPct(s.rpm_min_ratio)} of target while cutting): no sign of overload.`);
+  const dismissed = JSON.parse(localStorage.getItem('agenticcad.anDismissed') || '{}');
+  const sugs = (a.suggestions || []).filter(x => !dismissed[a.id + '#' + x.n]);
+  el.innerHTML = `
+  <div class="ar-sec"><div style="display:flex;gap:8px;align-items:baseline"><div class="ar-t" style="flex:1">${esc(anRunTitle(r))}</div><span class="an-tag ${cls}">${tag}</span></div>
+    <div class="ar-m">${esc(r.program || '')} · ${esc((r.started || '').replace('T', ' ').slice(0, 16))}${r.machine ? ' · ' + esc(r.machine) : ''}${r.app_version ? ' · v' + esc(r.app_version) : ''}${r.outcome === 'running' ? ' · <b style="color:var(--accent)">still running</b>: refreshes every 20 s' : ''}${r.message && r.outcome !== 'done' ? '<br>' + esc(r.message) : ''}</div></div>
+  <div class="ar-sec"><div class="ar-kpis">
+    ${kpi('Time', anMin(act).replace(/ (min|h)$/, ''), / h$/.test(anMin(act)) ? 'h' : 'min', est ? `est ${anMin(est)}${over != null && r.outcome !== 'running' ? ` · ${over >= 0 ? '+' : '−'}${Math.abs(Math.round(over * 100))}%` : ''}` : '', over != null && over > 0.15 && r.outcome !== 'running' ? 'w' : '')}
+    ${kpi('Cutting', s.cut_min.toFixed(0), 'min', `rapids ${s.rapid_min.toFixed(1)} · waits ${s.wait_min.toFixed(1)}`)}
+    ${kpi('Feed reached', reached != null ? Math.round(reached * 100) : '–', '%', 'while cutting', reached != null && reached < 0.85 ? 'w' : reached != null ? 'g' : '')}
+    ${kpi('Spindle peak', s.spindle_temp_max != null ? s.spindle_temp_max.toFixed(0) : '–', '°C', s.temp_slope_c_per_10min != null ? `${s.temp_slope_c_per_10min >= 0 ? '+' : ''}${s.temp_slope_c_per_10min} °C / 10 min` : 'halts at 70 °C', s.spindle_temp_max >= 62 ? 'e' : s.spindle_temp_max >= 55 ? 'w' : '')}
+    ${kpi('Lowest rpm', s.rpm_min_ratio != null ? Math.round(s.rpm_min_ratio * 100) : '–', '%', 'of target, cutting', s.rpm_min_ratio != null && s.rpm_min_ratio < 0.92 ? 'w' : '')}
+    ${kpi('Feed override', s.feed_ovr ? (s.feed_ovr[0] === s.feed_ovr[1] ? s.feed_ovr[0] : `${s.feed_ovr[0]}–${s.feed_ovr[1]}`) : '–', '%', s.feed_ovr && (s.feed_ovr[0] !== 100 || s.feed_ovr[1] !== 100) ? 'changed by hand' : 'untouched')}
+  </div></div>
+  <div class="ar-sec"><div class="an-h">Measured</div>
+    ${good.map(t => `<div class="ar-find good"><i></i><div>${esc(t)}</div></div>`).join('')}
+    ${finds.map(f => `<div class="ar-find ${f.severity === 'warn' ? 'warn' : ''}"><i></i><div>${esc(f.title)}<small>${esc(f.detail)}</small></div></div>`).join('')}
+    ${!good.length && !finds.length ? '<div class="ar-m">Nothing stands out yet.</div>' : ''}
+  </div>
+  <div class="ar-sec"><div class="an-h">Suggestions</div>
+    <div class="ar-ask"><div><b>Analyse with the assistant</b>It reads these numbers and the run's CAM script, and suggests changes with their evidence. Nothing changes until you apply one.</div>
+      <button class="btn acc" id="ar-analyse"${busy ? ' disabled title="The assistant is busy"' : ''}>${AN.asked[a.id] ? 'Again' : 'Analyse'}</button></div>
+    ${AN.asked[a.id] && !sugs.length ? '<div class="ar-m" style="margin-top:8px">The assistant is working on it — follow along in the Assistant tab. Its suggestions appear here.</div>' : ''}
+    ${sugs.map(x => `<div class="ar-sug"><div class="s1"><span class="ar-cat">${esc(x.category || 'other')}</span><b>${esc(x.title)}</b>${x.gain ? `<span class="gain">${esc(x.gain)}</span>` : ''}</div>
+      ${x.evidence ? `<p><b>Evidence:</b> ${esc(x.evidence)}</p>` : ''}${x.change ? `<p><b>Change:</b> ${esc(x.change)}</p>` : ''}
+      <div class="acts"><button class="btn sm pri" data-apply="${x.n}">Apply to CAM…</button>${x.op ? `<span class="muted sm">${esc(x.op)}</span>` : ''}<button class="btn sm ghost x" data-dismiss="${x.n}">Dismiss</button></div></div>`).join('')}
+  </div>
+  <div class="ar-sec"><div class="an-h">Operations</div>
+    <table class="ar-tbl"><tr><th>Operation</th><th>est</th><th>actual</th><th>feed</th><th>rpm</th><th>°C</th></tr>
+    ${a.ops.map((o, i) => { const d = o.actual_min && o.est_min && o.done ? (o.actual_min - o.est_min) / o.est_min : null;
+      return `<tr data-op="${i}"><td title="${esc(o.name)}"><span class="sw" style="background:${AN_OPC[i % AN_OPC.length]}"></span>${esc(o.name)}</td><td>${o.est_min != null ? o.est_min.toFixed(1) : '–'}</td>
+      <td class="${d == null ? '' : d > 0.15 ? 'w' : Math.abs(d) <= 0.05 ? 'g' : ''}">${o.actual_min != null ? o.actual_min.toFixed(1) + (o.done ? '' : '…') : '–'}</td>
+      <td class="${o.feed_reached != null && o.feed_reached < 0.85 ? 'w' : ''}">${o.feed_reached != null ? anPct(o.feed_reached) : '–'}</td>
+      <td class="${o.rpm_min != null && o.rpm_min < 0.92 ? 'w' : ''}">${o.rpm_min != null ? anPct(o.rpm_min) : '–'}</td><td>${o.temp_max != null ? o.temp_max.toFixed(0) : '–'}</td></tr>`; }).join('')}
+    </table><div class="ar-m" style="margin-top:6px">Minutes. Feed: time-weighted real speed against the programmed feed while cutting. Rpm: lowest while cutting. Click a row to jump the timeline to it.</div></div>
+  ${(r.probes || []).length ? `<div class="ar-sec"><div class="an-h">Probing</div>${r.probes.map(p => `<div class="ar-find ${p.skipped ? '' : 'good'}"><i></i><div>${esc(p.op)}<small>${p.skipped ? 'skipped (air cut)' : p.sets && p.sets.length ? 'sets ' + p.sets.join(', ').toUpperCase() : 'check'}</small></div></div>`).join('')}</div>` : ''}
+  <div class="ar-sec"><div class="ar-m">${s.samples} samples · ${s.match_rate != null ? Math.round(s.match_rate * 100) + '% placed on the program' : ''}${s.match_median_mm != null ? ` (median ${s.match_median_mm} mm off it)` : ''}${s.offset && s.offset.fitted ? ' · work offset fitted from the data (runs from 1.5.1 record it)' : ''}. The Z1 has no spindle load sensor: rpm droop is the only load signal.</div></div>`;
+  anEl('ar-analyse').onclick = () => anAsk(a.id);
+  el.querySelectorAll('[data-apply]').forEach(b => b.onclick = () => { const x = sugs.find(q => q.n === +b.dataset.apply);
+    anChat(`Apply suggestion ${x.n} for recorded run ${a.id}: "${x.title}". ${x.change || ''} Change the CAM script, rebuild and simulate, then tell me what changed and what to check before the next run.`); });
+  el.querySelectorAll('[data-dismiss]').forEach(b => b.onclick = () => { dismissed[a.id + '#' + b.dataset.dismiss] = 1; try { localStorage.setItem('agenticcad.anDismissed', JSON.stringify(dismissed)); } catch {} anReport(); });
+  el.querySelectorAll('tr[data-op]').forEach(tr => tr.onclick = () => { const i = +tr.dataset.op, row = a.timeline.find(q => q[2] === i); if (row) { AN.t = row[0]; anDrawTl(); anDraw(); anReadout(AN.t); }
+    el.querySelectorAll('tr[data-op]').forEach(q => q.classList.toggle('on', q === tr)); });
+}
+function anChat(text) {
+  if (busy) { addMsg('error', 'The assistant is busy: wait for it to finish, or stop it.'); return; }
+  showPane('chat'); addUserMsg(text, { faces: [], bodies: [] }); send({ type: 'chat', text }); setBusy(true);
+}
+function anAsk(id) {
+  AN.asked[id] = true;
+  const text = `Analyse recorded run ${id} (machine_runs action=analysis) against its CAM script, and file concrete suggestions with report_suggestions. If it went as planned, say so.`;
+  if (busy) { addMsg('error', 'The assistant is busy: wait for it to finish, or stop it.'); return; }
+  addUserMsg(text, { faces: [], bodies: [] }); send({ type: 'chat', text }); setBusy(true); anReport();
+}
+function anSuggestions(m) {
+  if (AN.a && m.id === AN.a.id) { AN.a.suggestions = m.suggestions; anReport(); }
+}
 function machineRequest(m) {
   if (MREQ.has(m.id)) return;
   const r = { ...m, state: 'waiting' }; MREQ.set(m.id, r); mreqPaint(r);

@@ -1208,9 +1208,26 @@ def _program_for_ops(body: MachineBody) -> tuple[dict, dict, str]:
 
 @app.get("/api/runs")
 async def runs_list(design: str | None = None):
-    """Recorded machine runs (run_recorder), newest first."""
+    """Recorded machine runs (run_recorder), newest first, with the name this design's runs are filed under."""
     import run_recorder
-    return {"runs": run_recorder.list_runs(WORKSPACE / "runs", design)}
+    return {"runs": run_recorder.list_runs(WORKSPACE / "runs", design), "design": agent.runs_design()}
+
+
+@app.get("/api/runs/analysis")
+async def runs_analysis(id: str):
+    """Planned vs actual for one run (run_analysis), with the assistant's suggestions for it if any."""
+    import run_analysis
+    import run_recorder
+    d = run_recorder.run_dir(WORKSPACE / "runs", id)
+    if d is None:
+        return JSONResponse({"error": "no such run"}, status_code=404)
+    try:
+        a = await asyncio.to_thread(run_analysis.analyse, d)
+    except Exception as e:  # noqa: BLE001 - a broken record shows as an error, not a crash
+        return JSONResponse({"error": f"analysis failed: {type(e).__name__}: {e}"}, status_code=500)
+    sug = d / "suggestions.json"
+    a = {**a, "id": id, "suggestions": json.loads(sug.read_text()).get("suggestions", []) if sug.exists() else []}
+    return a
 
 
 @app.get("/api/machine")
@@ -1811,7 +1828,9 @@ class NameBody(BaseModel):
 
 class ImportBody(BaseModel):
     name: str
-    code: str
+    code: str | None = None
+    data: str | None = None      # a shared .zip, base64
+    confirm: bool = False        # the user has seen what the scripts reach (share.risky) and imports anyway
 
 
 @app.get("/api/designs")
@@ -1848,11 +1867,56 @@ async def design_new():
 
 @app.post("/api/design/import")
 async def design_import(body: ImportBody):
+    """A design script (.py), or a shared bundle (.zip: design + CAM script). Scripts run as Python here, so what they
+    reach past geometry (imports, files, eval) is shown to the user first: {confirm: [...]} until they agree."""
+    import share
+    cam_code = None
+    if body.data is not None:
+        try:
+            b = share.read_bundle(base64.b64decode(body.data.split(",", 1)[-1]))
+        except ValueError as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
+        name, code, cam_code = b["name"], b["code"], b["cam_code"]
+    else:
+        name, code = body.name, body.code or ""
+    if not body.confirm:
+        risks = share.risky(code, "design") + (share.risky(cam_code, "CAM") if cam_code else [])
+        if risks:
+            return {"confirm": risks, "name": name}
     try:
-        name = await agent.import_design(body.name, body.code)
+        name = await agent.import_design(name, code, cam_code)
     except ck.CadError as e:
         return JSONResponse({"error": str(e)}, status_code=400)
-    return {"name": name}
+    return {"name": name, "cam": bool(cam_code)}
+
+
+@app.post("/api/design/share")
+async def design_share():
+    """Bundle the design as it is on screen (script, CAM script, STEP, README) and open a new email with it attached in
+    the user's own mail app. The app sends nothing: the user addresses it and presses Send."""
+    import share
+    if agent.model is None:
+        return JSONResponse({"error": "no design to share"}, status_code=400)
+    name = agent.runs_design()
+    out = WORKSPACE / "shared" / share._safe(name)
+    step = None
+    try:
+        step = (await asyncio.to_thread(ck.export, agent.model, out, share._safe(name), ["step"]))[0]
+    except Exception:  # noqa: BLE001 - the scripts still go; the README says what's in it
+        step = None
+    cam_info = None
+    p = agent.program
+    if agent.cam_code.strip() and p is not None:
+        try:
+            cam_info = {"summary": f"{p.machine.name}, {len(p.ops)} operation{'s' if len(p.ops) != 1 else ''}, about {round(p.time_minutes())} min"}
+        except Exception:  # noqa: BLE001
+            cam_info = {"summary": ""}
+    path = share.bundle(out, name, agent.model.code, agent.cam_code, step, __version__, cam_info)
+    subject, text = share.message(name, __version__, cam_info if agent.cam_code.strip() else None, step is not None)
+    if os.environ.get("AGENTICCAD_NO_MAIL"):                      # tests: build the bundle, open nothing
+        return {"file": str(path), "how": "none", "note": ""}
+    r = await asyncio.to_thread(share.compose, path, subject, text)
+    return {"file": str(path), **r}
 
 
 @app.get("/api/design/download")

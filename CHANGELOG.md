@@ -5,6 +5,41 @@ patch bumps fix things, a major bump changes something scripts or workspaces rel
 
 ## [Unreleased]
 
+## [1.6.0] — 2026-11-02
+
+### Added
+- **Analytics workspace: what the machine really did, against the plan.** A fourth workspace next to Design, CAM and
+  Machine lists the design's recorded runs (time against the estimate, how each ended). For the selected run:
+  - the toolpath in plan view coloured by what happened - feed reached (real speed / programmed feed), spindle rpm
+    against its target, spindle temperature, operation or depth - with the program's own path faint behind it; hover
+    for the numbers at a spot, drag to pan, scroll to zoom;
+  - a timeline of operations, feed reached with the feed override, spindle rpm, spindle and power-supply temperatures
+    against the 70 °C halt, and waits/holds; scrub it to move a marker along the path;
+  - a report: headline numbers, measured findings (operations that ran over their estimate, move groups that lose
+    time because they're too short to reach their feed, spindle droop, the temperature trend, overrides), the
+    per-operation table, probing.
+  The Z1 reports the line it's *reading* (it plans ahead) and the programmed feed, not its speed, so the analysis goes
+  by position: each status sample is matched to the planned move it was on, and the real speed comes from the
+  distance between samples. Runs recorded from now on keep the work position; for older ones the work offset is
+  fitted from the data. Rpm droop is the only load signal (the Z1 has no load sensor).
+- **Analyse with the assistant.** It reads a run's numbers and the CAM script it ran, and files suggestions with their
+  evidence, the CAM change and the expected gain; they show as cards in the report. Apply to CAM asks the assistant to
+  make the change and simulate it. Nothing changes until you apply one. New agent tools: `machine_runs`,
+  `report_suggestions`.
+- **File ▸ Share by email…** packs the design as it is on screen (script, CAM program, an exact STEP, a README) into a
+  .zip and opens a new email in your own default mail app, for you to address and send. The app sends nothing and
+  nothing goes through any service. No method attaches a file in every mail app (mailto: can't carry attachments), so
+  it goes by the default app: Apple Mail (macOS's mail share), Outlook for Mac (AppleScript; macOS asks once),
+  Thunderbird (-compose, when it isn't running), Windows Simple MAPI (Outlook classic, Thunderbird, eM Client...),
+  Linux xdg-email. Anything else, or any of those failing (new Outlook's scripting and MAPI support are partial):
+  mailto: opens the message with the subject and text and the .zip is shown selected in Finder / Explorer to drag in.
+- **File ▸ Import design…** takes a shared .zip as well as a .py, with its CAM program. Design and CAM scripts run as
+  Python on your computer, so an import that reaches past geometry (other modules, files, eval) lists what it does
+  and asks first.
+
+### Changed
+- The run recorder keeps the work position with each sample.
+
 ### Security
 - certifi 2026.10.23 (from 2026.7.22): drops the emSign root CAs whose intermediate keys were compromised
   (GHSA-6q48-6c7w-9gw2). It is the trust store for the app's HTTPS connections.
