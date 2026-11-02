@@ -43,6 +43,30 @@ to use an API key instead. The default model is Claude Opus 5.5 (`claude-opus-5-
 
 Setup from scratch: `python3 -m venv .venv && .venv/bin/pip install -r requirements.txt`.
 
+**Desktop app from source** (the same launcher the installers use, in a native window instead of a browser tab).
+`requirements.txt` only covers the web server; the launcher needs a few more packages:
+
+```bash
+# all platforms: the OS user-data folder and the native window
+.venv/bin/pip install platformdirs==4.11.12 pywebview==6.2.1
+# macOS: WKWebView bindings
+.venv/bin/pip install pyobjc-core pyobjc-framework-Cocoa pyobjc-framework-WebKit pyobjc-framework-Security
+# Windows: WebView2 bindings
+.venv\Scripts\pip install "pythonnet>=3.0" pywin32
+
+PYTHONPATH=src .venv/bin/python -m agenticcad
+```
+
+Without `platformdirs` the launcher stops at once with `ModuleNotFoundError: No module named 'platformdirs'`.
+Without `pywebview` (or its platform bindings) it still runs, but opens the UI in your default browser instead of a
+window. Notes:
+
+- The launcher package lives in `src/`, hence `PYTHONPATH=src` (the installers put it on the path for you).
+- It stores designs in the OS user-data folder (`~/Library/Application Support/AgenticCAD`, `%LOCALAPPDATA%\AgenticCAD`),
+  not in the checkout's `workspace/`; set `AGENTICCAD_WORKSPACE=<dir>` to use another folder (for instance the checkout's).
+- It picks a free localhost port (8765 if available, otherwise a random one), so the URL may differ from `server.py`'s.
+- The splash sits on "Loading the CAD kernel" for 15-60 s (longer from an external drive) before the workspace appears; that is normal.
+
 **Building the desktop app** ([Briefcase](https://briefcase.beeware.org), config in `pyproject.toml`):
 
 ```bash
