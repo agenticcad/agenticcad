@@ -8,6 +8,7 @@ Also owns the "design" (a .py script file in workspace/designs) and the build hi
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import os
 import sys
@@ -31,6 +32,7 @@ import drawing
 from cam_data import Library
 from library import PartLibrary, slug as lib_slug
 import script_edit
+import lessons as lessons_mod
 import run_analysis
 import run_recorder
 import extensions as ext_mod
@@ -344,6 +346,10 @@ probe_hole(..., check=0.1) on the diagonal one. The probe drops into holes to `d
 hole must be at least that deep and wider than the ball by 1 mm. simulate_cam checks every probe move for air
 (COLLISIONS "3D probe ... hits stock": a hole that isn't cut yet, a spot that was machined away, a wrong height).
 There is no probe op on other posts or on 4th-axis setups: say so and use Machine ▸ Zero instead.
+Lessons learnt (the `lessons` tool): rules written after earlier failures. cam_context and build_cam hand you the ones that
+apply - follow each and say in one line how the script meets it; simulate_cam names any lesson the program breaks. When a
+run fails or is stopped, the simulation catches something your script should have avoided, the app refuses something you
+sent, or the user corrects you, file a lesson (one rule, the evidence, tags, the verdict code that catches it if any).
 Recorded runs (Analytics workspace): every program the Machine workspace sends is recorded (status ~4 Hz: position,
 real speed, spindle rpm and temperatures, overrides, events). machine_runs(action=list) lists them; action=analysis
 {id} gives planned vs actual per op (time against the estimate, feed reached = real speed / commanded feed, spindle
@@ -363,7 +369,14 @@ band, not at one height: use free_region(view, z_top, z_bottom, within=...) (the
 level of the band; within = the recess / hole / outline it may work in). Never pocket a single section's holes (the
 interiors of section(view, z)) over a band: that misses islands and bosses inside them and anything that changes
 within the band (a countersink cone, a counterbore, a step), and cuts them away. After build_cam, simulate_cam: any
-GOUGES line is a broken program - fix the region (free_region, a shallower band, a separate op per level), never send it. Depths:
+GOUGES line is a broken program - fix the region (free_region, a shallower band, a separate op per level), never send it.
+simulate_cam also says, per body, what is left unmachined and what kind (flat at z = a face not taken down; sloped = a
+chamfer or bevel the model has and no op cut; edge), the real metal in every tab (THIN TAB below 2 mm in aluminium: tab
+height counts from the material that is actually there, so a back already relieved from the other side leaves less), when
+each part becomes tab-held or free, and any op that cuts a part after that (RELEASED). Simulating a later setup chains the
+earlier ones in. run_ops refuses ops that weren't simulated and puts the simulation's errors on the user's card. So: every
+edge the model chamfers gets a chamfer op, and every chamfer, face and pocket on a part runs BEFORE the cut that releases
+it; profile each body on its own (never one outline around two parts); make the release the last cut of each part. Depths:
 z_bottom below the stock bottom means cutting into the spoilboard (fine for through-cuts with a sacrificial
 board, warn otherwise). Tool numbers matter for tool changes (GRBL: machine.tool_change='pause' emits M6/M0; Haas and LinuxCNC posts emit Tn M06 + G43 Hn, so tool offsets must exist on the control). Built-in machines include the Makera Z1 and Carvera Air, Haas VF-2 / VF-2SS / VF-4 / Mini Mill / TM-1, and generic LinuxCNC mills.
 Prefer the tool library's feeds/stepdown; override per op only with a reason. The user's own per-op tweaks from
@@ -834,6 +847,7 @@ class CadAgent:
                 pass
             self.client = None
         self.session_id = None
+        self._write_state()
         self.notes.clear()
         await self.emit({"type": "chat_reset"})
 
@@ -1091,7 +1105,8 @@ class CadAgent:
     MACHINE_NOW = ("status", "hold", "pause", "stop_program", "halt", "check_ops", "connect", "disconnect")
     MACHINE_ASK = ("control_on", "control_off", "home", "unlock", "resume", "resume_program", "change_tool", "confirm_tool",
                    "origin_anchor", "auto_z_probe", "set_origin", "shift_origin", "origin_at", "lower_to", "raise_z", "goto",
-                   "cleaning_position", "probe_3d", "run_ops", "switch", "console", "jog_a", "rotary_zero", "shrink_a")
+                   "cleaning_position", "probe_3d", "probe_descend", "recover", "run_ops", "switch", "console", "jog_a", "rotary_zero",
+                   "shrink_a")
 
     def _setup_is_rotary(self, info: dict) -> bool:
         """Is the setup a program_for_ops() picked on the 4th axis? (its origin must then be zeroed on the axis)"""
@@ -1109,7 +1124,7 @@ class CadAgent:
         elif action == "home":
             mc._need(armed=True, idle=False)
         elif action in ("change_tool", "origin_anchor", "auto_z_probe", "set_origin", "shift_origin", "origin_at", "lower_to", "raise_z",
-                        "goto", "cleaning_position", "switch", "console", "jog_a", "rotary_zero", "shrink_a"):
+                        "goto", "cleaning_position", "switch", "console", "jog_a", "rotary_zero", "shrink_a", "probe_descend"):
             mc._need(armed=True, idle=action != "switch", homed=action != "switch")
             owner = (mc.job or {}).get("owner") or {}
             if mc.job_active and owner.get("doc") and owner["doc"] != self.doc_id:
@@ -1124,7 +1139,10 @@ class CadAgent:
         if action == "control_off":
             return "Turn Control off.", lambda: mc.arm(False)
         if action == "home":
-            return "Home all axes ($H): Z up first, then X and Y to their switches.", mc.home
+            return "Home all axes ($H): Z up first, then X and Y to their switches.", lambda: mc.home(wait=True)
+        if action == "recover":
+            info = mc.check_recover()
+            return info["summary"], mc.recover
         if action == "unlock":
             return "Clear the Alarm ($X). Home before moving.", mc.unlock
         if action == "resume":
@@ -1158,7 +1176,11 @@ class CadAgent:
             if not vals:
                 raise ml.Refused("set_origin: give x, y and/or z")
             words = ", ".join(f"{k.upper()} {v:g}" for k, v in vals.items())
-            return f"The head's current position becomes work {words} (G10 L20 P0). Nothing moves.", lambda: mc.set_origin(vals.get("x"), vals.get("y"), vals.get("z"))
+            p = f("p")
+            info = mc.check_set_origin(vals.get("x"), vals.get("y"), vals.get("z"), p)
+            return (f"The head's current position becomes {info['wcs']} work {words} ({info['command']}). Nothing moves. {info['facts']}"
+                    + (f" (selects {info['wcs']} first; it becomes the active work offset)" if info["select"] else "")
+                    ), lambda: mc.set_origin(vals.get("x"), vals.get("y"), vals.get("z"), p=p)
         if action == "shift_origin":
             dx, dy = float(f("dx", "nan")), float(f("dy", "nan"))
             ref = str(f("ref", "typed"))
@@ -1166,12 +1188,16 @@ class CadAgent:
         if action == "origin_at":
             x, y = float(f("x", "nan")), float(f("y", "nan"))
             ref = str(f("ref", "typed"))
-            return (f"Set work X0 Y0 at machine X {x:.3f} Y {y:.3f} (the {ref}). Z0 stays. Nothing moves."), lambda: mc.origin_at(x, y, ref, f"set by the assistant at the {ref}")
+            p = f("p")
+            info = mc.check_origin_at(x, y, p)
+            return (f"Set work X0 Y0 at machine X {x:.3f} Y {y:.3f} (the {ref}; {info['command']}). Z0 stays. Nothing moves. {info['facts']}"
+                    ), lambda: mc.origin_at(x, y, ref, f"set by the assistant at the {ref}", p=p)
         if action == "lower_to":
             h = float(f("height", "nan"))
-            return f"Lower Z only (X/Y stay) to {h:g} mm above work Z0 at 300 mm/min.", lambda: mc.lower_to(h)
+            info = mc.check_lower_to(h)
+            return info["summary"], lambda: mc.lower_to(h, wait=True)
         if action == "raise_z":
-            return "Raise Z to the top of travel at 300 mm/min. X/Y stay.", lambda: mc.raise_z_top()
+            return "Raise Z to the top of travel at 300 mm/min. X/Y stay.", lambda: mc.raise_z_top(wait=True)
         if action == "cleaning_position":
             cx, cy = mc.cleaning_xy
             return (f"Move to the cleaning position: Z to the top of travel, then machine X {cx:g} Y {cy:g} at 600 mm/min - the head "
@@ -1188,18 +1214,30 @@ class CadAgent:
             else:
                 mx, my = x, y
             return (f"Go to {'work' if work else 'machine'} X {x:g} Y {y:g}" + (f" (machine X {mx:.2f} Y {my:.2f})" if work else "")
-                    + " at 300 mm/min; Z goes up to the top first if it isn't there."), lambda: mc.goto_xy_raised(mx, my, 300.0)
+                    + " at 300 mm/min; Z goes up to the top first if it isn't there."), lambda: mc.goto_xy_raised(mx, my, 300.0, wait=True)
         if action == "probe_3d":
-            info = mc.check_probe_3d(str(f("kind", "")), float(f("x", 20)), float(f("y", 20)), float(f("depth", 2)), float(f("dia", 2)))
-            return (f"Makera's 3D probe, {info['label']} ({info['command']}) from where the head is now: it moves and probes on "
-                    "its own and overwrites the work origin. The app holds it if the head leaves the area or Z drops 10 mm "
-                    "without a touch."), lambda: mc.probe_3d(str(f("kind")), float(f("x", 20)), float(f("y", 20)), float(f("depth", 2)), float(f("dia", 2)))
+            hole = f("hole_dia")
+            hole = float(hole) if hole is not None else None
+            args3 = (str(f("kind", "")), float(f("x", 20)), float(f("y", 20)), float(f("depth", 2)), float(f("dia", 2)))
+            info = mc.check_probe_3d(*args3, None, hole)
+            return info["summary"], lambda: mc.probe_3d(*args3, hole_dia=hole)
+        if action == "probe_descend":
+            to_z = f("to_z")
+            to_z = float(to_z) if to_z is not None else None
+            md = float(f("max_dist", 20))
+            return mc.check_probe_descend(to_z, md)["summary"], lambda: mc.probe_descend(to_z, md)
         if action == "run_ops":
             prep, info, label = self.program_for_ops(f("ops") or [], float(f("air", 0) or 0))
             rot, ack = self._setup_is_rotary(info), bool(f("ack"))
             chk = mc.check_job(prep, rotary=rot, ack=ack)
             names = ", ".join(o["name"] for o in prep["ops"])
-            return (f"Run on the machine: {names} (setup {info['setup']}, {info['wcs']}) · about {info['time_min']} min"
+            idx = sorted(set(int(i) for i in (f("ops") or [])))
+            gate = self.sim_gate(idx)
+            if not gate["simulated"] and not prep["air_cut"]:
+                raise ml.Refused("simulate these ops first (simulate_cam with ops " + str([i + 1 for i in idx]) + "; the earlier setups "
+                                 "are chained in) and fix what it reports: the run is checked against that simulation")
+            sim_txt = ("SIMULATION ERRORS - approve only if you accept them: " + " | ".join(gate["errors"]) + ". ") if gate["errors"] else ""
+            return (sim_txt + f"Run on the machine: {names} (setup {info['setup']}, {info['wcs']}) · about {info['time_min']} min"
                     + (f" · AIR CUT +{prep['air_cut']:g} mm" if prep["air_cut"] else "") + (" · 4TH AXIS" if rot else "") + ". " + "; ".join(chk["notes"])
                     + ". The machine runs it on its own once started."), lambda: mc.run_program(label, prep, {**info, "owner": {"doc": self.doc_id, "name": self.design_name}}, rotary=rot, ack=ack)
         if action == "switch":
@@ -1209,8 +1247,8 @@ class CadAgent:
             return (f"Turn the {what.replace('_', ' ')} {'on' if on else 'off'}" + (f" at {pw:g}%" if on and pw is not None else "") + "."), lambda: mc.switch(what, on, pw)
         if action == "console":
             line = str(f("line", "")).strip()
-            return (f"Send this line to the machine exactly as written: {line}  (the app only checks it isn't blocked; "
-                    "it does not check where a move goes)."), lambda: mc.console(line)
+            info = mc.check_console(line, assistant=True)          # the assistant's console: reads and settings only, no motion
+            return info["summary"], lambda: mc.console(line, assistant=True)
         # -- the 4th axis
         if action == "jog_a":
             deg = float(f("deg", "nan"))
@@ -1245,6 +1283,87 @@ class CadAgent:
             raise ml.Refused("rotary_zero: what = z_probe | y_axis {y: machine Y, optional} | a_zero | x_here | x_at {x: machine X}")
         raise ml.Refused(f"unknown machine action {action!r}")
 
+    JOURNAL_KEEP = 400
+
+    def _journal(self, action: str, args: dict, outcome: str, text: str = "") -> None:
+        """What the assistant did on the machine, kept with the design (machine_journal.jsonl): a new conversation - a
+        relaunch, File ▸ New - starts from it instead of from nothing (zeroing, probe results, what ran, what failed)."""
+        if action in ("status", "check_ops"):
+            return
+        p = self.doc_dir / "machine_journal.jsonl"
+        try:
+            with open(p, "a") as fh:
+                fh.write(json.dumps({"t": round(time.time(), 1), "action": action, "args": args, "outcome": outcome,
+                                     "text": (text or "")[:400]}) + "\n")
+            lines = p.read_text().splitlines()
+            if len(lines) > self.JOURNAL_KEEP * 1.25:
+                p.write_text("\n".join(lines[-self.JOURNAL_KEEP:]) + "\n")
+        except OSError:
+            pass
+
+    def _run_lesson_notes(self) -> list[str]:
+        """A run of this design that failed or was stopped since the last turn: ask for a lesson once (kept in
+        lesson_runs.json so a relaunch doesn't ask again)."""
+        p = self.doc_dir / "lesson_runs.json"
+        try:
+            seen = set(json.loads(p.read_text())) if p.exists() else set()
+        except (OSError, ValueError):
+            seen = set()
+        try:
+            runs = run_recorder.list_runs(self.workspace / "runs", self.runs_design())[:5]
+        except Exception:  # noqa: BLE001
+            return []
+        out = []
+        for m in runs:
+            if m.get("outcome") in ("failed", "aborted", "stopped") and m["id"] not in seen and time.time() - (m.get("t0") or 0) < 3 * 86400:
+                seen.add(m["id"])
+                out.append(f"The run '{m.get('program')}' started {m.get('started')} ended {m.get('outcome')}"
+                           f"{': ' + m['message'] if m.get('message') else ''}. Once the cause is clear (ask the user what they saw "
+                           "if you don't know), file a lesson with the lessons tool so it doesn't happen again.")
+        if out:
+            try:
+                p.write_text(json.dumps(sorted(seen)))
+            except OSError:
+                pass
+        return out
+
+    def machine_context(self, new_session: bool) -> str:
+        """[Machine] lines for the next turn: the live state when connected, and - for a conversation that starts
+        without history - the journal of earlier machine actions and the last recorded runs of this design."""
+        out = []
+        mc = self.machine
+        if mc is not None and getattr(mc, "connected", False):
+            try:
+                out.append(f"[Machine] {mc.describe()}")           # includes the origin sources per work offset
+            except Exception:  # noqa: BLE001 - context only
+                pass
+        if new_session and mc is not None and getattr(mc, "connected", False):
+            les = self.lessons_for({"machine", "probe"}, "[Machine] LESSONS LEARNT for work on the machine (follow them):")
+            if les:
+                out.append(les)
+        if new_session:
+            p = self.doc_dir / "machine_journal.jsonl"
+            rows = []
+            try:
+                rows = [json.loads(x) for x in p.read_text().splitlines()[-30:] if x.strip()] if p.exists() else []
+            except (OSError, ValueError):
+                rows = []
+            if rows:
+                out.append("[Machine journal: what the assistant did on the machine before this conversation, oldest first]")
+                for r in rows:
+                    args = json.dumps(r.get("args") or {}, separators=(",", ":"))
+                    out.append(f"[Machine] {time.strftime('%m-%d %H:%M', time.localtime(r['t']))} {r['action']} {args if args != '{}' else ''} "
+                               f"-> {r['outcome']}{': ' + r['text'] if r.get('text') else ''}")
+            try:
+                runs = run_recorder.list_runs(self.workspace / "runs", self.runs_design())[:3]
+            except Exception:  # noqa: BLE001
+                runs = []
+            for m in runs:
+                out.append(f"[Machine] run {m.get('started')}: {m.get('program')} ops "
+                           f"{', '.join(o.get('name') or '?' for o in (m.get('ops') or [])[:12])} -> {m.get('outcome')}"
+                           f"{' (' + m['message'] + ')' if m.get('message') else ''}")
+        return "\n".join(out)
+
     async def machine_action(self, action: str, args: dict | None = None, wait: float = 900.0) -> str:
         """The agent's way to the machine. Stopping actions and status run at once; the rest wait for the user's Approve."""
         import machine_link as ml
@@ -1274,22 +1393,29 @@ class CadAgent:
                 await mc.disconnect()
                 return "Disconnected."
             if action == "hold":
-                await mc.hold(); return "Feed hold sent. " + mc.describe()
+                await mc.hold(); self._journal(action, a, "sent"); return "Feed hold sent. " + mc.describe()
             if action == "halt":
-                await mc.halt(); return "STOP sent: motion and spindle stopped, the machine is in Alarm (Unlock, then Home)."
+                await mc.halt(); self._journal(action, a, "sent")
+                return "STOP sent: motion and spindle stopped, the machine is in Alarm (Unlock, then Home)."
             if action == "pause":
-                await mc.job_pause(); return "Program pausing (finishes the moves in hand)."
+                await mc.job_pause(); self._journal(action, a, "sent"); return "Program pausing (finishes the moves in hand)."
             if action == "stop_program":
-                await mc.job_abort(); return "Program stopped; spindle off."
+                await mc.job_abort(); self._journal(action, a, "sent"); return "Program stopped; spindle off."
             if action == "check_ops":
                 prep, info, label = await asyncio.to_thread(self.program_for_ops, a.get("ops") or [], float(a.get("air") or 0))
                 chk = mc.check_job(prep, rotary=self._setup_is_rotary(info), ack=bool(a.get("ack")))
+                gate = self.sim_gate(sorted(set(int(i) for i in (a.get("ops") or []))))
+                sim_txt = (" Simulation: NOT SIMULATED - run_ops will refuse until simulate_cam covers these ops." if not gate["simulated"]
+                           else (" Simulation ERRORS: " + " | ".join(gate["errors"]) if gate["errors"] else " Simulation: clean.")
+                           + (" Warnings: " + " | ".join(gate["warnings"][:6]) if gate["warnings"] else ""))
                 return (f"{label}: {prep['lines']} lines, operations {[o['name'] for o in prep['ops']]}, tools {prep['tools']}, "
-                        f"about {info['time_min']} min. " + "; ".join(chk["notes"]))
+                        f"about {info['time_min']} min. " + "; ".join(chk["notes"]) + sim_txt)
             summary, do = await asyncio.to_thread(self._machine_plan, action, a)   # may build a big program: off the loop
         except ml.Refused as e:
+            self._journal(action, a, "refused", str(e))
             return f"Refused: {e}"
         except cam.CamError as e:
+            self._journal(action, a, "refused", str(e))
             return f"Refused: {e}"
         rid = uuid.uuid4().hex[:12]
         fut = asyncio.get_running_loop().create_future()
@@ -1303,18 +1429,28 @@ class CadAgent:
         finally:
             self.machine_requests.pop(rid, None)
         if not ok:
+            self._journal(action, a, "expired" if ok is None else "declined by the user")
             await self.emit({"type": "machine_request_done", "id": rid, "outcome": "expired" if ok is None else "declined"})
             return ("The user didn't answer the approval in time: nothing was done." if ok is None
                     else "The user declined: nothing was done. Ask what they want instead.")
         try:
-            await do()
+            res = await do()
         except ml.Refused as e:
+            self._journal(action, a, "refused by the machine side", str(e))
             await self.emit({"type": "machine_request_done", "id": rid, "outcome": "refused", "text": str(e)})
             return f"Approved, but the machine side refused it: {e}"
         except Exception as e:  # noqa: BLE001
+            self._journal(action, a, "failed", f"{type(e).__name__}: {e}")
             await self.emit({"type": "machine_request_done", "id": rid, "outcome": "failed", "text": str(e)})
             return f"Approved, but it failed: {type(e).__name__}: {e}"
         await self.emit({"type": "machine_request_done", "id": rid, "outcome": "done"})
+        try:
+            self._journal(action, a, "done", mc.describe())
+        except Exception:  # noqa: BLE001
+            self._journal(action, a, "done")
+        final = (res.get("final") or (res.get("recover") or {}).get("final")) if isinstance(res, dict) else None
+        if final:                                          # the move waited until it finished: no status polling needed
+            return "Approved and done. " + final
         running = action in ("change_tool", "probe_3d", "auto_z_probe", "run_ops", "home", "jog_a") or (action == "rotary_zero" and a.get("what", "z_probe") == "z_probe")
         return "Approved and sent. " + mc.describe() + (" It is still running: check with action status." if running else "")
 
@@ -1329,12 +1465,34 @@ class CadAgent:
     def pending_machine_requests(self) -> list[dict]:
         return [{k: v for k, v in r.items() if k != "future"} for r in self.machine_requests.values()]
 
+    def sim_gate(self, idx: list[int]) -> dict:
+        """What the last simulation says about running these ops (0-based): {"simulated", "errors", "warnings"} as text.
+        A run waits for a simulation of its ops (the earlier setups are chained in) and shows its errors on the card:
+        2026-11-02's side B ran with thin tabs, chamfers after release and unmachined features the simulation had reported."""
+        if self.program is None:
+            return {"simulated": False, "errors": [], "warnings": []}
+        if self.sim is None or not set(idx) <= set(self.sim_ops or []):
+            return {"simulated": False, "errors": [], "warnings": []}
+        names = {self.program.ops[i].name for i in idx if 0 <= i < len(self.program.ops)}
+        try:
+            v = self.sim.verdict()
+        except Exception:  # noqa: BLE001 - an old result without a verdict: nothing to add
+            return {"simulated": True, "errors": [], "warnings": []}
+        mine = lambda it: (it.get("op") in names) or bool(names & set(it.get("ops") or [])) or ("op" not in it and "ops" not in it)
+        return {"simulated": True, "errors": [it["message"] for it in v.get("errors", []) if mine(it)],
+                "warnings": [it["message"] for it in v.get("warnings", []) if mine(it) and it.get("code") in ("LEFT", "BITE", "FREED", "GOUGE_BEFORE")]}
+
     async def simulate(self, ops: list[int] | None = None, resolution: float | None = None):
         """Run the material-removal simulation (0-based op indices) and show it in the viewer."""
         import cam_sim
         if self.program is None:
             raise cam.CamError("no CAM program built")
         res = await asyncio.to_thread(cam_sim.simulate, self.program, ops, self.model, resolution)
+        fit = self.program.after_simulation(res)          # feeds follow the engagement (Program load / per-op "load")
+        if fit:
+            res = await asyncio.to_thread(cam_sim.simulate, self.program, ops, self.model, resolution)   # times and MRR at the fitted feeds
+            await self.emit({"type": "cam", "code": self.cam_code, "source": "fit_feeds", "program": self.program.to_payload(),
+                             "summary": self.program.summary()})
         self.sim = res
         self.sim_ops = ops if ops is not None else list(range(len(self.program.ops)))
         await self.emit({"type": "cam_sim", "sim": res.to_payload(), "ops": self.sim_ops})
@@ -1383,6 +1541,49 @@ class CadAgent:
         finally:
             ck.BUILD_LOCK.release()
         return prog
+
+    def cam_tags(self, prog=None) -> set[str]:
+        """What kind of CAM work this is, for picking lessons: cam, the machine, tabs / chamfer / probe / flip when the
+        program has them (with no program yet: all of them - the script is about to be written)."""
+        tags = {"cam"}
+        prog = prog if prog is not None else None
+        if prog is None:
+            return tags | {"tabs", "chamfer", "probe", "flip"}
+        try:
+            tags.add(lessons_mod._clean_tags([prog.setup.machine.name])[0])
+        except Exception:  # noqa: BLE001
+            pass
+        mat = getattr(prog, "material", None) or getattr(getattr(prog.setup, "stock", None), "material", None)
+        if mat:
+            tags.add(str(mat).lower())
+        for op in prog.ops:
+            if op.kind == "contour" and (op.params or {}).get("tabs"):
+                tags.add("tabs")
+            if op.kind == "chamfer":
+                tags.add("chamfer")
+            if op.kind == "probe":
+                tags.add("probe")
+        if len({id(prog.setup_of(o)) for o in prog.ops}) > 1:
+            tags.add("flip")
+        return tags
+
+    def lessons_for(self, tags: set[str], heading: str) -> str:
+        rows = lessons_mod.relevant(lessons_mod.load(self.workspace), tags)
+        return lessons_mod.text(rows, heading)
+
+    def broken_lessons(self, res) -> str:
+        """Lessons tied to the verdict codes this simulation raised, by name."""
+        try:
+            v = res.verdict()
+        except Exception:  # noqa: BLE001
+            return ""
+        rows = lessons_mod.load(self.workspace)
+        out = []
+        for kind, items in (("ERROR", v.get("errors", [])), ("warning", v.get("warnings", []))):
+            for code in dict.fromkeys(it.get("code") for it in items):
+                for r in lessons_mod.by_check(rows, code):
+                    out.append(f"BREAKS LESSON {r['id']} {r['title']} ({code} {kind}): {r['rule']}")
+        return "\n".join(dict.fromkeys(out))
 
     def cam_context(self) -> str:
         lines = [self.library.describe(), "Materials for feeds(): " + ", ".join(cam.MATERIALS),
@@ -1907,7 +2108,10 @@ class CadAgent:
                 "fixtures": fixture_lib.list_fixtures(self.workspace)}
 
     def _write_state(self) -> None:
-        (self.doc_dir / "state.json").write_text(json.dumps({"design": self.design_name, "config": self.config}))
+        # the Claude session too: after a relaunch the next message resumes the conversation instead of starting blind
+        # (2026-11-02: the app restarted mid-job and the assistant lost the zeroing plan, the probe and the setup)
+        (self.doc_dir / "state.json").write_text(json.dumps({"design": self.design_name, "config": self.config,
+                                                             "session": self.session_id}))
 
     # ------------------------------------------------------------------ model
     async def build(self, code: str, source: str = "agent", record: bool = True) -> ck.Model:
@@ -2065,6 +2269,7 @@ class CadAgent:
             try:
                 st = json.loads(state_path.read_text())
                 name, self.config = st.get("design"), st.get("config") or None
+                self.session_id = st.get("session") or None
             except Exception:
                 name = None
         # model.py is the working copy (may hold unsaved edits); the design file is what was last saved
@@ -2358,7 +2563,9 @@ class CadAgent:
         @tool("cam_context", "Machines, tool library, model facts for CAM (bbox, bodies, holes, planar levels) "
               "and the current CAM program summary. Call before writing a CAM script.", {})
         async def cam_context(args: dict[str, Any]) -> dict[str, Any]:
-            return {"content": [{"type": "text", "text": agent.cam_context()}]}
+            les = agent.lessons_for(agent.cam_tags(), "LESSONS LEARNT (from earlier jobs - follow every one that applies; the "
+                                    "build result lists them again as a checklist):")
+            return {"content": [{"type": "text", "text": agent.cam_context() + ("\n\n" + les if les else "")}]}
 
         @tool("build_cam", "Replace the CAM script with a complete script and build the toolpaths. The script must "
               "assign `program` (a cam_kernel Program). Returns the program summary (ops, times, warnings) or traceback.",
@@ -2370,7 +2577,9 @@ class CadAgent:
                 return {"content": [{"type": "text", "text": f"CAM BUILD FAILED\n{e}"}], "is_error": True}
             except Exception as e:  # noqa: BLE001
                 return {"content": [{"type": "text", "text": f"CAM BUILD FAILED\n{type(e).__name__}: {e}"}], "is_error": True}
-            return {"content": [{"type": "text", "text": prog.summary()}]}
+            les = agent.lessons_for(agent.cam_tags(prog), "LESSONS for this program - in your reply, say in one line each how the "
+                                    "script meets it (or that it doesn't apply); fix the script first where it doesn't:")
+            return {"content": [{"type": "text", "text": prog.summary() + ("\n\n" + les if les else "")}]}
 
         @tool("get_cam_code", "Return the current CAM script.", {})
         async def get_cam_code(args: dict[str, Any]) -> dict[str, Any]:
@@ -2408,7 +2617,45 @@ class CadAgent:
                 res = await agent.simulate(ops, args.get("resolution"))
             except cam.CamError as e:
                 return {"content": [{"type": "text", "text": f"simulation failed: {e}"}], "is_error": True}
-            return {"content": [{"type": "text", "text": res.summary()}]}
+            broken = agent.broken_lessons(res)
+            return {"content": [{"type": "text", "text": res.summary() + ("\n\n" + broken if broken else "")}]}
+
+        @tool("lessons",
+              "Lessons learnt: rules written down after something went wrong, shared by every design. action: list (all, or "
+              "`tags` to filter) | add {title, rule, why, tags, check?} | update {id, rule?, title?, why_add?, tags?, check?} | "
+              "retire {id, why_add}. why = the evidence (date, run, what happened). tags = where it applies: cam, machine, "
+              "probe plus narrower ones (tabs, chamfer, flip, a machine like makera-z1, a material). check = the simulation "
+              "verdict code that catches it (GOUGE, THIN_TAB, RELEASED, LEFT, BITE, COLLISION, RAPID, FREED) so a broken "
+              "lesson is named in simulate_cam. Add one whenever a run fails or is stopped, the simulation finds something "
+              "your script should have avoided, the app refuses something you sent, or the user corrects you - one rule per "
+              "lesson; update an existing lesson rather than adding a near-duplicate.",
+              {"type": "object", "properties": {"action": {"type": "string"}, "id": {"type": "string"}, "title": {"type": "string"},
+                                                "rule": {"type": "string"}, "why": {"type": "string"}, "why_add": {"type": "string"},
+                                                "tags": {"type": "array", "items": {"type": "string"}}, "check": {"type": "string"}},
+               "required": ["action"]})
+        async def lessons_tool(args: dict[str, Any]) -> dict[str, Any]:
+            act = str(args.get("action", "list"))
+            try:
+                if act == "list":
+                    rows = lessons_mod.load(agent.workspace)
+                    if args.get("tags"):
+                        rows = lessons_mod.relevant(rows, set(lessons_mod._clean_tags(args["tags"])))
+                    txt = "\n".join(f"{r['id']} [{r['status']}; {', '.join(r['tags'])}{'; check ' + r['check'] if r.get('check') else ''}] "
+                                    f"{r['title']}: {r['rule']} (why: {r['why']})" for r in rows) or "no lessons"
+                    return {"content": [{"type": "text", "text": txt}]}
+                if act == "add":
+                    r = lessons_mod.add(agent.workspace, args.get("title"), args.get("rule"), args.get("why"), args.get("tags"),
+                                        args.get("check") or None)
+                elif act in ("update", "retire"):
+                    r = lessons_mod.update(agent.workspace, str(args.get("id")), title=args.get("title"), rule=args.get("rule"),
+                                           tags=args.get("tags"), check=args.get("check"), why_add=args.get("why_add"),
+                                           status="retired" if act == "retire" else None)
+                else:
+                    return {"content": [{"type": "text", "text": "action: list | add | update | retire"}], "is_error": True}
+            except ValueError as e:
+                return {"content": [{"type": "text", "text": str(e)}], "is_error": True}
+            await agent.emit({"type": "lessons", "lessons": lessons_mod.load(agent.workspace)})
+            return {"content": [{"type": "text", "text": f"{act}: {r['id']} {r['title']} [{r['status']}]"}]}
 
         @tool("limit_feeds_from_sim",
               "Material removal rate as part of the calculation. After simulate_cam, slow every feed move whose removal rate "
@@ -2978,22 +3225,38 @@ class CadAgent:
               "(feed hold), pause (a running program), stop_program, halt (STOP: everything stops, Alarm), check_ops "
               "(what running ops would do; nothing is sent), connect {host}, disconnect. Everything else is checked, then "
               "shown to the user as an approval card and runs ONLY when they click Approve in the app (your call waits "
-              "for it): control_on, control_off, home, unlock, resume, resume_program, change_tool {tool}, confirm_tool, "
-              "origin_anchor, auto_z_probe (wired probe T0 fitted), set_origin {x,y,z: the head's position becomes these "
-              "work values}, shift_origin {dx,dy,ref}, origin_at {x,y machine, ref} (e.g. the block's front-left corner from "
-              "the faces 3D-probe runs found: status lists them), lower_to {height above work Z0}, raise_z, goto {x,y,frame: "
+              "for it): control_on, control_off, home, unlock, resume, resume_program, recover (one card back to a known state after a "
+              "hold, a stopped routine or an alarm: abort, unlock, Control on, home and wait), change_tool {tool}, confirm_tool, "
+              "origin_anchor, auto_z_probe (wired probe T0 fitted), set_origin {x,y,z, p: G54..G59 (default the active one): the head's "
+              "position becomes these work values; z only as a touch-off, |z| <= 1}, shift_origin {dx,dy,ref}, origin_at {x,y machine, "
+              "ref, p} (e.g. the block's front-left corner from the faces 3D-probe runs found: status lists them), lower_to {height "
+              "above a PROBED work Z0; refused on a typed one}, raise_z, goto {x,y,frame: "
               "work|machine; Z goes to the top first}, cleaning_position (Z to the top, then the head over the front-middle of the bed "
-              "with the table back, exposing what Home covers; the user homes again after cleaning), probe_3d {kind e.g. outside_back_right, x, y, depth, dia; 3D probe "
-              "T9999 fitted}, run_ops {ops: 0-based indices in ONE setup, air: lift mm for an air cut, ack: true only when the user "
+              "with the table back, exposing what Home covers; the user homes again after cleaning), probe_3d {kind e.g. outside_back_right, x, y, depth, "
+              "dia: the probe's BALL Ø (2 for the Makera probe, never a hole size), hole_dia: pocket_center only, the hole's Ø; 3D probe "
+              "T9999 fitted; corners/boss start 1-10 mm above a probed Z0 or a probe_descend touch, pocket_center starts INSIDE the "
+              "hole}, probe_descend {to_z: work Z to go down to (into a hole: no touch expected), or none: find the surface below and "
+              "back off 5 mm; max_dist} (G38.3 with the 3D probe, stops on contact without an alarm), run_ops {ops: 0-based indices in ONE setup, air: lift mm for an air cut, ack: true only when the user "
               "has vouched for a rotary setup's origin}, switch {what: "
-              "dust|light|probe_laser|spindle_fan, on, power: fan speed 0-100 %}, console {line: one line of G-code, sent as written}. "
+              "dust|light|probe_laser|spindle_fan, on, power: fan speed 0-100 %}, console {line: reads and settings only ($#, $G, M957, "
+              "G54..G59 select, M5, switches); no motion - use the actions}. Probing: Z with auto_z_probe (T0) or probe_descend (3D probe), "
+              "then lower_to ~5 and the corner routine; a hole: goto over it, lower_to 5, probe_descend {to_z: -depth}, then probe_3d "
+              "pocket_center {hole_dia}. "
               "4th axis (only on a machine with the rotary module; status shows A): jog_a {deg: up to ±90}, rotary_zero {what: "
               "z_probe (Makera's 4th-axis Z probe with the wired probe T0: Z0 on the chuck centreline) | y_axis (Y0 on the centreline "
               "from the controller's rotation offset; y: machine Y to override) | a_zero (A0 here) | x_here | x_at {x: machine X}}, "
               "shrink_a (A modulo 360). A rotary program needs Y0 and Z0 zeroed on the axis and A0 set this session. Rules: one step at a time; say what "
               "you will do and why before asking; every tool change is measured before moving with it; suggest an air "
               "cut the first time a program runs at an origin; never ask to run M490 or M498.2. If the user says stop, "
-              "call halt (or hold) first, then talk.",
+              "call halt (or hold) first, then talk. Z0 comes ONLY from a probe (auto_z_probe, the program's probe ops, a 3D-probe "
+              "routine) or a touch-off at the head: never work it out from tool length offsets or earlier positions (each offset is "
+              "relative to the tool fitted at the last Z-origin change, and setting Z clears it - this drove a cutter into the plate "
+              "on 2026-11-02). After a probe routine fails or holds, read status first: the firmware may already have set the origin. "
+              "A Refused is final: never send the same motion another way (console, goto, a different action) - tell the user what "
+              "was refused and why. To cut, run the program's ops (run_ops): they change and measure their own tools, so don't "
+              "change tools by hand ahead of them. Before run_ops, simulate those ops and fix every GOUGE, BITE, thin tab, op on a "
+              "released part and unmachined feature; if one must stay, say so plainly and let the user decide. When the user says go, "
+              "go: no repeated questions about what they already answered.",
               {"type": "object", "properties": {"action": {"type": "string"}, "args": {"type": "object"}}, "required": ["action"]})
         async def machine_control(args: dict[str, Any]) -> dict[str, Any]:
             text = await agent.machine_action(str(args.get("action") or ""), args.get("args") or {})
@@ -3042,7 +3305,7 @@ class CadAgent:
             await agent.emit({"type": "run_suggestions", "id": args.get("id"), "suggestions": sug})
             return {"content": [{"type": "text", "text": f"{len(sug)} suggestion(s) shown in the Analytics report."}]}
 
-        tools = [build_model, *([] if LEGACY_BUILD else [edit_model]), inspect_model, screenshot, export_model, get_code, save_design, machine_status, machine_control, cam_edit, machine_runs, report_suggestions,
+        tools = [build_model, *([] if LEGACY_BUILD else [edit_model]), inspect_model, screenshot, export_model, get_code, save_design, machine_status, machine_control, cam_edit, machine_runs, report_suggestions, lessons_tool,
                  cam_context, build_cam, get_cam_code, export_gcode, simulate_cam, check_interference, check_motion, feeds_speeds, save_machine, save_tool, build_machine, get_machine_code, build_fixture, get_fixture_code,
                  get_parameters, set_parameters, measure_tool, mass_properties, make_drawings, library_tool, kit_tool, sketch_tool,
                  extension_tool, show_panel, configurations_tool] + ext_tools + slicing_tools
@@ -3099,6 +3362,7 @@ class CadAgent:
         "sim_stock": "voxel",              # simulation stock in the viewer: "voxel" (smooth 3D, Web Worker) or "heightmap" (lighter)
         "mcp_servers": {},                 # name -> {type: stdio|http|sse, command, args, env, url, headers, enabled}
         "extra_prompt": "",                # appended to the system prompt (house rules, machine notes...)
+        "dream": True,                     # consolidate the lessons learnt in the background while the app is idle (dream.py)
         "api_key": "",                     # Anthropic API key (alternative to the Claude Code login); kept in settings.json (0600)
         "units": "",                       # display/default units: "" = auto (US timezone → in, else mm) | mm | in
         "drawings": {"material": "", "sheet": "A4"},   # shop-drawing defaults (ribbon Drawings button, agent tool without args)
@@ -3211,8 +3475,62 @@ class CadAgent:
                          + (f" · effort {self.settings['effort']}" if self.settings.get("effort") else "")})
 
     # ------------------------------------------------------------------ session
+    def _session_on_disk(self, sid: str) -> bool:
+        """Does Claude Code still have this conversation (its transcript) to resume?"""
+        base = Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude") / "projects"
+        try:
+            return any(base.glob(f"*/{sid}.jsonl"))
+        except OSError:
+            return False
+
+    def chat_history(self, limit: int = 60, since: float | None = None) -> list[dict[str, str]]:
+        """The resumable conversation's messages (user text without the app's [..] preamble lines, assistant text), so a
+        page opened after a relaunch shows what the assistant still remembers. since: only messages from then (epoch s),
+        each with its time "t" - what the user said about a run, for the lessons pass (dream.py)."""
+        if not self.session_id:
+            return []
+        base = Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude") / "projects"
+        f = next(iter(base.glob(f"*/{self.session_id}.jsonl")), None)
+        if f is None:
+            return []
+        out: list[dict[str, str]] = []
+        try:
+            lines = f.read_text(errors="replace").splitlines()
+        except OSError:
+            return []
+        for ln in lines:
+            try:
+                d = json.loads(ln)
+            except ValueError:
+                continue
+            if d.get("isSidechain") or d.get("type") not in ("user", "assistant"):
+                continue
+            c = (d.get("message") or {}).get("content")
+            blocks = [{"type": "text", "text": c}] if isinstance(c, str) else (c if isinstance(c, list) else [])
+            text = "\n\n".join(b.get("text", "") for b in blocks if isinstance(b, dict) and b.get("type") == "text").strip()
+            if d["type"] == "user":
+                text = re.sub(r"\A(?:\[(?:Library parts available|Design|Note|Machine)[^\n]*\n+)+", "", text).strip()
+                if text.startswith("[Image") or text.startswith("[Request interrupted"):
+                    continue
+            if text:
+                if since is not None:
+                    try:
+                        import datetime as _dt
+                        ts = _dt.datetime.fromisoformat(str(d.get("timestamp", "")).replace("Z", "+00:00")).timestamp()
+                    except ValueError:
+                        continue
+                    if ts < since:
+                        continue
+                    out.append({"role": d["type"], "text": text[:1500], "t": time.strftime("%H:%M", time.localtime(ts))})
+                else:
+                    out.append({"role": d["type"], "text": text})
+        return out[-limit:]
+
     async def start(self) -> None:
         st = self.settings
+        if self.session_id and not self._session_on_disk(self.session_id):
+            self.session_id = None                 # gone (cleared by Claude Code, another machine): start a fresh one
+            self._write_state()
         mcp = self._mcp_configs()
         allowed = ["mcp__cad__*"] + [f"mcp__{n}__*" for n in mcp if n != "cad"]
         builtin: list[str] = []                    # no Bash/Edit/Write/Read: the agent works through the CAD tools only
@@ -3341,9 +3659,13 @@ class CadAgent:
         if saved:
             prompt += "\n\n[Attached images: " + ", ".join(f"{p.name} ({p})" for p, _, _ in saved) + \
                       " — shown below; use them as reference for shape and proportions, dimensions in the text take precedence]"
+        self.notes += self._run_lesson_notes()
         if self.notes:
             prompt = "".join(f"[Note] {n}\n" for n in self.notes) + "\n" + prompt
             self.notes.clear()
+        mctx = self.machine_context(new_session=not self.session_id)
+        if mctx:
+            prompt = mctx + "\n" + prompt
         if self.design_name:
             prompt = f"[Design: '{self.design_name}']\n" + prompt
         parts = self.parts.list()
@@ -3420,7 +3742,9 @@ class CadAgent:
                                          "name": short(tool_names.get(blk.tool_use_id, "")),
                                          "text": result_text(blk.content), "is_error": bool(blk.is_error)})
             elif isinstance(msg, ResultMessage):
-                self.session_id = msg.session_id
+                if msg.session_id and msg.session_id != self.session_id:
+                    self.session_id = msg.session_id
+                    self._write_state()
                 if msg.is_error and AUTH_ERROR_RE.search(str(getattr(msg, "result", "") or "")):
                     self.auth_problem = str(msg.result)[:300]
                     await self.emit({"type": "agent_auth_required", "text": self.auth_problem})

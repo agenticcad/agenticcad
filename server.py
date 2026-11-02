@@ -306,6 +306,7 @@ async def lifespan(app: FastAPI):
         await asyncio.gather(*_boot.values())
     task = None
     watcher = asyncio.create_task(_watch_extensions())
+    dreamer = asyncio.create_task(_dream_loop()) if os.environ.get("AGENTICCAD_NO_AGENT") != "1" else None
     if os.environ.get("AGENTICCAD_NO_REMOTE") != "1" and _remote_cfg().get("enabled"):
         await _remote_start()
     yield
@@ -313,6 +314,8 @@ async def lifespan(app: FastAPI):
     if task:
         task.cancel()
     watcher.cancel()
+    if dreamer:
+        dreamer.cancel()
     await machine.disconnect()
     camera.set_host(None)
     for a in list(DOCS.values()):
@@ -392,6 +395,8 @@ def _doc_of_request(headers, query) -> str | None:
 
 @app.middleware("http")
 async def _doc_scope(request, call_next):
+    if request.method != "GET":                            # the user did something (status polling doesn't count)
+        _activity["t"] = time.time()
     tok = _doc_var.set(_doc_of_request(request.headers, request.query_params))
     try:
         return await call_next(request)
@@ -1195,6 +1200,10 @@ class MachineBody(BaseModel):
     name: str | None = None          # run_file: its name
     power: float | None = None       # switch: speed in % (the spindle fan)
     ack: bool | None = None          # check_ops / run_ops: the user vouches for a rotary setup's origin ("I checked it")
+    p: str | None = None             # set_origin / origin_at: the work offset (G54..G59; default the active one)
+    hole_dia: float | None = None    # probe_3d pocket_center: the hole's Ø (sizes the search)
+    to_z: float | None = None        # probe_descend: work Z to go down to (none: find the surface below)
+    hz: float | None = None          # spindle_load_poll: M957 rate
 
 
 def _program_for_ops(body: MachineBody) -> tuple[dict, dict, str]:
@@ -1284,13 +1293,22 @@ async def machine_post(body: MachineBody):
             res = await machine.lower_to(body.z if body.z is not None else float('nan'))
         elif a == "probe_3d":                            # Makera's 3D-probe routine (M480.n) from where the head is
             res = await machine.probe_3d(body.kind or "", body.x if body.x is not None else 20.0,
-                                         body.y if body.y is not None else 20.0, body.depth or 2.0, body.dia or 2.0)
+                                         body.y if body.y is not None else 20.0, body.depth or 2.0, body.dia or 2.0, hole_dia=body.hole_dia)
+        elif a == "probe_descend":                       # G38.3 with the 3D probe: find the surface below, or go into a hole
+            res = await machine.probe_descend(body.to_z, body.dist or 20.0)
+        elif a == "recover":                             # back to a known state after a hold / stopped routine / alarm
+            res = await machine.recover()
+        elif a == "spindle_load_poll":                   # M957 drive effort while the spindle runs (recorded with runs)
+            res = {**machine.payload(), "poll": machine.set_spindle_load_poll(bool(body.on), body.hz)}
         elif a == "check_ops":                            # what running these operations would do (nothing is sent)
             prep, info, label = await asyncio.to_thread(_program_for_ops, body)   # big programs: keep the loop (and status) running
             chk = machine.check_job(prep, rotary=info["rotary"], ack=bool(body.ack))
+            gate = agent.sim_gate(sorted(set(body.ops or [])))
+            sim_notes = (["not simulated: run Simulate on these operations first to check them"] if not gate["simulated"]
+                         else [f"SIMULATION: {e}" for e in gate["errors"]] or ["simulation: no errors"])
             return {**machine.payload(), "check": {"label": machine_link.program_filename(label), "lines": prep["lines"],
                                                    "ops": prep["ops"], "tools": prep["tools"], "extents": prep["extents"],
-                                                   "notes": chk["notes"], "uses_a": prep["uses_a"],
+                                                   "notes": chk["notes"] + sim_notes, "sim": gate, "uses_a": prep["uses_a"],
                                                    **{k: v for k, v in info.items() if k != "cam_code"}}}
         elif a == "run_ops":                              # upload the chosen operations to the machine and play them
             prep, info, label = await asyncio.to_thread(_program_for_ops, body)   # big programs: keep the loop (and status) running
@@ -1326,10 +1344,10 @@ async def machine_post(body: MachineBody):
         elif a == "read_rotation_offset":                  # config-get sd coordinate.rotation_offset_* (read-only)
             res = await machine.read_rotation_offset()
         elif a == "set_origin":                            # the head's position becomes these work coordinates (G10 L20)
-            res = await machine.set_origin(body.x, body.y, body.z)
+            res = await machine.set_origin(body.x, body.y, body.z, p=body.p)
         elif a == "origin_at":                             # X0 Y0 at machine x, y (e.g. the block corner from 3 probed corners)
             res = await machine.origin_at(body.x if body.x is not None else float('nan'), body.y if body.y is not None else float('nan'),
-                                          body.kind or "typed", body.name or "set")
+                                          body.kind or "typed", body.name or "set", p=body.p)
         elif a == "shift_origin":                          # move X0 Y0 by x, y mm (e.g. probed corner -> the setup's corner)
             res = await machine.shift_origin(body.x if body.x is not None else float('nan'), body.y if body.y is not None else float('nan'),
                                              body.kind or "typed", body.name or "shifted")
@@ -1784,6 +1802,153 @@ async def version():
     return {"version": __version__, "changelog": log}
 
 
+class LessonBody(BaseModel):
+    action: str                      # add | update | retire | activate | delete
+    id: str | None = None
+    title: str | None = None
+    rule: str | None = None
+    why: str | None = None
+    tags: list[str] | str | None = None
+    check: str | None = None
+
+
+@app.get("/api/lessons")
+async def lessons_get():
+    import lessons
+    return {"lessons": lessons.load(WORKSPACE), "checks": list(lessons.CHECKS)}
+
+
+@app.post("/api/lessons")
+async def lessons_post(body: LessonBody):
+    """The user's own edits to the lessons the assistant reads before CAM and machine work."""
+    import lessons
+    try:
+        if body.action == "add":
+            lessons.add(WORKSPACE, body.title, body.rule, body.why, body.tags, body.check or None, source="user")
+        elif body.action in ("update", "retire", "activate"):
+            st = {"retire": "retired", "activate": "active"}.get(body.action)
+            row = next((r for r in lessons.load(WORKSPACE) if r["id"] == body.id), None)
+            if row is None:
+                raise ValueError(f"no lesson {body.id}")
+            lessons.update(WORKSPACE, body.id, title=body.title, rule=body.rule, tags=body.tags, status=st,
+                           check=body.check if body.check is not None else None)
+            if body.why is not None:
+                rows = lessons.load(WORKSPACE)
+                next(r for r in rows if r["id"] == body.id)["why"] = body.why.strip()
+                lessons._save(WORKSPACE, rows)
+        elif body.action == "delete":
+            lessons.remove(WORKSPACE, body.id or "")
+        else:
+            raise ValueError("action: add | update | retire | activate | delete")
+    except ValueError as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+    rows = lessons.load(WORKSPACE)
+    await bus.emit({"type": "lessons", "lessons": rows})
+    return {"lessons": rows}
+
+
+# ---------------------------------------------------------------- dreaming: consolidate the lessons while idle
+_activity = {"t": time.time()}
+_dreaming = {"running": False, "last_check": None}
+
+
+async def _dream_llm(system: str, prompt: str) -> str:
+    """One answer from Claude with no tools (the consolidation pass), on the user's model and login."""
+    from claude_agent_sdk import AssistantMessage, ClaudeAgentOptions, query
+    from claude_agent_sdk.types import TextBlock
+    st = agent.settings
+    d = WORKSPACE / "dreams"
+    d.mkdir(exist_ok=True)
+    opts = ClaudeAgentOptions(system_prompt=system, allowed_tools=[], tools=[], setting_sources=[], permission_mode="dontAsk",
+                              max_turns=1, cwd=str(d), model=st.get("model") or os.environ.get("AGENTICCAD_MODEL") or None,
+                              env={"ENABLE_TOOL_SEARCH": "false", **({"ANTHROPIC_API_KEY": st["api_key"]} if st.get("api_key") else {})})
+    cli = find_claude_cli()
+    if not cli:
+        raise RuntimeError("Claude Code is not installed")
+    opts.cli_path = cli
+    out: list[str] = []
+    async for msg in query(prompt=prompt, options=opts):
+        if isinstance(msg, AssistantMessage):
+            out += [b.text for b in msg.content if isinstance(b, TextBlock)]
+    return "".join(out)
+
+
+async def _dream_now(reason: str, runs: list[dict] | None = None) -> dict:
+    import dream
+    _dreaming["running"] = True
+    await bus.emit({"type": "dreaming", "running": True})
+    try:
+        since = min((m.get("t0") or 0) for m in runs) if runs else (dream.state(WORKSPACE).get("last_t") or time.time() - 86400)
+        chat = []
+        for a in DOCS.values():                            # what was said about the run(s), in every open design
+            chat += await asyncio.to_thread(a.chat_history, 60, since)
+        entry = await dream.run(WORKSPACE, _dream_llm, reason, runs, chat)
+    finally:
+        _dreaming["running"] = False
+    import lessons
+    await bus.emit({"type": "lessons", "lessons": lessons.load(WORKSPACE)})
+    await bus.emit({"type": "dreaming", "running": False, "entry": entry})
+    return entry
+
+
+async def _dream_loop() -> None:
+    """After each CNC run (any outcome), once nobody has used the app for a while (no chat turn, no machine job, no
+    clicks - so the user's reaction to the run is in): draw the lessons out of that run and fold them into the others
+    (dream.py). Never on a timer: the loop only looks for finished runs (a file listing), the model runs once per run.
+    Settings ▸ Lessons can switch it off."""
+    import dream
+    await asyncio.to_thread(dream.pending_runs, WORKSPACE)     # first start: runs already on disk count as seen
+    while True:
+        await asyncio.sleep(120)
+        try:
+            if agent.settings.get("dream", True) is False or _dreaming["running"]:
+                continue
+            busy = any(a.busy for a in DOCS.values()) or machine.job_active or bool(machine.routine)
+            idle = 0.0 if busy else time.time() - _activity["t"]
+            runs, why = await asyncio.to_thread(dream.due, WORKSPACE, idle)
+            _dreaming["last_check"] = {"t": time.time(), "due": bool(runs), "why": why}
+            if runs:
+                await _dream_now(why, runs)
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:  # noqa: BLE001 - a failed pass never takes the app down; it shows in the log
+            _dreaming["last_check"] = {"t": time.time(), "due": False, "why": f"failed: {type(e).__name__}: {e}"}
+
+
+class DreamBody(BaseModel):
+    action: str                      # run | undo | enable | disable
+
+
+@app.get("/api/dreams")
+async def dreams_get():
+    import dream
+    return {"log": dream.log(WORKSPACE), "state": dream.state(WORKSPACE), "running": _dreaming["running"],
+            "last_check": _dreaming["last_check"], "enabled": agent.settings.get("dream", True) is not False}
+
+
+@app.post("/api/dreams")
+async def dreams_post(body: DreamBody):
+    import dream
+    import lessons
+    try:
+        if body.action == "run":
+            if _dreaming["running"]:
+                raise ValueError("a consolidation pass is already running")
+            import dream
+            runs = await asyncio.to_thread(dream.pending_runs, WORKSPACE)
+            return {"entry": await _dream_now("asked by the user", runs or None)}
+        if body.action == "undo":
+            e = dream.undo(WORKSPACE)
+            await bus.emit({"type": "lessons", "lessons": lessons.load(WORKSPACE)})
+            return {"entry": e}
+        if body.action in ("enable", "disable"):
+            agent.save_settings({"dream": body.action == "enable"})
+            return {"enabled": agent.settings.get("dream", True) is not False}
+        raise ValueError("action: run | undo | enable | disable")
+    except (ValueError, RuntimeError) as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+
+
 @app.get("/api/settings")
 async def settings_get():
     return {"settings": agent.public_settings(), "models": agent.MODELS, "defaults": {k: v for k, v in agent.DEFAULT_SETTINGS.items() if k != "api_key"}}
@@ -1951,6 +2116,9 @@ async def ws_endpoint(ws: WebSocket) -> None:
         if agent.model:
             await ws.send_text(json.dumps(_model_event()))
         await ws.send_text(json.dumps(agent.design_state()))
+        hist = await asyncio.to_thread(agent.chat_history)
+        if hist:                                           # a page opened after a relaunch: the conversation that resumes
+            await ws.send_text(json.dumps({"type": "chat_history", "items": hist}))
         await ws.send_text(json.dumps({"type": "library", **agent.library_payload()}))
         await ws.send_text(json.dumps({"type": "library_parts", "parts": agent.parts.list()}))
         await ws.send_text(json.dumps({"type": "cam", "code": agent.cam_code, "source": "load",
@@ -1984,6 +2152,7 @@ async def ws_endpoint(ws: WebSocket) -> None:
 
 async def _dispatch(ws: WebSocket, msg: dict) -> None:
     t = msg.get("type")
+    _activity["t"] = time.time()                            # the user is here (the lessons pass waits for quiet)
     if t == "chat":
         bus.primary[_doc_var.get() or _default_doc()] = ws
         asyncio.create_task(agent.chat(msg.get("text", ""), msg.get("selection"), msg.get("images") or []))

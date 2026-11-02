@@ -1,6 +1,7 @@
 """Machine control against the Z1 emulator: the protocol, and above all the safety rules (the emulator, like the
 real firmware, does not stop a jog past the end of travel; these tests prove machine_link refuses it first)."""
 import asyncio
+import re
 import sys
 from pathlib import Path
 
@@ -15,8 +16,81 @@ def run(coro):
     return asyncio.run(coro)
 
 
+class Emu(Z1Emu):
+    """The Z1 emulator plus what the safety rules read and use (as the firmware does it): six work offsets (G54..G59,
+    `wco` is the active one), `$#` / `$G` replies (SimpleShell grblDP_command / get state), G10 L2 Pn, G38.3 (relative,
+    stops on contact without an alarm), the spindle's M957 report. The app's own offset reads ($#, $G) and M957 polls go
+    to `queries`, not `lines`, so the tests can keep comparing exact command sequences."""
+
+    def __init__(self, *a, **kw):
+        self._wcs = {w: [0.0, 0.0, 0.0] for w in ml.WCS_NAMES[:6]}
+        self.active = "G54"
+        self.queries: list[str] = []
+        self.rpm, self.pwm = 0.0, 0.1
+        self.answer_offsets = True
+        self.halt_code = 1                              # the |H: code the status carries while halted (13 = e-stop)
+        super().__init__(*a, **kw)
+
+    @property
+    def wco(self):
+        return self._wcs[self.active]
+
+    @wco.setter
+    def wco(self, v):
+        if not hasattr(self, "_wcs"):
+            self._wcs = {w: [0.0, 0.0, 0.0] for w in ml.WCS_NAMES[:6]}
+            self.active = "G54"
+        self._wcs[self.active] = list(v)
+
+    def status(self) -> str:
+        return super().status().replace("|S:0.0,10000.0,", f"|S:{self.rpm:.1f},10000.0,").replace("|H:1|", f"|H:{self.halt_code}|")
+
+    def on_line(self, line: str):
+        s = line.strip()
+        u = s.upper()
+        if u in ("$#", "$G", "M957"):
+            self.queries.append(u)
+            if u == "M957":
+                return (f"State: {'on' if self.rpm else 'off'}, Current RPM: {self.rpm:5.0f}  Target RPM: {10000.0:5.0f}  "
+                        f"PWM value: {self.pwm:5.3f}\nok")
+            if not self.answer_offsets or self.halted:
+                return "!! halted, use $X" if self.halted else "ok"
+            if u == "$G":
+                return f"[G0 {self.active} G17 G21 G90 G94 M0 M5 M9 T{self.tool} F0.0000 S0.0000]\nok"
+            f = lambda v: ",".join(f"{x:.4f}" for x in v)
+            return "\n".join([f"[{w}:{f(v)},0.0000,0.0000]" for w, v in self._wcs.items()]
+                             + ["[G28:0.0000,0.0000,0.0000]", "[G30:0.0000,0.0000,0.0000]", "[G92:0.0000,0.0000,0.0000,0.0000,0.0000]",
+                                "[TL0:0.0000]", "[PRB:-1.0000,-2.0000,-3.0000:1]", "ok"])
+        if re.match(r"^G5[4-9](\.[1-3])?$", u):
+            self.raw_lines.append(line); self.lines.append(s)
+            self.active = u
+            return "ok"
+        m = re.match(r"^G10 ?L2 ?P([1-6])\b", u)
+        if m:
+            self.raw_lines.append(line); self.lines.append(s)
+            self._lag_offsets()
+            w = self._wcs[ml.WCS_NAMES[int(m.group(1)) - 1]]
+            for k, v in re.findall(r"([XYZ])(-?[\d.]+)", u[m.end():]):
+                w["XYZ".index(k)] = float(v)
+            return "ok"
+        if u.startswith("G38.3"):
+            self.raw_lines.append(line); self.lines.append(s)
+            words = dict((t[0].lower(), float(t[1:])) for t in s.split()[1:] if len(t) > 1)
+            z_target = self.mpos[2] + words.get("z", 0.0)
+            surf = -1e9 if self.probe3d_fail else self._surface(self.mpos[0], self.mpos[1])
+            hit = surf >= z_target
+
+            async def probe3():
+                self.state = "Run"
+                await self._move_to([self.mpos[0], self.mpos[1], max(z_target, surf)], words.get("f", 100.0))
+                self.replies.append(f"[PRB:{self.mpos[0]:.3f},{self.mpos[1]:.3f},{self.mpos[2]:.3f}:{int(hit)}]")
+            self._start(probe3())
+            return None
+        return super().on_line(line)
+
+
 async def _setup(**kw):
-    emu = Z1Emu(speed=kw.pop("speed", 40.0), **kw)
+    emu = Emu(speed=kw.pop("speed", 40.0), **kw)
     port, cam = await emu.start()
     mc = ml.MachineControl()
     await mc.connect("127.0.0.1", port)
@@ -27,6 +101,12 @@ async def _setup(**kw):
 def _measured(mc, emu):
     """Jog-mechanics tests: treat the emulator's fitted tool as measured (the change-tool test does it for real)."""
     mc.measured = {"tool": emu.tool, "touch_z": emu.setter_z, "offset": -17.297, "t": 0}
+
+
+def _probed(mc, wcs=None):
+    """Mechanics tests: treat the current work origin as zeroed and probed this session (the probe tests do it for real).
+    Call it once the status shows the offsets the test set."""
+    mc._record_origin(xy=("test", "test origin"), z=("top", "test probe"), source="probe", wcs=wcs)
 
 
 async def _until(cond, timeout=5.0):
@@ -398,6 +478,8 @@ def test_3d_probe_outside_corner_with_makeras_m480():
             assert mc.routine["stage"] == "done" and emu.tool == 9999 and mc.tool_ok()
             emu.wco[2] = -55.0                                       # work Z0 on the stock top (an earlier M495)
             await mc.raise_z_top(); await _until(lambda: not mc.jog_busy, timeout=10)   # the change ends at Z -3
+            await asyncio.sleep(0.3)
+            _probed(mc)                                              # ... probed this session
             await _at_top_over(mc, emu, -96.28, -99.45)              # 5 mm in from the back-right corner
             with pytest.raises(ml.Refused, match="unknown 3D probe"):
                 mc.check_probe_3d("outside_somewhere")
@@ -448,15 +530,20 @@ def test_3d_probe_centres_inside_corner_and_travel_check():
             _measured(mc, emu)
             emu.wco[2] = -55.0
             emu.pocket = (-150.0, -130.0, -150.0, -135.0, -60.0)     # 20 x 15 pocket, 5 deep, in the stock
+            await asyncio.sleep(0.3)
+            _probed(mc)                                              # work Z0 on the stock top, probed this session
             # boss centre on the 100 mm stock would step out past the travel (and into the L-bracket): refused
             await _at_top_over(mc, emu, -141.28, -144.45)
             with pytest.raises(ml.Refused, match="outside"):
                 mc.check_probe_3d("boss_center", 60, 60)
-            # pocket centre: start inside the pocket, below its edge (work Z0 on the pocket floor, 2 mm above it)
+            # pocket centre: start inside the pocket, below its edge: down to 5 mm over the top, then the probe's own descent
             await _at_top_over(mc, emu, -139.0, -143.0)
-            emu.wco[2] = -60.0
+            await mc.lower_to(5); await _until(lambda: not mc.jog_busy, timeout=10)
             await asyncio.sleep(0.3)
-            await mc.lower_to(2); await _until(lambda: not mc.jog_busy, timeout=10)
+            with pytest.raises(ml.Refused, match="INSIDE the hole"):
+                mc.check_probe_3d("pocket_center", 15, 12)           # still above the edge: it would probe sideways in the air
+            await mc.probe_descend(to_z=-3)                          # G38.3: nothing touched on the way, inside the pocket
+            assert mc.routine["stage"] == "done" and not mc.routine["touched"], mc.routine
             await asyncio.sleep(0.3)
             await mc.probe_3d("pocket_center", 15, 12)
             await _until(lambda: mc.routine["stage"] in ("done", "failed"), timeout=30)
@@ -466,8 +553,6 @@ def test_3d_probe_centres_inside_corner_and_travel_check():
             await mc.raise_z_top(); await _until(lambda: not mc.jog_busy, timeout=10)
             # inside corner (the pocket's back-left): start over the top, just outside the corner
             await _at_top_over(mc, emu, -155.0, -130.0)
-            emu.wco[2] = -55.0
-            await asyncio.sleep(0.3)
             await mc.lower_to(5); await _until(lambda: not mc.jog_busy, timeout=10)
             await asyncio.sleep(0.3)
             await mc.probe_3d("inside_back_left", 10, 10, 2, 2)
@@ -502,6 +587,8 @@ def test_3d_probe_that_never_triggers_is_held():
             await asyncio.sleep(0.3)
             _measured(mc, emu)
             emu.wco[2] = -55.0
+            await asyncio.sleep(0.3)
+            _probed(mc)
             await _at_top_over(mc, emu, -96.28, -99.45)
             await mc.lower_to(5); await _until(lambda: not mc.jog_busy, timeout=10)
             await asyncio.sleep(0.3)
@@ -509,7 +596,9 @@ def test_3d_probe_that_never_triggers_is_held():
             await mc.probe_3d("outside_back_right", 20, 20, 2, 2, max_drop=3)
             await _until(lambda: mc.routine["stage"] in ("done", "failed"), timeout=10)
             assert mc.routine["stage"] == "failed" and "nothing touched" in mc.routine["msg"], mc.routine
-            await _until(lambda: b"!" in emu.realtime and emu.state == "Hold", timeout=3)   # the emulator reads the byte a moment later
+            # a HALT, not a feed hold (a hold can't stop the probing move already queued): Alarm, Control off
+            await _until(lambda: b"\x18" in emu.realtime and emu.state == "Alarm", timeout=3)
+            assert b"!" not in emu.realtime and not mc.armed
             assert emu.mpos[2] > -50.0 - 6.0                         # stopped a few mm down (3 + polling lag), not 108
         finally:
             await mc.disconnect(); await emu.stop()
@@ -575,6 +664,7 @@ def test_run_program_changes_tools_in_the_file_and_waits_at_each_change():
             _measured(mc, emu)                                       # T6 fitted and measured
             emu.wco = [-150.0, -150.0, -60.0]
             await asyncio.sleep(0.4)
+            _probed(mc)
             both = ml.prepare_program(PROG, ["Face", "Outline"])
             chk = mc.check_job(both)
             assert any("changes tools 1 time" in n and "T6 → T3" in n for n in chk["notes"]), chk["notes"]
@@ -615,6 +705,7 @@ def test_program_pause_resume_and_abort():
             _measured(mc, emu)
             emu.wco = [-150.0, -150.0, -60.0]
             await asyncio.sleep(0.4)
+            _probed(mc)
             prep = ml.prepare_program(PROG1, ["Face"])
             await mc.run_program("pause test", prep)
             await _until(lambda: mc.job["stage"] == "running", timeout=20)
@@ -674,6 +765,7 @@ def test_a_long_upload_does_not_switch_control_off():
             _measured(mc, emu)
             emu.wco = [-150.0, -150.0, -60.0]
             await asyncio.sleep(0.4)
+            _probed(mc)
             body = "\n".join(f"G1 X{10 + (i % 20)} Y{10 + (i % 7)} F600" for i in range(9000))
             big = PROG1.replace("G1 X40 F1200", "G1 X40 F1200\n" + body)
             prep = ml.prepare_program(big, ["Face"])
@@ -778,7 +870,7 @@ def test_emulator_with_the_module_reports_a_and_shrinks_and_zeroes_it():
             await _until(lambda: emu.state == "Idle", timeout=10)
             await mc.console("G91 G0 A-30")
             await _until(lambda: abs(emu.a - 60.0) < 1e-6, timeout=10)
-            await _until(lambda: emu.state == "Idle", timeout=10)
+            await _until(lambda: mc.link.status["state"] == "Idle" and emu.state == "Idle", timeout=10)   # the app's view too
             await mc.console("G90")
         finally:
             await mc.disconnect(); await emu.stop()
@@ -873,7 +965,7 @@ def test_4th_axis_z_probe_is_held_if_nothing_touches_before_the_floor():
             await mc.rotary_z_probe(max_drop=30)                # the floor: 30 mm below the clearance height
             await _until(lambda: mc.routine["stage"] in ("done", "failed"), timeout=30)
             assert mc.routine["stage"] == "failed" and "nothing touched" in mc.routine["msg"], mc.routine
-            await _until(lambda: b"!" in emu.realtime, timeout=3)
+            await _until(lambda: b"\x18" in emu.realtime, timeout=3)          # a halt: a hold can't stop the queued G38.2
             assert not mc.armed
         finally:
             await mc.disconnect(); await emu.stop()

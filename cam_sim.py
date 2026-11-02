@@ -68,6 +68,83 @@ class SimResult:
     final: dict = field(default_factory=dict)            # name -> np.ndarray (final state)
     masks: dict = field(default_factory=dict)            # gouge / left masks (bool arrays)
     per_move: dict = field(default_factory=dict)         # op index -> {"mrr": np.ndarray, "ap": np.ndarray} per move (zmap)
+    # zmap with a part: material left per body and feature [{body, area_mm2, max_mm, volume_mm3, features: [{kind, z_lo,
+    # z_hi, area_mm2, max_mm, at}]}] (kind: flat | sloped | edge, "underside ..." for a flipped setup's side)
+    leftover: list = field(default_factory=list)
+    # real metal in every tab of every selected tabbed contour, measured on the stock right after the op:
+    # [{op, tab, metal_mm (core thickness), width_mm (length at >= 90 % of it), min_mm (thinnest section, ramps
+    # included), z_top, at: (x, y), body, ok}]
+    tabs: list = field(default_factory=list)
+    # how each body is held, at every change: [{body, op, state, prev, history}] (state: held | tab-held | free); the
+    # first entry per body is its state before the first op ("op": None)
+    release: list = field(default_factory=list)
+    # ops that cut a body which was already held only by tabs, or free: [{op, body, state, since, removed_mm3, at}]
+    violations: list = field(default_factory=list)
+    history: list = field(default_factory=list)          # names of the earlier ops simulated silently first (stock history)
+    tab_min: float = 2.0                                 # thinnest acceptable tab (mm of metal)
+
+    def verdict(self, bite_factor: float = 2.0) -> dict:
+        """A compact verdict for gating a run: {"ok": no errors, "errors": [...], "warnings": [...]}; each item is
+        {"code", "message", ...details}. Errors: gouges into the part (cut by the simulated ops), machine collisions,
+        rapids through material, tabs thinner than tab_min, ops that cut a part already held only by tabs (or free),
+        a pass buried deeper than bite_factor x the tool's stepdown. Warnings: material left (per body and feature), a
+        shallower bite, removal-rate spikes, feed time in air, parts cut free without tabs."""
+        s = self.stats
+        errors, warnings = [], []
+        g = s.get("gouge")
+        if g and g.get("cells"):
+            new = g.get("new_cells", g["cells"])
+            msg = (f"the tool cut up to {g['max_depth']:.2f} mm into the part over {g['area_mm2']:.1f} mm² (worst at {g['worst']})"
+                   + (f"; caused by: {', '.join(g['ops'])}" if g.get("ops") else ""))
+            if new:
+                errors.append({"code": "GOUGE", "message": msg, "ops": list(g.get("ops") or []), "max_mm": g["max_depth"],
+                               "area_mm2": g["area_mm2"], "at": g["worst"]})
+            else:
+                warnings.append({"code": "GOUGE_BEFORE", "message": msg + " (cut by earlier ops, not the simulated ones)"})
+        col = s.get("collisions")
+        for h in (col or {}).get("hits", [])[:8]:
+            errors.append({"code": "COLLISION", "op": h["op"], "message": f"{h['part']} hits {h['what']} in {h['op']} at "
+                           f"({h['pos'][0]:.1f}, {h['pos'][1]:.1f}, {h['pos'][2]:.1f}), {h['depth']:.2f} mm", "depth_mm": h["depth"]})
+        for h in (s.get("rapid_hits") or [])[:8]:
+            errors.append({"code": "RAPID", "op": h["op"], "message": f"{h['op']}: rapid through material at move {h['move']} "
+                           f"({h['depth']:.2f} mm deep)", "depth_mm": h["depth"]})
+        for t in self.tabs:
+            if not t["ok"]:
+                errors.append({"code": "THIN_TAB", "op": t["op"], "message": f"{t['op']} tab {t['tab']} ({t['body']}) at "
+                               f"({t['at'][0]:.1f}, {t['at'][1]:.1f}): {t['metal_mm']:.2f} mm of metal over {t['width_mm']:.1f} mm, "
+                               f"needs {self.tab_min:g}", "metal_mm": t["metal_mm"], "body": t["body"]})
+        for v in self.violations:
+            errors.append({"code": "RELEASED", "op": v["op"], "body": v["body"], "message": _violation_text(v)})
+        for b in s.get("bites") or []:
+            sd = b.get("stepdown") or 0
+            by_design = b.get("kind") in ("vcarve", "chamfer")
+            if sd and not by_design and b["max"] > sd * 1.1 + 0.02:
+                item = {"code": "BITE", "op": b["op"], "message": f"{b['op']}: the {b['tool']} is buried {b['max']:.2f} mm deep at "
+                        f"move {b['move']} {tuple(b['at']) if b['at'] else ''} - its stepdown is {sd:g} mm", "max_mm": b["max"],
+                        "stepdown": sd, "move": b["move"]}
+                (errors if b["max"] > bite_factor * sd else warnings).append(item)
+            rated, mean = b.get("mrr_rated") or 0, b.get("mrr_mean") or 0
+            if b.get("kind") in FINISHING_KINDS and mean > 0 and b.get("mrr_max", 0) > 3 * mean and b["mrr_max"] > 20:
+                warnings.append({"code": "MRR", "op": b["op"], "message": f"{b['op']}: a finishing pass removes {b['mrr_max']:.0f} mm³/min "
+                                 f"at move {b['mrr_move']}, {b['mrr_max'] / mean:.0f}x its average"})
+            elif rated and not by_design and b.get("mrr_max", 0) > rated * 3.0 and b["mrr_max"] > 5:
+                warnings.append({"code": "MRR", "op": b["op"], "message": f"{b['op']}: removes up to {b['mrr_max']:.0f} mm³/min at move "
+                                 f"{b['mrr_move']}, {b['mrr_max'] / rated:.1f}x the {b['tool']}'s rating"})
+            if b["air_s"] >= 20 and b["air_s"] > 0.15 * max(b["cut_s"], 1.0):
+                warnings.append({"code": "AIR", "op": b["op"], "message": f"{b['op']}: {b['air_s']:.0f} s of feed moves cut nothing "
+                                 f"(cutting {b['cut_s']:.0f} s)", "air_s": b["air_s"]})
+        for lb in self.leftover:
+            warnings.append({"code": "LEFT", "body": lb["body"], "message": _leftover_text(lb), "area_mm2": lb["area_mm2"],
+                             "max_mm": lb["max_mm"], "features": lb["features"]})
+        if not self.leftover and (s.get("left") or {}).get("area_mm2"):
+            lf = s["left"]
+            warnings.append({"code": "LEFT", "message": f"material left on the part: up to {lf['max']:.2f} mm over {lf['area_mm2']:.0f} mm²",
+                             "area_mm2": lf["area_mm2"], "max_mm": lf["max"]})
+        for r in self.release:
+            if r["state"] == "free" and r["prev"] == "held" and not r.get("history"):
+                warnings.append({"code": "FREED", "op": r["op"], "body": r["body"], "message": f"{r['op']} cuts {r['body']} free with no "
+                                 "tabs: nothing but the workholding (tape/glue) keeps it from moving into the cutter"})
+        return {"ok": not errors, "errors": errors, "warnings": warnings}
 
     def summary(self) -> str:
         s = self.stats
@@ -83,6 +160,15 @@ class SimResult:
         if lf:
             lines.append(f"Material left on the part: up to {lf['max']:.2f} mm, {lf['area_mm2']:.0f} mm² above {lf['tol']} mm "
                          f"({lf['volume_cm3']:.3f} cm³)")
+            lines += [f"  {_leftover_text(lb)}" for lb in self.leftover]
+        for t in self.tabs:
+            lines.append(f"{'TAB' if t['ok'] else 'THIN TAB'}: {t['op']} tab {t['tab']} ({t['body']}, at {t['at'][0]:.1f}, {t['at'][1]:.1f}): "
+                         f"{t['metal_mm']:.2f} mm of metal over {t['width_mm']:.1f} mm of its length"
+                         + ("" if t["ok"] else f" - under {self.tab_min:g} mm: it can break and let the part move into the cutter"))
+        moves = [r for r in self.release if r["op"] is not None and not r.get("history")]
+        if moves:
+            lines.append("Release: " + "; ".join(f"{r['body']} {r['prev']} -> {r['state']} after {r['op']}" for r in moves))
+        lines += [_violation_text(v) for v in self.violations]
         if s.get("outside_cm3"):
             lines.append(f"Stock still standing outside the part (frame, tabs, uncut margins): {s['outside_cm3']:.2f} cm³")
         col = s.get("collisions")
@@ -117,6 +203,9 @@ class SimResult:
                 lines.append(f"{b['op']}: {b['air_s']:.0f} s of feed moves cut nothing ({b['air_moves']} moves; cutting {b['cut_s']:.0f} s): "
                              "links, approaches or returns that could be rapids or shorter")
         lines += [f"note: {n}" for n in self.notes]
+        if self.history:
+            lines.append(f"note: started from the stock as {len(self.history)} earlier op(s) leave it ({_short_list(self.history)}), "
+                         "simulated first and not reported")
         return "\n".join(lines)
 
     def frame_payload(self, k: int) -> dict:
@@ -131,7 +220,40 @@ class SimResult:
 
     def to_payload(self) -> dict:
         return {"mode": self.mode, "grid": self.grid, "frames": [f[0] for f in self.frames], "stats": self.stats,
-                "notes": self.notes, "summary": self.summary()}
+                "notes": self.notes, "summary": self.summary(), "leftover": self.leftover, "tabs": self.tabs,
+                "release": self.release, "violations": self.violations, "history": self.history, "verdict": self.verdict()}
+
+
+def _short_list(names, n: int = 3) -> str:
+    return ", ".join(names[:n]) + (f" … {names[-1]}" if len(names) > n else "")
+
+
+def _violation_text(v) -> str:
+    if v.get("freed"):
+        return (f"RELEASED: {v['op']} cuts through the tabs that held {v['body']} (held only by tabs since {v['since'] or 'an earlier op'}): "
+                "it comes loose under the cutter")
+    how = "held only by tabs" if v["state"] == "tab-held" else "free (nothing holds it)"
+    return (f"RELEASED: {v['op']} cuts {v['body']} ({v['removed_mm3']:.0f} mm³ near {v['at'][0]:.1f}, {v['at'][1]:.1f}) after "
+            f"{v['since'] or 'an earlier op'} left it {how}: machine it before the release, or hold it another way")
+
+
+def _feature_text(f) -> str:
+    z = f"z {f['z_lo']:.2f}" if f["z_hi"] - f["z_lo"] < 0.1 else f"z {f['z_lo']:.1f}-{f['z_hi']:.1f}"
+    under = f["kind"].startswith("underside")
+    k = f["kind"].replace("underside ", "")
+    pre = "underside " if under else ""
+    if k == "flat":
+        return f"{f['area_mm2']:.0f} mm² {pre}flat at {z}, +{f['max_mm']:.2f} mm (a level face left above its height)"
+    if k == "sloped":
+        return f"{f['area_mm2']:.0f} mm² {pre}sloped faces {z}, up to {f['max_mm']:.2f} mm (chamfer/bevel/countersink not machined)"
+    return f"{f['area_mm2']:.0f} mm² {pre}along an edge/wall at {z}, up to {f['max_mm']:.2f} mm"
+
+
+def _leftover_text(lb) -> str:
+    big = [f for f in lb["features"] if f["area_mm2"] >= 1.0]
+    rest = lb["area_mm2"] - sum(f["area_mm2"] for f in big)
+    return (f"{lb['body']}: {lb['area_mm2']:.0f} mm² left, up to {lb['max_mm']:.2f} mm - " + "; ".join(_feature_text(f) for f in big)
+            + (f"{'; ' if big else ''}{rest:.0f} mm² in small spots" if rest >= 0.5 else ""))
 
 
 def _part_mesh(model_or_shape):
@@ -140,12 +262,26 @@ def _part_mesh(model_or_shape):
     return ck.build_model(ck.coerce_bodies(model_or_shape), "", "fine").mesh
 
 
+TAB_MIN_MM = {"aluminium": 2.0, "aluminum": 2.0}      # thinnest acceptable tab by stock material (default TAB_MIN_DEFAULT)
+TAB_MIN_DEFAULT = 2.0
+
+
 def simulate(program: cam.Program, ops: list[int] | None = None, part=None, resolution: float | None = None,
-             frames: int = 48, tol: float = 0.05, machine_model=None, placement=None, res_a: float = 1.0) -> SimResult:
+             frames: int = 48, tol: float = 0.05, machine_model=None, placement=None, res_a: float = 1.0,
+             history: bool = True, tab_min: float | None = None, material: str | None = None,
+             attach_min: float = 0.1) -> SimResult:
     """Simulate the given ops (indices into program.ops, default all) in order. `part` (model or shape) enables the
-    gouge / left-material comparison. `resolution` = cell size along X/Y (mm; default from the stock size, 0.2 mm on
-    the 4th axis), `res_a` = the angular cell on the 4th axis (degrees, default 1°). `placement` (4th axis: chuck_gap,
-    tail_gap in mm) overrides the machine model's mounting numbers. Returns a SimResult (summary(), frame_payload(k))."""
+    gouge / left-material comparison (per body and feature: result.leftover). `resolution` = cell size along X/Y (mm;
+    default from the stock size, 0.2 mm on the 4th axis), `res_a` = the angular cell on the 4th axis (degrees, default 1°).
+    `placement` (4th axis: chuck_gap, tail_gap in mm) overrides the machine model's mounting numbers.
+    history (default True): when the selection starts later in the program (a later setup) or skips ops, every earlier
+    op of the program is simulated first, silently, so the selected ops meet the real in-process stock (register holes
+    cut on side A, the back already thinned); history=False starts from fresh stock.
+    Tabs: every selected tabbed contour's tabs are measured on the stock (result.tabs); a tab with less than `tab_min`
+    mm of metal is an error (default by `material` / the program's stock material: TAB_MIN_MM, else 2 mm). Release
+    tracking (result.release, result.violations): whether each body is still held by the surrounding stock, only by
+    tabs, or free (material columns overlapping by more than `attach_min` mm connect). Returns a SimResult
+    (summary(), verdict(), frame_payload(k))."""
     sel = list(range(len(program.ops))) if ops is None else [i for i in ops if 0 <= i < len(program.ops)]
     if not sel:
         raise cam.CamError("simulate: no operations selected")
@@ -159,9 +295,25 @@ def simulate(program: cam.Program, ops: list[int] | None = None, part=None, reso
             machine_model = _mm.model_for(program.setup.machine)
         except Exception:  # noqa: BLE001 - the machine model never stops a simulation
             machine_model = None
+    # the run order: (op index, silent). Silent ops are the earlier ops the selection skips (stock history only)
+    chosen = set(sel)
+    if history and sel == sorted(chosen):
+        order = [(i, i not in chosen) for i in range(sel[-1] + 1)]
+    elif history:
+        order = [(i, True) for i in range(min(sel)) if i not in chosen] + [(i, False) for i in sel]
+    else:
+        order = [(i, False) for i in sel]
+    if tab_min is None:
+        mat = material or getattr(program, "material", None) or getattr(program.setup.stock, "material", None)
+        tab_min = TAB_MIN_MM.get(str(mat).lower().strip(), TAB_MIN_DEFAULT) if mat else TAB_MIN_DEFAULT
     if all(rot):
-        return _sim_radial(program, sel, part, resolution, frames, tol, machine_model, placement or {}, res_a)
-    out = _sim_zmap(program, sel, part, resolution, frames, tol, machine_model, placement or {})
+        st0 = setups[0]
+        same = [(i, s) for i, s in order if not s or (program.setup_of(program.ops[i]).rotary
+                                                       and cam.Program.same_mounting(st0, program.setup_of(program.ops[i])))]
+        out = _sim_radial(program, sel, part, resolution, frames, tol, machine_model, placement or {}, res_a,
+                          pre=[i for i, s in same if s and i < min(sel)])
+        return out
+    out = _sim_zmap(program, order, part, resolution, frames, tol, machine_model, placement or {}, float(tab_min), attach_min)
     return out
 
 
@@ -217,7 +369,8 @@ def _bite_stats(op, mv, pts, idx, kinds, eng, rapid_rate) -> tuple[dict, dict]:
     tool = op.tool
     rated = tool.rated_mrr()
     b = {"op": op.name, "kind": op.kind, "tool": tool.label(), "max": round(max(mx, 0.0), 3), "move": worst + 1,
-         "at": [round(float(v), 2) for v in mv[worst][1:4]] if n else None, "stepdown": tool.stepdown,
+         "at": [round(float(v), 2) for v in mv[worst][1:4]] if n else None,
+         "stepdown": float((op.params or {}).get("ap") or tool.stepdown),   # a planned full-depth finish pass is buried by design
          "mrr_max": round(float(mrr_move[wm]), 1), "mrr_move": wm + 1, "mrr_at": [round(float(v), 2) for v in mv[wm][1:4]] if n else None,
          "mrr_rated": round(rated, 1), "mrr_mean": round(float(vol_move.sum()) / (cut_s / 60.0), 1) if cut_s > 1e-6 else 0.0,
          "removed_mm3": round(float(vol_move.sum()), 2),
@@ -233,13 +386,22 @@ def _frame_marks(total: int, frames: int) -> list[int]:
 
 
 # ----------------------------------------------------------------------------- zmap
-def _sim_zmap(program, sel, part, resolution, frames, tol, machine_model=None, placement=None) -> SimResult:
+def _sim_zmap(program, order, part, resolution, frames, tol, machine_model=None, placement=None, tab_min=TAB_MIN_DEFAULT,
+              attach_min=0.1) -> SimResult:
+    """`order`: [(op index, silent)] in run order; silent ops (the earlier ops a selection skips) only cut the stock."""
     placement = placement or {}
+    sel = [i for i, silent in order if not silent]
     setups = [program.setup_of(program.ops[i]) for i in sel]
+    all_setups = [program.setup_of(program.ops[i]) for i, _ in order]
+    keep = [not s_.rotary for s_ in all_setups]                       # a 4th-axis op can't be part of a flat stock's history
+    skipped_rot = [program.ops[i].name for (i, silent), k in zip(order, keep) if not k and silent]
+    order = [o for o, k in zip(order, keep) if k]
+    all_setups = [s_ for s_, k in zip(all_setups, keep) if k]
     st_boxes = [s.model_stock for s in setups]
-    x0 = min(b.xmin for b in st_boxes); x1 = max(b.xmax for b in st_boxes)
-    y0 = min(b.ymin for b in st_boxes); y1 = max(b.ymax for b in st_boxes)
-    zmin = min(b.zmin for b in st_boxes); zmax = max(b.zmax for b in st_boxes)
+    all_boxes = [s.model_stock for s in all_setups]
+    x0 = min(b.xmin for b in all_boxes); x1 = max(b.xmax for b in all_boxes)
+    y0 = min(b.ymin for b in all_boxes); y1 = max(b.ymax for b in all_boxes)
+    zmin = min(b.zmin for b in all_boxes); zmax = max(b.zmax for b in all_boxes)
     area = (x1 - x0) * (y1 - y0)
     res = resolution or max(0.15, math.sqrt(area / 160_000.0))
     # the fixtures (vises / clamps / plates) of the top setup, in model coordinates: uncuttable. They get their own height
@@ -248,17 +410,19 @@ def _sim_zmap(program, sel, part, resolution, frames, tol, machine_model=None, p
     nx = int(math.ceil((x1 - x0) / res)) + 1
     ny = int(math.ceil((y1 - y0) / res)) + 1
     zhi = np.full((ny, nx), -np.inf); zlo = np.full((ny, nx), np.inf)
-    st0 = st_boxes[0]
+    st0 = all_boxes[0]
     ix0 = int(round((st0.xmin - x0) / res)); ix1 = int(round((st0.xmax - x0) / res))
     iy0 = int(round((st0.ymin - y0) / res)); iy1 = int(round((st0.ymax - y0) / res))
     zhi[iy0:iy1 + 1, ix0:ix1 + 1] = st0.zmax
     zlo[iy0:iy1 + 1, ix0:ix1 + 1] = st0.zmin
-    initial = np.where(zhi > zlo, zhi - zlo, 0.0).sum() * res * res
     grid = {"res": res, "x0": x0, "y0": y0, "nx": nx, "ny": ny, "zmin": zmin, "zmax": zmax}
     out = SimResult("zmap", grid)
+    out.tab_min = tab_min
+    if skipped_rot:
+        out.notes.append(f"the stock history leaves out {len(skipped_rot)} 4th-axis op(s) ({_short_list(skipped_rot)}): a different stock model")
     has_bottom = False
-    plans = []                                            # (op_index, op, side, model moves)
-    for i in sel:
+    plans = []                                            # (op_index, op, side, model moves, src, silent, setup-frame z)
+    for i, silent in order:
         op = program.ops[i]; st = program.setup_of(op)
         ax = st.tool_axis_model
         if ax[2] > 0.999:
@@ -266,16 +430,17 @@ def _sim_zmap(program, sel, part, resolution, frames, tol, machine_model=None, p
         elif ax[2] < -0.999:
             side = -1; has_bottom = True
         else:
-            out.notes.append(f"{op.name}: side setup ({st.orient}) is not simulated in the height-map model")
-            plans.append((i, op, 0, None, [])); continue
+            if not silent:
+                out.notes.append(f"{op.name}: side setup ({st.orient}) is not simulated in the height-map model")
+            plans.append((i, op, 0, None, [], silent, None)); continue
         if op.kind == "probe":                            # probe ops run once; the touches stopped short of their faces
             tm, src = op.sim_moves or op.moves, list(range(len(op.moves)))
         else:
             tm, src = cam.tile_moves(op, program.op_tiles(op), st.clearance_z)  # every tile, as the post runs them
         P = st.to_model(np.array([m[1:4] for m in tm], dtype=float)) if tm else np.zeros((0, 3))
         mv = [[m[0], *p, m[4]] for m, p in zip(tm, P)]
-        plans.append((i, op, side, mv, src))
-    total = sum(len(mv) if mv is not None else len(op.moves) for _, op, _, mv, _ in plans)
+        plans.append((i, op, side, mv, src, silent, np.array([m[3] for m in tm], dtype=float)))
+    total = sum((len(mv) if mv is not None else len(op.moves)) for _, op, _, mv, _, silent, _ in plans if not silent)
     marks = _frame_marks(total, frames)
     done = 0
     mark_i = 0
@@ -288,7 +453,8 @@ def _sim_zmap(program, sel, part, resolution, frames, tol, machine_model=None, p
             q["zlo"] = _quant(zlo, zhi, zmin, zmax, low=True)
         out.frames.append((upto, q))
 
-    pmaps = _part_maps_z(part, res, x0, y0, nx, ny) if part is not None else None
+    bodies = _body_maps_z(part, res, x0, y0, nx, ny) if part is not None else None
+    pmaps = (bodies["top"], bodies["bot"]) if bodies is not None else None
     fix = _fixture_map(fix_shapes, res) if fix_shapes else None
     fix_hi = fix["top"] if fix else None
     if fix_shapes:
@@ -298,9 +464,42 @@ def _sim_zmap(program, sel, part, resolution, frames, tol, machine_model=None, p
     gouge_ops: list[str] = []
     bites: list[dict] = []                                # per op: the deepest single-pass cut, and feed time spent in air
     rapid_rate = float(getattr(program.setup.machine, "rapid", 2000.0) or 2000.0)
+    rel = _Release(bodies, res, attach_min, x0, y0) if bodies is not None and bodies["names"] else None
+    if rel is not None:
+        rel.start(zhi, zlo, out.release)
+    started = False
+    initial = 0.0
+    silent_removed = 0.0                                  # removed by silent ops after the first selected one (not counted)
 
-    snap(0)
-    for i, op, side, mv, src in plans:
+    def vol():
+        return float(np.where(zhi > zlo, zhi - zlo, 0.0).sum()) * res * res
+
+    for i, op, side, mv, src, silent, zs in plans:
+        if silent:
+            if side == 0 or not mv or op.kind == "probe":
+                continue
+            v0 = vol() if started else 0.0
+            pts, idx, kinds = _samples([m[:4] for m in mv], res / 2, False)
+            _stamp_z(zhi, zlo, pts, kinds, idx, op.tool, side, res, x0, y0, [], op.name)
+            out.history.append(op.name)
+            if rel is not None:
+                if op.kind == "contour" and (op.params or {}).get("tabs"):
+                    _find_tabs(op, mv, zs, side, pts, idx, kinds, zhi, zlo, res, x0, y0, bodies, rel, attach_min, tab_min)
+                rel.after(op.name, zhi, zlo, out.release, history=True)
+            if started:
+                silent_removed += v0 - vol()
+                if pmaps is not None:
+                    g = _gouge_z(pmaps, zhi, zlo, tol, has_bottom)[0]
+                    gouged_start |= g & ~gouged
+                    gouged |= g
+            continue
+        if not started:                                   # the stock as the history left it: where the reported run starts
+            started = True
+            initial = vol()
+            snap(0)
+            if pmaps is not None and out.history:
+                gouged = _gouge_z(pmaps, zhi, zlo, tol, has_bottom)[0]
+            gouged_start = gouged.copy()
         if side == 0 or not mv:
             done += len(mv) if mv else len(op.moves)
             while mark_i < len(marks) and marks[mark_i] <= done:
@@ -314,6 +513,7 @@ def _sim_zmap(program, sel, part, resolution, frames, tol, machine_model=None, p
             while mark_i < len(marks) and marks[mark_i] <= done:
                 snap(marks[mark_i]); mark_i += 1
             continue
+        before = (zhi.copy(), zlo.copy()) if rel is not None else None
         eng = np.full((len(pts), 3), -np.inf); eng[:, 1] = 0.0
         # process in pieces that end at frame marks so snapshots are exact
         start = 0
@@ -339,16 +539,21 @@ def _sim_zmap(program, sel, part, resolution, frames, tol, machine_model=None, p
         done += len(mv)
         b, per_move = _bite_stats(op, mv, pts, idx, kinds, eng, rapid_rate)
         if len(mv) != len(op.moves):                       # tiles: each op move gets its worst over the tiles
-            sa = np.asarray(src); keep = sa >= 0
+            sa = np.asarray(src); keep_ = sa >= 0
             fold = {}
             for k, arr in per_move.items():
-                f = np.zeros(len(op.moves)); np.maximum.at(f, sa[keep], np.asarray(arr)[keep]); fold[k] = f
+                f = np.zeros(len(op.moves)); np.maximum.at(f, sa[keep_], np.asarray(arr)[keep_]); fold[k] = f
             per_move = fold
             b["tiles"] = int(len(program.op_tiles(op)))
             for key in ("move", "mrr_move"):
                 j = b[key] - 1
                 b[key] = int(src[j]) + 1 if 0 <= j < len(src) and src[j] >= 0 else b[key]
         bites.append(b); out.per_move[i] = per_move
+        if rel is not None:
+            rel.check_cut(op.name, before, zhi, zlo, out.violations)
+            if op.kind == "contour" and (op.params or {}).get("tabs"):
+                out.tabs += _find_tabs(op, mv, zs, side, pts, idx, kinds, zhi, zlo, res, x0, y0, bodies, rel, attach_min, tab_min)
+            rel.after(op.name, zhi, zlo, out.release, violations=out.violations)
         if pmaps is not None:
             g = _gouge_z(pmaps, zhi, zlo, tol, has_bottom)[0]
             if (g & ~gouged).sum() * res * res > 0.5:
@@ -358,8 +563,11 @@ def _sim_zmap(program, sel, part, resolution, frames, tol, machine_model=None, p
             snap(marks[mark_i]); mark_i += 1
     if not out.frames or out.frames[-1][0] != total:
         snap(total)
-    remaining = np.where(zhi > zlo, zhi - zlo, 0.0).sum() * res * res
-    out.stats = {"moves": total, "ops": len(sel), "removed_cm3": round((initial - remaining) / 1000.0, 3),
+    if pmaps is not None and sel and max(sel) < len(program.ops) - 1:
+        out.notes.append(f"the program goes on after {program.ops[max(sel)].name}: material left on the part includes what "
+                         "its later ops are meant to cut")
+    remaining = vol()
+    out.stats = {"moves": total, "ops": len(sel), "removed_cm3": round((initial - remaining - silent_removed) / 1000.0, 3),
                  "rapid_hits": rapid_hits[:50], "bites": bites}
     if machine_model is not None or fix_hi is not None or collisions:
         out.stats["collisions"] = _collision_stats(collisions)
@@ -370,8 +578,11 @@ def _sim_zmap(program, sel, part, resolution, frames, tol, machine_model=None, p
         if has_bottom:
             out.notes.append("machine collisions are checked on top setups only; flipped (bottom) setups are not checked against the holder")
     if pmaps is not None:
-        _compare_zmap(out, pmaps, zhi, zlo, res, x0, y0, nx, tol, has_bottom)
+        _compare_zmap(out, pmaps, zhi, zlo, res, x0, y0, nx, tol, has_bottom, bodies)
         out.stats["gouge"]["ops"] = gouge_ops
+        out.stats["gouge"]["new_cells"] = int((out.masks["gouge"] & ~gouged_start).sum())
+        if rel is not None:
+            out.stats["held"] = {n: s_ for n, (s_, _) in rel.state.items()}
     out.final = {"zhi": zhi, "zlo": zlo}
     return out
 
@@ -414,6 +625,7 @@ def _stamp_z_run(zhi, zlo, P, K, I, tool, side, res, x0, y0, rapid_hits, op_name
     if len(P) == 0:
         return
     R = tool.shape.cut_radius
+    edge = max(0.01, (res / 4) ** 2 / max(R, 1e-3))     # how far a sample's distance to a cell can be off (step / 2 along the path)
     k = int(math.ceil(R / res)) + 1
     oy, ox = np.mgrid[-k:k + 1, -k:k + 1]
     oy = oy.ravel(); ox = ox.ravel()
@@ -429,6 +641,10 @@ def _stamp_z_run(zhi, zlo, P, K, I, tool, side, res, x0, y0, rapid_hits, op_name
         prof_all = _profile(tool, np.where(ok, d, 0.0))
         ok &= np.isfinite(prof_all)
         flat = (CY * nx + CX)[ok]
+        # cells grazed by the cutter's rim: whether a pass takes them depends on where its samples fall along the path
+        # (a cell centre on the wall line, right at R, survives one lap and goes on the next, with the full height of the
+        # wall above it). They count as removed material but not as axial engagement (the BITE depth).
+        inner = (d < R - edge)[ok]
         prof = prof_all[ok]
         zt = np.broadcast_to(P[s:e, 2:3], d.shape)[ok]
         vals = zt + prof if side > 0 else zt - prof
@@ -477,7 +693,7 @@ def _stamp_z_run(zhi, zlo, P, K, I, tool, side, res, x0, y0, rapid_hits, op_name
             axial = np.empty_like(ax_s); axial[order] = ax_s
             cut = inc > 1e-6
             per = np.full(m_, -np.inf); np.maximum.at(per, rows, inc); per[rap] = -np.inf
-            ap = np.full(m_, -np.inf); np.maximum.at(ap, rows, np.where(cut, axial, -np.inf)); ap[rap] = -np.inf
+            ap = np.full(m_, -np.inf); np.maximum.at(ap, rows, np.where(cut & inner, axial, -np.inf)); ap[rap] = -np.inf
             vol = np.zeros(m_); np.add.at(vol, rows[cut], inc[cut] * res * res); vol[rap] = 0.0
             eng[s:s + m_, 0] = np.maximum(eng[s:s + m_, 0], ap)
             eng[s:s + m_, 1] += vol
@@ -558,6 +774,339 @@ def _part_maps_z(part, res, x0, y0, nx, ny):
     return top, -nbot
 
 
+def _body_maps_z(part, res, x0, y0, nx, ny) -> dict:
+    """Per body of the part: its top / bottom surface heights per cell (-inf / +inf where it is absent), names, and the
+    union: "top" (max), "bot" (min), "owner" (index of the body whose top is highest in each cell, -1 = no part)."""
+    model = part if isinstance(part, ck.Model) else ck.build_model(ck.coerce_bodies(part), "", "fine")
+    mbodies = model.mesh["bodies"]
+    names = [b.name for b in model.bodies] if len(model.bodies) == len(mbodies) else [f"body {k + 1}" for k in range(len(mbodies))]
+    seen: dict[str, int] = {}
+    for k, n in enumerate(names):                          # unique names (two bodies called "Body")
+        if n in seen:
+            names[k] = f"{n} #{seen[n] + 1}"
+        seen[n] = seen.get(n, 0) + 1
+    tops, bots = [], []
+    for bd in mbodies:
+        P = np.array(bd["positions"], dtype=float).reshape(-1, 3)
+        I = np.array(bd["indices"], dtype=np.int64).reshape(-1, 3)
+        top = np.full((ny, nx), -np.inf); nbot = np.full((ny, nx), -np.inf)
+        cam._raster_triangles(P, I, top, x0, y0, res)
+        Q = P.copy(); Q[:, 2] = -Q[:, 2]
+        cam._raster_triangles(Q, I, nbot, x0, y0, res)
+        tops.append(top); bots.append(-nbot)
+    if tops:
+        T = np.stack(tops)
+        top_u = T.max(axis=0); bot_u = np.stack(bots).min(axis=0)
+        owner = np.where(np.isfinite(top_u), np.argmax(T, axis=0), -1)
+    else:
+        top_u = np.full((ny, nx), -np.inf); bot_u = np.full((ny, nx), np.inf); owner = np.full((ny, nx), -1)
+    return {"names": names, "tops": tops, "bots": bots, "has": [np.isfinite(t) for t in tops], "top": top_u, "bot": bot_u,
+            "owner": owner}
+
+
+def _slope(H, res):
+    """Surface slope (rise / run) per cell. Along each axis the gentler of the two one-sided differences (only one where
+    the other neighbour is off the surface): a face that really slopes rises on both sides, a cell beside a step or on
+    the flat next to a chamfer has one level side and reads flat."""
+    Hn = np.where(np.isfinite(H), H, np.nan)
+    P = np.pad(Hn, 1, constant_values=np.nan)
+    g2 = np.zeros(H.shape)
+    for fwd, bwd in ((P[2:, 1:-1], P[:-2, 1:-1]), (P[1:-1, 2:], P[1:-1, :-2])):
+        with np.errstate(invalid="ignore"):
+            f = np.abs(fwd - Hn) / res
+            b = np.abs(Hn - bwd) / res
+        d = np.where(np.isfinite(f) & np.isfinite(b), np.minimum(f, b), np.where(np.isfinite(f), f, np.where(np.isfinite(b), b, 0.0)))
+        g2 += d * d
+    return np.where(np.isfinite(Hn), np.sqrt(g2), 0.0)
+
+
+SLOPE_MIN = 0.25                     # a part surface steeper than this (14°) is a sloped face (chamfer, bevel, draft)
+
+
+def _features(m, surf, amt, slope, res, x0, y0, prefix=""):
+    """Leftover cells `m` of one body grouped by what the part surface does there: sloped faces (one feature: their z
+    range), level faces left above their height (one feature per level), thin strips along an edge or wall."""
+    from scipy import ndimage
+    cell = res * res
+    feats = []
+
+    def item(kind, mm, zlo, zhi):
+        a = np.where(mm, amt, -1.0); j = int(np.argmax(a)); iy, ix = divmod(j, mm.shape[1])
+        return {"kind": prefix + kind, "z_lo": round(float(zlo), 2), "z_hi": round(float(zhi), 2),
+                "area_mm2": round(float(mm.sum() * cell), 1), "max_mm": round(float(amt[mm].max()), 2),
+                "at": (round(x0 + ix * res, 2), round(y0 + iy * res, 2))}
+    sl = m & (slope > SLOPE_MIN)
+    if sl.any():                                          # sloped patches grouped by overlapping height ranges
+        lab, n = ndimage.label(sl, structure=np.ones((3, 3), bool))
+        spans = []
+        for k, sl_ in enumerate(ndimage.find_objects(lab), 1):
+            comp = lab[sl_] == k
+            z = surf[sl_][comp]
+            spans.append([float(z.min()), float(z.max()), [k]])
+        spans.sort(key=lambda t: t[0])
+        groups = []
+        for sp in spans:
+            if groups and sp[0] <= groups[-1][1] + 0.2:
+                groups[-1][1] = max(groups[-1][1], sp[1]); groups[-1][2] += sp[2]
+            else:
+                groups.append(sp)
+        for zlo_, zhi_, ks in groups:
+            feats.append(item("sloped", np.isin(lab, ks), zlo_, zhi_))
+    fl = m & ~sl
+    if fl.any():
+        lab, n = ndimage.label(fl, structure=np.ones((3, 3), bool))
+        levels: dict[int, np.ndarray] = {}
+        edge = np.zeros_like(fl)
+        for k, sl_ in enumerate(ndimage.find_objects(lab), 1):
+            comp = lab[sl_] == k
+            core = ndimage.binary_erosion(comp)
+            if core.sum() < 0.25 * comp.sum():            # a strip a cell or two wide: along an edge / a wall
+                edge[sl_] |= comp
+                continue
+            z = float(np.median(surf[sl_][comp]))
+            key = int(round(z / 0.1))
+            full = levels.setdefault(key, np.zeros_like(fl))
+            full[sl_] |= comp
+        for key, mm in levels.items():
+            feats.append(item("flat", mm, surf[mm].min(), surf[mm].max()))
+        if edge.any():
+            feats.append(item("edge", edge, surf[edge].min(), surf[edge].max()))
+    return sorted(feats, key=lambda f: -f["area_mm2"])
+
+
+def _leftover(bodies, left_t, amt_t, left_b, amt_b, res, x0, y0) -> list[dict]:
+    """Material left on the part per body (the body owning the column) and feature."""
+    out = []
+    owner = bodies["owner"]
+    st = _slope(bodies["top"], res)
+    sb = _slope(bodies["bot"], res) if left_b is not None and left_b.any() else None
+    cell = res * res
+    for k, name in enumerate(bodies["names"] + ["(no body)"]):
+        kk = k if k < len(bodies["names"]) else -1
+        mt = left_t & (owner == kk)
+        mb = (left_b & (owner == kk)) if sb is not None else None
+        if not mt.any() and (mb is None or not mb.any()):
+            continue
+        feats = _features(mt, bodies["top"], amt_t, st, res, x0, y0) if mt.any() else []
+        if mb is not None and mb.any():
+            feats += _features(mb, bodies["bot"], amt_b, sb, res, x0, y0, "underside ")
+        both = mt | mb if mb is not None else mt
+        amt = np.maximum(np.where(mt, amt_t, 0.0), np.where(mb, amt_b, 0.0) if mb is not None else 0.0)
+        out.append({"body": name, "area_mm2": round(float(both.sum() * cell), 1), "max_mm": round(float(amt.max()), 2),
+                    "volume_mm3": round(float(amt.sum() * cell), 1), "features": sorted(feats, key=lambda f: -f["area_mm2"])})
+    return sorted(out, key=lambda b: -b["area_mm2"])
+
+
+def _disc(r_cells: float):
+    k = int(math.ceil(r_cells))
+    oy, ox = np.mgrid[-k:k + 1, -k:k + 1]
+    m = (ox * ox + oy * oy) <= r_cells * r_cells + 1e-9
+    return oy[m], ox[m]
+
+
+def _cells_near(pts_xy, r, res, x0, y0, shape):
+    """Bool mask of the cells whose centre is within r of any of the points."""
+    ny, nx = shape
+    mask = np.zeros(shape, dtype=bool)
+    if len(pts_xy) == 0:
+        return mask
+    c = np.unique(np.stack([np.rint((pts_xy[:, 1] - y0) / res), np.rint((pts_xy[:, 0] - x0) / res)], axis=1).astype(np.int64), axis=0)
+    oy, ox = _disc(r / res)
+    Y = (c[:, 0:1] + oy[None, :]).ravel(); X = (c[:, 1:2] + ox[None, :]).ravel()
+    ok = (Y >= 0) & (Y < ny) & (X >= 0) & (X < nx)
+    mask[Y[ok], X[ok]] = True
+    return mask
+
+
+def _find_tabs(op, mv, zs, side, pts, idx, kinds, zhi, zlo, res, x0, y0, bodies, rel, attach_min, tab_min) -> list[dict]:
+    """The tabs a tabbed contour left, measured on the stock right after it: the path's stretches at the tab top (below
+    the op's first pass under it) seed them; a tab is the connected stock standing in the kerf (the cells the tool
+    swept at or below the tab top) above the kerf floor around a seed. Its metal is what actually joins the part to
+    the waste there: the stock's top over the tab minus the higher of the stock's bottom and the part's underside next
+    to it (a back already thinned by an earlier setup counts). Registers each tab's cells with the release tracker."""
+    from scipy import ndimage
+    p = op.params or {}
+    if not int(p.get("tabs") or 0) or zs is None or len(mv) < 2:
+        return []
+    th = p.get("tab_height")
+    if th is None:
+        th = (op.cut_overrides or {}).get("tab_height", (op.cut_defaults or {}).get("tab_height", 3.0))
+    tt = float(p.get("tab_top", float(p["z_bottom"]) + float(th)))           # setup frame
+    feed = np.array([m[0] != cam.RAPID for m in mv])
+    below = zs < tt - 0.01
+    if not below.any():
+        return []
+    first = int(np.argmax(below))
+    at_tt = np.abs(zs - tt) < 0.01
+    seed_mv = np.zeros(len(mv), dtype=bool)
+    seed_mv[1:] = feed[1:] & at_tt[1:] & at_tt[:-1]
+    seed_mv[:first + 1] = False
+    kerf_mv = feed & (zs <= tt + 0.01)
+    kerf_mv[:first] = False
+    if not seed_mv.any():
+        return []
+    seed_s, kerf_s = seed_mv[idx], kerf_mv[idx]
+    R = op.tool.shape.cut_radius
+    shape = zhi.shape
+    kerf = _cells_near(pts[kerf_s, :2], 0.8 * R, res, x0, y0, shape)
+    floor = pts[kerf_s, 2].min() if side > 0 else pts[kerf_s, 2].max()
+    with np.errstate(invalid="ignore"):
+        mat = zhi > zlo + 1e-6
+        standing = kerf & mat & ((zhi - floor > attach_min) if side > 0 else (floor - zlo > attach_min))
+    lab, n = ndimage.label(standing, structure=np.ones((3, 3), bool))
+    seeds = np.flatnonzero(seed_s)
+    S = pts[seeds]
+    D = pts[np.minimum(seeds + 1, len(pts) - 1), :2] - pts[np.maximum(seeds - 1, 0), :2]   # path direction at each seed
+    nrm = np.hypot(D[:, 0], D[:, 1])
+    ok = nrm > 1e-9
+    S, D, nrm = S[ok], D[ok], nrm[ok]
+    Nx, Ny = -D[:, 1] / nrm, D[:, 0] / nrm
+    sy = np.clip(np.rint((S[:, 1] - y0) / res).astype(np.int64), 0, shape[0] - 1)
+    sx = np.clip(np.rint((S[:, 0] - x0) / res).astype(np.int64), 0, shape[1] - 1)
+    sl = lab[sy, sx]
+    # one tab per cluster of seed cells (every pass under the tab top rides over the same stretch); a tab whose stretch
+    # has no metal under it (the kerf was already cut there) is still a tab: of 0 mm
+    seedmask = np.zeros(shape, dtype=bool); seedmask[sy, sx] = True
+    tl, _ = ndimage.label(ndimage.binary_dilation(seedmask, iterations=2), structure=np.ones((3, 3), bool))
+    st_ = tl[sy, sx]
+    # the tab's metal at each seed: the thinnest stock column on the line across the kerf through it (the tool's width
+    # either side of the path) - the bridge is only as thick as its thinnest section between part and waste
+    with np.errstate(invalid="ignore"):
+        T = np.where(zhi > zlo, zhi - zlo, 0.0)
+    ts = np.arange(-R, R + 1e-9, res / 2)
+    cy = np.clip(np.rint((S[:, 1:2] + Ny[:, None] * ts[None, :] - y0) / res).astype(np.int64), 0, shape[0] - 1)
+    cx = np.clip(np.rint((S[:, 0:1] + Nx[:, None] * ts[None, :] - x0) / res).astype(np.int64), 0, shape[1] - 1)
+    cross = T[cy, cx].min(axis=1)
+    owner, names = bodies["owner"], bodies["names"]
+    oy, ox = _disc((R + 2 * res) / res)
+    tabs = []
+    for L in [int(v) for v in dict.fromkeys(st_.tolist()) if v > 0]:             # in path order
+        sel_ = st_ == L
+        c = cross[sel_]
+        metal = float(c.max())
+        core = sel_.copy(); core[sel_] = c >= 0.9 * metal - 1e-6
+        dx_, dy_ = D[sel_].mean(axis=0) if sel_.sum() else (1.0, 0.0)
+        dn = math.hypot(dx_, dy_) or 1.0
+        proj = (S[core, 0] * dx_ + S[core, 1] * dy_) / dn
+        width = float(proj.max() - proj.min()) if len(proj) and metal > 0.05 else 0.0
+        Y = np.clip(sy[sel_][:, None] + oy[None, :], 0, shape[0] - 1); X = np.clip(sx[sel_][:, None] + ox[None, :], 0, shape[1] - 1)
+        ow = owner[Y, X].ravel()
+        ow = ow[ow >= 0]
+        body = names[int(np.bincount(ow).argmax())] if len(ow) else "(no part)"
+        tabs.append({"op": op.name, "tab": len(tabs) + 1, "metal_mm": round(metal, 2), "min_mm": round(float(c.min()), 2),
+                     "width_mm": round(width, 2),
+                     "z_top": round(float(np.median((zhi if side > 0 else zlo)[sy[core], sx[core]])), 2),
+                     "at": (round(float(S[core, 0].mean()), 1), round(float(S[core, 1].mean()), 1)),
+                     "body": body, "ok": bool(metal >= tab_min - 1e-6)})
+        comps = [int(v) for v in np.unique(sl[sel_]) if v > 0]                   # the standing stock it left
+        if rel is not None and comps:
+            rel.add_tab(ndimage.binary_dilation(np.isin(lab, comps)))
+    return tabs
+
+
+def _components(zhi, zlo, keep, eps):
+    """Connected material (labels, -1 = none): 4-neighbour columns whose material intervals overlap by more than eps."""
+    from scipy.sparse import coo_matrix
+    from scipy.sparse.csgraph import connected_components
+    ny, nx = zhi.shape
+    with np.errstate(invalid="ignore"):
+        mat = keep & (zhi - zlo > eps)
+        er = mat[:, :-1] & mat[:, 1:] & (np.minimum(zhi[:, :-1], zhi[:, 1:]) - np.maximum(zlo[:, :-1], zlo[:, 1:]) > eps)
+        ed = mat[:-1, :] & mat[1:, :] & (np.minimum(zhi[:-1, :], zhi[1:, :]) - np.maximum(zlo[:-1, :], zlo[1:, :]) > eps)
+    ids = np.arange(ny * nx).reshape(ny, nx)
+    r = np.concatenate([ids[:, :-1][er], ids[:-1, :][ed]]); c = np.concatenate([ids[:, 1:][er], ids[1:, :][ed]])
+    g = coo_matrix((np.ones(len(r), dtype=np.int8), (r, c)), shape=(ny * nx, ny * nx)).tocsr()
+    _, lab = connected_components(g, directed=False)
+    lab = lab.reshape(ny, nx)
+    lab[~mat] = -1
+    return lab
+
+
+class _Release:
+    """Is each body still part of the plate? A body is held while its material connects (columns overlapping by more
+    than attach_min) to the frame - the largest piece of stock outside all the bodies; tab-held when it connects only
+    through the tabs of tabbed contours (_find_tabs registers their cells); free when nothing connects it. Bodies that
+    are not held at the start (outside the stock, or no frame around them) are not tracked."""
+
+    def __init__(self, bodies, res, attach_min, x0=0.0, y0=0.0):
+        from scipy import ndimage
+        self.x0, self.y0 = x0, y0
+        self.names = bodies["names"]
+        self.fp = bodies["has"]
+        anyb = np.logical_or.reduce(self.fp) if self.fp else None
+        self.outside = ~ndimage.binary_dilation(anyb, iterations=2) if anyb is not None else None
+        self.tab_mask = np.zeros_like(anyb) if anyb is not None else None
+        self.res, self.eps = res, attach_min
+        self.min_frame = max(4, int(4.0 / (res * res)))        # >= 4 mm² of stock outside the bodies
+        self.state: dict[str, tuple[str, str | None]] = {}     # name -> (state, the op that made it so)
+        self.tracked: list[int] = []
+
+    def add_tab(self, mask):
+        self.tab_mask |= mask
+
+    def _attached(self, zhi, zlo, keep) -> list[bool]:
+        lab = _components(zhi, zlo, keep, self.eps)
+        out_lab = lab[self.outside & (lab >= 0)]
+        if len(out_lab) == 0:
+            return [False] * len(self.names)
+        cnt = np.bincount(out_lab)
+        frame = int(cnt.argmax())
+        if cnt[frame] < self.min_frame:
+            return [False] * len(self.names)
+        return [bool((lab[fp] == frame).any()) for fp in self.fp]
+
+    def classify(self, zhi, zlo) -> dict[int, str]:
+        full = self._attached(zhi, zlo, np.ones(zhi.shape, dtype=bool))
+        notab = self._attached(zhi, zlo, ~self.tab_mask) if self.tab_mask.any() else full
+        return {k: ("held" if notab[k] else "tab-held" if full[k] else "free") for k in range(len(self.names))}
+
+    def start(self, zhi, zlo, log):
+        with np.errstate(invalid="ignore"):
+            mat = zhi > zlo
+        st = self.classify(zhi, zlo)
+        for k, name in enumerate(self.names):
+            if st[k] == "held" and (mat & self.fp[k]).any():
+                self.tracked.append(k)
+                self.state[name] = ("held", None)
+                log.append({"body": name, "op": None, "state": "held", "prev": None, "history": True})
+
+    def after(self, op_name, zhi, zlo, log, history=False, violations=None):
+        """The states after an op; an op (not history) that cuts the tabs a tab-held body hung on, leaving it free, is
+        a violation too: the part comes loose under the cutter."""
+        if not self.tracked:
+            return
+        st = self.classify(zhi, zlo)
+        for k in self.tracked:
+            name = self.names[k]
+            prev, since = self.state[name]
+            if st[k] != prev:
+                self.state[name] = (st[k], op_name)
+                log.append({"body": name, "op": op_name, "state": st[k], "prev": prev, "history": history})
+                if violations is not None and not history and prev == "tab-held" and st[k] == "free":
+                    violations.append({"op": op_name, "body": name, "state": prev, "since": since, "removed_mm3": 0.0,
+                                       "at": None, "freed": True})
+
+    def check_cut(self, op_name, before, zhi, zlo, violations, min_mm3: float = 0.5):
+        """An op that removes material from a body that was tab-held or free when it started."""
+        bhi, blo = before
+        with np.errstate(invalid="ignore"):
+            m0 = np.where(bhi > blo, bhi - blo, 0.0)
+            m1 = np.where(zhi > zlo, zhi - zlo, 0.0)
+        gone = np.clip(m0 - m1, 0.0, None)
+        cell = self.res * self.res
+        for k in self.tracked:
+            name = self.names[k]
+            state, since = self.state[name]
+            if state == "held":
+                continue
+            g = np.where(self.fp[k], gone, 0.0)
+            v = float(g.sum()) * cell
+            if v > min_mm3:
+                iy, ix = divmod(int(np.argmax(g)), g.shape[1])        # where it cuts the most
+                at = (round(self.x0 + ix * self.res, 1), round(self.y0 + iy * self.res, 1))
+                violations.append({"op": op_name, "body": name, "state": state, "since": since, "removed_mm3": round(v, 1), "at": at})
+
+
 def _nb_extreme(H, op, pad):
     """Per cell, the min (op=np.minimum) or max of its 4 neighbours' values; `pad` beyond the grid."""
     P = np.pad(H, 1, constant_values=pad)
@@ -598,17 +1147,22 @@ def _no_step(H, res):
     return ok
 
 
-def _compare_zmap(out, pmaps, zhi, zlo, res, x0, y0, nx, tol, has_bottom):
+def _compare_zmap(out, pmaps, zhi, zlo, res, x0, y0, nx, tol, has_bottom, bodies=None):
     top, bot = pmaps
     gouge, depth, has, mat = _gouge_z(pmaps, zhi, zlo, tol, has_bottom)
     flat_t, flat_b = _no_step(top, res), _no_step(bot, res)   # a column straddling a wall is not "left" material
     left = has & mat & flat_t & (zhi > top + tol)
+    left_t, left_b, amt_b = left, None, None
     with np.errstate(invalid="ignore"):
-        left_amt = np.where(left, zhi - top, 0.0)
+        amt_t = np.where(left, zhi - top, 0.0)
+        left_amt = amt_t
         if has_bottom:
             left_b = has & mat & flat_b & (zlo < bot - tol)
-            left_amt = np.maximum(left_amt, np.where(left_b, bot - zlo, 0.0))
+            amt_b = np.where(left_b, bot - zlo, 0.0)
+            left_amt = np.maximum(left_amt, amt_b)
             left = left | left_b
+    if bodies is not None and left.any():
+        out.leftover = _leftover(bodies, left_t, amt_t, left_b, amt_b, res, x0, y0)
     outside = (~has) & mat
     cell = res * res
     g = {"cells": int(gouge.sum()), "area_mm2": round(float(gouge.sum() * cell), 2),
@@ -624,7 +1178,7 @@ def _compare_zmap(out, pmaps, zhi, zlo, res, x0, y0, nx, tol, has_bottom):
 
 
 # ----------------------------------------------------------------------------- radial
-def _sim_radial(program, sel, part, resolution, frames, tol, machine_model=None, placement=None, res_a=1.0) -> SimResult:
+def _sim_radial(program, sel, part, resolution, frames, tol, machine_model=None, placement=None, res_a=1.0, pre=()) -> SimResult:
     """4th-axis material removal on a (angle, x) radius map, plus what the height map can't see: the holder stack and the
     body above the flutes against the remaining bar (contact, not cutting), and the whole tool stack against the chuck,
     its jaws and the tailstock (from the machine model's rotary dict and the setup's stock) for every move."""
@@ -656,11 +1210,19 @@ def _sim_radial(program, sel, part, resolution, frames, tol, machine_model=None,
             tz = np.where(c_ > 1e-12, hz1 / c_, np.where(c_ < -1e-12, hz0 / c_, np.inf))
         r0 = np.minimum(ty, tz)
     r = np.tile(r0[:, None], (1, nx))
+    spacing = min(res_x / 2, 0.25)
+    for i in pre:                                        # the earlier ops on this mounting: stock history, not reported
+        op = program.ops[i]; s_ = program.setup_of(op)
+        if op.moves and op.kind != "probe":
+            mv = [list(m[:5]) + [m[5] if len(m) > 5 else s_.a] for m in op.moves]
+            pts, idx, kinds = _samples(mv, spacing, True)
+            _stamp_r(r, pts, kinds, idx, op.tool, res_x, res_a, x0, [], op.name)
     initial = 0.5 * (r ** 2).sum() * math.radians(res_a) * res_x
     rmax = float(r0.max())
     grid = {"res": res_x, "x0": x0, "nx": nx, "na": na, "res_a": res_a, "rmax": rmax,
             "axis": list(st.axis), "x1": x1}
     out = SimResult("radial", grid)
+    out.history = [program.ops[i].name for i in pre]
     total = sum(len(program.ops[i].moves) for i in sel)
     marks = _frame_marks(total, frames)
     mark_i = 0
@@ -668,7 +1230,6 @@ def _sim_radial(program, sel, part, resolution, frames, tol, machine_model=None,
     rapid_hits = []
     hits: list[dict] = []
     mount = _rotary_mounting(st, machine_model, placement)
-    spacing = min(res_x / 2, 0.25)
 
     def snap(upto):
         q = np.clip(np.round(r / max(rmax, 1e-9) * 65534), 0, 65534).astype(np.uint16)
@@ -695,6 +1256,9 @@ def _sim_radial(program, sel, part, resolution, frames, tol, machine_model=None,
             core &= np.abs(nb - R) <= jump
     cell_a = np.radians(res_a) * res_x                   # cell area = cell_a · R
     gouged = np.zeros((na, nx), dtype=bool)
+    if R is not None and pre:                            # cut into the part by the history: not the selected ops' doing
+        gouged = core & (r < R - tol)
+    gouged0 = int(gouged.sum())
     gouge_ops: list[str] = []
     gouge_by_op: list[dict] = []
 
@@ -751,7 +1315,7 @@ def _sim_radial(program, sel, part, resolution, frames, tol, machine_model=None,
         cell = np.outer(np.full(na, 1.0), np.full(nx, res_x)) * np.radians(res_a)
         g = {"cells": int(gouge.sum()), "area_mm2": round(float((cell * R)[gouge].sum()), 2),
              "max_depth": round(float((R - r)[gouge].max()), 3) if gouge.any() else 0.0, "worst": None,
-             "ops": gouge_ops, "by_op": gouge_by_op}
+             "ops": gouge_ops, "by_op": gouge_by_op, "new_cells": int(gouge.sum()) - gouged0}
         if gouge.any():
             j = int(np.argmax(np.where(gouge, R - r, -1))); ia, ix = divmod(j, nx)
             g["worst"] = {"x": round(x0 + ix * res_x, 2), "angle": round(ia * res_a, 1)}

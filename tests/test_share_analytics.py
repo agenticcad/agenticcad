@@ -128,7 +128,7 @@ PROG = "\n".join(["G21 G90 G17", "G54", "M6 T2", "G53 G0 Z-3", "G0 X0 Y0", "M3 S
 OFF = (-100.0, -50.0, -60.0)                             # machine = work + OFF
 
 
-def _fake_run(root, with_wpos: bool, slow_corner: bool = False):
+def _fake_run(root, with_wpos: bool, slow_corner: bool = False, rpm=None):
     """A run of PROG sampled at 4 Hz as the Z1 reports it: the line it is reading runs ahead of the motion."""
     moves = ra.parse_program(PROG, [{"name": "Rect", "start": 3, "end": 15, "time": 0.4}])
     pts = []                                             # (work xyz, feed mm/min, line)
@@ -153,7 +153,7 @@ def _fake_run(root, with_wpos: bool, slow_corner: bool = False):
     with open(rec.dir / "samples.jsonl", "w") as f:
         for i, (w, ln) in enumerate(pts):
             row = {"t": round(i * 0.25, 2), "s": "Run", "ln": min(ln + 3, 15), "op": 0, "m": [w[k] + OFF[k] for k in range(3)],
-                   "f": [600.0, 600.0, 100.0], "sp": [9990.0, 10000.0, 100.0, 40.0 + i * 0.01, 30.0], "tl": 2}
+                   "f": [600.0, 600.0, 100.0], "sp": [rpm(i) if rpm else 9990.0, 10000.0, 100.0, 40.0 + i * 0.01, 30.0], "tl": 2}
             if with_wpos:
                 row["w"] = w
             f.write(json.dumps(row) + "\n")
@@ -193,3 +193,41 @@ def test_runs_api_lists_and_analyses(client):
     a = client.get("/api/runs/analysis", params={"id": rid}).json()
     assert a["id"] == rid and a["ops"][0]["name"] == "Rect" and a["suggestions"] == []
     assert client.get("/api/runs/analysis", params={"id": "../../etc"}).status_code == 404
+
+
+def test_a_sudden_load_then_nothing_is_flagged_where_it_happened(tmp_path):
+    # the 2026-11-02 tab break: steady cutting, rpm dips to 99.1 %, then runs unloaded above target
+    d = _fake_run(tmp_path, True, rpm=lambda i: 9910.0 if i == 60 else 10030.0 if 61 <= i <= 64 else 9990.0)
+    a = ra.analyse(d, use_cache=False)
+    ev = a["summary"]["load_events"]
+    assert len(ev) == 1 and ev[0]["rpm"] == pytest.approx(0.991) and ev[0]["after"] == pytest.approx(1.003)
+    f = next(f for f in a["findings"] if f["kind"] == "load")
+    assert "then the spindle ran unloaded" in f["title"] and f["lines"] == [ev[0]["line"]]
+    assert sum(a["summary"]["time_by_kind_min"].values()) > 0
+    # a dip that recovers without running unloaded is just a heavier moment, not an event
+    d2 = _fake_run(tmp_path / "b", True, rpm=lambda i: 9910.0 if i == 60 else 9990.0)
+    assert ra.analyse(d2, use_cache=False)["summary"]["load_events"] == []
+
+
+def test_the_user_edits_the_lessons_in_settings(client):
+    rows = client.get("/api/lessons").json()["lessons"]
+    assert rows and rows[0]["id"] == "L1"
+    r = client.post("/api/lessons", json={"action": "add", "title": "Deburr before flipping", "rule": "Deburr the register holes.",
+                                          "why": "2026-11-02: BP3 found burrs", "tags": "cam, flip", "check": ""}).json()
+    new = r["lessons"][-1]
+    assert new["source"] == "user" and new["tags"] == ["cam", "flip"] and new["check"] is None
+    r = client.post("/api/lessons", json={"action": "update", "id": new["id"], "rule": "Deburr all four register holes.", "why": "edited"}).json()
+    row = next(x for x in r["lessons"] if x["id"] == new["id"])
+    assert row["rule"] == "Deburr all four register holes." and row["why"] == "edited"
+    assert next(x for x in client.post("/api/lessons", json={"action": "retire", "id": new["id"]}).json()["lessons"] if x["id"] == new["id"])["status"] == "retired"
+    assert all(x["id"] != new["id"] for x in client.post("/api/lessons", json={"action": "delete", "id": new["id"]}).json()["lessons"])
+    assert client.post("/api/lessons", json={"action": "add", "title": "x"}).status_code == 400
+
+
+def test_the_consolidation_settings_and_undo(client):
+    d = client.get("/api/dreams").json()
+    assert d["enabled"] is True and d["running"] is False
+    assert client.post("/api/dreams", json={"action": "disable"}).json()["enabled"] is False
+    assert client.get("/api/dreams").json()["enabled"] is False
+    assert client.post("/api/dreams", json={"action": "enable"}).json()["enabled"] is True
+    assert client.post("/api/dreams", json={"action": "undo"}).status_code == 400          # nothing to undo yet

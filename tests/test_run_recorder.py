@@ -6,7 +6,7 @@ import json
 
 import machine_link as ml
 import run_recorder
-from test_machine_link import PROG1, _measured, _setup, _until, run
+from test_machine_link import PROG1, _measured, _probed, _setup, _until, run
 
 
 def test_a_program_run_is_recorded_with_its_design(tmp_path):
@@ -18,6 +18,7 @@ def test_a_program_run_is_recorded_with_its_design(tmp_path):
             _measured(mc, emu)
             emu.wco = [-150.0, -150.0, -60.0]
             await asyncio.sleep(0.4)
+            _probed(mc)                                       # the setup was zeroed this session (a run on an unzeroed one is refused)
             prep = ml.prepare_program(PROG1, ["Face"])
             prep["ops"][0].update(kind="face", key="Face", time=0.2)
             info = {"program": "plate", "setup": "Top", "wcs": "G54", "time_min": 0.2, "cam_code": "program = ...\n",
@@ -37,7 +38,7 @@ def test_a_program_run_is_recorded_with_its_design(tmp_path):
     assert (d / "program.nc").read_text() == prep_text() and (d / "cam.py").read_text() == "program = ...\n"
     rows = [json.loads(x) for x in gzip.open(d / "samples.jsonl.gz", "rt")]
     assert len(rows) > 3 and rows == sorted(rows, key=lambda r: r["t"])
-    assert any(r["s"] == "Run" and r["op"] == 0 for r in rows) and all(len(r["sp"]) == 5 for r in rows)
+    assert any(r["s"] == "Run" and r["op"] == 0 for r in rows) and all(len(r["sp"]) in (5, 6) for r in rows)
     assert runs[0]["ops"][0]["name"] == "Face" and runs[0]["ops"][0]["actual_min"] > 0
     events = [json.loads(x) for x in (d / "events.jsonl").read_text().splitlines()]
     assert any("finished" in e["text"] for e in events)

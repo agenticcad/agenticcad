@@ -27,8 +27,18 @@ Safety model (MachineControl):
     above work zero, so the tool can't be jogged into the stock top or the bed under it).
   * No free-form G-code and no manual spindle control. Programs run only as the CAM program's operations, prepared
     (prepare_program: comments out, 62-character lines, no relative moves / probing / offset changes), checked
-    against the travel from the current work origin, uploaded to the machine's SD and played; Pause / Resume /
-    Stop program and STOP stay available.
+    against the travel from the program's own work offset (its first G54..G59) and refused unless that offset was set
+    or probed this session (or the program's own probe ops set it before cutting), uploaded to the machine's SD and
+    played; Pause / Resume / Stop program and STOP stay available.
+  * The 2026-11-02 rules (latch-job-review): Z0 is set only by a probe or at a touch-off (|work Z| <= 1 mm at the tip),
+    never typed - the firmware clears TLO on every Z0 change and the fitted tool becomes the length reference
+    (tlo_ref); lower_to goes only down to a probed Z0, the last 10 mm at <= 100 mm/min; Makera's 3D-probe routines start
+    1 .. 10.5 mm above a probed reference (corners, boss) or inside the hole (pocket centre; probe_descend gets there
+    with G38.3) and are stopped with a HALT (a feed hold doesn't stop the queued G38.2); whatever a routine leaves in
+    the offsets is recorded (origin_log), finished or not. The assistant's console has no motion words; nobody's
+    console sends M480.x. recover() is the one way back from a hold or alarm (not e-stop / hard alarms).
+  * Work offsets: `$#` / `$G` are read (read_offsets) at connect and after every origin change; self.origins keeps
+    what set each WCS this session.
 
 4th axis (Makera's rotary module, the firmware's "delta" actuator: delta_max_rate 3600 deg/min, delta_acceleration 360):
   * The status carries A (and B) as the 4th and 5th coordinates (mpos_ab / wpos_ab). A is shown and jogged only when
@@ -68,6 +78,12 @@ FILE_TYPES = (T_FILE_MD5, T_FILE_VIEW, T_FILE_DATA, T_FILE_END, T_FILE_CAN, T_FI
 PACKET = 8192
 MAX_LINE = 62                     # the Z1 plays lines from 64-byte slots: 62 characters + newline + NUL
 PATH_ESC = {" ": "\x01", "?": "\x02", "*": "\x03", "!": "\x04", "~": "\x05"}
+REPORT_HEARTBEAT_S = 1.0          # Z1Link.report_t advances at least this often on an unchanging status
+# M957 (PWMSpindleControl::report_speed): "State: on, Current RPM: 12000  Target RPM: 12000  PWM value: 0.420"
+M957_RE = re.compile(r"State:\s*(on|off),\s*Current RPM:\s*(-?[\d.]+)\s+Target RPM:\s*(-?[\d.]+)\s+PWM value:\s*(-?[\d.]+)")
+LOAD_STALE_S = 2.0                # an M957 reading older than this is not shown (pwm None)
+QUIET_OK_S = 1.0                  # an "ok" this soon after a quiet line (M957) is its answer and is dropped
+SPINDLE_ON_RPM = 100.0            # the '?' status rpm above which the spindle counts as running (the target stays set when off)
 
 
 # ------------------------------------------------------------------ framing
@@ -216,8 +232,20 @@ class Z1Link:
         self.reader: asyncio.StreamReader | None = None
         self.writer: asyncio.StreamWriter | None = None
         self.status: dict[str, Any] | None = None
-        self.status_t = 0.0
+        self.status_t = 0.0                                 # when the last status frame arrived (liveness: fresh / stale)
+        # when the status last CHANGED: the Z1 answers some '?' with the very same report as the one before (recorded
+        # 2026-11-02: 870 of 4780 Run samples byte-identical to the previous one, about every 5th - a cached reply), so a
+        # consumer that wants one row per real report (run_recorder) keys on this. A static machine still advances it
+        # once a second (REPORT_HEARTBEAT_S).
+        self.report_t = 0.0
+        self._last_raw: str | None = None
         self.log: list[tuple[float, str]] = []
+        # spindle drive effort from M957 ("State: on, Current RPM: .. Target RPM: .. PWM value: 0.420"): the PID's PWM
+        # duty (0.1 .. 0.9 while on) = the real load signal; the '?' status has rpm only. {"pwm", "rpm", "target", "on", "t"}
+        self.spindle_load: dict | None = None
+        self.poll_spindle_load = False                      # opt-in (MachineControl.set_spindle_load_poll): send M957 while the spindle runs
+        self.spindle_poll_s = 0.5
+        self._quiet_sent: list[float] = []                  # times of lines sent quietly (M957): their "ok"s are swallowed
         self.error: str | None = None
         self.on_status: Callable[[dict], None] | None = None
         self._tasks: list[asyncio.Task] = []
@@ -234,7 +262,7 @@ class Z1Link:
         sock = self.writer.get_extra_info("socket")
         if sock is not None:
             sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-        self._tasks = [asyncio.create_task(self._read()), asyncio.create_task(self._poll())]
+        self._tasks = [asyncio.create_task(self._read()), asyncio.create_task(self._poll()), asyncio.create_task(self._poll_load())]
         t0 = time.time()                                    # a status reply proves the machine is talking to us
         while time.time() - t0 < timeout and self.status is None and self.connected and not self.error:
             await asyncio.sleep(0.05)
@@ -268,11 +296,26 @@ class Z1Link:
     async def realtime(self, ch: bytes) -> None:
         await self.send(T_REALTIME, ch)
 
-    async def line(self, text: str) -> None:
+    async def line(self, text: str, quiet: bool = False) -> None:
+        """One console line. `quiet`: telemetry the app sends by itself (M957) - kept out of the console log, and its
+        "ok" is swallowed, so neither the user, the assistant nor the run recorder sees a stream of them."""
         if BLOCKED.search(text):
             raise Refused(f"refused to send {text.strip()!r}: on the Z1 this command is unsafe (see BLOCKED)")
-        self.log.append((time.time(), "> " + text))
+        if quiet:
+            self._quiet_sent = [t for t in self._quiet_sent if time.time() - t < QUIET_OK_S][-8:] + [time.time()]
+        else:
+            self.log.append((time.time(), "> " + text))
         await self.send(T_LINE, (text.rstrip("\n") + "\n").encode())
+
+    def _swallow_ok(self) -> bool:
+        """An "ok" that answers a quiet line (sent within QUIET_OK_S): dropped. Mis-attributing one to a user's line
+        costs nothing - an "ok" carries no information anything here reads."""
+        now = time.time()
+        self._quiet_sent = [t for t in self._quiet_sent if now - t < QUIET_OK_S]
+        if self._quiet_sent:
+            self._quiet_sent.pop(0)
+            return True
+        return False
 
     async def raw(self, text: str) -> None:
         """A console command sent exactly as given, no newline: the Z1 needs `play <path>`, `suspend`, `resume` and
@@ -343,6 +386,31 @@ class Z1Link:
         except (ConnectionError, OSError, asyncio.CancelledError):
             pass
 
+    def spindle_running(self) -> bool:
+        st = self.status or {}
+        rpm = (st.get("spindle") or {}).get("rpm")
+        return isinstance(rpm, float) and rpm > SPINDLE_ON_RPM and st.get("state") not in ("Alarm", "Sleep", "Tool")
+
+    async def _poll_load(self) -> None:
+        """Opt-in M957 poll while the spindle turns (firmware: SpindleControl M957 -> report_speed() prints at once,
+        without waiting for the queue; console lines aren't blocked while a file plays). Never during an upload."""
+        try:
+            while self.connected:
+                await asyncio.sleep(max(self.spindle_poll_s, 0.2))
+                if self.poll_spindle_load and not self.poll_paused and self.spindle_running():
+                    await self.line("M957", quiet=True)
+        except (ConnectionError, OSError, asyncio.CancelledError):
+            pass
+
+    def _with_load(self, st: dict) -> dict:
+        """The latest M957 drive effort on the status's spindle (None when older than LOAD_STALE_S)."""
+        sp = st.get("spindle")
+        if sp is not None:
+            ld = self.spindle_load
+            ok = bool(ld) and time.time() - ld["t"] <= LOAD_STALE_S
+            sp["pwm"], sp["pwm_t"] = (ld["pwm"], ld["t"]) if ok else (None, None)
+        return st
+
     async def _read(self) -> None:
         buf = bytearray()
         try:
@@ -361,13 +429,29 @@ class Z1Link:
                     if t == T_STATUS:
                         st = parse_status(txt)
                         if st:
-                            self.status, self.status_t = st, time.time()
+                            now = time.time()
+                            if st["raw"] != self._last_raw or now - self.report_t >= REPORT_HEARTBEAT_S:
+                                self.report_t = now
+                            self._last_raw = st["raw"]
+                            self.status, self.status_t = self._with_load(st), now
                             if self.on_status:
                                 self.on_status(st)
                     else:
                         for ln in txt.replace("\r", "").split("\n"):
-                            if ln.strip():
-                                self.log.append((time.time(), ln.strip()))
+                            s_ = ln.strip()
+                            if not s_:
+                                continue
+                            m957 = M957_RE.search(s_)
+                            if m957:                         # telemetry: into the status, not the log
+                                self.spindle_load = {"on": m957.group(1) == "on", "rpm": float(m957.group(2)),
+                                                     "target": float(m957.group(3)), "pwm": float(m957.group(4)), "t": time.time()}
+                                if self.status:
+                                    self._with_load(self.status)
+                                continue
+                            if s_ == "ok" and self._quiet_sent and self._swallow_ok():
+                                continue
+                            if s_:
+                                self.log.append((time.time(), s_))
                                 if "maximum number of client" in ln:
                                     self.error = ("the machine already has the maximum number of connections "
                                                   "(close MakeraStudio's connection to it, or another AgenticCAD)")
@@ -468,9 +552,66 @@ PROBE3D_REF = {"outside_back_left": "back-left", "outside_back_right": "back-rig
                "pocket_center": "pocket centre", "boss_center": "centre"}
 # console: read-only $ queries are fine; settings, resets and everything BLOCKED are not
 CONSOLE_DOLLAR_OK = re.compile(r"^\$(#|G|I|\$)?$")
-PROBE3D_MAX_DROP = 10.0                  # mm: hold if Z falls this far below the start before the probe touches anything
+# what the ASSISTANT may send as a console line (console(..., assistant=True)): read-only queries, selecting a work
+# offset, safe modal resets, spindle off and the accessory switches. No motion word, offset change or probing: those go
+# through the guarded actions (2026-11-02: a refused lower_to was resent as a raw `G1 Z-3`).
+ASSISTANT_CONSOLE_OK = re.compile(r"^(?:\$(?:#|G|I|\$)|DIAGNOSE|VERSION|M957|CONFIG-GET SD [A-Z0-9_.]+|G5[4-9](?:\.[1-3])?|G90|G21|G17|G94"
+                                  r"|M0?5|M82[12]|M85[12]|M83[12]|M811(?: ?S\d{1,3})?|M812)$")
+CONSOLE_MOTION = re.compile(r"\bG0?[0-3]\b|\bG38(?:\.\d)?|\bG53\b|\bG10\b|\bG92(?:\.\d)?\b|\bG28(?:\.\d)?\b|\bG30\b|\bG91\b|\bG20\b|[XYZABC]-?\d|\$J")
+PROBE3D_MAX_DROP = None                  # mm below the start before a touch; None: PROBE3D_FLOOR_BELOW under the probed reference
+PROBE3D_FLOOR_BELOW = 3.0                # halt if Z gets this far below the probed Z0 / touched surface before the first touch
+PROBE3D_START = (1.0, 10.5)              # Z-touching routines start this high (mm) above a probed Z0 or touched surface: the
+                                         # firmware searches down ~108 mm (G38.2 is relative) and only a halt stops it
+PROBE3D_BALL_MAX = 6.0                   # mm: `dia` is the probe's BALL (2 mm ruby); a bigger number is a hole Ø by mistake
+DESCEND_MAX = 30.0                       # mm one probe_descend (G38.3) may search
+TOUCHOFF_MAX = 1.0                       # set_origin Z: only |work Z| <= this at the head (a touch-off), never a typed height
+LOWER_SLOW_ZONE, LOWER_SLOW_FEED = 10.0, 100.0   # lower_to: the last 10 mm at <= 100 mm/min
+VERIFIED_Z = ("probe", "touch-off")      # Z0 sources lower_to / probe start heights trust (this session, unchanged since)
+WCS_NAMES = ("G54", "G55", "G56", "G57", "G58", "G59", "G59.1", "G59.2", "G59.3")   # P1..P9 (Robot.cpp MAX_WCS 9)
 ARM_IDLE_S = 300.0                                           # Control turns itself off after this long unused
 STALE_S = 2.0                                                # status older than this: treat the link as lost
+
+
+def hard_halt(code: int | None) -> bool:
+    """Alarms `recover` must not clear by itself: e-stop, cover open, overheating and everything that needs a reset or
+    a power cycle (halt_advice)."""
+    return code in (9, 11, 13, 14) or (code is not None and code >= 21)
+
+
+def wcs_name(p) -> str | None:
+    """None / 0 / '' -> None (the active WCS); 1..9, '55', 'G55', 'g59.1' -> 'G55' ..."""
+    if p is None or p == 0 or p == "":
+        return None
+    if isinstance(p, bool):
+        raise Refused("work offset: G54..G59 or P1..P9")
+    if isinstance(p, (int, float)) and float(p).is_integer() and 1 <= int(p) <= len(WCS_NAMES):
+        return WCS_NAMES[int(p) - 1]
+    s = str(p).strip().upper()
+    s = s if s.startswith("G") else "G" + s
+    if s in WCS_NAMES:
+        return s
+    raise Refused(f"unknown work offset {p!r} (G54..G59, or P1..P9)")
+
+
+def parse_offsets(lines: list[str]) -> tuple[dict, str | None, bool]:
+    """The replies to `$#` and `$G` (SimpleShell grblDP_command / get state): ({"G54": [x, y, z, a, b], ..., "G92": [...],
+    "tlo": z, "prb": [x, y, z, ok]}, the active WCS, whether the `$#` block was complete)."""
+    out: dict[str, Any] = {}
+    active, done = None, False
+    nums = lambda s: [float(v) for v in s.split(",") if re.match(r"^\s*-?\d*\.?\d+\s*$", v)]
+    for ln in lines:
+        m = re.match(r"^\[(G5[4-9](?:\.[1-3])?|G92|G28|G30):([^\]]*)\]", ln)
+        if m:
+            out[m.group(1)] = nums(m.group(2))
+            continue
+        m = re.match(r"^\[(?:TL0|TLO):(-?[\d.]+)\]", ln) or re.match(r"^\[Tool Offset:[^,\]]*,[^,\]]*,(-?[\d.]+)\]", ln)
+        if m:
+            out["tlo"], done = float(m.group(1)), True
+            continue
+        m = re.match(r"^\[G\d+(?:\.\d)? (G5[4-9](?:\.[1-3])?) ", ln)
+        if m:
+            active = m.group(1)
+    return out, active, done
 
 
 class Refused(Exception):
@@ -509,7 +650,9 @@ def prepare_program(gcode: str, op_names: list[str], air_cut: float = 0.0, probe
     (from the post's "; <name> [kind] ..." header comments, in order) and the work-coordinate extents of the moves.
     Raises Refused for what the Z1 must not get: lines too long, relative moves, homing/probing, blocked commands.
     Probe ops: the post's PROBE blocks (PROBE_LINE only, with T`probe_tool` fitted) are the one place G38 / G10 / M480.9
-    pass; an air cut leaves them out (a probe touches nothing in the air, and must not set the origin there)."""
+    pass; an air cut leaves them out (a probe touches nothing in the air, and must not set the origin there). Each probe
+    records its work offset and whether it comes before the first spindle start (`before_cut`); "wcs" / "wcs_list" are
+    the work offsets the program selects (G54..G59), first one first."""
     out: list[str] = []
     ops: list[dict] = []
     k = 0
@@ -519,6 +662,9 @@ def prepare_program(gcode: str, op_names: list[str], air_cut: float = 0.0, probe
     uses_a = False
     probes: list[dict] = []
     in_probe: dict | None = None
+    wcs_list: list[str] = []                     # the work offsets the program selects, in order (G54..G59)
+    cur_wcs: str | None = None
+    spindle_seen = False                         # a probe op before the first M3/M4 zeroes the setup before any cut
     for raw in gcode.splitlines():
         s_ = raw.strip()
         if s_.startswith(";"):
@@ -528,7 +674,8 @@ def prepare_program(gcode: str, op_names: list[str], air_cut: float = 0.0, probe
                     raise Refused("a PROBE block inside another one")
                 if not tools or tools[-1] != probe_tool:
                     raise Refused(f"a PROBE block without the 3D probe (T{probe_tool}) fitted by the program")
-                in_probe = {"op": c_[len("PROBE BEGIN"):].strip(), "lines": 0, "sets": [], "skipped": bool(air_cut)}
+                in_probe = {"op": c_[len("PROBE BEGIN"):].strip(), "lines": 0, "sets": [], "skipped": bool(air_cut),
+                            "wcs": cur_wcs, "before_cut": not spindle_seen}
                 probes.append(in_probe)
             elif c_.startswith("PROBE END"):
                 if in_probe is None:
@@ -541,6 +688,12 @@ def prepare_program(gcode: str, op_names: list[str], air_cut: float = 0.0, probe
         s_ = re.sub(r"\(.*?\)", "", s_.split(";")[0]).strip().upper()
         if not s_:
             continue
+        for m_ in re.finditer(r"\bG(5[4-9](?:\.[1-3])?)(?![\d.])", s_):
+            cur_wcs = "G" + m_.group(1)
+            if not wcs_list or wcs_list[-1] != cur_wcs:
+                wcs_list.append(cur_wcs)
+        if re.search(r"\bM0?[34]\b", s_):
+            spindle_seen = True
         if in_probe is not None:
             if not PROBE_LINE.match(s_):
                 raise Refused(f"the PROBE block of {in_probe['op']!r} contains {s_!r}: only the post's probe moves run there")
@@ -598,7 +751,7 @@ def prepare_program(gcode: str, op_names: list[str], air_cut: float = 0.0, probe
         raise Refused(f"the PROBE block of {in_probe['op']!r} never ends")
     return {"text": "\n".join(out) + "\n", "lines": len(out), "ops": ops, "tools": tools,
             "extents": {w_: v for w_, v in ext.items() if v[0] <= v[1]}, "air_cut": air_cut, "uses_a": uses_a,
-            "probes": probes}
+            "probes": probes, "wcs": wcs_list[0] if wcs_list else None, "wcs_list": list(dict.fromkeys(wcs_list))}
 
 
 def program_filename(name: str) -> str:
@@ -637,16 +790,62 @@ class MachineControl:
         self.runs_dir = None                  # where programs are recorded (run_recorder; the server sets it)
         self.recorder = None                  # the RunRecorder of the job running now
         self._watch: asyncio.Task | None = None
-        # the work origin as this session set it: {"xy": {ref, how, t, wco}, "z": {ref, how, t}}; empty = set before
-        # this session (or by something the app didn't see), so a setup can't rely on it without zeroing
-        self.origin: dict = {}
+        # the work origin as this session set it, per work offset (WCS "G54".."G59"): {"xy": {ref, how, t, wco, source},
+        # "z": {ref, how, t, source, verified, tool, wco_z, old, delta}, "x"/"y"/"a": ...}; empty = set before this session
+        # (or by something the app didn't see), so a setup can't rely on it without zeroing. self.origin is the active one.
+        self.origins: dict[str, dict] = {}
+        self.active_wcs = "G54"              # the controller's current WCS (the Z1 starts in G54; `$G` / selects keep it right)
+        self.wcs_table: dict | None = None   # the last `$#` read: {"G54": [x, y, z, a, b], .., "G92": [..], "tlo": z, "t": ..}
+        self.origin_log: list[dict] = []     # every work-origin change seen: {wcs, axes, source, how, t, old, new, delta, tool}
+        # the tool fitted when Z0 last changed: any G10 L2/L20 with Z clears TLO and makes the fitted tool the firmware's
+        # length reference (Robot.cpp G10: set_ref_tool_mz + clearToolOffset) - TLOs measured before are against another tool
+        self.tlo_ref: dict | None = None
+        self.surface_touch: dict | None = None   # the last probe_descend touch: {"mz", "xy", "tool", "t"}
         self.probes: list[dict] = []         # 3D-probe results this session: {kind, ref, wco [x, y], z, t} (Find the block)
+        # M957 spindle drive effort (Z1Link._poll_load): OFF until watched once on the machine, supervised. Switch on with
+        # set_spindle_load_poll(True) or the environment AGENTICCAD_POLL_SPINDLE_LOAD=1 (rate: ..._HZ, default 2).
+        import os
+        self.spindle_load_poll = {"on": os.environ.get("AGENTICCAD_POLL_SPINDLE_LOAD", "") in ("1", "true", "on"),
+                                  "hz": float(os.environ.get("AGENTICCAD_POLL_SPINDLE_LOAD_HZ", "2") or 2)}
+        self._bg_tasks: set = set()
+        self._wcs_sel_t = 0.0                # when the app last sent a WCS select (G54..G59)
         # 4th axis: the saved machine record's `rotary` (+ model.rotary) if the program's machine has one (the server keeps
         # it in step), the module's position found this session, and whether the status has shown a meaningful A yet
         self.rotary_module: dict | None = None
         self.rotary_found: dict | None = None   # {"axis_my", "axis_mz", "pad_mz", "t"}: machine Y / Z of the chuck centreline
         self.on_rotary_found: Callable[[dict], Any] | None = None
         self._a_seen = False
+
+    @property
+    def origin(self) -> dict:
+        """The origin records of the active work offset (see self.origins)."""
+        return self.origins.setdefault(self.active_wcs, {})
+
+    @origin.setter
+    def origin(self, v: dict) -> None:
+        self.origins[self.active_wcs] = v
+
+    def set_spindle_load_poll(self, on: bool, hz: float | None = None) -> dict:
+        """Opt in / out of polling M957 (the spindle's PWM duty = drive effort) while the spindle runs. Off by default."""
+        if hz is not None:
+            if not isinstance(hz, (int, float)) or not (0.2 <= hz <= 5):
+                raise Refused("spindle load poll rate: 0.2 .. 5 Hz")
+            self.spindle_load_poll["hz"] = float(hz)
+        self.spindle_load_poll["on"] = bool(on)
+        self._apply_load_poll()
+        self._note(f"spindle load (M957) polling {'on' if on else 'off'} at {self.spindle_load_poll['hz']:g} Hz")
+        return self.payload()
+
+    def _apply_load_poll(self) -> None:
+        if self.link:
+            self.link.poll_spindle_load = bool(self.spindle_load_poll["on"])
+            self.link.spindle_poll_s = 1.0 / self.spindle_load_poll["hz"]
+
+    def _bg(self, coro) -> None:
+        """Fire and forget (offset reads); the task is kept until it ends."""
+        t = asyncio.create_task(coro)
+        self._bg_tasks.add(t)
+        t.add_done_callback(self._bg_tasks.discard)
 
     # -- 4th axis
     def set_machine_record(self, machine: dict | None) -> None:
@@ -718,12 +917,15 @@ class MachineControl:
         self.armed = self.homed = self._homing = False
         self.jog_busy = None
         self.measured = self.routine = self.job = None
-        self.origin = {}
+        self.origins, self.active_wcs, self.wcs_table, self.origin_log = {}, "G54", None, []
+        self.tlo_ref = self.surface_touch = None
+        self._apply_load_poll()
         self.probes = []
         self.rotary_found = None
         self._a_seen = False
         self._note(f"connected to {host}:{port}")
         self._watch = asyncio.create_task(self._watchdog())
+        self._bg(self._refresh_offsets())                  # every WCS and the active one, read-only
         return self.payload()
 
     async def disconnect(self) -> None:
@@ -871,7 +1073,7 @@ class MachineControl:
                 "status": {k: v for k, v in st.items() if k != "raw"} if st else None, "raw": st.get("raw") if st else None,
                 # in Hold / Pause / Alarm the Z1 reports its last planned position, not where the head stopped (seen on a
                 # real Z1 2026-10-17: held at about -57,-58 while the status said -1,-1): show it as unreliable
-                "position_reliable": bool(st) and st.get("state") not in ("Hold", "Pause", "Alarm"),
+                "position_reliable": self.position_reliable(st),
                 "z_floor": self.z_floor, "switches": dict(self.switch_state), "switch_power": dict(self.switch_power), "events": self.events[-20:],
                 "measured": self.measured, "tool_ok": self.tool_ok(), "routine": self.routine,
                 "job": {k: v for k, v in self.job.items() if k != "text"} if self.job else None,
@@ -880,41 +1082,93 @@ class MachineControl:
                 "profile": self.profile.name, "probe3d_tool": self.profile.probe3d_tool,
                 "anchor1": list(self.profile.anchor1), "bed_anchor": list(self.profile.bed_anchor),
                 "origin": self.origin_payload(st), "probes": self.probes[-12:],
+                # per work offset: which one is active, its offsets as `$#` last read them, what set each this session
+                "wcs": {"active": self.active_wcs, "table": self.wcs_table,
+                        "origins": {w: self.origin_payload(st, w) for w in self.origins if self.origins[w]}},
+                "origin_log": self.origin_log[-20:], "tlo_ref": self.tlo_ref, "surface_touch": self.surface_touch,
+                "spindle_load": (self.link.spindle_load if self.link else None), "spindle_load_poll": dict(self.spindle_load_poll),
                 # the 4th axis: shown only when known (has_fourth); A in work and machine degrees; the module's position
                 "fourth": self.has_fourth(), "a": self.a_pos(st),
                 "rotary": {"module": self.rotary_module, "offset": self.rotation_offset, "axis_my": self.axis_machine_y(),
                            "found": self.rotary_found}}
+
+    def position_reliable(self, st: dict | None = None) -> bool:
+        st = st if st is not None else self._status()
+        return bool(st) and st.get("state") not in ("Hold", "Pause", "Alarm") and self.fresh()
 
     def _wco(self, st: dict | None = None) -> list[float] | None:
         st = st or self._status() or {}
         mp, wp = st.get("mpos"), st.get("wpos")
         return [m - w for m, w in zip(mp, wp)] if mp and wp else None
 
+    def wcs_wco(self, name: str | None = None, st: dict | None = None) -> list[float] | None:
+        """MPos - WPos that work coordinates in WCS `name` have now (default: the active one): the live status for the
+        active WCS; for another, the last `$#` read as the firmware's mcs2wcs does it (G5x - G92, + the tool offset on Z)."""
+        name = name or self.active_wcs
+        if name == self.active_wcs:
+            return self._wco(st)
+        t = self.wcs_table or {}
+        if not t.get(name) or len(t[name]) < 3:
+            return None
+        g92 = (t.get("G92") or [0.0, 0.0, 0.0]) + [0.0, 0.0, 0.0]
+        return [t[name][0] - g92[0], t[name][1] - g92[1], t[name][2] - g92[2] + (t.get("tlo") or 0.0)]
+
+    def _fitted(self) -> int | None:
+        return ((self._status() or {}).get("tool") or {}).get("number")
+
+    def _log_origin(self, wcs: str, axes: str, source: str, how: str, old: list | None, new: list | None) -> dict:
+        idx = ["xyz".index(a) for a in axes if a in "xyz"]
+        e = {"wcs": wcs, "axes": axes, "source": source, "how": how, "t": time.time(), "tool": self._fitted(),
+             "old": [round(old[i], 3) for i in idx] if old else None, "new": [round(new[i], 3) for i in idx] if new else None}
+        if old and new:
+            e["delta"] = [round(new[i] - old[i], 3) for i in idx]
+        self.origin_log.append(e)
+        del self.origin_log[:-50]
+        return e
+
     def _record_origin(self, xy: tuple[str, str] | None = None, z: tuple[str, str] | None = None,
-                       wco_xy: list[float] | None = None) -> None:
-        """Remember what set the work origin (ref in a setup's words, how, when) - for "this setup wants / the machine has".
-        wco_xy: the X/Y offsets just commanded (known exactly), so a status that hasn't caught up yet is never recorded."""
-        wco, t = self._wco(), time.time()
+                       wco_xy: list[float] | None = None, source: str = "typed", before: list[float] | None = None,
+                       wcs: str | None = None) -> None:
+        """Remember what set the work origin (ref in a setup's words, how, when, `source`: probe / touch-off / typed /
+        anchor / routine-partial / ...) - for "this setup wants / the machine has", the approval cards and lower_to.
+        wco_xy: the X/Y offsets just commanded (known exactly), so a status that hasn't caught up yet is never recorded.
+        before: MPos - WPos before the change (the log keeps old -> new and the delta). wcs: default the active one."""
+        name = wcs or self.active_wcs
+        o = self.origins.setdefault(name, {})
+        wco, t = (self._wco() if name == self.active_wcs else self.wcs_wco(name)), time.time()
         if xy:
-            self.origin["xy"] = {"ref": xy[0], "how": xy[1], "t": t, "wco": list(wco_xy) if wco_xy else (wco[:2] if wco else None)}
+            o["xy"] = {"ref": xy[0], "how": xy[1], "t": t, "source": source,
+                       "wco": list(wco_xy) if wco_xy else (wco[:2] if wco else None)}
             # the per-axis records a rotary setup reads follow the combined one (X0 Y0 set together)
             for i, ax in enumerate("xy"):
-                self.origin[ax] = {"ref": xy[0], "how": xy[1], "t": t, "wco": self.origin["xy"]["wco"][i] if self.origin["xy"]["wco"] else None}
+                o[ax] = {"ref": xy[0], "how": xy[1], "t": t, "source": source, "wco": o["xy"]["wco"][i] if o["xy"]["wco"] else None}
         if z:
-            self.origin["z"] = {"ref": z[0], "how": z[1], "t": t}
+            tool = self._fitted()
+            o["z"] = {"ref": z[0], "how": z[1], "t": t, "source": source, "verified": source in VERIFIED_Z, "tool": tool,
+                      "wco_z": wco[2] if wco else None, "old": before[2] if before else None,
+                      "delta": (wco[2] - before[2]) if (wco and before) else None}
+            # the firmware cleared TLO: the fitted tool is now the length reference (every tool measured from here on
+            # is measured against it)
+            self.tlo_ref = {"tool": tool, "t": t, "how": z[1], "wcs": name}
+        if xy or z:
+            new = list(wco) if wco else None
+            if new and wco_xy:
+                new[:2] = list(wco_xy)
+            self._log_origin(name, ("xy" if xy else "") + ("z" if z else ""), source, (z or xy)[1], before, new)
 
-    def _record_axis(self, axis: str, ref: str, how: str, wco_v: float | None = None) -> None:
+    def _record_axis(self, axis: str, ref: str, how: str, wco_v: float | None = None, source: str = "typed") -> None:
         """One axis of the work origin on its own (a rotary setup zeroes X, Y, Z and A separately). The combined X/Y
         record is kept in step so the flat-setup logic doesn't call it 'changed'."""
         t = time.time()
-        self.origin[axis] = {"ref": ref, "how": how, "t": t, "wco": wco_v}
+        wco = self._wco()
+        self._log_origin(self.active_wcs, axis, source, how, wco, None)
+        self.origin[axis] = {"ref": ref, "how": how, "t": t, "wco": wco_v, "source": source}
         if axis in "xy":
             xy = self.origin.get("xy")
-            wco = self._wco()
             cur = list(xy["wco"]) if xy and xy.get("wco") else (wco[:2] if wco else [None, None])
             cur["xy".index(axis)] = wco_v
             ox, oy = self.origin.get("x", {}), self.origin.get("y", {})
-            self.origin["xy"] = {"ref": "axis" if ("axis" in (ox.get("ref"), oy.get("ref"))) else ref,
+            self.origin["xy"] = {"ref": "axis" if ("axis" in (ox.get("ref"), oy.get("ref"))) else ref, "source": source,
                                  "how": f"X: {ox.get('how', 'not set')}; Y: {oy.get('how', 'not set')}", "t": t, "wco": cur}
 
     async def _await_offsets(self, xy: list[float] | None, t_sent: float, timeout: float = 3.0) -> None:
@@ -927,9 +1181,51 @@ class MachineControl:
             if xy is None or (w and max(abs(a - b) for a, b in zip(w[:2], xy)) < 0.002):
                 return
 
-    def origin_payload(self, st: dict | None = None) -> dict:
-        out = {k: dict(v) for k, v in self.origin.items()}
-        wco = self._wco(st) if st else None
+    async def _reports_after(self, t: float, n: int = 2, timeout: float = 2.0) -> None:
+        """Wait for `n` status reports that arrived after `t` (so they reflect lines sent before t)."""
+        t0, seen, last = time.time(), 0, self.link.status_t
+        while time.time() - t0 < timeout and seen < n:
+            await asyncio.sleep(0.05)
+            if self.link.status_t > max(t, last):
+                seen, last = seen + 1, self.link.status_t
+
+    async def read_offsets(self, timeout: float = 2.0) -> dict | None:
+        """`$#` (every work offset, G92, the tool length offset) and `$G` (the active WCS) - both read-only. Keeps the
+        table in self.wcs_table (and the active WCS) and returns it; None when no complete answer came in time (a halted
+        Z1 may not answer; the emulator never does)."""
+        if not self.connected:
+            raise Refused("not connected")
+        t0 = time.time()
+        await self.link.line("$#")
+        await self.link.line("$G")
+        table, active, done = {}, None, False
+        while time.time() - t0 < timeout:
+            await asyncio.sleep(0.05)
+            table, active, done = parse_offsets([ln for t, ln in self.link.log if t >= t0])
+            if done and active:
+                break
+        if active and active != self.active_wcs and self._wcs_sel_t < t0:   # (a select sent meanwhile is newer than this reply)
+            self._note(f"the machine's active work offset is {active} (was taken as {self.active_wcs})")
+            self.active_wcs = active
+        if not done:
+            return None
+        table["t"] = time.time()
+        old = self.wcs_table
+        self.wcs_table = table
+        if old and old.get("tlo") and not table.get("tlo"):
+            self._note(f"tool length offset now 0 (was {old['tlo']:g}): Z0 was changed, the fitted tool is the length reference")
+        return table
+
+    async def _refresh_offsets(self, timeout: float = 2.0) -> None:
+        try:
+            await self.read_offsets(timeout)
+        except (Refused, ConnectionError, OSError):
+            pass
+
+    def origin_payload(self, st: dict | None = None, wcs: str | None = None) -> dict:
+        name = wcs or self.active_wcs
+        out = {k: dict(v) for k, v in self.origins.get(name, {}).items()}
+        wco = (self._wco(st) if st else None) if name == self.active_wcs else self.wcs_wco(name)
         xy = out.get("xy")
         if xy and wco and xy.get("wco") and all(v is not None for v in xy["wco"]) and max(abs(a - b) for a, b in zip(wco[:2], xy["wco"])) > 0.01:
             xy["changed"] = True                      # the offsets moved since: something else set them
@@ -937,8 +1233,50 @@ class MachineControl:
             r = out.get(ax)
             if r and wco and r.get("wco") is not None and abs(wco[i] - r["wco"]) > 0.01:
                 r["changed"] = True
+        zr = out.get("z")
+        # Z includes the tool length offset: comparable only with the same tool fitted as when it was set
+        if zr and wco and zr.get("wco_z") is not None and zr.get("tool") == self._fitted() and abs(wco[2] - zr["wco_z"]) > 0.01:
+            zr["changed"] = True
         out["wco"] = wco
+        out["wcs"] = name
         return out
+
+    def z0_state(self, wcs: str | None = None) -> dict:
+        """Where Z0 of `wcs` (default: the active one) came from: {"verified", "source", "how", "t", "why"}. Verified =
+        set this session by a probe (auto Z, 3D probe, the 4th-axis probe, a program's probe op) or a touch-off, and not
+        changed since."""
+        name = wcs or self.active_wcs
+        zr = self.origin_payload(self._status(), name).get("z")
+        if not zr:
+            return {"verified": False, "source": None, "why": f"{name} Z0 was not set this session (it may be from an earlier session or typed)"}
+        when = time.strftime("%H:%M:%S", time.localtime(zr["t"]))
+        base = {"source": zr.get("source"), "how": zr.get("how"), "t": zr["t"], "tool": zr.get("tool")}
+        if zr.get("changed"):
+            return {**base, "verified": False, "why": f"{name} Z0 changed after {zr.get('how')} set it at {when}"}
+        if zr.get("source") not in VERIFIED_Z:
+            return {**base, "verified": False, "why": f"{name} Z0 was set by {zr.get('how')} ({zr.get('source')}) at {when}, not probed"}
+        return {**base, "verified": True, "why": f"{name} Z0 from {zr.get('how')} at {when}"}
+
+    def origin_facts(self, axes: str = "z", new: list | None = None, wcs: str | None = None) -> str:
+        """The approval card's facts for an origin change: what it replaces and how far it moves. `new`: the MPos - WPos
+        the change will give (None: unknown)."""
+        name = wcs or self.active_wcs
+        o = self.origins.get(name, {})
+        cur = self.wcs_wco(name)
+        out = []
+        if "z" in axes:
+            zr = o.get("z")
+            out.append((f"replaces {name} Z0 set by {zr['how']} ({zr.get('source')}) at {time.strftime('%H:%M:%S', time.localtime(zr['t']))}"
+                        if zr else f"replaces {name} Z0 set before this session (source unknown)")
+                       + (f"; moves it {new[2] - cur[2]:+.3f} mm" + (" (DOWN: everything cuts deeper)" if new[2] < cur[2] - 0.005 else "")
+                          if new is not None and new[2] is not None and cur else ""))
+            out.append(f"T{self._fitted()} becomes the tool-length reference (the firmware clears TLO on any Z0 change)")
+        if "x" in axes or "y" in axes:
+            r = o.get("xy")
+            out.append((f"replaces {name} X0 Y0 set by {r['how']} at {time.strftime('%H:%M:%S', time.localtime(r['t']))}" if r
+                        else f"replaces {name} X0 Y0 set before this session")
+                       + (f"; moves it {new[0] - cur[0]:+.3f}, {new[1] - cur[1]:+.3f} mm" if new is not None and None not in new[:2] and cur else ""))
+        return "; ".join(out)
 
     def describe(self) -> str:
         """Plain-text status for the agent."""
@@ -952,10 +1290,27 @@ class MachineControl:
         a = self.a_pos(st)
         fa = lambda v: "?" if v is None else f"{v:.3f}"
         fourth = (f", 4th axis A {fa(a['work'])}° (machine {fa(a['machine'])}°)" if self.has_fourth() else "")
-        return (f"{self.profile.name} at {self.link.host}: state {st.get('state')}, machine position {f(mp)}, work position {f(wp)}{fourth}, "
-                f"tool T{tl.get('number')} (length offset {tl.get('offset')}), spindle {sp.get('rpm')} rpm, "
-                f"Control {'on' if self.armed else 'off'}, homed this session: {'yes' if self.homed else 'no'}"
-                + ("" if self.fresh() else " (status is stale)"))
+        rel = "" if self.position_reliable(st) else (
+            " - POSITION NOT RELIABLE (in Hold / Pause / Alarm the Z1 reports its last planned position, not where the head is)"
+            if st.get("state") in ("Hold", "Pause", "Alarm") else " - position not reliable (status is stale)")
+        ref = self.tlo_ref
+        tlo = (f"; tool-length reference T{ref['tool']} (Z0 set by {ref['how']} at {time.strftime('%H:%M:%S', time.localtime(ref['t']))})"
+               if ref else "; tool-length reference unknown (Z0 not set this session)")
+        pwm = sp.get("pwm")
+        org = []
+        for w in sorted(set(self.origins) | {self.active_wcs}, key=lambda n: WCS_NAMES.index(n) if n in WCS_NAMES else 99):
+            o = self.origin_payload(st, w)
+            parts = [f"{k.upper()} {o[k]['ref']} by {o[k].get('source') or o[k]['how']} at "
+                     f"{time.strftime('%H:%M', time.localtime(o[k]['t']))}" + (" (CHANGED since)" if o[k].get("changed") else "")
+                     for k in ("xy", "z") if o.get(k)]
+            org.append(f"{w}{' (active)' if w == self.active_wcs else ''}: " + ("; ".join(parts) if parts else "not set this session"))
+        return (f"{self.profile.name} at {self.link.host}: state {st.get('state')}{rel}, machine position {f(mp)}, "
+                f"work position ({self.active_wcs}) {f(wp)}{fourth}, "
+                f"tool T{tl.get('number')} (length offset {tl.get('offset')}{tlo}), spindle {sp.get('rpm')} rpm"
+                + (f", drive {pwm:.2f}" if isinstance(pwm, float) else "")
+                + f", Control {'on' if self.armed else 'off'}, homed this session: {'yes' if self.homed else 'no'}"
+                + ("" if self.fresh() else " (status is stale)")
+                + ". Work offsets this session: " + " | ".join(org))
 
     # -- guards
     def _need(self, armed: bool = True, idle: bool = True, homed: bool = False) -> dict:
@@ -1226,9 +1581,10 @@ class MachineControl:
             raise Refused(f"go-to feed must be 0 .. {GOTO_FEED_MAX:g} mm/min")
         return x, y, feed
 
-    async def goto_xy(self, x: float, y: float, feed: float = 300.0, internal: bool = False) -> dict:
+    async def goto_xy(self, x: float, y: float, feed: float = 300.0, internal: bool = False, wait: bool = False) -> dict:
         """Move to machine X, Y (G53) at `feed`, Z untouched (it must already be at the top). `internal`: a step of
-        the change-tool flow (allowed before the new tool is measured; XY only, Z at the top)."""
+        the change-tool flow (allowed before the new tool is measured; XY only, Z at the top). wait: return when it has
+        arrived (the payload's "final" is the describe() text), or raise Refused if it stopped anywhere else."""
         x, y, feed = self.check_goto_xy(x, y, feed, internal)
         st = self._status()
         target = [x, y, st["mpos"][2]]
@@ -1237,9 +1593,30 @@ class MachineControl:
         self.jog_busy = {"target": target, "t0": time.time(), "deadline": time.time() + dist / feed * 60.0 * 2 + 5.0}
         await self.link.line(f"G53 G1 X{x:.3f} Y{y:.3f} F{feed:g}")
         self._note(f"go to machine X{x:.2f} Y{y:.2f} at {feed:g} mm/min")
+        if wait:
+            return await self._wait_motion("go-to", dist / feed * 60.0 * 2 + 10.0)
         return self.payload()
 
-    async def goto_xy_raised(self, x: float, y: float, feed: float = 300.0) -> dict:
+    async def _wait_motion(self, what: str, timeout: float) -> dict:
+        """Until the move in hand (jog_busy) or a homing cycle has finished: the payload with "final" = describe(); a
+        move that ended anywhere but Idle at its target raises Refused with the machine's state."""
+        t0 = time.time()
+        while time.time() - t0 < timeout:
+            await asyncio.sleep(0.1)
+            if not self.jog_busy and not self._homing:
+                break
+        else:
+            raise Refused(f"{what} didn't finish in {timeout:.0f} s: check the machine. " + self.describe())
+        st = self._status() or {}
+        if st.get("state") != "Idle" or not self.armed and what != "home":
+            raise Refused(f"{what} stopped with the machine {st.get('state')}" + ("" if self.armed else ", Control off") + ". " + self.describe())
+        if what == "home" and not self.homed:
+            raise Refused("homing didn't finish (no Idle after it). " + self.describe())
+        p_ = self.payload()
+        p_["final"] = self.describe()
+        return p_
+
+    async def goto_xy_raised(self, x: float, y: float, feed: float = 300.0, wait: bool = False) -> dict:
         """Raise Z to the top of travel if it isn't there, then go to machine X, Y: the safe way over the work (e.g.
         right after a tool change, which leaves Z a few mm down). Everything is checked before Z moves."""
         for v in (x, y, feed):
@@ -1263,7 +1640,7 @@ class MachineControl:
             if self.jog_busy or not self.armed:
                 raise Refused("Z didn't reach the top: check the machine")
             await asyncio.sleep(0.3)
-        return await self.goto_xy(x, y, feed)
+        return await self.goto_xy(x, y, feed, wait=wait)
 
     @property
     def cleaning_xy(self) -> tuple[float, float]:
@@ -1300,17 +1677,19 @@ class MachineControl:
         a = self.profile.anchor1
         return a[0] + self.profile.setter_from_anchor[0], a[1] + self.profile.setter_from_anchor[1]
 
-    async def raise_z_top(self, feed: float = 300.0) -> dict:
+    async def raise_z_top(self, feed: float = 300.0, wait: bool = False) -> dict:
         """Raise Z to the top of travel (machine Z = profile.top - 0.5) at `feed`, XY untouched."""
         st = self._need(armed=True, idle=True, homed=True)
         z = self.profile.top - 0.5
         if st["mpos"][2] >= z - 1e-3:
-            return self.payload()
+            return {**self.payload(), "final": self.describe()} if wait else self.payload()
         self.last_action = time.time()
         self.jog_busy = {"target": [st["mpos"][0], st["mpos"][1], z], "t0": time.time(),
                          "deadline": time.time() + (z - st["mpos"][2]) / feed * 60.0 * 2 + 5.0}
         await self.link.line(f"G53 G1 Z{z:.3f} F{min(feed, 600.0):g}")
         self._note(f"raise Z to the top at {feed:g} mm/min")
+        if wait:
+            return await self._wait_motion("raise Z", (z - st["mpos"][2]) / feed * 60.0 * 2 + 10.0)
         return self.payload()
 
     # -- Makera's own routines (firmware ATCHandler), wrapped: checks before, one command, watch, checks after.
@@ -1322,12 +1701,16 @@ class MachineControl:
         return any(t >= since and "Done ATC" in ln for t, ln in self.link.log)
 
     def _prbs(self, since: float) -> list:
+        """The probe results ([x, y, z], touched) reported since `since`. A `$#` reply ends with the LAST probe position
+        ([PRB:..] right after [TL0:..]): that one is history, not a touch, and is skipped."""
         out = []
+        prev = ""
         for t, ln in self.link.log:
             if t >= since:
                 m = re.search(r"\[PRB:([-\d.]+),([-\d.]+),([-\d.]+):(\d)\]", ln)
-                if m:
+                if m and not prev.startswith(("[TL0:", "[TLO:", "[Tool Offset:")):
                     out.append(([float(m.group(i)) for i in (1, 2, 3)], m.group(4) == "1"))
+            prev = ln
         return out
 
     async def _watch_routine(self, kind: str, since: float, timeout: float) -> None:
@@ -1351,16 +1734,23 @@ class MachineControl:
                 if g and st.get("state") in ("Run", "Idle") and self.fresh():
                     why = self._guard_breach(g, st["mpos"], since)
                     if why:
-                        await self.link.realtime(b"!")
-                        raise Refused(f"{why}: feed hold sent, check the machine")
+                        # HALT, not a feed hold: a hold only stops new blocks being queued (Robot.cpp), the probing move
+                        # in progress (G38.2 Z-108, relative) carries on - and the routine sets Z0 wherever it touches
+                        await self.link.realtime(HALT)
+                        self.jog_busy = None
+                        raise Refused(f"{why}: HALT sent (a feed hold can't stop the probing move already queued) - "
+                                      "Unlock (or recover), home, and check the machine")
                 if self._routine_done(since) and st.get("state") == "Idle":
                     break
             else:
                 raise Refused(f"{kind} didn't finish in time: check the machine")
             await asyncio.sleep(0.6)                        # let the status catch up with the routine's last move
             prbs = self._prbs(since)
-            if not prbs or not all(ok for _, ok in prbs):
-                raise Refused(f"{kind} finished without a confirmed touch: check the machine")
+            if not prbs:
+                raise Refused(f"{kind} finished without any probe report: check the machine")
+            if not all(ok for _, ok in prbs):
+                miss = next(p_[0] for p_ in prbs if not p_[1])
+                raise Refused(f"{kind}: a probe move ended at machine X{miss[0]:.3f} Y{miss[1]:.3f} Z{miss[2]:.3f} without touching: check the machine")
             st = self._status()
             if kind in ("tool change", "re-measure"):
                 tl = (st.get("tool") or {})
@@ -1373,9 +1763,10 @@ class MachineControl:
                 r.update(stage="done", **self._probe3d_result(r, prbs, st))
                 ref = PROBE3D_REF.get(r.get("kind_key", ""), r["label"])
                 self.probes.append({"kind": r.get("kind_key"), "ref": ref, "wco": r.get("origin"), "z": r.get("surface_z"),
-                                    "size": r.get("size"), "t": time.time()})
+                                    "size": r.get("size"), "t": time.time(), "wcs": self.active_wcs})
                 del self.probes[:-12]
-                self._record_origin(xy=(ref, f"3D probe, {r['label']}"), z=("top", f"3D probe, {r['label']}") if r["sub"] != 9 else None)
+                self._record_origin(xy=(ref, f"3D probe, {r['label']}"), z=("top", f"3D probe, {r['label']}") if r["sub"] != 9 else None,
+                                    source="probe", before=r.get("wco_before"))
             elif kind == "4th-axis Z probe":
                 if len(prbs) != r["expect_prbs"]:
                     raise Refused(f"the routine reported {len(prbs)} touches, not {r['expect_prbs']}: the work Z0 may be wrong, check it")
@@ -1385,7 +1776,8 @@ class MachineControl:
                 if abs((z - off_z) - wco[2]) > 0.05:
                     raise Refused(f"after the probe work Z0 is at machine Z {wco[2]:.3f}, not {z - off_z:.3f} (pad {z:.3f} minus "
                                   f"rotation_offset_z {off_z:g}): check the module's offsets before cutting")
-                self._record_origin(z=("axis", "Makera's 4th-axis Z probe (M495 O0): Z0 on the chuck centreline"))
+                self._record_origin(z=("axis", "Makera's 4th-axis Z probe (M495 O0): Z0 on the chuck centreline"), source="probe",
+                                    before=r.get("wco_before"))
                 self.rotary_found = {**(self.rotary_found or {}), "axis_my": self.axis_machine_y(), "axis_mz": wco[2], "pad_mz": z,
                                      "pad_mxy": prbs[-1][0][:2], "t": time.time()}
                 r.update(stage="done", touch=prbs[-1][0], touches=[p_[0][2] for p_ in prbs], wpos=st.get("wpos"), found=dict(self.rotary_found),
@@ -1400,25 +1792,56 @@ class MachineControl:
                         self._note(f"could not save the axis position to the machine record: {e}")
             else:
                 z = prbs[-1][0][2]
-                self._record_origin(z=("top", "auto Z probe (wired probe)"))
+                self._record_origin(z=("top", "auto Z probe (wired probe)"), source="probe", before=r.get("wco_before"))
                 r.update(stage="done", touch=prbs[-1][0], touches=[p_[0][2] for p_ in prbs], wpos=st.get("wpos"),
                          msg=f"surface touched at machine Z {z:.3f} (first {prbs[0][0][2]:.3f}); work Z zero set there "
                              f"(the probe is now {st['wpos'][2]:.3f} above it)")
             self._note(r["msg"])
         except Refused as e:
-            r.update(stage="failed", msg=str(e))
+            msg = str(e)
+            touched = [p_[0] for p_ in self._prbs(since) if p_[1]]
+            if touched and "without touching" not in msg:     # never say "the probe didn't trigger" when it did
+                msg += (f" (the controller did report {len(touched)} touch{'es' if len(touched) != 1 else ''}, the first at machine "
+                        f"Z {touched[0][2]:.3f})")
+            r["msg"] = msg
             self.armed = False
-            self._note(f"{kind} failed: {e}")
-        except asyncio.CancelledError:
-            r.update(stage="failed", msg="stopped watching (cancelled)")
+            if kind not in ("tool change", "re-measure"):
+                await asyncio.sleep(0.4)                  # the status catches up with what the firmware set before it stopped
+                self._routine_origin_diff(r)              # (adds to the message)
+            r["stage"] = "failed"
+            self._note(f"{kind} failed: {r['msg']}")
+        except asyncio.CancelledError:                    # recover() records the offsets once the machine is still
+            r.update(stage="failed", msg=r.get("abort_msg") or "stopped watching (cancelled)")
+        if kind not in ("tool change", "re-measure") and not r.get("abort_msg"):
+            self._bg(self._refresh_offsets())             # what the firmware left in every WCS / TLO
         self.confirm_nonce = None
         await self._push()
+
+    def _routine_origin_diff(self, r: dict) -> None:
+        """After a probing routine that did NOT finish: the firmware may already have set part of the origin (the
+        corner routine sets Z0 at its first touch, 2026-11-02 14:23). Whatever moved is recorded as `routine-partial`
+        (unverified: lower_to and the start checks won't trust it) and said in the routine's message."""
+        w0, w1 = r.get("wco_before"), self._wco()
+        if r.get("stage") == "done" or not w0 or not w1 or r.get("origin_changed"):
+            return
+        moved = [i for i in range(3) if abs(w1[i] - w0[i]) > 0.002]
+        if not moved:
+            return
+        how = f"{r.get('label') or r.get('kind')} that did not finish"
+        self._record_origin(xy=("partial", how) if any(i < 2 for i in moved) else None, z=("partial", how) if 2 in moved else None,
+                            wco_xy=w1[:2] if any(i < 2 for i in moved) else None, source="routine-partial", before=w0)
+        what = ", ".join(f"{'XYZ'[i]} by {w1[i] - w0[i]:+.3f} mm" for i in moved)
+        r["origin_changed"] = {"axes": "".join("xyz"[i] for i in moved), "old": w0, "new": w1}
+        r["msg"] = (r.get("msg") or "") + (f". The routine had already moved the work origin ({what})"
+                                           + ("; Z0 changed, so TLO was cleared" if 2 in moved else "")
+                                           + ": it is NOT trusted - probe again before cutting")
 
     def _start_routine(self, kind: str, command: str, timeout: float, **info) -> None:
         if self.routine and self.routine["stage"] in ("running", "awaiting"):
             raise Refused(f"{self.routine['kind']} is still running")
         since = time.time()
-        self.routine = {"kind": kind, "command": command, "stage": "running", "msg": f"{kind}: {command}", **info}
+        self.routine = {"kind": kind, "command": command, "stage": "running", "msg": f"{kind}: {command}",
+                        "wco_before": self._wco(), "wcs": self.active_wcs, **info}
         self._rt_task = asyncio.create_task(self._watch_routine(kind, since, timeout))
 
     async def change_tool(self, number: int) -> dict:
@@ -1457,43 +1880,76 @@ class MachineControl:
         """Work X/Y origin = Anchor 1 (the L-bracket's inside corner), as MakeraStudio does: G10 L2 P0 X Y. Z untouched."""
         self._need(armed=True, idle=True, homed=True)
         ax, ay = self.profile.anchor1
+        before = self._wco()
         t_sent = time.time()
         await self.link.line(f"G10 L2 P0 X{ax:.3f} Y{ay:.3f}")
         self._note(f"work XY origin set to Anchor 1 (machine X{ax:.2f} Y{ay:.2f})")
         await self._await_offsets([ax, ay], t_sent)
-        self._record_origin(xy=("anchor1", "Origin = Anchor 1"), wco_xy=[ax, ay])
+        self._record_origin(xy=("anchor1", "Origin = Anchor 1"), wco_xy=[ax, ay], source="anchor", before=before)
+        self._bg(self._refresh_offsets())
         return self.payload()
 
-    async def set_origin(self, x: float | None = None, y: float | None = None, z: float | None = None) -> dict:
-        """The head's current position becomes these work coordinates (G10 L20 P0): x=y=0 sets X0 Y0 here. Axes left
-        None are untouched. Z needs the fitted tool measured (its length is part of where Z0 lands)."""
+    def check_set_origin(self, x: float | None = None, y: float | None = None, z: float | None = None, p=None) -> dict:
+        """Validate set_origin; returns {"command", "wcs", "select", "new", "facts", "given"} - `facts` is the approval
+        card's line ("replaces Z0 set by <source> at <time>; moves it N mm; T.. becomes the length reference").
+        Z: only a touch-off (|Z| <= TOUCHOFF_MAX at the head): a typed height above the stock is how Z0 went 9 mm wrong
+        on 2026-11-02 (worked out by hand from tool lengths, after the firmware had cleared TLO)."""
         given = {a: v for a, v in (("X", x), ("Y", y), ("Z", z)) if v is not None}
         if not given:
             raise Refused("give at least one axis")
         for a, v in given.items():
-            if not isinstance(v, (int, float)) or v != v or abs(v) > 1000:
+            if not isinstance(v, (int, float)) or isinstance(v, bool) or v != v or abs(v) > 1000:
                 raise Refused(f"{a}: a number (mm)")
-        self._need(armed=True, idle=True, homed=True)
+        st = self._need(armed=True, idle=True, homed=True)
         if "Z" in given:
             self._need_tool_measured()
-        if self.jog_busy or self.job_active:
+            if abs(given["Z"]) > TOUCHOFF_MAX + 1e-9:
+                raise Refused(f"a typed Z ({given['Z']:g}) is refused: Z0 is set only at a touch-off (the tool tip on the surface, work Z "
+                              f"within ±{TOUCHOFF_MAX:g} mm of the tip) or by a probe - auto_z_probe (wired probe, T0) or a 3D-probe "
+                              "routine. Never work Z0 out from tool lengths: the firmware clears TLO on every Z0 change")
+        if self.jog_busy or self.job_active or (self.routine and self.routine["stage"] in ("running", "awaiting")):
             raise Refused("wait for the machine to finish")
-        cmd = "G10 L20 P0 " + " ".join(f"{a}{v:.3f}" for a, v in given.items())
+        name = wcs_name(p) or self.active_wcs
+        mp, cur = st["mpos"], self.wcs_wco(name, st)
+        new = [mp[i] - given[a] if a in given else (cur[i] if cur else None) for i, a in enumerate("XYZ")]
+        facts = self.origin_facts("".join(a.lower() for a in given), new, name)
+        if "Z" in given:
+            facts = (f"TOUCH-OFF: the tip of T{self._fitted()} must be on the surface now (paper test): Z0 lands "
+                     f"{given['Z']:+g} mm from it; " + facts)
+        return {"command": "G10 L20 P0 " + " ".join(f"{a}{v:.3f}" for a, v in given.items()), "wcs": name,
+                "select": name != self.active_wcs, "new": new, "facts": facts, "given": given}
+
+    async def set_origin(self, x: float | None = None, y: float | None = None, z: float | None = None, p=None) -> dict:
+        """The head's current position becomes these work coordinates (G10 L20 P0): x=y=0 sets X0 Y0 here. Axes left
+        None are untouched. Z only as a touch-off (check_set_origin) with the fitted tool measured. `p`: the work offset
+        (G54..G59 / 1..6, default the active one); another one is selected first (G10 L20 with P not the current WCS
+        mixes two offsets in this firmware), so it becomes the active WCS."""
+        info = self.check_set_origin(x, y, z, p)
+        given, cmd = info["given"], info["command"]
+        if info["select"]:
+            t_sel = time.time()
+            await self.link.line(info["wcs"])
+            self._wcs_sel_t = t_sel
+            self._note(f"{info['wcs']} selected (was {self.active_wcs})")
+            self.active_wcs = info["wcs"]
+            await self._reports_after(t_sel)
         mp, w0 = (self._status() or {}).get("mpos"), self._wco()
         want = [mp[0] - given["X"] if "X" in given else w0[0], mp[1] - given["Y"] if "Y" in given else w0[1]] if mp and w0 else None
         t_sent = time.time()
         await self.link.line(cmd)
         self.last_action = time.time()
-        self._note(f"{cmd} sent: the head's position is now " + ", ".join(f"work {a} {v:g}" for a, v in given.items()))
+        self._note(f"{cmd} sent ({self.active_wcs}): the head's position is now " + ", ".join(f"work {a} {v:g}" for a, v in given.items())
+                   + f" - {info['facts']}")
         await self._await_offsets(want, t_sent)
         typed = ", ".join(f"{a}{v:g}" for a, v in given.items())
-        self._record_origin(xy=("typed", f"set at the head ({typed})") if ("X" in given or "Y" in given) else None,
-                            z=("typed", f"set at the head ({typed})") if "Z" in given else None, wco_xy=want)
+        if "X" in given or "Y" in given:
+            self._record_origin(xy=("typed", f"set at the head ({typed})"), wco_xy=want, source="typed", before=w0)
+        if "Z" in given:
+            self._record_origin(z=("top", f"touch-off at the head ({typed})"), source="touch-off", before=w0)
+        self._bg(self._refresh_offsets())
         return self.payload()
 
-    async def origin_at(self, x: float, y: float, ref: str, how: str) -> dict:
-        """Work X0 Y0 at machine X, Y (G10 L2 P0) without moving: e.g. the block's front-left corner worked out from
-        the faces three 3D-probe runs found. Z0 is untouched."""
+    def check_origin_at(self, x: float, y: float, p=None) -> dict:
         for v in (x, y):
             if not isinstance(v, (int, float)) or v != v:
                 raise Refused("origin: numbers (machine X, Y)")
@@ -1504,12 +1960,25 @@ class MachineControl:
             lo, hi = -self.profile.travel[ax], self.profile.top
             if not (lo - 1e-9 <= v <= hi + 1e-9):
                 raise Refused(f"machine {ax.upper()} {v:.2f} is outside the travel")
+        name = wcs_name(p) or self.active_wcs
+        n = 0 if name == self.active_wcs else WCS_NAMES.index(name) + 1
+        return {"command": f"G10 L2 P{n} X{x:.3f} Y{y:.3f}", "wcs": name, "p": n, "facts": self.origin_facts("xy", [x, y, None], name)}
+
+    async def origin_at(self, x: float, y: float, ref: str, how: str, p=None) -> dict:
+        """Work X0 Y0 at machine X, Y (G10 L2) without moving: e.g. the block's front-left corner worked out from the
+        faces three 3D-probe runs found. Z0 is untouched. `p`: the work offset (default the active one; G10 L2 with P
+        sets any WCS directly and doesn't change which one is active)."""
+        info = self.check_origin_at(x, y, p)
+        name = info["wcs"]
+        before = self.wcs_wco(name)
         t_sent = time.time()
-        await self.link.line(f"G10 L2 P0 X{x:.3f} Y{y:.3f}")
+        await self.link.line(info["command"])
         self.last_action = time.time()
-        self._note(f"work X0 Y0 set at machine X{x:.3f} Y{y:.3f} ({how})")
-        await self._await_offsets([x, y], t_sent)
-        self._record_origin(xy=(str(ref)[:40], str(how)[:120]), wco_xy=[x, y])
+        self._note(f"{name} X0 Y0 set at machine X{x:.3f} Y{y:.3f} ({how})")
+        if info["p"] == 0:
+            await self._await_offsets([x, y], t_sent)
+        self._record_origin(xy=(str(ref)[:40], str(how)[:120]), wco_xy=[x, y], source="computed", before=before, wcs=name)
+        self._bg(self._refresh_offsets())
         return self.payload()
 
     async def shift_origin(self, dx: float, dy: float, ref: str, how: str) -> dict:
@@ -1534,12 +2003,13 @@ class MachineControl:
         self.last_action = time.time()
         self._note(f"work X0 Y0 moved by {dx:+.3f}, {dy:+.3f} to machine X{x:.3f} Y{y:.3f} ({how})")
         await self._await_offsets([x, y], t_sent)
-        self._record_origin(xy=(str(ref)[:40], str(how)[:120]), wco_xy=[x, y])
+        prev = (self.origin.get("xy") or {}).get("source")
+        self._record_origin(xy=(str(ref)[:40], str(how)[:120]), wco_xy=[x, y], source=prev or "computed", before=wco)
+        self._bg(self._refresh_offsets())
         return self.payload()
 
-    async def console(self, line: str) -> dict:
-        """One line of G-code / a read-only $ query, exactly as typed - the ad-hoc escape hatch. The app does not check
-        where a move in it goes: Control on, homed, Idle, nothing else running, and the blocked commands are refused."""
+    def check_console(self, line: str, assistant: bool = False) -> dict:
+        """Validate a console line (see console); returns {"line": what is sent, "read_only": bool, "summary"}."""
         line = (line or "").strip()
         if not line or any(c in line for c in "\r\n") or not line.isascii() or any(ord(c) < 32 for c in line):
             raise Refused("one line of plain text")
@@ -1548,18 +2018,58 @@ class MachineControl:
         up = line.upper()
         if BLOCKED.search(up):
             raise Refused(f"{line!r} is never sent to a Z1")
+        if assistant:
+            norm = re.sub(r"\s+", " ", up).strip()
+            if not ASSISTANT_CONSOLE_OK.match(norm):
+                why = ("it moves the machine or changes offsets/probing" if CONSOLE_MOTION.search(norm) or re.search(r"\bM4[89]\d|\bM0?[346]\b|\bT\d", norm)
+                       else "it isn't on the assistant's console list")
+                raise Refused(f"{line!r} is not sent from the assistant's console: {why}. Use the guarded actions (jog, goto, "
+                              "lower_to, raise_z, probe_descend, probe_3d, auto_z_probe, set_origin, origin_at, recover). A refused "
+                              "move is final: don't send it another way - ask the user")
+            up = norm
         if up.startswith("$") and not CONSOLE_DOLLAR_OK.match(up.replace(" ", "")):
             raise Refused("machine settings, resets and homing aren't sent from the console (Home and Unlock have buttons)")
+        if re.search(r"\bM48\d", up):
+            raise Refused("Makera's 3D-probe routines (M480.x) run from Probe 3D: it checks the start height and halts them if they go wrong")
         if re.search(r"\bM49[0-9]|\bM0?6\b|\bT\d", up):
             raise Refused("tool changes and probing use the Machine workspace's own steps (they measure and watch)")
-        self._need(armed=True, idle=True, homed=True)
-        if self.jog_busy or self.job_active or (self.routine and self.routine["stage"] in ("running", "awaiting")):
+        read_only = bool(re.match(r"^\$(#|G|I|\$)$", up.replace(" ", ""))) or up in ("DIAGNOSE", "VERSION", "M957") or up.startswith("CONFIG-GET")
+        self._need(armed=not read_only, idle=not read_only, homed=not read_only)
+        if not read_only and (self.jog_busy or self.job_active or (self.routine and self.routine["stage"] in ("running", "awaiting"))):
             raise Refused("wait for the machine to finish")
+        sel = re.findall(r"\bG(5[4-9](?:\.[1-3])?)(?![\d.])", up)
+        return {"line": up, "read_only": read_only,
+                "summary": f"Send `{up}` to the machine" + (" (read-only)" if read_only else "")
+                           + (f": selects work offset G{sel[-1]} (was {self.active_wcs})" if sel and not re.search(r"\bG10\b", up) else "") + "."}
+
+    async def console(self, line: str, assistant: bool = False) -> dict:
+        """One line of G-code / a read-only $ query, exactly as typed - the user's ad-hoc escape hatch: Control on, homed,
+        Idle, nothing else running, and the blocked commands, settings, tool changes and Makera's probe routines
+        (M480.x: they run from Probe 3D, which checks the start height and watches them) are refused.
+        `assistant=True` (the chat assistant's console): only ASSISTANT_CONSOLE_OK - read-only queries, selecting a work
+        offset, safe modal resets, spindle off, switches. No motion word, offset change or probing: those have guarded
+        actions, and a Refused move is final (2026-11-02: a refused lower_to came back as a raw `G1 Z-3`)."""
+        info = self.check_console(line, assistant)
+        up, read_only = info["line"], info["read_only"]
+        before = self._wco()
         await self.link.line(up)
-        self.last_action = time.time()
-        self._note(f"console: {up}")
-        if re.search(r"\bG10\b|\bG92\b", up):
-            self._record_origin(xy=("typed", f"console {up}"), z=("typed", f"console {up}"))
+        if not read_only:
+            self.last_action = time.time()
+        self._note(f"console{' (assistant)' if assistant else ''}: {up}")
+        sel = re.findall(r"\bG(5[4-9](?:\.[1-3])?)(?![\d.])", up)
+        if sel and not re.search(r"\bG10\b", up):
+            self.active_wcs, self._wcs_sel_t = "G" + sel[-1], time.time()
+        g10 = re.search(r"\bG10\b", up)
+        if g10 or re.search(r"\bG92\b(?!\.)", up):
+            pm = re.search(r"\bP(\d+)", up) if g10 else None
+            n = int(pm.group(1)) if pm else 0
+            name = WCS_NAMES[n - 1] if 1 <= n <= len(WCS_NAMES) else self.active_wcs
+            axes = {a.lower() for a in re.findall(r"([XYZ])-?\d", up)}
+            self._record_origin(xy=("typed", f"console {up}") if axes & {"x", "y"} else None,
+                                z=("typed", f"console {up}") if "z" in axes else None, source="typed",
+                                before=before if name == self.active_wcs else None, wcs=name)
+        if g10 or sel or re.search(r"\bG92\b", up):
+            self._bg(self._refresh_offsets())
         return self.payload()
 
     async def auto_z_probe(self, wx: float | None = None, wy: float | None = None) -> dict:
@@ -1583,9 +2093,9 @@ class MachineControl:
         self._note(f"{cmd} sent (Makera's auto Z probe at machine X{mx:.2f} Y{my:.2f})")
         return self.payload()
 
-    async def lower_to(self, height: float, feed: float = 300.0) -> dict:
-        """Lower Z (only down, XY untouched) to `height` mm above work Z zero, e.g. the 5 mm a 3D-probe routine starts
-        from. Needs the fitted tool measured, so the work Z includes its length; never below the Z floor."""
+    def check_lower_to(self, height: float, feed: float = 300.0) -> dict:
+        """Validate lower_to; returns {"mz" (the machine-Z target, for the card), "segments": [(machine Z, feed)], "z0",
+        "summary"}. Only down to a probed Z0 (z0_state): on 2026-11-02 a hand-computed Z0 drove T2 into the plate."""
         if not isinstance(height, (int, float)) or height != height:
             raise Refused("give a height above work zero")
         st = self._need(armed=True, idle=True, homed=True)
@@ -1599,24 +2109,49 @@ class MachineControl:
             raise Refused("no work position from the machine")
         if wz <= height + 0.01:
             raise Refused(f"the tool is already at {wz:.2f} mm above work zero: this only lowers")
+        z0 = self.z0_state()
+        if not z0["verified"]:
+            raise Refused(f"{z0['why']}: lower_to only goes down to a Z0 probed (auto_z_probe, a 3D-probe routine) or touched off "
+                          "this session. Probe it first - don't send the move another way")
         mz = st["mpos"][2] - (wz - height)
         if mz < -self.profile.travel["z"] + self.profile.margin:
             raise Refused(f"that is machine Z {mz:.2f}, below the travel")
         feed = min(max(feed, 1.0), 300.0)
+        slow = min(feed, LOWER_SLOW_FEED)
+        segs = ([(mz + LOWER_SLOW_ZONE, feed)] if wz - height > LOWER_SLOW_ZONE + 0.01 else []) + [(mz, slow)]
+        summary = (f"Lower Z only (X/Y stay) to {height:g} mm above {self.active_wcs} Z0 = machine Z {mz:.3f} (the tool is {wz:.2f} above "
+                   "Z0 now): " + (f"{feed:g} mm/min to {height + LOWER_SLOW_ZONE:g} mm above it, then " if len(segs) > 1 else "")
+                   + f"{slow:g} mm/min. Z0: {z0['why']}.")
+        return {"mz": mz, "wz": wz, "height": height, "segments": segs, "z0": z0, "summary": summary, "wcs": self.active_wcs}
+
+    async def lower_to(self, height: float, feed: float = 300.0, wait: bool = False) -> dict:
+        """Lower Z (only down, XY untouched) to `height` mm above work Z zero, e.g. the 5 mm a 3D-probe routine starts
+        from: at `feed` (<= 300) to 10 mm above the target, the last 10 mm at <= 100 mm/min. Needs the fitted tool
+        measured and a probed Z0 (check_lower_to); never below the Z floor. wait: return when it has arrived."""
+        info = self.check_lower_to(height, feed)
+        st = self._status()
+        t_est, z_prev = 0.0, st["mpos"][2]
+        for z_, f_ in info["segments"]:
+            t_est, z_prev = t_est + abs(z_prev - z_) / f_ * 60.0, z_
         self.last_action = time.time()
-        self.jog_busy = {"target": [st["mpos"][0], st["mpos"][1], mz], "t0": time.time(),
-                         "deadline": time.time() + (wz - height) / feed * 60.0 * 2 + 5.0}
-        await self.link.line(f"G53 G1 Z{mz:.3f} F{feed:g}")
-        self._note(f"lower to {height:g} mm above work zero (machine Z {mz:.2f}) at {feed:g} mm/min")
+        self.jog_busy = {"target": [st["mpos"][0], st["mpos"][1], info["mz"]], "t0": time.time(), "deadline": time.time() + t_est * 2 + 5.0}
+        for z_, f_ in info["segments"]:
+            await self.link.line(f"G53 G1 Z{z_:.3f} F{f_:g}")
+        self._note(f"lower to {height:g} mm above {self.active_wcs} Z0 (machine Z {info['mz']:.2f}), the last part at {info['segments'][-1][1]:g} mm/min")
+        if wait:
+            return await self._wait_motion("lower_to", t_est * 2 + 10.0)
         return self.payload()
 
     def check_probe_3d(self, kind: str, x: float = 20.0, y: float = 20.0, depth: float = 2.0, dia: float = 2.0,
-                       max_drop: float = PROBE3D_MAX_DROP) -> dict:
-        """Validate a 3D-probe routine from where the head is now; returns the routine's info (command, guard box)."""
+                       max_drop: float | None = PROBE3D_MAX_DROP, hole_dia: float | None = None) -> dict:
+        """Validate a 3D-probe routine from where the head is now; returns the routine's info (command, guard, summary).
+        dia: the probe's BALL diameter. hole_dia (pocket_center): the hole's Ø - the X/Y search is hole/2 + 2.
+        Start heights: the Z-touching routines (corners, boss) 1 .. 10.5 mm above a probed Z0 or a probe_descend touch;
+        pocket_center inside the hole, below a probed Z0 (it probes sideways at the height it starts)."""
         if kind not in PROBE3D:
             raise Refused(f"unknown 3D probe routine {kind!r} (one of {', '.join(PROBE3D)})")
-        for v in (x, y, depth, dia, max_drop):
-            if not isinstance(v, (int, float)) or v != v:
+        for v in (x, y, depth, dia) + ((max_drop,) if max_drop is not None else ()) + ((hole_dia,) if hole_dia is not None else ()):
+            if not isinstance(v, (int, float)) or isinstance(v, bool) or v != v:
                 raise Refused("3D probe settings must be numbers")
         st = self._need(armed=True, idle=True, homed=True)
         self._need_tool_measured()
@@ -1628,16 +2163,24 @@ class MachineControl:
                           f"the machine says T{tl}. Change tool → {self.profile.probe3d_tool}")
         sub, sx, sy = PROBE3D[kind]
         centre = sub >= 9
+        if not (0.5 <= dia <= PROBE3D_BALL_MAX):
+            raise Refused(f"dia is the probe's BALL diameter (0.5 .. {PROBE3D_BALL_MAX:g} mm; the 3D probe's ruby is 2): {dia:g} looks like "
+                          "a hole or part size - give a hole's diameter as hole_dia")
+        if hole_dia is not None:
+            if sub != 9:
+                raise Refused("hole_dia is for pocket_center (a round hole): it sizes the X/Y search")
+            if not (dia + 1.0 <= hole_dia <= 150.0):
+                raise Refused(f"hole_dia: {dia + 1:g} .. 150 mm (bigger than the ball)")
+            x = y = round(hole_dia / 2.0 + 2.0, 3)
         lo_off = 0.0 if centre else 2.0
         if not (lo_off <= x <= 80 and lo_off <= y <= 80) or (centre and x == 0 and y == 0):
             raise Refused("X/Y offsets: 2 .. 80 mm" + (" (0 skips that axis, not both)" if centre else ""))
         if not (0.5 <= depth <= 10):
             raise Refused("probing depth: 0.5 .. 10 mm below the touched surface")
-        if not (0.5 <= dia <= 10):
-            raise Refused("probe ball diameter: 0.5 .. 10 mm")
-        if not (2 <= max_drop <= 30):
+        if max_drop is not None and not (2 <= max_drop <= 30):
             raise Refused("Z search limit: 2 .. 30 mm")
         mx, my, mz = st["mpos"]
+        wz = (st.get("wpos") or [None] * 3)[2]
         xd, yd = sx * x, sy * y
         if sub <= 4:                                     # out past the edge, then back in
             xs, ys = (mx, mx - xd), (my, my + yd)
@@ -1654,20 +2197,54 @@ class MachineControl:
             if lo_ < lo - 1e-9 or hi_ > hi + 1e-9:
                 raise Refused(f"the routine would reach {ax.upper()} {lo_:.1f} .. {hi_:.1f} (machine), outside "
                               f"{lo:.1f} .. {hi:.1f}: start further from the edge of the travel or use smaller offsets")
+        z0 = self.z0_state()
+        ref_mz = None
+        if sub == 9:
+            if not z0["verified"]:
+                raise Refused(f"pocket_center starts inside the hole below its edge, judged from a probed Z0 - {z0['why']}. Probe Z0 on the top first")
+            if wz is None or wz > -0.3:
+                raise Refused(f"pocket_center probes sideways at the height it starts (M480.9 has no Z move): the probe must be INSIDE the "
+                              f"hole/pocket, below its edge - it is {'?' if wz is None else format(wz, '.2f')} mm above {self.active_wcs} Z0. Go down into it first with "
+                              "probe_descend(to_z=-<depth>) (G38.3: stops on contact without an alarm)")
+            where = f"{-wz:.2f} mm below {self.active_wcs} Z0 (inside the hole)"
+        else:
+            touch = self.surface_touch
+            if z0["verified"] and wz is not None:
+                ref_mz, ref, h = mz - wz, f"{self.active_wcs} Z0 ({z0['why']})", wz
+            elif touch and touch.get("tool") == tl and ((touch["xy"][0] - mx) ** 2 + (touch["xy"][1] - my) ** 2) ** 0.5 <= 30.0:
+                ref_mz, ref, h = touch["mz"], f"the surface probe_descend touched at machine Z {touch['mz']:.3f}", mz - touch["mz"]
+            else:
+                raise Refused(f"{kind.replace('_', ' ')} touches Z first and searches down ~108 mm (only a halt stops it): it needs a probed "
+                              f"reference under the probe - {z0['why']}. Find the surface with probe_descend (G38.3, stops on contact "
+                              "and backs off to 5 mm above it) or probe Z0 first")
+            lo, hi = PROBE3D_START
+            if not (lo - 1e-9 <= h <= hi + 1e-9):
+                raise Refused(f"the probe is {h:.2f} mm above {ref}: {kind.replace('_', ' ')} must start {lo:g} .. {hi:g} mm above it")
+            where = f"{h:.1f} mm above {ref}"
         n_axes = (x > 0) + (y > 0) if centre else 2
         expect = (0 if sub == 9 else 2) + n_axes * (4 if centre else 2)
         cmd = f"M480.{sub} X{x:g} Y{y:g} Z{depth:g} D{dia:g}"
+        floor_txt = (f"Z gets {max_drop:g} mm below the start" if max_drop is not None else
+                     f"Z gets {PROBE3D_FLOOR_BELOW:g} mm below that reference") + " before a touch"
+        summary = (f"Makera's 3D probe, {kind.replace('_', ' ')} ({cmd}; D = the {dia:g} mm ball" + (f", search ±{x:g} mm for a Ø{hole_dia:g} hole" if hole_dia else "")
+                   + f") from where the probe is now, {where}: it moves and probes on its own and overwrites {self.active_wcs} "
+                   + ("X0 Y0" if sub == 9 else "X0 Y0 and Z0 (TLO cleared: the 3D probe becomes the tool-length reference)")
+                   + f". The app HALTS it if the head leaves the area" + ("" if sub == 9 else f" or {floor_txt}") + ". "
+                   + self.origin_facts("xy" if sub == 9 else "xyz", None))
         return {"command": cmd, "sub": sub, "label": kind.replace("_", " "), "kind_key": kind, "start": [mx, my, mz], "dia": dia,
-                "expect_prbs": expect, "x_off": x, "y_off": y,
-                "guard": {"box": box, "start_z": mz, "max_drop": max_drop, "depth": depth, "z_probe": sub != 9}}
+                "expect_prbs": expect, "x_off": x, "y_off": y, "hole_dia": hole_dia, "summary": summary,
+                "guard": {"box": box, "start_z": mz, "max_drop": max_drop, "depth": depth, "z_probe": sub != 9,
+                          "z_floor": (ref_mz - PROBE3D_FLOOR_BELOW) if ref_mz is not None else None}}
 
     async def probe_3d(self, kind: str, x: float = 20.0, y: float = 20.0, depth: float = 2.0, dia: float = 2.0,
-                       max_drop: float = PROBE3D_MAX_DROP) -> dict:
+                       max_drop: float | None = PROBE3D_MAX_DROP, hole_dia: float | None = None) -> dict:
         """Makera's 3D-probe routine (M480.n) from where the head is now. The firmware moves, probes and overwrites the
-        work origin itself; we check before, then watch: the head must stay in the routine's area and Z may not drop
-        more than `max_drop` before the first touch (a probe that never triggers) - either sends a feed hold."""
-        info = self.check_probe_3d(kind, x, y, depth, dia, max_drop)
+        work origin itself; we check before (check_probe_3d), then watch: the head must stay in the routine's area and Z
+        may not get PROBE3D_FLOOR_BELOW under the probed reference before the first touch - either HALTS the machine.
+        Whatever the routine leaves in the offsets is recorded, finished or not."""
+        info = self.check_probe_3d(kind, x, y, depth, dia, max_drop, hole_dia)
         cmd = info.pop("command")
+        info.pop("summary")
         self.last_action = time.time()
         self._start_routine("3D probe", cmd, 300.0, **info)
         await self.link.line(cmd)
@@ -1685,13 +2262,15 @@ class MachineControl:
             floor = g["start_z"] - 0.5
         elif prbs:
             floor = prbs[0][0][2] - g["depth"] - 0.5
-        elif g.get("max_drop") is None:                  # the 4th-axis Z probe: the pad may be far below the start
+        elif g.get("max_drop") is None:                  # below the probed reference (the 4th-axis probe: its pad floor)
             floor = g["z_floor"]
         else:
             floor = g["start_z"] - g["max_drop"]
-        if z < floor:
-            return (f"Z went to {z:.2f} (machine), below {floor:.2f}"
-                    + (" with nothing touched: is the probe triggering?" if g["z_probe"] and not prbs else ""))
+        if floor is not None and z < floor:
+            if g["z_probe"] and not prbs:
+                return (f"Z went to {z:.2f} (machine), {g['start_z'] - z:.1f} mm below the start and past {floor:.2f} with nothing touched yet: "
+                        "the surface isn't where the probed reference says, or the probe isn't triggering")
+            return f"Z went to {z:.2f} (machine), below {floor:.2f}"
         return None
 
     def _probe3d_result(self, r: dict, prbs: list, st: dict) -> dict:
@@ -1720,6 +2299,112 @@ class MachineControl:
             msg += "; measured " + ", ".join(f"{a.upper()} {v:.3f} mm" for a, v in sizes.items())
         out["msg"] = msg
         return out
+
+    def check_probe_descend(self, to_z: float | None = None, max_dist: float = 20.0, feed: float = 100.0) -> dict:
+        """Validate a probe descent (G38.3 straight down: stops on contact WITHOUT an alarm, or after the distance).
+        to_z: a work Z to go down to (needs a probed Z0) - e.g. -3 to put the probe inside a hole for pocket_center; a
+        touch on the way means the probe is not over the hole. None: find the surface below, at most max_dist mm."""
+        st = self._need(armed=True, idle=True, homed=True)
+        self._need_tool_measured()
+        if self.jog_busy or self.job_active or (self.routine and self.routine["stage"] in ("running", "awaiting")):
+            raise Refused("wait for the machine to finish")
+        tl = (st.get("tool") or {}).get("number")
+        if tl not in (0, self.profile.probe3d_tool):
+            raise Refused(f"a probe descent needs a probe fitted (T{self.profile.probe3d_tool} the 3D probe, or T0): the machine says T{tl}")
+        for v in (max_dist, feed) + ((to_z,) if to_z is not None else ()):
+            if not isinstance(v, (int, float)) or isinstance(v, bool) or v != v:
+                raise Refused("probe descent: numbers")
+        mx, my, mz = st["mpos"]
+        wz = (st.get("wpos") or [None] * 3)[2]
+        if to_z is not None:
+            z0 = self.z0_state()
+            if not z0["verified"]:
+                raise Refused(f"going down to a work Z needs a probed Z0 - {z0['why']}")
+            if to_z < -30.0 or wz is None or to_z > wz - 0.1:
+                raise Refused(f"to_z: below where the probe is (work Z {'?' if wz is None else format(wz, '.2f')}) and not under -30")
+            dist = wz - to_z
+        else:
+            if not (1.0 <= max_dist <= DESCEND_MAX):
+                raise Refused(f"max_dist: 1 .. {DESCEND_MAX:g} mm")
+            dist = float(max_dist)
+        if dist > DESCEND_MAX + 1e-9:
+            raise Refused(f"that is {dist:.1f} mm down; a probe descent searches at most {DESCEND_MAX:g} mm: lower_to first")
+        if mz - dist < -self.profile.travel["z"] + self.profile.margin:
+            raise Refused(f"that goes to machine Z {mz - dist:.2f}, below the travel")
+        feed = min(max(float(feed), 10.0), 150.0)
+        mode = "into" if to_z is not None else "surface"
+        summary = (f"Probe straight down (G38.3 Z-{dist:.3f} F{feed:g}: stops at the first contact without an alarm) from machine Z {mz:.3f}"
+                   + (f" to work Z {to_z:g} ({self.active_wcs}): a touch on the way means the probe is not over the hole - it then backs off 1 mm"
+                      if mode == "into" else f", at most {dist:g} mm: on a touch it backs off to 5 mm above the surface (where the corner routines start)"))
+        return {"command": f"G38.3 Z-{dist:.3f} F{feed:g}", "dist": dist, "to_z": to_z, "mode": mode, "start": [mx, my, mz],
+                "feed": feed, "tool": tl, "summary": summary}
+
+    async def probe_descend(self, to_z: float | None = None, max_dist: float = 20.0, feed: float = 100.0, wait: bool = True) -> dict:
+        """Lower the probe with G38.3 (check_probe_descend), watched as a routine ('probe descent'): the result says
+        whether it touched and where; a surface touch is kept (self.surface_touch) as the reference the corner routines'
+        start check accepts. wait: return when it has finished."""
+        info = self.check_probe_descend(to_z, max_dist, feed)
+        cmd = info.pop("command")
+        self.last_action = time.time()
+        if self.routine and self.routine["stage"] in ("running", "awaiting"):
+            raise Refused(f"{self.routine['kind']} is still running")
+        since = time.time()
+        self.routine = {"kind": "probe descent", "command": cmd, "stage": "running", "msg": f"probe descent: {cmd}",
+                        "wco_before": self._wco(), "wcs": self.active_wcs, **info}
+        self._rt_task = asyncio.create_task(self._watch_descend(self.routine, since, info["dist"] / info["feed"] * 60.0 * 2 + 8.0))
+        await self.link.line(cmd)
+        self._note(f"{cmd} sent (probe descent, {info['mode']})")
+        if wait:
+            await asyncio.shield(self._rt_task)
+            if self.routine["stage"] != "done":
+                raise Refused(self.routine["msg"])
+        return self.payload()
+
+    async def _watch_descend(self, r: dict, since: float, timeout: float) -> None:
+        try:
+            t0 = time.time()
+            prb = None
+            while time.time() - t0 < timeout:
+                await asyncio.sleep(0.1)
+                st = self._status() or {}
+                if st.get("state") == "Alarm":
+                    h = st.get("halt") or {}
+                    raise Refused(f"the machine alarmed during the probe descent: {h.get('reason', 'halted')} ({h.get('advice', 'Unlock, then home')})")
+                prbs = self._prbs(since)
+                if prbs and st.get("state") == "Idle" and self.link.status_t > time.time() - 0.5:
+                    prb = prbs[-1]
+                    break
+            else:
+                raise Refused("the probe descent didn't report in time: check the machine")
+            await asyncio.sleep(0.3)
+            (px, py, pz), touched = prb
+            st = self._status() or {}
+            wz = (st.get("wpos") or [None] * 3)[2]
+            if touched:
+                self.surface_touch = {"mz": pz, "xy": [px, py], "tool": r["tool"], "t": time.time(), "wz": wz}
+                back = 1.0 if r["mode"] == "into" else 5.0
+                await self.link.line(f"G53 G1 Z{pz + back:.3f} F300")
+                self.jog_busy = {"target": [px, py, pz + back], "t0": time.time(), "deadline": time.time() + back / 300 * 60 * 2 + 5}
+                if r["mode"] == "into":
+                    raise Refused(f"the probe touched something at machine Z {pz:.3f} (work Z {wz:.2f}) before work Z {r['to_z']:g}: it is NOT "
+                                  "over the hole/pocket (or the hole is shallower). It backed off 1 mm; centre it over the hole first")
+                r.update(stage="done", touched=True, touch=[px, py, pz],
+                         msg=f"surface touched at machine Z {pz:.3f}" + (f" (work Z {wz:.3f} in {self.active_wcs})" if wz is not None else "")
+                             + f"; backing off to 5 mm above it - the corner / boss routines may start from there")
+            else:
+                if r["mode"] == "into":
+                    r.update(stage="done", touched=False, msg=f"reached work Z {wz:.2f} without touching: the probe is inside the hole/pocket "
+                                                              "- pocket_center can start here")
+                else:
+                    r.update(stage="failed", touched=False, msg=f"nothing touched within {r['dist']:g} mm (the probe is at machine Z {pz:.3f}): "
+                                                                 "the surface is further down, or the probe isn't triggering - check it before going on")
+            self._note(r["msg"])
+        except Refused as e:
+            r.update(stage="failed", msg=str(e))
+            self._note(f"probe descent: {e}")
+        except asyncio.CancelledError:
+            r.update(stage="failed", msg=r.get("abort_msg") or "stopped watching (cancelled)")
+        await self._push()
 
     # -- programs: upload to the machine's SD, then play (as MakeraStudio does); the machine runs them on its own
     @property
@@ -1775,7 +2460,16 @@ class MachineControl:
                     ([f"sets {'/'.join(sets).upper()} of the work origin"] if sets else []) + ([f"{checks} check{'s' if checks != 1 else ''}"] if checks else []))
                     + ". A touch that finds nothing, a check out of tolerance, or the probe meeting anything on the way HALTS the "
                       "machine (probe failed): then Unlock, re-zero by hand and run again")
-        wco = [m - w for m, w in zip(st["mpos"], st["wpos"])]
+        # the program's own work offset (its first G54..G59; none: the active one) - not whichever the machine has active
+        # (2026-11-02: side B in G55 was checked against G54)
+        names = list(dict.fromkeys([w_ or self.active_wcs for w_ in (prep.get("wcs_list") or [None])]))
+        pw = names[0]
+        wco = self.wcs_wco(pw, st)
+        if wco is None:
+            raise Refused(f"the program runs in {pw} (the machine has {self.active_wcs} active) and {pw}'s offsets haven't been read "
+                          "from the machine ($#): reconnect or refresh the offsets, then check again")
+        if not rotary:
+            self._check_setup_zeroed(prep, names, notes, ack)
         for ax, i in (("x", 0), ("y", 1)):
             e = prep["extents"].get(ax)
             if not e:
@@ -1783,7 +2477,7 @@ class MachineControl:
             lo, hi = -self.profile.travel[ax] + self.profile.margin, self.profile.top
             a, b = e[0] + wco[i], e[1] + wco[i]
             if a < lo - 1e-6 or b > hi + 1e-6:
-                raise Refused(f"the program reaches machine {ax.upper()} {a:.1f} .. {b:.1f} from the current work origin, "
+                raise Refused(f"the program reaches machine {ax.upper()} {a:.1f} .. {b:.1f} from the {pw} work origin, "
                               f"outside {lo:.1f} .. {hi:.1f}: check the work origin (Machine ▸ Zero) and the setup")
         ez = prep["extents"].get("z")
         if ez:
@@ -1810,7 +2504,44 @@ class MachineControl:
             if isinstance(reach, (int, float)) and ey and max(abs(ey[0]), abs(ey[1])) > reach + 1e-6:
                 raise Refused(f"the program reaches Y {ey[0]:.1f} .. {ey[1]:.1f} from the centreline, beyond the module's "
                               f"{reach:g} mm reach (machine record rotary.y_reach)")
-        return {"notes": notes, "work_origin": wco}
+        return {"notes": notes, "work_origin": wco, "wcs": pw}
+
+    def _check_setup_zeroed(self, prep: dict, names: list[str], notes: list[str], ack: bool) -> None:
+        """Every work offset the program runs in must have X, Y and Z set or probed this session (and unchanged since) - or
+        the user ticked 'I checked it'. A program whose own probe ops set them before the first cut still needs a rough zero
+        this session: its first moves (to the probe points) use the offsets already there (2026-11-02, 16:50: side B's probe
+        file started in a G55 nobody had zeroed)."""
+        st = self._status()
+        for w in names:
+            o = self.origin_payload(st, w)
+            have = {a for a in "xy" if (o.get(a) or o.get("xy")) and not (o.get(a) or o.get("xy")).get("changed")}
+            if o.get("z") and not o["z"].get("changed"):
+                have.add("z")
+            by_probe = {a for q in (prep.get("probes") or []) if q.get("before_cut") and not q.get("skipped")
+                        and (q.get("wcs") or names[0]) == w for a in q["sets"]}
+            missing = sorted({"x", "y", "z"} - have)
+            t = self.wcs_table or {}
+            if t.get(w) and all(abs(v) < 1e-9 for v in t[w][:3]) and not by_probe >= {"x", "y", "z"} and not ack:
+                raise Refused(f"the program runs in {w}, which has never been set on this machine (its offsets read 0, 0, 0): zero that setup first")
+            if missing:
+                why = [a.upper() for a in missing]
+                changed = [a.upper() for a in ("xy", "z") if (o.get(a) or {}).get("changed")]
+                if not ack:
+                    raise Refused(f"the program runs in {w}, but {'/'.join(why)} of its origin {'was' if len(why) == 1 else 'were'} not set or "
+                                  "probed this session" + (f" ({', '.join(changed)} changed since)" if changed else "")
+                                  + f": zero that setup first (probe_3d / auto_z_probe / origin_at with p={w})"
+                                  + (" - a rough zero is enough, the program's probe ops then set it exactly" if by_probe else "")
+                                  + ", or tick 'I checked it'")
+                notes.append(f"{w}: {'/'.join(why)} not set this session - acknowledged")
+            if by_probe - have:
+                pre = self.wcs_wco(w)
+                notes.append(f"{w}: the program's own probe ops set {'/'.join(a.upper() for a in sorted(by_probe - have))} before cutting, but their "
+                             f"first moves use {w}'s current offsets" + (f" (work 0,0,0 = machine {pre[0]:.1f}, {pre[1]:.1f}, {pre[2]:.1f})" if pre else "")
+                             + ": make sure the probe starts over the part")
+            elif not missing:
+                zr = o.get("z") or {}
+                notes.append(f"runs in {w}: X/Y by {(o.get('xy') or o.get('x') or {}).get('how', '?')}, Z0 by {zr.get('how', '?')}"
+                             + ("" if zr.get("verified") else " (typed, not probed)"))
 
     async def run_program(self, name: str, prep: dict, info: dict | None = None, rotary: bool = False, ack: bool = False) -> dict:
         """Upload `prep["text"]` as /sd/gcodes/<name> and play it. `prep` comes from prepare_program(). Tool changes in
@@ -1838,6 +2569,13 @@ class MachineControl:
                 self.job["record"] = str(self.recorder.dir)
             except Exception as e:  # noqa: BLE001 - recording never stops a job
                 self.events.append(time.strftime("%H:%M:%S ") + f"run not recorded: {type(e).__name__}: {e}")
+        probe_sets: dict[str, list] = {}                  # work offset -> axes the program's probe ops set
+        for q in prep.get("probes") or []:
+            if not q.get("skipped") and q["sets"]:
+                k = q.get("wcs") or chk.get("wcs")
+                probe_sets[k] = sorted(set(probe_sets.get(k, [])) | set(q["sets"]))
+        self.job.update(wcs=chk.get("wcs"), wco_before=self._wco(), active_before=self.active_wcs, probe_sets=probe_sets,
+                        table_before=dict(self.wcs_table) if self.wcs_table else None)
         self._note(f"program {fname}: {prep['lines']} lines, {len(prep['ops'])} operation(s)" + (f", air cut +{prep['air_cut']:g} mm" if prep["air_cut"] else ""))
         self._job_task = asyncio.create_task(self._job_flow(path, prep["text"].encode()))
         return self.payload()
@@ -1873,7 +2611,7 @@ class MachineControl:
                     seen_run, last_progress = True, time.time()
                     j.update(line=int(pr["lines"] or 0), percent=pr.get("percent") or 0, seconds=pr.get("seconds") or 0)
                     j["op"] = next((i for i, o in enumerate(j["ops"]) if o["start"] <= j["line"] <= o["end"]), j.get("op"))
-                self._rec("sample", st, self.link.status_t, j, self.link.log)
+                self._rec("sample", st, self.link.report_t, j, self.link.log)     # one row per real report (not a repeated one)
                 if s == "Alarm":
                     h = st.get("halt") or {}
                     raise Refused(f"the machine alarmed: {h.get('reason', 'halted')} ({h.get('advice', 'Unlock, then home')})")
@@ -1916,11 +2654,45 @@ class MachineControl:
             j.update(stage="failed", msg="stopped watching (cancelled)")
         self.confirm_nonce = None
         self._note(f"program {j['name']}: {j['stage']} — {j['msg']}")
+        if j.get("probe_sets"):
+            self._bg(self._job_origin_record(j))
         self._rec("close", j["stage"], j["msg"], j)
         self.recorder = None
         await self._push()
         await self._notify("program_done" if j["stage"] == "done" else "program_failed", program=j["name"], msg=j["msg"],
                            air_cut=bool(j.get("air_cut")))
+
+    async def _job_origin_record(self, j: dict) -> None:
+        """After a program with probe ops that set the origin (G10 L20 P0 in its PROBE blocks): record what it set, per
+        work offset, as `probe` if the program finished, `routine-partial` if it stopped part-way. Uses `$#` when the
+        machine answers it, else the live offsets of the work offset that was active before and after."""
+        ok = j.get("stage") == "done"
+        src, how = ("probe", f"probe op in {j['name']}") if ok else ("routine-partial", f"probe op in {j['name']} (program {j['stage']})")
+        t0 = j.get("table_before")
+        table = None
+        try:
+            table = await self.read_offsets(2.0)
+        except (Refused, ConnectionError, OSError):
+            pass
+        for w, axes in (j.get("probe_sets") or {}).items():
+            if not w:
+                continue
+            if table and t0 and table.get(w) and t0.get(w):
+                old = self.wcs_wco(w)                         # what it is now; the old one from the snapshot
+                g92, tlo0 = (t0.get("G92") or [0, 0, 0]), (t0.get("tlo") or 0.0)
+                before = [t0[w][0] - g92[0], t0[w][1] - g92[1], t0[w][2] - g92[2] + tlo0]
+                moved = {"xyz"[i] for i in range(3) if abs(table[w][i] - t0[w][i]) > 0.002}
+                new = old
+            elif w == self.active_wcs == j.get("active_before"):
+                before, new = j.get("wco_before"), self._wco()
+                moved = {"xyz"[i] for i in range(3) if before and new and abs(new[i] - before[i]) > 0.002}
+            else:
+                continue
+            got = moved & set(axes) if ok else moved
+            if got:
+                self._record_origin(xy=("probed", how) if got & {"x", "y"} else None, z=("probed", how) if "z" in got else None,
+                                    wco_xy=new[:2] if (new and got & {"x", "y"}) else None, source=src, before=before, wcs=w)
+        await self._push()
 
     async def job_pause(self) -> dict:
         if not self.job or self.job["stage"] != "running":
@@ -1950,7 +2722,8 @@ class MachineControl:
         self.job.update(stage="aborted", msg="aborted")
         return self.payload()
 
-    async def home(self) -> dict:
+    async def home(self, wait: bool = False, timeout: float = 120.0) -> dict:
+        """$H (the firmware homes Z first, then X and Y). wait: return once homed (payload "final" = describe())."""
         st = self._need(armed=True, idle=False)
         if st["state"] not in ("Idle", "Alarm"):
             raise Refused(f"the machine is {st['state']}: it can only home from Idle or Alarm")
@@ -1959,7 +2732,97 @@ class MachineControl:
         self._homing, self._saw_home_state, self._homing_t0 = True, False, time.time()
         await self.link.line("$H")
         self._note("homing (Z goes up first)")
+        if wait:
+            return await self._wait_motion("home", timeout)
         return self.payload()
+
+    def check_recover(self) -> dict:
+        """What recover() would do from the state now (for the approval card); Refused when it won't."""
+        if not self.connected:
+            raise Refused("not connected")
+        if not self.fresh():
+            raise Refused("no current status from the machine")
+        st = self._status()
+        h = st.get("halt") or {}
+        if st["state"] == "Alarm" and hard_halt(h.get("code")):
+            raise Refused(f"the machine is in Alarm ({h.get('reason')}): {h.get('advice')}. recover doesn't clear this one")
+        if st["state"] == "Sleep":
+            raise Refused("the machine is asleep: wake it on the machine first")
+        steps = (["feed hold"] if st["state"] in ("Run", "Home") else []) + ([f"abort the program {self.job['name']}"] if self.job_active else []) \
+            + ([f"abort {self.routine['kind']}"] if self.routine and self.routine["stage"] in ("running", "awaiting") else []) \
+            + (["HALT (drops the queued moves; spindle off)"] if st["state"] not in ("Idle", "Alarm") else []) \
+            + (["unlock ($X)"] if st["state"] != "Idle" else []) + ["Control on", "home (Z up first, then X/Y) and wait until homed"]
+        return {"steps": steps, "summary": f"Recover from {st['state']}" + (f" ({h.get('reason')})" if st["state"] == "Alarm" else "")
+                + ": " + ", then ".join(steps) + ". Work offsets are kept; the measured tool stays measured unless the machine reports another tool."}
+
+    async def recover(self, timeout: float = 120.0) -> dict:
+        """One step back to a known state after a hold, a stopped routine or an alarm: feed hold if it is moving, abort
+        the program / routine, HALT to drop whatever is still queued (a hold doesn't), $X unlock, Control on, home (Z
+        first) and wait until homed. Refused for e-stop, cover open, overheating and the alarms that need a reset or
+        a power cycle (hard_halt). The measured-tool record stays unless the fitted tool number changed. Returns the
+        payload with "recover": {"steps", "final"}."""
+        self.check_recover()
+        st = self._status()
+
+        def hard(st_):
+            h = st_.get("halt") or {}
+            if st_.get("state") == "Alarm" and hard_halt(h.get("code")):
+                raise Refused(f"the machine is in Alarm ({h.get('reason')}): {h.get('advice')}. recover doesn't clear this one")
+        steps, tool0 = [], (st.get("tool") or {}).get("number")
+        if st["state"] in ("Run", "Home"):
+            await self.link.realtime(b"!")
+            steps.append("feed hold")
+            t0 = time.time()
+            while time.time() - t0 < 3.0 and (self._status() or {}).get("state") in ("Run", "Home"):
+                await asyncio.sleep(0.05)
+        if self.job_active:
+            await self.link.raw("abort")
+            if self._job_task and self.job["stage"] == "uploading":
+                self._job_task.cancel()
+            self.job.update(stage="aborted", msg="aborted by recover")
+            steps.append(f"program {self.job['name']} aborted")
+        r = self.routine
+        if r and r["stage"] in ("running", "awaiting"):
+            r["abort_msg"] = f"{r['kind']} aborted by recover"
+            if self._rt_task and not self._rt_task.done():
+                self._rt_task.cancel()
+            steps.append(f"{r['kind']} aborted")
+        st = self._status() or {}
+        if st.get("state") not in ("Idle", "Alarm"):
+            await self.link.realtime(HALT)                  # drops the queued moves (a held G38.2 would carry on after ~)
+            steps.append("halt (clears the queued moves)")
+            t0 = time.time()
+            while time.time() - t0 < 3.0 and (self._status() or {}).get("state") != "Alarm":
+                await asyncio.sleep(0.05)
+        self.jog_busy = None
+        st = self._status() or {}
+        if st.get("state") == "Alarm":
+            hard(st)
+            t_x = time.time()
+            await self.link.line("$X")
+            steps.append("unlock ($X)")
+            while time.time() - t_x < 5.0 and not (self.link.status_t > t_x and (self._status() or {}).get("state") == "Idle"):
+                await asyncio.sleep(0.05)
+        st = self._status() or {}
+        if st.get("state") != "Idle":
+            raise Refused(f"after {', '.join(steps) or 'nothing'} the machine is {st.get('state')}, not Idle: " + self.describe())
+        if r and r.get("wco_before") and r["stage"] != "done":
+            self._routine_origin_diff(r)                   # what the stopped routine already set in the offsets
+        self.armed, self.last_action = True, time.time()
+        self._note("recover: Control on")
+        steps.append("Control on")
+        await self.home(wait=True, timeout=timeout)
+        steps.append("homed")
+        tool1 = self._fitted()
+        if self.measured and tool1 != tool0:
+            self.measured = None
+            steps.append(f"the fitted tool reads T{tool1} (was T{tool0}): measure it before moving")
+        self._bg(self._refresh_offsets())
+        self._note("recover: " + ", ".join(steps))
+        p_ = self.payload()
+        p_["recover"] = {"steps": steps, "final": self.describe()}
+        p_["final"] = p_["recover"]["final"]
+        return p_
 
     async def unlock(self) -> dict:
         st = self._need(armed=False, idle=False)

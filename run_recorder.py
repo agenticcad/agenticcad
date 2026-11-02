@@ -7,7 +7,8 @@ Every program the Machine workspace sends is recorded under <workspace>/runs/<de
   cam.py        the CAM script it came from (when the run came from CAM operations)
   samples.jsonl.gz  one row per machine status the app saw (~4 Hz): t (s from start), state, line, op index, machine
                 position, work position, feed [current, requested, override %], spindle [rpm, target, override %, temp C, power temp C],
-                tool number
+                tool number; with spindle-load polling on (M957), the spindle drive's PWM duty as a 6th spindle value - the real
+                load signal (the rpm loop hides load until it saturates at 0.9)
   events.jsonl  the app's notes during the run (tool changes, pauses, alarms) and interesting console lines (probe
                 touches [PRB:...], errors, alarms), with t
 Local files only; nothing leaves the machine. A recorder failure never stops a job (it just stops recording).
@@ -73,7 +74,8 @@ class RunRecorder:
             f, s = st.get("feed") or {}, st.get("spindle") or {}
             row = {"t": round(status_t - self.t0, 2), "s": st.get("state"), "ln": job.get("line"), "op": job.get("op"),
                    "m": st.get("mpos"), "w": st.get("wpos"), "f": [f.get("current"), f.get("requested"), f.get("override")],
-                   "sp": [s.get("rpm"), s.get("target"), s.get("override"), s.get("temp"), s.get("power_temp")],
+                   "sp": [s.get("rpm"), s.get("target"), s.get("override"), s.get("temp"), s.get("power_temp")]
+                         + ([s["pwm"]] if s.get("pwm") is not None else []),
                    "tl": (st.get("tool") or {}).get("number")}
             if st.get("mpos_ab"):
                 row["a"] = st["mpos_ab"][0] if st["mpos_ab"] else None

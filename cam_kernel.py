@@ -119,8 +119,14 @@ class Tool:
     def rated_mrr(self) -> float:
         """Material removal rate (mm3/min) at the tool's own stepdown x stepover width x feed - the cut feeds() sized it
         for. A pass that removes much more than this (a ball buried in a slot, a plunge into a step) is one the tool
-        was never meant to take; V-bits and chamfer tools cut to depth by design, so theirs is only a guide."""
-        w = self.stepover * self.diameter if self.type not in ("vbit", "chamfer") else max(self.tip_diameter, 0.2)
+        was never meant to take. A V-bit / chamfer tool cuts laps of its stepdown with its cone: one lap removes a band
+        stepdown x the cone's engaged height x tan(half angle) per flank, at most stepdown x (Ø - tip) / 2 on a chamfer's
+        one flank (both flanks of a V groove: twice that) - what it is rated for (the tip Ø alone made the latch's 90°
+        chamfer bit 12 mm3/min, while its 1.2 mm chamfers ran at 40-110 without trouble)."""
+        if self.type in ("vbit", "chamfer"):
+            w = max(self.diameter - self.tip_diameter, 0.2) * (0.5 if self.type == "chamfer" else 1.0)
+        else:
+            w = self.stepover * self.diameter
         return float(max(self.stepdown, 0.0) * max(w, 0.0) * max(self.feed, 0.0))
 
     def label(self) -> str:
@@ -266,14 +272,20 @@ class Machine:
 # =============================================================================
 # Setup: stock + WCS origin
 # =============================================================================
+def _material(m: str) -> str:
+    k = str(m or "").lower().strip()
+    return MATERIAL_ALIASES.get(k, k)
+
+
 @dataclass
 class Stock:
     xmin: float; xmax: float; ymin: float; ymax: float; zmin: float; zmax: float
+    material: str = ""          # e.g. "aluminium" (feeds / the simulation's tab and load thresholds); "" = not given
 
     @classmethod
-    def from_model(cls, model, margin: float = 2.0, top: float = 0.0, bottom: float = 0.0) -> "Stock":
+    def from_model(cls, model, margin: float = 2.0, top: float = 0.0, bottom: float = 0.0, material: str = "") -> "Stock":
         """Bounding box of the model (or any shape / body) plus XY margin; `top`/`bottom` add extra
-        material above/below."""
+        material above/below. material: what the stock is ("aluminium", ...)."""
         if isinstance(model, ck.Model):
             (x0, y0, z0), (x1, y1, z1) = model.bbox_min, model.bbox_max
         elif isinstance(model, ck.Body):
@@ -283,28 +295,29 @@ class Stock:
             (x0, y0, z0), (x1, y1, z1) = (bb.min.X, bb.min.Y, bb.min.Z), (bb.max.X, bb.max.Y, bb.max.Z)
         else:
             raise CamError("Stock.from_model expects the model, a body, or a shape")
-        return cls(x0 - margin, x1 + margin, y0 - margin, y1 + margin, z0 - bottom, z1 + top)
+        return cls(x0 - margin, x1 + margin, y0 - margin, y1 + margin, z0 - bottom, z1 + top, _material(material))
 
     from_shape = from_model
 
     @classmethod
     def block(cls, size_x: float, size_y: float, size_z: float, center_xy=(0.0, 0.0), top: float | None = None,
-              bottom: float | None = None) -> "Stock":
-        """Explicit block. Give either `top` (z of stock top) or `bottom`; default bottom = 0."""
+              bottom: float | None = None, material: str = "") -> "Stock":
+        """Explicit block. Give either `top` (z of stock top) or `bottom`; default bottom = 0. material: e.g. "aluminium"."""
         if top is None and bottom is None:
             bottom = 0.0
         if top is None:
             top = bottom + size_z
         bottom = top - size_z
         cx, cy = center_xy
-        return cls(cx - size_x / 2, cx + size_x / 2, cy - size_y / 2, cy + size_y / 2, bottom, top)
+        return cls(cx - size_x / 2, cx + size_x / 2, cy - size_y / 2, cy + size_y / 2, bottom, top, _material(material))
 
     @classmethod
-    def cylinder(cls, diameter: float, length: float, x0: float = 0.0, axis: tuple[float, float] = (0.0, 0.0)) -> "Stock":
+    def cylinder(cls, diameter: float, length: float, x0: float = 0.0, axis: tuple[float, float] = (0.0, 0.0),
+                 material: str = "") -> "Stock":
         """Round bar for the 4th axis: axis parallel to X through model (y, z) = `axis`, from x0 to x0 + length."""
         y0, z0 = axis
         r = diameter / 2
-        st = cls(x0, x0 + length, y0 - r, y0 + r, z0 - r, z0 + r)
+        st = cls(x0, x0 + length, y0 - r, y0 + r, z0 - r, z0 + r, _material(material))
         st.radius = r
         return st
 
@@ -446,7 +459,7 @@ class Setup:
             corners = [(y - y0, z - z0) for y in (self.stock.ymin, self.stock.ymax) for z in (self.stock.zmin, self.stock.zmax)]
             r = self.stock.radius if self.stock.is_cylinder else max(math.hypot(*c) for c in corners)
             self.max_radius = r
-            st = Stock(self.stock.xmin, self.stock.xmax, -r, r, -r, r)
+            st = Stock(self.stock.xmin, self.stock.xmax, -r, r, -r, r, self.stock.material)
             st.radius = r
             self.stock = st
             self.origin = self.origin or "rotary-axis-left"
@@ -463,7 +476,7 @@ class Setup:
                             for z in (self.stock.zmin, self.stock.zmax)])
             q = np.round(pts @ self._R().T, 9)
             lo, hi = q.min(axis=0), q.max(axis=0)
-            self.stock = Stock(*(float(v) + 0.0 for v in (lo[0], hi[0], lo[1], hi[1], lo[2], hi[2])))
+            self.stock = Stock(*(float(v) + 0.0 for v in (lo[0], hi[0], lo[1], hi[1], lo[2], hi[2])), self.stock.material)
             self.origin = self.origin or "stock-top-left"
             if self.safe_z is None:
                 self.safe_z = self.stock.top + self.machine.safe_z
@@ -1109,6 +1122,7 @@ def _levels(z_top: float, z_bottom: float, stepdown: float) -> list[float]:
 # Operations
 # =============================================================================
 RAMP_DEG = 3.0                      # default entry ramp angle along the path (0 = straight plunge)
+TAB_RAMP_DEG = 15.0                 # tabs: the tool ramps onto and off each tab at this angle (outside the tab's flat)
 RAMP_FEED = 0.6                     # ramps and helices run at up to this fraction of the cutting feed (see ramp_feed)
 ENTRY_GAP = 0.05                    # ramps / helices start this far above the material the op cuts (rapid to 0.5 above it)
 COLORS = {"face": "#7fd1ff", "contour": "#4ea1ff", "pocket": "#4cd37a", "drill": "#ffd166", "parallel3d": "#c58cff", "engrave": "#ff9f7a", "adaptive": "#ff9f43", "rest": "#8ef0d0",
@@ -1187,12 +1201,17 @@ def face(setup: Setup, tool: Tool, z_top: float | None = None, z_bottom: float |
 def contour(setup: Setup, tool: Tool, polys, z_top: float, z_bottom: float, side: str = "outside",
             stepdown: float | None = None, tabs: int = 0, tab_height: float = 3.0, tab_width: float = 8.0,
             climb: bool = True, stock_to_leave: float = 0.0, lead: float | None = None,
-            ramp: float = RAMP_DEG, name: str = "Contour") -> Op:
+            ramp: float = RAMP_DEG, name: str = "Contour", tab_ramp: float = TAB_RAMP_DEG,
+            finish: bool | None = None) -> Op:
     """Profile around polygons. side: 'outside' (tool outside material: outer rings AND holes),
     'inside' (tool inside, e.g. finishing a pocket wall), 'on' (centre on the line).
     lead: radius of the tangential arc lead-in/out (default tool radius outside, half inside, 0 for 'on';
     pass 0 to disable). ramp: entry angle in degrees — each pass descends along the profile instead of plunging
-    (0 = plunge); passes run on without retracting between them."""
+    (0 = plunge); passes run on without retracting between them. Tabs sit on straight runs where they can; the tool
+    ramps onto and off each one at tab_ramp degrees outside its width (never faster down than the plunge feed).
+    finish: one pass at full depth (the fewest passes the flutes allow) for a light wall cut instead of stepdown laps;
+    None = automatic: a wall the pockets / adaptives above it in this script roughed (stock_to_leave) is finished that
+    way unless a stepdown is given; False = stepdown laps (a slot)."""
     op = Op(name, "contour", tool, color=COLORS["contour"])
     if lead is None:
         lead = tool.radius if side == "outside" else (tool.radius / 2 if side == "inside" else 0.0)
@@ -1225,52 +1244,108 @@ def contour(setup: Setup, tool: Tool, polys, z_top: float, z_bottom: float, side
         rings = [r[::-1] for r in rings]
     levels = _levels(z_top, z_bottom, stepdown or tool.stepdown)
     tab_top = z_bottom + tab_height
+    tab_ang = tab_ramp if tab_ramp and tab_ramp > 0 else 90.0
+    # a finishing pass (light radial cut on a wall a roughing op already cleared beside): full depth in the fewest passes
+    # the flutes allow instead of stepdown laps (7-11 laps cutting air on the latch walls). Auto (finish=None, no
+    # stepdown given) when the roughing ops of this script cleared everything the cutter sweeps but a skin < ¼ Ø.
+    fl = max(getattr(tool, "flute_length", 0.0) or 0.0, 0.1)
+    fin_levels = _levels(z_top, z_bottom, max(fl - 0.2, 0.1))
+    cleared = _cleared_beside(setup, z_top, z_bottom) if finish is None and stepdown is None and side != "on" else None
+    n_fin = 0
     op.params = dict(z_top=z_top, z_bottom=z_bottom, side=side, tabs=tabs, passes=len(levels), lead=lead, ramp=ramp)
+    if tabs > 0:
+        op.params.update(tab_top=round(tab_top, 4), tab_height=tab_height, tab_width=tab_width, tab_ramp=tab_ang, tab_xy=[])
+    gap_min = 2 * tool.diameter                             # full-depth cut left between one tab's ramp and the next
+    tab_block = None
+    if tabs > 0:
+        bl = [c for st, c, zt, zb in _OV.get("rough", []) if st is setup and zb < tab_top - 1e-6 and zt > z_bottom + 1e-6]
+        tab_block = unary_union(bl).buffer(-0.05) if bl else None
     for ring in rings:
         ring = _start_on_straight(ring)
         dense = _densify(ring + [ring[0]], 0.5)
         total = sum(math.dist(a, b) for a, b in zip(dense, dense[1:]))
-        tab_centres = [total * (i + 0.5) / tabs for i in range(tabs)] if tabs > 0 else []
+        n_tabs, ang = tabs, tab_ang
+        foot = tab_height / math.tan(math.radians(ang)) if ang < 90 else 0.0
+        if n_tabs > 0 and total / n_tabs < tab_width + 2 * foot + gap_min:
+            # tabs + ramps would leave no full-depth cut between them: steeper ramps (up to 45°), then fewer tabs
+            fit = (total / n_tabs - tab_width - gap_min) / 2
+            if fit >= tab_height - 1e-9:
+                ang = math.degrees(math.atan2(tab_height, max(fit, 1e-9))); foot = fit
+                op.warnings.append(f"tabs: ramps steepened to {ang:.0f}° on a {total:.0f} mm ring so {n_tabs} tabs keep "
+                                   f"{gap_min:g} mm of full-depth cut between them")
+            else:
+                ang = max(ang, 45.0); foot = tab_height / math.tan(math.radians(ang))
+                n_tabs = max(1, int(total // (tab_width + 2 * foot + gap_min)))
+                op.warnings.append(f"tabs: only {n_tabs} of {tabs} fit on a {total:.0f} mm ring with {ang:.0f}° ramps and "
+                                   f"{gap_min:g} mm of full-depth cut between them; lower or narrower tabs fit more")
+        bad = None
+        if n_tabs > 0 and tab_block is not None:          # where another op cleared the kerf below the tab top: no tab metal
+            ln_d = LineString(dense)
+            def bad(c, ln_d=ln_d, total=total):
+                from shapely.ops import substring
+                a_, b_ = c - tab_width / 2, c + tab_width / 2
+                parts = [substring(ln_d, max(a_, 0.0), min(b_, total))] + ([substring(ln_d, a_ + total, total)] if a_ < 0 else []) \
+                    + ([substring(ln_d, 0.0, b_ - total)] if b_ > total else [])
+                foot_ = unary_union([g.buffer(tool.radius) for g in parts if not g.is_empty])
+                return foot_.intersection(tab_block).area > 0.2 * tab_width * tool.radius
+        tab_centres = _tab_centres(ring, n_tabs, tab_width, foot, gap_min, bad) if n_tabs > 0 else []
+        if bad is not None and any(bad(c) for c in tab_centres):
+            op.warnings.append("tabs: another op cleared the kerf below the tab top at some tabs (no metal there): "
+                               "place the tabs yourself or cut that neighbour after the release")
+        if tab_centres:
+            ln_ = LineString(dense)
+            op.params["tab_xy"].append([[round(q.x, 3), round(q.y, 3)] for q in (ln_.interpolate(c) for c in tab_centres)])
         lead_in, lead_out = _lead_arcs(dense, lead, climb) if lead > 0 else ([], [])
         path = dense[:-1]                                   # closed ring for the lap/ramp walker
+        fin = bool(finish) or (cleared is not None and _skin_only(dense, tool.radius, cleared))
+        lv = fin_levels if fin else levels
+        n_fin += fin
         # one entry per ring: lead-in just above the stock, then every pass ramps down along the profile from where
-        # the previous pass ended and runs a full lap (tabs lift the tool at any depth below the tab top)
+        # the previous pass ended and runs a full lap (tabs lift the tool at any depth below the tab top). A finishing
+        # pass whose lead-in starts in cleared ground goes straight down there and leads in at depth.
         z_air = z_top + ENTRY_GAP                           # entry starts just above where this op cuts (material above is already gone)
         start = lead_in[0] if lead_in else dense[0]
-        pb.rapid_xy(*start); pb.plunge_to(z_air, rapid_to=z_top, gap=0.5)
+        down = fin and cleared is not None and lead_in and cleared.covers(Point(start).buffer(tool.radius * 1.02))
+        z_in = lv[0] if down else z_air
+        pb.rapid_xy(*start); pb.plunge_to(z_in, rapid_to=z_air if down else z_top, gap=0.5)
         for x, y in lead_in[1:]:
-            pb.feed_to(x, y, z_air)
+            pb.feed_to(x, y, z_in)
         s_at = 0.0
-        for z in levels:
-            use_tabs = tabs > 0 and z < tab_top - 1e-9
-            zmod = (lambda s, zz: max(zz, tab_top) if _in_tab(s, tab_centres, tab_width, total) else zz) if use_tabs else None
-            s_at = _lap_ramp(pb, path, z, ramp, s_at, zmod)
+        tz = lambda z: _tab_lift(tab_centres, tab_width, total, tab_top, ang, z) if tab_centres and z < tab_top - 1e-9 else None
+        for z in lv:
+            s_at = _lap_ramp(pb, path, z, ramp, s_at, tz(z))
         # with a lead-out: back to the start point at depth (the remainder of a lap) so the arc leaves from where it was built
         if s_at > 1e-6 and lead_out:
-            use_tabs = tabs > 0 and levels[-1] < tab_top - 1e-9
-            zmod = (lambda s, zz: max(zz, tab_top) if _in_tab(s, tab_centres, tab_width, total) else zz) if use_tabs else None
-            zc = pb.pos[2]
-            n = len(path); segl = [math.dist(path[i], path[(i + 1) % n]) for i in range(n)]
-            acc = 0.0; i = 0
-            while i < n and acc + segl[i] <= s_at + 1e-9:
-                acc += segl[i]; i += 1
-            s = s_at
-            for j in range(i + 1, n + 1):
-                s = sum(segl[:j]); x, y = path[j % n]
-                zz = levels[-1] if zmod is None else zmod(s % total, levels[-1])
-                dz = abs(zz - pb.pos[2]); L3 = math.dist(pb.pos, (x, y, zz))
-                pb.feed_to(x, y, zz, None if dz < 1e-9 else min(pb.feed, pb.plunge * L3 / dz))   # descent never outruns the plunge rate
+            _lap_ramp(pb, path, lv[-1], ramp, s_at, tz(lv[-1]), lap=False, upto=total)
         # the lead-out arc swings one radius away from the wall into the waste: at full depth it would half-slot fresh
         # stock (the Outline on the Z1 bit 1.15 mm in one go there, 2026-10-22). The arc climbs out instead - up to just
         # above the top within its first 40 % - so the wall still gets a tangential exit and the waste a thin wedge.
         # (Climbing along the wall before the arc is not safe: the lap's own ramp may have left that stretch shallow.)
-        if lead_out:
+        if lead_out and math.dist(pb.pos[:2], dense[0]) < 1e-3:
             z_exit, z_from = z_top + 0.2, pb.pos[2]
             for k, (x, y) in enumerate(lead_out, 1):
                 pb.feed_to(x, y, z_from + (z_exit - z_from) * min(1.0, 2.5 * k / len(lead_out)))
         pb.retract()
     pb.retract()
+    if n_fin:
+        op.params.update(finish=n_fin, passes=len(fin_levels) if n_fin == len(rings) else op.params["passes"],
+                         ap=round((z_top - z_bottom) / len(fin_levels), 3))      # the planned depth of one finishing pass
     return op
+
+
+def _cleared_beside(setup: Setup, z_top: float, z_bottom: float):
+    """What the pockets / adaptives built so far in this script (same setup) cleared over the whole band z_bottom..z_top
+    (their regions as the tool reaches them, without their stock_to_leave), or None."""
+    hits = [c for st, c, zt, zb in _OV.get("rough", []) if st is setup and zb <= z_bottom + 1e-6 and zt >= z_top - 1e-6]
+    return unary_union(hits) if hits else None
+
+
+def _skin_only(dense, r: float, cleared) -> bool:
+    """Does a pass along `dense` meet only a skin thinner than ¼ Ø beside `cleared` (a finishing cut)?"""
+    if cleared is None or cleared.is_empty:
+        return False
+    cut = LineString(dense).buffer(r, quad_segs=8).difference(cleared)
+    return cut.is_empty or cut.buffer(-r / 4, quad_segs=4).area < 1e-3
 
 
 def _start_on_straight(ring: list[tuple[float, float]]) -> list[tuple[float, float]]:
@@ -1316,23 +1391,41 @@ def _lead_arcs(dense, r: float, climb: bool):
 
 
 def _lap_ramp(pb: PathBuilder, ring: list[tuple[float, float]], z: float, ramp: float, s0: float = 0.0,
-              zmod=None, lap: bool = True) -> float:
+              zmod=None, lap: bool = True, upto: float | None = None) -> float:
     """Entry along the path instead of a plunge. The tool is on the closed `ring` at arc length `s0` (its current z);
     it descends to `z` along the ring at `ramp` degrees (going round again if the ring is shorter than the ramp)
-    and then, with `lap`, cuts one full lap at `z` so the sloped ramp floor is cleared. Returns the arc length (mod
-    the ring length) where the tool ends. zmod(s, z) may lift points (tabs). ramp <= 0: plunge where the tool is."""
+    and then, with `lap`, cuts one full lap at `z` so the sloped ramp floor is cleared (`upto`: instead, on to that
+    arc length). Returns the arc length (mod the ring length) where the tool ends. zmod(s, z) may lift points (tabs;
+    zmod.breaks: arc lengths emitted exactly). ramp <= 0: plunge where the tool is. No move descends faster than the
+    plunge feed."""
     n = len(ring)
     seg = [math.dist(ring[i], ring[(i + 1) % n]) for i in range(n)]
     total = sum(seg)
     z_from = pb.pos[2]
-    depth = max(0.0, z_from - z)
+    z_here = zmod(s0 % total, z) if (zmod is not None and total > 1e-9) else z
+    depth = max(0.0, z_from - z_here)            # on a tab the profile carries the tool down (at the tab ramp angle)
     if ramp <= 0 and depth > 0:
-        pb.plunge_to(z); z_from, depth = z, 0.0
+        zt = z_here
+        if zt < z_from - 1e-9:
+            pb.plunge_to(zt)
+        z_from, depth = z, 0.0
     L = depth / math.tan(math.radians(ramp)) if depth > 0 else 0.0
-    end = s0 + L + (total if lap else 0.0)
+    tan_r = math.tan(math.radians(ramp)) if ramp > 0 else 0.0
+    end = s0 + L + (total if lap else 0.0) if upto is None else max(upto, s0 + L)
     if end <= s0 + 1e-9 or total <= 1e-9:
         return s0 % total if total > 1e-9 else 0.0
     step = 0.5 if (L > 0 or zmod is not None) else total + 1.0     # sample finely only where z varies
+    breaks = sorted(getattr(zmod, "breaks", ()) or ())
+
+    def next_break(s_):
+        if not breaks:
+            return math.inf
+        k = math.floor(s_ / total)
+        for kk in (k, k + 1):
+            for b in breaks:
+                if b + kk * total > s_ + 1e-9:
+                    return b + kk * total
+        return math.inf
     # walk the ring from s0 to end, emitting every vertex crossing, every `step` while z varies, and the ramp end
     i = 0; s_vert = 0.0
     while i < n and s_vert + seg[i] <= s0 + 1e-9:                   # segment containing s0
@@ -1345,11 +1438,15 @@ def _lap_ramp(pb: PathBuilder, ring: list[tuple[float, float]], z: float, ramp: 
         return a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t
     def emit(s_at, i_seg, s_local):
         x, y = point(i_seg, s_local)
-        zz = z_from - depth * min(1.0, (s_at - s0) / L) if L > 0 else z
+        zz = max(z, z_from - (s_at - s0) * tan_r) if L > 0 else z
         if zmod is not None:
             zz = zmod(s_at % total, zz)
         ramping = L > 0 and s_at <= s0 + L + 1e-9                  # the ramp (to its end point) runs at the ramp feed
-        pb.feed_to(x, y, zz, pb.ramp_feed(ramp) if ramping else None)
+        f = pb.ramp_feed(ramp) if ramping else pb.feed
+        dz = pb.pos[2] - zz
+        if dz > 1e-9:                                               # coming down (a ramp, off a tab): at most the plunge rate
+            f = min(f, max(pb.plunge * math.dist(pb.pos, (x, y, zz)) / dz, pb.plunge))
+        pb.feed_to(x, y, zz, f)
     def corner(i_seg):                                                # does the path turn at the end of segment i?
         a, b, c = ring[i_seg], ring[(i_seg + 1) % n], ring[(i_seg + 2) % n]
         ux, uy, vx, vy = b[0] - a[0], b[1] - a[1], c[0] - b[0], c[1] - b[1]
@@ -1360,7 +1457,8 @@ def _lap_ramp(pb: PathBuilder, ring: list[tuple[float, float]], z: float, ramp: 
     s_last = s0
     while s < end - 1e-9:
         seg_end = s_vert + seg[i]                                     # arc length at the end of segment i
-        nxt = min(seg_end, end)
+        nb = next_break(s)
+        nxt = min(seg_end, end, nb)
         ramping = L > 0 and s < s0 + L - 1e-9
         if ramping and s0 + L < nxt - 1e-9:
             nxt = s0 + L                                              # stop exactly at the ramp end
@@ -1370,13 +1468,89 @@ def _lap_ramp(pb: PathBuilder, ring: list[tuple[float, float]], z: float, ramp: 
         s = nxt
         at_vertex = abs(s - seg_end) < 1e-9
         # while ramping, fine vertices of a smooth curve are skipped (sampled by `step` instead); corners always emitted
-        if not (ramping and at_vertex and s - s_last < step * 0.5 and not corner(i)) or s >= end - 1e-9 or abs(s - (s0 + L)) < 1e-9:
+        if not (ramping and at_vertex and s - s_last < step * 0.5 and not corner(i)) or s >= end - 1e-9 or abs(s - (s0 + L)) < 1e-9 \
+                or abs(s - nb) < 1e-9:
             emit(s, i, s - s_vert); s_last = s
         if at_vertex:
             s_vert = seg_end; i = (i + 1) % n
             if i == 0:
                 s_vert -= total; s -= total; end -= total; s0 -= total; s_last -= total   # wrap: keep arc lengths small
     return s % total
+
+
+def _tab_centres(ring: list[tuple[float, float]], tabs: int, width: float, foot: float, gap_min: float = 0.5,
+                 bad=None) -> list[float]:
+    """Arc lengths of the tab centres along a closed ring: each tab's flat (and if they fit its ramps, `foot` either
+    side) on a straight run, as near to an even spread as the straights allow; a tab with no straight long enough
+    falls back to an even spread turned to put as many tabs on straights as it can. Tabs on corner arcs hold badly
+    and the tool leaves them with a dig. bad(s): a tab centred there would have no metal (cleared by another op)."""
+    n = len(ring)
+    seg = [math.dist(ring[i], ring[(i + 1) % n]) for i in range(n)]
+    total = sum(seg)
+    if tabs <= 0 or total <= 1e-9:
+        return []
+    ideal = [total * (i + 0.5) / tabs for i in range(tabs)]
+    runs, s = [], 0.0                                   # [s_start, s_end, heading]: segments within 2° of the run's first
+    for i in range(n):
+        if seg[i] > 1e-9:
+            h = math.atan2(ring[(i + 1) % n][1] - ring[i][1], ring[(i + 1) % n][0] - ring[i][0])
+            if runs and abs(runs[-1][1] - s) < 1e-9 and abs(math.remainder(h - runs[-1][2], 2 * math.pi)) <= math.radians(2):
+                runs[-1][1] = s + seg[i]
+            else:
+                runs.append([s, s + seg[i], h])
+        s += seg[i]
+    if len(runs) > 1 and runs[0][0] < 1e-9 and abs(runs[-1][1] - total) < 1e-9 and \
+            abs(math.remainder(runs[0][2] - runs[-1][2], 2 * math.pi)) <= math.radians(2):
+        runs[0][0] = runs[-1][0] - total; runs.pop()      # the run through the ring's start
+    gap = width + 2 * foot + gap_min
+    cdist = lambda a, b: min(abs(a - b) % total, total - abs(a - b) % total)
+    out: list[float] = []
+    for c0 in ideal:
+        pick = None
+        for m in (foot, 0.0):
+            best = None
+            for a, b, _ in runs:
+                lo, hi = a + width / 2 + m, b - width / 2 - m
+                if hi < lo - 1e-9:
+                    continue
+                for k in range(int((hi - lo) / 0.5) + 2):
+                    p = min(lo + 0.5 * k, hi) % total
+                    if all(cdist(p, q) >= gap for q in out) and (best is None or cdist(p, c0) < cdist(best, c0)) \
+                            and not (bad and bad(p)):
+                        best = p
+            if best is not None:
+                pick = best; break
+        if pick is None:
+            break
+        out.append(pick)
+    if len(out) == tabs:
+        return out
+    # not every tab finds a straight with room: an even spread, turned to put as many flats on straights as it can
+    def on_straight(c):
+        return any(a + width / 2 - 1e-6 <= cc <= b - width / 2 + 1e-6 for a, b, _ in runs for cc in (c, c - total, c + total))
+    step = total / tabs
+    best_off = max((k * 0.5 for k in range(int(step / 0.5) + 1)),
+                   key=lambda off: (-sum(bool(bad and bad((c + off) % total)) for c in ideal),
+                                    sum(on_straight((c + off) % total) for c in ideal), -off))
+    return [(c + best_off) % total for c in ideal]
+
+
+def _tab_lift(centres: list[float], width: float, total: float, tab_top: float, angle: float, z: float):
+    """zmod for one pass at z: the tool rides each tab's flat (`width` along the path) at tab_top and ramps on and off
+    it at `angle` outside that width. `breaks`: the arc lengths where the lift profile bends (emitted exactly)."""
+    k = math.tan(math.radians(angle)) if angle > 0 else math.inf
+    foot = (tab_top - z) / k if k < math.inf else 0.0
+
+    def zmod(s, zz):
+        for c in centres:
+            d = abs(s - c) % total
+            d = min(d, total - d) - width / 2
+            h = tab_top if d <= 1e-9 else tab_top - d * k
+            if h > zz:
+                zz = h
+        return zz
+    zmod.breaks = sorted({round((c + o) % total, 9) for c in centres for o in (-width / 2 - foot, -width / 2, width / 2, width / 2 + foot)})
+    return zmod
 
 
 def _in_tab(s: float, centres: list[float], width: float, total: float) -> bool:
@@ -1390,11 +1564,15 @@ def _in_tab(s: float, centres: list[float], width: float, total: float) -> bool:
 
 def pocket(setup: Setup, tool: Tool, polys, z_top: float, z_bottom: float, stepdown: float | None = None,
            stepover: float | None = None, finish: bool = True, climb: bool = True, rest_from: Tool | None = None,
-           stock_to_leave: float = 0.0, ramp: float = RAMP_DEG, name: str = "Pocket") -> Op:
+           stock_to_leave: float = 0.0, ramp: float = RAMP_DEG, name: str = "Pocket", strategy: str = "auto") -> Op:
     """Clear closed regions (holes in the polygons are islands) with concentric inward passes,
     innermost first, wall pass last. rest_from=<bigger tool>: only machine what that tool left.
     stock_to_leave: radial allowance left on the walls for a finishing contour. ramp: entry angle in degrees —
-    the tool ramps down along the innermost ring (a helix on a small ring) instead of plunging (0 = plunge)."""
+    the tool ramps down along the innermost ring (a helix on a small ring) instead of plunging (0 = plunge).
+    strategy: "auto" (a round hole 1.3-3x the tool Ø is helix-bored, see bore(); other regions get rings), "rings",
+    "bore" (round regions bored, the rest rings), "adaptive" (constant engagement at the stepover, see adaptive())."""
+    if strategy not in POCKET_STRATEGIES:
+        raise CamError(f"pocket: strategy must be one of {POCKET_STRATEGIES}")
     op = Op(name, "pocket" if rest_from is None else "rest", tool, color=COLORS["pocket" if rest_from is None else "rest"])
     pb = PathBuilder(setup, tool, op)
     src = _polys(polys)
@@ -1417,6 +1595,8 @@ def pocket(setup: Setup, tool: Tool, polys, z_top: float, z_bottom: float, stepd
     while True:
         g = region.buffer(-d, join_style=1)
         ps = _polys(g)
+        if shells:                      # slivers (a neck just wide enough) lie within the ring outside them: no ring
+            ps = [q for q in ps if q.area > 0.05 * so * so]
         if not ps:
             break
         shells.append(ps)
@@ -1427,12 +1607,29 @@ def pocket(setup: Setup, tool: Tool, polys, z_top: float, z_bottom: float, stepd
             return op
         raise CamError(f"pocket: tool Ø{tool.diameter} does not fit in the region")
     levels = _levels(z_top, z_bottom, stepdown or tool.stepdown)
+    if strategy == "adaptive" and rest_from is None:      # constant engagement at the stepover, the pocket's stepdown
+        ad = adaptive(setup, tool, region, z_top, z_bottom, stepover=min(so / tool.diameter, 0.5),
+                      stepdown=stepdown or tool.stepdown, climb=climb, name=name)
+        op.moves, op.warnings = ad.moves, op.warnings + ad.warnings
+        op.params = dict(z_top=z_top, z_bottom=z_bottom, stepover=so, passes=len(levels), strategy="adaptive",
+                         **{k: ad.params[k] for k in ("engagement", "links", "hops", "lifts", "retracts") if k in ad.params})
+        return op
     # separate regions (two pockets) are finished one after the other through all depths — not one level across all of
     # them — and visited nearest-neighbour; within a region the next level is plunged where the tool already is
     regions = _nn_order(_polys(region), lambda R: (R.centroid.x, R.centroid.y), pb.pos[:2] if pb.pos else None)
     op.params = dict(z_top=z_top, z_bottom=z_bottom, stepover=so, passes=len(levels), rings=len(shells), regions=len(regions), ramp=ramp)
     z_air = z_top + ENTRY_GAP                               # entry starts just above where this op cuts
+    bored = 0
     for R in regions:
+        disc = _disc(R) if strategy in ("auto", "bore") else None
+        if disc and BORE_RANGE[0] <= disc[2] / tool.diameter <= BORE_RANGE[1] and z_top - z_bottom <= tool.flute_length + 1e-6:
+            _helix_bore(pb, disc[0], disc[1], disc[2], z_top, z_bottom, tool, so, ramp, climb, stepdown or tool.stepdown)
+            bored += 1
+            continue
+        if strategy == "bore":
+            op.warnings.append(f"bore: a region {'Ø%.2f' % disc[2] if disc else 'that is not round'} is not "
+                               f"{BORE_RANGE[0]:g}-{BORE_RANGE[1]:g}x the {tool.label()}'s Ø{tool.diameter:g} (or deeper than its "
+                               "flutes): pocketed with rings instead")
         shells_R = [[q for q in ps if R.covers(q.representative_point())] for ps in shells]
         shells_R = [ps for ps in shells_R if ps]
         if not shells_R:
@@ -1440,37 +1637,247 @@ def pocket(setup: Setup, tool: Tool, polys, z_top: float, z_bottom: float, stepd
         _rings_ramped(pb, R, shells_R, tool, levels, climb, ramp, z_air)
         pb.retract()
     pb.retract()
+    if bored:
+        op.params.update(bored=bored)
+    _note_cleared(setup, region, tool, z_top, z_bottom)
     return op
 
 
+POCKET_STRATEGIES = ("auto", "rings", "bore", "adaptive")
+BORE_RANGE = (1.3, 3.0)                 # hole Ø as a multiple of the tool Ø that a helical bore takes
+
+
+def _disc(R) -> tuple[float, float, float] | None:
+    """(x, y, Ø) when the region is a plain disc (no islands), else None."""
+    import shapely
+    if not isinstance(R, Polygon) or R.interiors or R.is_empty:
+        return None
+    rb = float(shapely.minimum_bounding_radius(R))
+    if rb <= 0 or R.area < 0.97 * math.pi * rb * rb:
+        return None
+    c = shapely.minimum_bounding_circle(R).centroid
+    return c.x, c.y, 2 * rb
+
+
+def _helix_bore(pb: PathBuilder, cx: float, cy: float, d: float, z_top: float, z_bottom: float, tool: Tool, so: float,
+                ramp: float, climb: bool, stepdown: float):
+    """A round hole by helices: the first (the only one up to 2x the tool Ø) with the tool over the centre, so no core
+    pin is left; wider holes add helices out to the wall at most `so` apart. Each helix descends at the ramp angle
+    (never more than the stepdown per turn, never faster down than the plunge feed) and ends with a full circle at the
+    bottom so the floor is flat; the first runs at the ramp feed (it cuts full width), the others at the feed."""
+    rt = tool.radius
+    rh = d / 2 - rt
+    r_in = min(rh, 0.9 * rt)
+    n = math.ceil((rh - r_in) / so - 1e-9) if rh > r_in + 1e-6 else 0
+    radii = [r_in + (rh - r_in) * k / n for k in range(n + 1)] if n else [rh]
+    sgn = -1.0 if climb else 1.0                            # clockwise keeps the wall on the left: climb (see contour)
+    depth = z_top - z_bottom
+    z_air = z_top + ENTRY_GAP
+    for k, r in enumerate(radii):
+        C = 2 * math.pi * r
+        ang = min(ramp if ramp > 0 else RAMP_DEG, math.degrees(math.atan2(max(stepdown, 0.05), C)))
+        turns = max(1, math.ceil(depth / (C * math.tan(math.radians(ang))) - 1e-9))
+        npts = 24 * turns
+        sa = math.sin(math.radians(ang))
+        f = pb.ramp_feed(ang) if k == 0 else min(pb.feed, max(pb.plunge / sa, pb.plunge))
+        if k == 0:
+            pb.rapid_xy(cx + r, cy); pb.plunge_to(z_air, rapid_to=z_top, gap=0.5)
+        else:                                               # up inside the bore, over to the next radius just above the top
+            pb._add(RAPID, pb.pos[0], pb.pos[1], z_top + 0.5)
+            pb._add(RAPID, cx + r, cy, z_top + 0.5)
+            pb._add(PLUNGE, cx + r, cy, z_air, pb.plunge)
+        for i in range(1, npts + 1):
+            a = sgn * 2 * math.pi * i / 24
+            pb.feed_to(cx + r * math.cos(a), cy + r * math.sin(a), z_air - (z_air - z_bottom) * i / npts, f)
+        for i in range(1, 25):                              # the floor: one flat circle at the bottom
+            a = sgn * 2 * math.pi * i / 24
+            pb.feed_to(cx + r * math.cos(a), cy + r * math.sin(a), z_bottom, pb.feed if k else f)
+    pb.feed_to(cx, cy, z_bottom)
+    pb.retract()
+
+
+def bore(setup: Setup, tool: Tool, x: float, y: float, diameter: float, z_top: float, z_bottom: float,
+         ramp: float = RAMP_DEG, stepover: float | None = None, climb: bool = True, name: str = "Bore") -> Op:
+    """Helical bore of a round hole Ø`diameter` at (x, y) from z_top to z_bottom: helices at the ramp angle (descent
+    never faster than the plunge feed, at most the stepdown per turn) and a full circle at the bottom; holes from
+    1.3x to 3x the tool Ø (outside that, or deeper than the flutes: pocketed with rings, with a warning). Far faster
+    than pocketing a hole level by level (the latch's four Ø8 register holes: 17.8 min as pockets)."""
+    return pocket(setup, tool, circle(x, y, diameter), z_top=z_top, z_bottom=z_bottom, stepover=stepover, climb=climb,
+                  ramp=ramp, name=name, strategy="bore")
+
+
+def _note_cleared(setup: Setup, region, tool: Tool, z_top: float, z_bottom: float) -> None:
+    """Remember what a roughing op cleared (the region as the tool reaches it) for the ops after it in this script."""
+    reach = region.buffer(-tool.radius, join_style=1).buffer(tool.radius - 1e-3, join_style=1)
+    if not reach.is_empty:
+        _OV.setdefault("rough", []).append((setup, reach, max(z_top, z_bottom), min(z_top, z_bottom)))
+
+
 def _rings_ramped(pb: PathBuilder, R, shells_R, tool: Tool, levels, climb: bool, ramp: float, z_air: float):
-    """Cut the concentric rings of one region innermost-first at every level. Entries ramp down along the ring
-    being cut (from the previous level's floor, or from just above the stock on the first level); links between
-    rings at one level are feeds through cleared material, links that would cross the wall retract."""
+    """Cut the concentric rings of one region at every level, lobe by lobe: where the offsets split the region (narrow
+    necks), each lobe is cut from its innermost ring outwards before the next, and the ring that joins them last.
+    Each ring starts where the tool is nearest. One entry per lobe per level: it ramps down along the lobe's
+    innermost ring that is long enough (from the previous level's floor, or from just above the stock on the first
+    level). Links stay down when they are a step out onto the next ring or run through ground cleared at this level;
+    otherwise the tool lifts just above the previous level's floor (cleared over the whole region) and moves inside
+    the region; only a link that would cross the wall retracts."""
     inner_ok = R.buffer(-tool.radius + 1e-6)       # where the tool centre may travel at depth inside this region
+    so = max((pb.op.params or {}).get("stepover") or tool.diameter * tool.stepover, 1e-3)
     floor = z_air                                   # z the region is cleared to so far
-    first = True
-    rings_all = []                                  # innermost first
-    for ps in reversed(shells_R):
+    # the offset tree: a shell's parent is the shell one offset further out that contains it
+    nodes = []                                      # [poly, depth, parent index, children]
+    prev_ids: list[int] = []
+    for k, ps in enumerate(shells_R):
+        ids = []
         for q in ps:
-            q = orient(q, 1.0)
-            rings = [_ring_coords(q.exterior, False)] + [_ring_coords(h, True) for h in q.interiors]
-            rings_all += [r[::-1] for r in rings] if not climb else rings
-    # the entry ramps along the innermost ring that is long enough (a helix of about half the tool diameter or more);
-    # a shorter innermost ring would make the ramp a wobbling plunge — those rings follow once the tool is at depth
-    min_len = max(tool.diameter * 1.5, 2.0)
-    lens = [sum(math.dist(r[k], r[(k + 1) % len(r)]) for k in range(len(r))) for r in rings_all]
-    ei = next((k for k, ln in enumerate(lens) if ln >= min_len), max(range(len(lens)), key=lambda k: lens[k]) if lens else 0)
-    order = [rings_all[ei]] + rings_all[:ei] + rings_all[ei + 1:]
+            par = next((j for j in prev_ids if nodes[j][0].covers(q.representative_point())), None)
+            nodes.append([orient(q, 1.0), k, par, []])
+            if par is not None:
+                nodes[par][3].append(len(nodes) - 1)
+            ids.append(len(nodes) - 1)
+        prev_ids = ids
+    def rings_of(i):
+        q = nodes[i][0]
+        rr = [_ring_coords(q.exterior, False)] + [_ring_coords(h, True) for h in q.interiors]
+        return [r[::-1] for r in rr] if not climb else rr
+    ring_len = lambda r: sum(math.dist(r[k], r[(k + 1) % len(r)]) for k in range(len(r)))
+    min_len = max(tool.diameter * 1.5, 2.0)        # shorter: the ramp would be a wobbling plunge
+    first = True
+    from shapely.prepared import prep
     for z in levels:
-        for ring in order:
+        cleared = None                              # what this level has cut so far
+        # stock the ops before this one in the script already cleared through this level's slab: rings there are air
+        pre = _cleared_slab(pb.setup, z, floor if floor < z_air - 1e-9 else z_air - ENTRY_GAP)
+        pre_p = prep(pre) if pre is not None else None
+        def cut_ring(ring, entry):
+            nonlocal first, cleared
+            sweep = LineString(ring + [ring[0]]).buffer(tool.radius, quad_segs=8)
+            if pre_p is not None and pre_p.covers(sweep):
+                cleared = sweep if cleared is None else cleared.union(sweep)
+                return False
+            pos = pb.pos[:2] if pb.pos is not None else ring[0]
+            ring = _ring_from(ring, pos)
             start = ring[0]
-            if first or pb.pos is None or not inner_ok.covers(LineString([pb.pos[:2], start])):
-                pb.rapid_xy(*start); pb.plunge_to(floor, rapid_to=floor, gap=0.5); first = False   # rapid to just above the cleared floor
+            link = LineString([pos, start]) if pb.pos is not None and math.dist(pos, start) > 1e-9 else None
+            if first or pb.pos is None:
+                pb.rapid_xy(*start); pb.plunge_to(floor, rapid_to=floor, gap=0.5); first = False
+            elif link is None:
+                pass
+            elif not entry and inner_ok.covers(link) and (link.length if cleared is None else link.difference(
+                    cleared.buffer(-tool.radius + 0.05)).length) <= 1.25 * so + 0.05:
+                pb.feed_to(start[0], start[1], pb.pos[2])          # through cleared ground, then a step out onto the ring
+            elif entry and abs(pb.pos[2] - floor) < 1e-6 and link.length <= 4 * tool.diameter and inner_ok.covers(link):
+                pb.feed_to(start[0], start[1], floor)               # a new level: along the floor just cut to the entry
+            elif (route := _route_inside(pos, start, roots_poly, inner_ok)) is not None:   # lift over the previous
+                zl = floor + 0.3                                    # level's floor (cleared all over), stay in the region
+                if pb.pos[2] < zl:
+                    pb._add(RAPID, pos[0], pos[1], zl)
+                for x_, y_ in route:
+                    pb._add(RAPID, x_, y_, zl)
+                pb._add(PLUNGE, start[0], start[1], floor, pb.plunge)
             else:
-                pb.feed_to(start[0], start[1], pb.pos[2])
+                pb.rapid_xy(*start); pb.plunge_to(floor, rapid_to=floor, gap=0.5)
+            if entry and pre_p is not None and pb.pos[2] > z + 1e-9 and pre_p.covers(Point(start).buffer(tool.radius * 1.02)):
+                pb._add(PLUNGE, start[0], start[1], z, pb.plunge)   # the entry is over cleared ground: straight down in the air
             _lap_ramp(pb, ring, z, ramp, 0.0)
+            cleared = sweep if cleared is None else cleared.union(sweep)
+            return True
+        roots = [i for i, nd in enumerate(nodes) if nd[2] is None]
+        # slivers at the wall (where the tool just fits a notch of the boundary) are not lobes worth an entry each
+        notch = [i for i in roots if not nodes[i][3] and nodes[i][0].area <= 0.05 * so * so]
+        if len(notch) < len(roots):
+            roots = [i for i in roots if i not in notch]
+        else:
+            notch = []
+        roots_poly = [nodes[i][0] for i in roots]
+        def chains(i):
+            """The cutting order of node i's subtree as chains: each chain starts with a new entry."""
+            ch = nodes[i][3]
+            if not ch:
+                return [[i]]
+            sub = []
+            pos = pb.pos[:2] if pb.pos is not None else None
+            for c in _nn_order(ch, lambda j: (nodes[j][0].centroid.x, nodes[j][0].centroid.y), pos):
+                sub += chains(c)
+            sub[-1].append(i)                       # the parent ring follows the last child's lobe without a new entry
+            return sub
+        order = []
+        for rt in _nn_order(roots, lambda j: (nodes[j][0].centroid.x, nodes[j][0].centroid.y), pb.pos[:2] if pb.pos else None):
+            order += chains(rt)
+
+        for chain in order:
+            rings = [r for i in chain for r in rings_of(i)]
+            # the entry ramps along the innermost ring that is long enough; shorter rings inside it follow at depth
+            ei = next((k for k, r in enumerate(rings) if ring_len(r) >= min_len), max(range(len(rings)), key=lambda k: ring_len(rings[k])))
+            rings = [rings[ei]] + rings[:ei] + rings[ei + 1:]
+            entry = True
+            for ring in rings:
+                if cut_ring(ring, entry):
+                    entry = False
         floor = z
+
+
+def _cleared_slab(setup: Setup, z_lo: float, z_hi: float):
+    """Where the roughing ops built so far in this script (same setup) cleared the whole slab z_lo..z_hi, or None."""
+    ents = [(c, zt, zb) for st, c, zt, zb in _OV.get("rough", []) if st is setup and zt > z_lo + 1e-6 and zb < z_hi - 1e-6]
+    if not ents or z_hi <= z_lo + 1e-9:
+        return None
+    cuts = sorted({z_lo, z_hi} | {v for _, zt, zb in ents for v in (zt, zb) if z_lo < v < z_hi})
+    area = None
+    for lo, hi in zip(cuts, cuts[1:]):
+        u = [c for c, zt, zb in ents if zb <= lo + 1e-6 and zt >= hi - 1e-6]
+        if not u:
+            return None
+        g = unary_union(u)
+        area = g if area is None else area.intersection(g)
+        if area.is_empty:
+            return None
+    return area
+
+
+def _route_inside(a, b, polys, ok):
+    """A path from a to b (the points after a) inside `ok`: straight, or out to the outer ring of the offset polygon
+    holding both, along it the shorter way round, and in again. None if there is none."""
+    if ok.covers(LineString([a, b])):
+        return [b]
+    pa, pb_ = Point(a), Point(b)
+    for q in polys:
+        if not (q.buffer(1e-6).covers(pa) and q.buffer(1e-6).covers(pb_)):
+            continue
+        from shapely.ops import substring
+        ext = LineString(q.exterior.coords)
+        L = ext.length
+        s1, s2 = ext.project(pa), ext.project(pb_)
+        def arc(u, v):                                      # forward along the ring from u to v
+            if v >= u:
+                return list(substring(ext, u, v).coords)
+            return list(substring(ext, u, L).coords) + list(substring(ext, 0.0, v).coords)
+        pts = arc(s1, s2) if (s2 - s1) % L <= L / 2 else arc(s2, s1)[::-1]
+        pts = pts + [b]
+        if ok.covers(LineString([a] + pts)):
+            return pts
+    return None
+
+
+def _ring_from(ring: list[tuple[float, float]], pos) -> list[tuple[float, float]]:
+    """The closed ring re-started at its point nearest `pos` (a vertex is inserted there)."""
+    ln = LineString(list(ring) + [ring[0]])
+    s = ln.project(Point(pos))
+    if s <= 1e-9 or s >= ln.length - 1e-9:
+        return list(ring)
+    acc, n = 0.0, len(ring)
+    for i in range(n):
+        a, b = ring[i], ring[(i + 1) % n]
+        d = math.dist(a, b)
+        if acc + d >= s - 1e-9:
+            t = (s - acc) / d if d > 1e-12 else 0.0
+            p = (a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t)
+            rest = list(ring[i + 1:]) + list(ring[:i + 1])
+            if math.dist(p, rest[0]) < 1e-9:
+                return rest
+            return [p] + rest + ([] if math.dist(p, rest[-1]) < 1e-9 else [])
+        acc += d
+    return list(ring)
 
 
 def rest_region(polys, prev_tool: Tool, tool: Tool, overlap: float | None = None) -> MultiPolygon:
@@ -1885,6 +2292,7 @@ def adaptive(setup: Setup, tool: Tool, polys, z_top: float, z_bottom: float, ste
             op.warnings.append(f"adaptive: ~{100 * left / material0:.0f}% of the reachable material was not cleared at z={z:.2f}")
     pb.retract()
     op.params.update(links=links, hops=hops, lifts=lifts, retracts=retracts, fronts=passes_total, max_engagement_angle=round(max_eng_seen, 1))
+    _note_cleared(setup, P, tool, z_top, z_bottom)
     if max_eng_seen > 2.2 * phi:
         op.warnings.append(f"adaptive: engagement rises to {max_eng_seen:.0f}° in corners (target {phi:.0f}°); feed is reduced there")
     return op
@@ -2646,7 +3054,7 @@ def _raster_triangles(P: np.ndarray, I: np.ndarray, zmap: np.ndarray, minx: floa
 
 
 PUBLIC_API = [
-    "regular_polygon","Stock.from_model", "Stock.block", "Stock.cylinder", "Setup", "Setup.view", "Program", "face", "contour", "pocket",
+    "regular_polygon","Stock.from_model", "Stock.block", "Stock.cylinder", "Setup", "Setup.view", "Program", "Program.fit_feeds", "face", "contour", "pocket", "bore",
               "adaptive", "drill", "parallel3d", "chamfer_edges", "vcarve", "rest_region", "section", "silhouette", "outline", "face_outline", "stock_minus", "free_region", "holes", "face_polygon",
               "circle", "rect", "feeds", "apply_feeds", "rotary_rough", "rotary_finish", "rotary_wrap", "rotary_profile",
               "gear_teeth", "radial_map", "tiles_of", "probe_surface", "probe_hole", "probe_edge", "probe_tool"]
@@ -2666,6 +3074,8 @@ def api_reference() -> str:
             sig = "(...)"
         doc = (inspect.getdoc(obj) or "").strip().splitlines()
         lines.append(f"{name}{sig}" + (f"\n    {doc[0]}" if doc else ""))
+    lines.append("Every cutting op also takes load= (0.3..2: the chip load Program.fit_feeds holds for it; softer < 1 < "
+                 "harder) and bodies= (the body name(s) it cuts, for the simulation's checks).")
     lines.append("Hole fields: x, y, diameter, z_top, z_bottom, through, depth. Polygons are shapely (Polygon/MultiPolygon: "
                  ".buffer(d), .difference(g), .union(g), .intersection(g), .area, .bounds, .geoms).")
     return "\n".join(lines)
@@ -2797,6 +3207,9 @@ def apply_feeds(tool: Tool, material: str, machine: Machine | None = None, **kw)
 # =============================================================================
 # Program + GRBL post
 # =============================================================================
+FIT_SKIP_KINDS = ("probe", "drill", "vcarve", "chamfer", "gear_teeth")   # fit_feeds: no radial-engagement model for these
+
+
 class Program:
     """Operations in run order. Each op carries the Setup it was made with; consecutive ops that share a setup run
     together. A change of setup is an operator step (flip or re-clamp the part, re-zero) unless both setups are on
@@ -2804,10 +3217,13 @@ class Program:
 
     gcode_lines: int | None = None                # set by the app when it builds the program
 
-    def __init__(self, setup: Setup, ops: Iterable[Op] = (), name: str = "program"):
+    def __init__(self, setup: Setup, ops: Iterable[Op] = (), name: str = "program", load: float = 1.0):
         self.setup = setup
         self.ops: list[Op] = list(ops)
         self.name = name
+        self.load = load                          # fit_feeds' default chip load scale (softer < 1 < harder); ops may set their own
+        self.auto_fit = True                       # after_simulation() fits the feeds (False: the planned feeds stay)
+        self.feeds_fitted: dict | None = None      # what the last fit_feeds did
 
     def add(self, op: Op, tiles: bool = True) -> Op:
         """Add an operation. tiles=False: with a tiled setup, this op runs ONCE (its moves already cover every tile:
@@ -2856,6 +3272,15 @@ class Program:
             if st.wcs is None:
                 st.wcs = twin.wcs if twin is not None and twin.wcs else (free.pop(0) if free else "G54")
             groups.append(st)
+
+    @property
+    def material(self) -> str:
+        """What is being cut: Program.material_override if set, else the program setup's stock material ("" = unknown)."""
+        return getattr(self, "material_override", None) or self.setup.model_stock.material or self.setup.stock.material
+
+    @material.setter
+    def material(self, value: str) -> None:
+        self.material_override = _material(value)
 
     @property
     def machine(self) -> Machine:
@@ -3114,6 +3539,86 @@ class Program:
                 op.params["feed_limited"] = {"moves": changed, "min_factor": round(fmin, 3), "beyond": len(beyond)}
         return out
 
+    def after_simulation(self, sim) -> dict | None:
+        """The default step after a simulation: fit_feeds on the simulated ops not fitted yet (unless auto_fit is off).
+        Returns fit_feeds' result when it changed anything (then simulate again for MRR and times at the new feeds)."""
+        if not getattr(self, "auto_fit", True):
+            return None
+        res = self.fit_feeds(sim, skip_fitted=True)
+        return res if res["changed"] else None
+
+    def fit_feeds(self, sim, load: float | None = None, max_factor: float = 2.0, floor: float = 0.5, slot: float = 1.0,
+                  margin: float = 2.5, finish_factor: float = 1.0, skip_fitted: bool = False) -> dict:
+        """Feeds that follow the engagement ("constant load"), from a simulation of this program: per level or rising
+        feed move, the radial engagement from the move's simulated removal rate and depth (ae = MRR / (ap x feed x Ø))
+        sets the feed that keeps the tool's planned chip load - its feed at its own stepover, with radial chip thinning
+        (x 1/sqrt(1-(1-2ae)^2) below half the Ø) - scaled by `load` (op "load" override / script value, else this
+        argument, else Program.load; 0.5 softer .. 1.5 harder). `slot` < 1 runs a full slot at that fraction of the chip
+        load (linear from ae 0.5; the latch job's slots at 737-843 mm3/min showed no spindle load, so 1 by default). Capped at `max_factor` x the planned feed, the machine's max feed and
+        `margin` x the tool's rated MRR x load (limit_feeds' slot allowance); never below `floor` x the planned feed.
+        Moves that cut nothing run at the cap; ramps, plunges and helices (anything descending) keep their feeds;
+        finishing contours (contour finish=) are not sped up beyond `finish_factor` (wall finish, deflection). Ops with
+        an explicit per-op feed override, probes, drills and V / chamfer cuts are left alone. Run it on a fresh
+        simulation (the removal rates are at the feeds simulated; a second call with the same result reuses them);
+        skip_fitted: leave ops an earlier fit already set.
+        Returns {"changed": n, "ops": {name: {"moves", "load", "min", "max" (factors), "minutes_before", "minutes_after"}}}."""
+        per = getattr(sim, "per_move", None) or {}
+        at_sim = getattr(sim, "_feeds_at_sim", None)
+        if at_sim is None:
+            at_sim = {i: [m[4] for m in op.moves] for i, op in enumerate(self.ops)}
+            try:
+                sim._feeds_at_sim = at_sim
+            except Exception:  # noqa: BLE001 - a result that takes no attributes: one call per simulation
+                pass
+        mx = self.machine.max_feed or {}
+        fmax = min(mx.get("x", 1e9), mx.get("y", 1e9))
+        rct = lambda a: 1.0 / math.sqrt(1.0 - (1.0 - 2.0 * a) ** 2) if 0 < a < 0.5 else 1.0
+        out: dict = {"changed": 0, "ops": {}}
+        for i, op in enumerate(self.ops):
+            pm = per.get(i)
+            if not pm or not op.moves or op.kind in FIT_SKIP_KINDS or "feed" in (op.overrides or {}) or (
+                    skip_fitted and "feed_fit" in (op.params or {})):
+                continue
+            t = op.tool
+            F0 = min(t.feed, fmax)
+            if F0 <= 0 or t.diameter <= 0:
+                continue
+            ld = float((op.params or {}).get("load") or (load if load is not None else getattr(self, "load", 1.0)) or 1.0)
+            so = min(max(t.stepover, 0.01), 1.0)
+            rated = t.rated_mrr() * margin * ld
+            cap = min(max_factor * F0, fmax)
+            if (op.params or {}).get("finish") and op.kind == "contour":
+                cap = min(cap, finish_factor * F0 * max(ld, 1e-3))
+            mrr, ap = pm.get("mrr"), pm.get("ap")
+            fs = at_sim.get(i) or [m[4] for m in op.moves]
+            t_before = op.time_minutes(self.machine)
+            n, fmin, fmax_seen = 0, math.inf, 0.0
+            for k in range(1, min(len(op.moves), len(mrr))):
+                m, prev = op.moves[k], op.moves[k - 1]
+                if m[0] != FEED or not m[4] or m[3] < prev[3] - 1e-6 or k >= len(fs) or not fs[k]:
+                    continue
+                if mrr[k] <= 1e-3 or ap[k] <= 1e-3:
+                    f = cap                                          # cuts nothing
+                else:
+                    ae_mm = float(mrr[k]) / (float(ap[k]) * fs[k])
+                    ae = min(max(ae_mm / t.diameter, 0.005), 1.0)
+                    der = 1.0 - (1.0 - slot) * min(max((ae - 0.5) / 0.5, 0.0), 1.0)
+                    f = ld * F0 * rct(ae) / rct(so) * der
+                    if rated > 0:
+                        f = min(f, rated / (float(ap[k]) * ae_mm))
+                    f = min(max(f, floor * F0), cap)
+                f = round(f, 1)
+                if abs(f - m[4]) > 0.05:
+                    m[4] = f; n += 1
+                fmin, fmax_seen = min(fmin, f / F0), max(fmax_seen, f / F0)
+            if n:
+                out["ops"][op.name] = {"moves": n, "load": ld, "min": round(fmin, 2), "max": round(fmax_seen, 2),
+                                       "minutes_before": round(t_before, 2), "minutes_after": round(op.time_minutes(self.machine), 2)}
+                out["changed"] += n
+                op.params["feed_fit"] = {"moves": n, "load": ld, "min": round(fmin, 2), "max": round(fmax_seen, 2)}
+        self.feeds_fitted = {"changed": out["changed"], "ops": len(out["ops"])}
+        return out
+
     def gcode(self) -> str:
         post = self.setup.machine.post
         if post == "makera":
@@ -3163,7 +3668,7 @@ def _arc_ok(pts, tol, max_sweep: float = math.pi):
         elif (cr > 0) != (sign > 0):
             return None
         sweep += 2 * math.asin(min(1.0, ch / (2 * r)))
-    if sweep > max_sweep + 1e-6:
+    if sweep > max_sweep - 2e-3:                     # a margin: the posted (rounded) R / end point can add ~0.06°
         return None
     return cx, cy, sign < 0      # cw = clockwise (negative cross) in G17
 
@@ -3789,8 +4294,10 @@ CUT_FIELDS = {
     "face": {**_Z, "angle": ("Pass angle", "°", "num", None), "one_way": ("One way (uniform lay)", "", "bool", None)},
     "contour": {**_Z, "side": ("Side", "", "choice", ["outside", "inside", "on"]), **_LEAVE, "tabs": ("Tabs", "", "int", None),
                 "tab_height": ("Tab height", "mm", "num", None), "tab_width": ("Tab width", "mm", "num", None), **_CLIMB,
-                "lead": ("Lead-in radius", "mm", "num", None), "ramp": ("Ramp angle", "°", "num", None)},
-    "pocket": {**_Z, **_LEAVE, "finish": ("Finishing pass", "", "bool", None), **_CLIMB, "ramp": ("Ramp angle", "°", "num", None)},
+                "lead": ("Lead-in radius", "mm", "num", None), "ramp": ("Ramp angle", "°", "num", None),
+                "tab_ramp": ("Tab ramp angle", "°", "num", None), "finish": ("Finish pass (full depth)", "", "bool", None)},
+    "pocket": {**_Z, **_LEAVE, "finish": ("Finishing pass", "", "bool", None), **_CLIMB, "ramp": ("Ramp angle", "°", "num", None),
+               "strategy": ("Strategy", "", "choice", ["auto", "rings", "bore", "adaptive"])},
     "adaptive": {**_Z, **_LEAVE, **_CLIMB, "helix_diameter": ("Helix diameter", "mm", "num", None),
                  "stay_down": ("Stay down between areas", "", "bool", None), "lift": ("Lift for linking", "mm", "num", None),
                  "hop": ("Hop height", "mm", "num", None), "chip_thinning": ("Chip-thinning feed", "", "bool", None)},
@@ -3805,6 +4312,10 @@ CUT_FIELDS = {
                    "side": ("Cutter side", "", "choice", ["+y", "-y"]), "backlash": ("Backlash (extra depth)", "mm", "num", None),
                    **_CLIMB},
 }
+_LOAD = ("Load (feed fit)", "x", "num", None)   # fit_feeds' chip load scale for this op: 0.5 softer .. 1.5 harder (blank: program's)
+LOAD_RANGE = (0.3, 2.0)
+for _k in ("face", "contour", "pocket", "adaptive", "parallel3d", "rotary_rough", "rotary_finish", "rotary_profile"):
+    CUT_FIELDS.setdefault(_k, {})["load"] = _LOAD
 COLOR_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
 OP_FIELDS = {"face": OVERRIDE_FIELDS, "pocket": OVERRIDE_FIELDS, "adaptive": OVERRIDE_FIELDS,
              "contour": ("rpm", "feed", "plunge", "stepdown"), "drill": ("rpm", "plunge"),
@@ -3812,12 +4323,13 @@ OP_FIELDS = {"face": OVERRIDE_FIELDS, "pocket": OVERRIDE_FIELDS, "adaptive": OVE
              "rotary_finish": ("rpm", "feed", "plunge", "stepover"), "rotary_wrap": OVERRIDE_FIELDS,
              "rotary_profile": OVERRIDE_FIELDS, "gear_teeth": ("rpm", "feed", "plunge", "stepdown"),
              "chamfer": ("rpm", "feed", "plunge", "stepdown"), "vcarve": ("rpm", "feed", "plunge", "stepdown")}
-_OV: dict[str, Any] = {"table": {}, "seen": {}, "depth": 0, "used": set()}
+_OV: dict[str, Any] = {"table": {}, "seen": {}, "depth": 0, "used": set(), "rough": []}
 
 
 def overrides(table: dict | None = None) -> None:
     """Per-operation tool overrides, keyed by operation name ("Pocket", or "Pocket#2" for the second op with that name):
     {"Pocket": {"rpm": 11000, "feed": 600, "plunge": 150, "stepdown": 0.8, "stepover": 0.3}} (stepover = fraction of Ø).
+    "load": 0.5 .. 1.5 scales the chip load Program.fit_feeds holds for that op (softer / harder; a "feed" wins).
     Written by the CAM tab; put it before the operations. Values not given come from the tool / the script."""
     bad = []
     cut_all: dict[str, tuple] = {}
@@ -3837,6 +4349,9 @@ def overrides(table: dict | None = None) -> None:
             elif f_ in OVERRIDE_FIELDS:
                 if isinstance(x, bool) or not isinstance(x, (int, float)) or x <= 0 or (f_ == "stepover" and x > 1):
                     raise CamError(f"overrides: {k}.{f_} = {x!r} (must be > 0{'; stepover is a fraction of Ø ≤ 1' if f_ == 'stepover' else ''})")
+            elif f_ == "load":
+                if isinstance(x, bool) or not isinstance(x, (int, float)) or not (LOAD_RANGE[0] <= x <= LOAD_RANGE[1]):
+                    raise CamError(f"overrides: {k}.load = {x!r} (the feed fit's chip load scale, {LOAD_RANGE[0]:g} .. {LOAD_RANGE[1]:g}; 1 = the tool's)")
             elif f_ in cut_all:
                 _, _, typ, choices = cut_all[f_]
                 ok = (isinstance(x, bool) if typ == "bool" else x in choices if typ == "choice"
@@ -3854,7 +4369,7 @@ def overrides(table: dict | None = None) -> None:
 
 def reset_overrides() -> None:
     """Start of a CAM script run: no overrides, op keys numbered from 1 again."""
-    _OV.update(table={}, seen={}, depth=0, used=set())
+    _OV.update(table={}, seen={}, depth=0, used=set(), rough=[])
     _FIXTURES.update(table={})
 
 
@@ -4139,6 +4654,8 @@ def _overridable(fn, kind: str):
     @functools.wraps(fn)
     def wrapper(*args, **kw):
         stop_point()
+        load_script = kw.pop("load", None) if "load" not in sig.parameters else None
+        bodies_ = kw.pop("bodies", None) if "bodies" not in sig.parameters else None
         if _OV["depth"]:                                   # an op built inside another (rotary_wrap -> pocket): pass through
             return fn(*args, **kw)
         b = sig.bind(*args, **kw)
@@ -4177,6 +4694,18 @@ def _overridable(fn, kind: str):
         op.key, op.base_tool, op.overrides, op.defaults = key, tool, ov, defaults
         op.cut_defaults = {k: (None if v is inspect.Parameter.empty else _plain(v)) for k, v in cut_script.items()}
         op.cut_overrides = dict(cut_ov)
+        if bodies_:                                        # what the op cuts (the simulation checks one contour per body)
+            bl = [bodies_] if isinstance(bodies_, str) or not isinstance(bodies_, (list, tuple, set)) else list(bodies_)
+            op.params["bodies"] = [x if isinstance(x, str) else str(getattr(x, "path", None) or getattr(x, "name", x)) for x in bl]
+        if "load" in cut_meta:                             # fit_feeds' chip load scale: not an argument of the op itself
+            op.cut_defaults["load"] = _plain(load_script)
+            ld = entry.get("load", load_script)
+            if "load" in entry:
+                op.cut_overrides["load"] = entry["load"]
+            if ld is not None:
+                if not (LOAD_RANGE[0] <= float(ld) <= LOAD_RANGE[1]):
+                    raise CamError(f"{name}: load={ld!r} (the feed fit's chip load scale, {LOAD_RANGE[0]:g} .. {LOAD_RANGE[1]:g})")
+                op.params["load"] = float(ld)
         if isinstance(entry.get("color"), str):
             op.color = entry["color"]
             op.color_override = True
@@ -4188,6 +4717,7 @@ def _overridable(fn, kind: str):
 face = _overridable(face, "face")
 contour = _overridable(contour, "contour")
 pocket = _overridable(pocket, "pocket")
+bore = _overridable(bore, "pocket")
 adaptive = _overridable(adaptive, "adaptive")
 drill = _overridable(drill, "drill")
 parallel3d = _overridable(parallel3d, "parallel3d")

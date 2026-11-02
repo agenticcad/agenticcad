@@ -5,6 +5,56 @@ patch bumps fix things, a major bump changes something scripts or workspaces rel
 
 ## [Unreleased]
 
+## [1.7.0] — 2026-11-02
+
+After a two-sided job on the Z1 went badly (a cutter driven into the plate, parts released on 0.9 mm tabs, chamfers
+cut after release, features left unmachined, scrappy paths), every cause was traced to the app and fixed.
+
+### Added
+- **Lessons learnt.** Rules written down after something went wrong, shared by every design (Settings ▸ Lessons: see,
+  edit, retire, add). The assistant gets the ones that apply with the CAM context, every CAM build (as a checklist it
+  answers) and a new conversation on the machine; a lesson tied to a simulation check is named when the simulation
+  catches it broken. It files its own after a failed or stopped run, a refusal it caused or a correction from you.
+  Seeded with what the latch job taught.
+- **Learning from each run.** Once after every CNC run, when the app has gone quiet, a background pass reads the run
+  (outcome, findings, load events), the refusals and what was said about it, draws the lessons out and folds them into
+  the others: adds, merges, sharpens, retires - at most 10 changes, nothing deleted, every new lesson citing its
+  evidence, snapshotted and undoable. Settings ▸ Lessons switches it off.
+- **The simulation as a gate.** It now reports what is left unmachined per body and per feature (a face not taken down,
+  a chamfer or bevel no op cut), the real metal in every tab, when each part becomes tab-held or free and any op that
+  cuts it after that, and simulating a later setup chains the earlier ones in (no more false probe collisions in holes
+  the other side cut). A run waits for a simulation of its operations and shows its errors on the approval card.
+- **Feeds that follow the engagement.** After a simulation the feeds are fitted to the cut: slower where the cutter is
+  buried, faster where it is lightly loaded or in air, holding the tool's chip load with radial chip thinning. Each
+  operation's **Load** (CAM tab ▸ Cut: 0.5 softer .. 1.5 harder) and the program's `load=` scale it; a feed override
+  still wins.
+- **Helical bore** (`bore()`, and pockets bore round holes automatically): 4 × Ø8 register holes 17.9 → 8.1 min at the tool's own feed.
+- **Machine: Recover** (one step back to a known state after a hold or an alarm), **probe down** (G38.3: find the
+  surface, or go into a hole) and the hole Ø for bore centring; **spindle load** (M957, the drive's effort - the real
+  load signal) recorded with runs when switched on (experimental).
+- Analytics flags **load events** (a sudden load, then the spindle running unloaded: a part or tab letting go) and the
+  time spent on ramps and rapids.
+- The conversation **survives a relaunch** (it resumes, and the chat shows it), and a per-design **machine journal**
+  (what was zeroed and how, probe results, refusals, runs) starts every new conversation.
+
+### Changed
+- Toolpaths: tabs ramp on and off at 15° within the plunge feed (no more 2.7 mm drops at cutting feed) and sit on
+  straight runs; finish walls after roughing are one full-depth pass; pockets cut lobe by lobe inside-out, stay down
+  inside cleared ground instead of retracting, and skip ground already cleared. The latch job: 247 → 194 min, 266 → 30
+  retracts, 86 → 0 steep drops, no new gouges.
+- Machine safety: Z0 only from a probe or a touch-off (setting Z clears the tool-length offset in the Z1's firmware);
+  lower_to refuses a typed Z0 and does the last 10 mm at 100 mm/min; 3D-probe routines check their start height,
+  record what the firmware set and no longer report a touch as "not triggered"; a program refuses a work offset that
+  wasn't zeroed this session (a rough zero is enough before its own probe ops); the assistant's console takes reads
+  and settings only; positions in Hold/Alarm are marked unreliable.
+- A chamfer bit's rated removal rate comes from the chamfer it cuts (12 → 95 mm³/min for the 90° bit).
+
+### Fixed
+- The machine camera in the assistant's status (`base64` was not imported).
+- A finish wall's planned full depth no longer reads as a buried cutter; a cell on the wall line no longer reads as a
+  2.9 mm bite.
+- The recorder no longer stores the machine's repeated status reports as new samples.
+
 ## [1.6.0] — 2026-11-02
 
 ### Added

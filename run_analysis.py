@@ -20,11 +20,14 @@ from typing import Any
 
 import numpy as np
 
-VERSION = 1                       # bump when the analysis changes shape: cached results are rebuilt
+VERSION = 2                       # bump when the analysis changes shape: cached results are rebuilt
 WINDOW = 60                       # how many lines behind the reported one the motion can be (planner look-ahead)
 ARC_STEP = 0.5                    # mm between points when arcs are turned into segments for matching
 RAPID = None                      # the commanded feed of a G0 (the machine's own rapid rate)
 SLOW = 0.8                        # a cutting sample below this fraction of its commanded feed is "slowed"
+DIP = 0.993                       # load event: rpm below this fraction of target while cutting at a steady speed ...
+UNLOADED = 1.0015                 # ... then above this within 4 s: the cut suddenly took more, then nothing (2026-11-02:
+                                  # the hub+ring tabs letting go, 0.991 then 1.003, 7 s before the user's stop)
 TEMP_HALT = 70.0                  # the Z1 halts above this spindle temperature (C)
 WORD = re.compile(r"([A-Z])\s*(-?\d*\.?\d+)")
 
@@ -315,6 +318,7 @@ def _analyse(data: dict) -> dict[str, Any]:
         slow_t = sum(s["dt"] for s, x in zip(cut, reached) if x < SLOW)
         cut_t = sum(wts)
         sp = [s["r"]["sp"] for s in mine if s["r"].get("sp")]
+        drive = [s["r"]["sp"][5] for s in cut if len(s["r"].get("sp") or []) > 5 and s["r"]["sp"][5] is not None]
         rpm_ratio = [s["r"]["sp"][0] / s["r"]["sp"][1] for s in cut if s["r"]["sp"][1]]    # while cutting (not spin-up)
         temps = [x[3] for x in sp if x[3] is not None]
         fo = [s["r"]["f"][2] for s in mine if s["r"].get("f") and s["r"]["f"][2] is not None]
@@ -328,6 +332,7 @@ def _analyse(data: dict) -> dict[str, Any]:
             "feed_reached": round(float(np.average(reached, weights=wts)), 3) if cut_t > 0 else None,
             "slow_min": round(slow_t / 60, 2), "rpm_min": _pct(rpm_ratio, 0), "rpm_p5": _pct(rpm_ratio, 5),
             "temp_max": max(temps) if temps else None, "temp_start": temps[0] if temps else None,
+            "drive_max": max(drive) if drive else None, "drive_p95": _pct(drive, 95),
             "feed_ovr": [min(fo), max(fo)] if fo else None, "spindle_ovr": [min(so), max(so)] if so else None,
             "done": bool(mine) and max((s["r"].get("ln") or 0) for s in mine) >= (o.get("end") or 0) - WINDOW,
         })
@@ -379,6 +384,40 @@ def _analyse(data: dict) -> dict[str, Any]:
         pts = _arc_points(m["a"], m["b"], m["c"], m["g"] == 2) if m["g"] in (2, 3) and "c" in m else [m["a"], m["b"]]
         planned.append([m["op"], m["g"], [[round(p[0], 2), round(p[1], 2), round(p[2], 2)] for p in pts[:: max(1, len(pts) // 8)] + ([pts[-1]] if len(pts) > 8 else [])]])
 
+    # ---- load events: a sudden extra load while cutting at a steady speed, followed by running unloaded
+    events_load = []
+    for i, s in enumerate(S):
+        sp = s["r"].get("sp")
+        if s["k"] is None or not sp or not sp[1] or not cutting(s) or sp[0] / sp[1] >= DIP:
+            continue
+        before = [x["r"]["sp"] for x in S[max(0, i - 25):i] if x["r"].get("sp") and s["r"]["t"] - x["r"]["t"] < 5]
+        if len(before) < 8 or any(not b[1] or b[1] != sp[1] or abs(b[0] / b[1] - 1) > 0.005 for b in before[:-2]):
+            continue                                   # spin-up, a speed change, or already disturbed
+        after = [x["r"]["sp"][0] / x["r"]["sp"][1] for x in S[i + 1:i + 20]
+                 if x["r"].get("sp") and x["r"]["sp"][1] and x["r"]["t"] - s["r"]["t"] < 4]
+        if not after or max(after) < UNLOADED:
+            continue
+        if events_load and s["r"]["t"] - events_load[-1]["t"] < 10:
+            continue
+        m = moves[s["k"]]
+        events_load.append({"t": s["r"]["t"], "op": m["op"], "line": m["ln"], "rpm": round(sp[0] / sp[1], 4), "after": round(max(after), 4),
+                            "at": [round(float(v), 2) for v in s["w"]] if s["w"] is not None else None})
+    by_kind: dict[str, float] = {}
+    for s in S:
+        if s["k"] is None or s["r"].get("s") != "Run":
+            continue
+        m = moves[s["k"]]
+        if m["g"] == 0 or not m.get("f"):
+            kk = "rapid"
+        elif m.get("a") is not None and m["b"][2] < m["a"][2] - 0.02:
+            h = math.hypot(m["b"][0] - m["a"][0], m["b"][1] - m["a"][1]); ang = math.degrees(math.atan2(m["a"][2] - m["b"][2], h)) if h > 1e-9 else 90.0
+            kk = "plunge" if h < 1e-3 else "steep descent" if ang > 30 else "ramp"
+        elif m.get("a") is not None and m["b"][2] > m["a"][2] + 0.02:
+            kk = "climb"
+        else:
+            kk = "level cut"
+        by_kind[kk] = by_kind.get(kk, 0.0) + s["dt"]
+
     matched = [s for s in S if s["r"].get("s") == "Run"]
     match_rate = (sum(1 for s in matched if s["k"] is not None) / len(matched)) if matched else None
     dists = [s["dist"] for s in matched if s["k"] is not None]
@@ -398,6 +437,9 @@ def _analyse(data: dict) -> dict[str, Any]:
         "match_median_mm": round(float(np.median(dists)), 3) if dists else None,
         "offset": off, "samples": len(rows), "lines_reached": max((r.get("ln") or 0) for r in rows) if rows else 0,
         "temp_slope_c_per_10min": _temp_slope(temps),
+        "drive_max": max((x[5] for x in sp_all if len(x) > 5 and x[5] is not None), default=None),
+        "time_by_kind_min": {k: round(v / 60, 2) for k, v in sorted(by_kind.items(), key=lambda kv: -kv[1])},
+        "load_events": events_load,
     }
     out = {"run": {k: meta.get(k) for k in ("design", "design_saved", "doc", "program", "setup", "wcs", "file", "started", "ended",
                                               "outcome", "message", "est_min", "duration_min", "air_cut", "tools", "app_version", "machine",
@@ -459,6 +501,21 @@ def findings(a: dict) -> list[dict]:
             out.append({"id": f"ovr-{i}", "kind": "override", "op": i, "severity": "info",
                         "title": f"{o['name']}: feed override {o['feed_ovr'][0]:.0f}-{o['feed_ovr'][1]:.0f}%",
                         "detail": "the feed was changed by hand during this operation: its programmed feed may want the same change"})
+    for e in s.get("load_events") or []:
+        name = a["ops"][e["op"]]["name"] if e["op"] is not None and e["op"] < len(a["ops"]) else "?"
+        out.append({"id": f"load-{e['line']}", "kind": "load", "op": e["op"], "severity": "warn",
+                    "title": f"{name}: sudden load at line {e['line']}, then the spindle ran unloaded",
+                    "detail": f"rpm fell to {e['rpm'] * 100:.1f}% of target and within 4 s rose to {e['after'] * 100:.1f}% at "
+                              f"{e['at']} ({e['t'] / 60:.1f} min in): the cut suddenly met more material and then none - a part "
+                              "shifting or a tab letting go, a chip or a broken tip. Look at the part there.", "lines": [e["line"]]})
+    tk = s.get("time_by_kind_min") or {}
+    tot = sum(tk.values())
+    for kk, lim in (("ramp", 0.15), ("rapid", 0.10)):
+        if tot > 5 and tk.get(kk, 0) > lim * tot:
+            out.append({"id": f"time-{kk}", "kind": "path", "op": None, "severity": "info",
+                        "title": f"{tk[kk]:.1f} of {tot:.0f} min spent on {kk}s ({tk[kk] / tot * 100:.0f}%)",
+                        "detail": ("ramp entries per level and over cleared area: ramp once per region and stay down"
+                                   if kk == "ramp" else "retracts and repositioning at the machine's rapid rate: link inside cleared area")})
     if s.get("match_rate") is not None and s["match_rate"] < 0.8:
         out.append({"id": "match", "kind": "data", "op": None, "severity": "info",
                     "title": f"Only {s['match_rate'] * 100:.0f}% of the samples could be placed on the program",

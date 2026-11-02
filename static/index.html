@@ -139,6 +139,7 @@
   .msg.assistant pre code { padding:0; }
   .msg.system { color:var(--muted); font-size:12px; align-self:center; text-align:center; }
   .msg.error { color:var(--err); font-size:12px; }
+  .msg.muted { color:var(--muted); font-size:12px; align-self:center; border-top:1px solid var(--line); padding-top:6px; }
   .tool { border:1px solid var(--line); border-radius:8px; font-size:12px; overflow:hidden; }
   /* WebKit (the desktop app's window) drops a <summary> whose display is not list-item/block, leaving an empty bordered line —
      so the summary stays a block and the flex row lives in a child span */
@@ -380,6 +381,20 @@
   #anim-panel .ap-ok { color:var(--ok); margin-top:4px; } #anim-panel .ap-bad { color:var(--err); margin-top:4px; }
   #anim-panel .ap-hit { padding:3px 6px; border-radius:5px; cursor:pointer; } #anim-panel .ap-hit:hover { background:var(--panel2); } #anim-panel .ap-hit span { color:var(--muted); }
   .set-grid { display:grid; grid-template-columns:120px 1fr; gap:8px 10px; align-items:center; font-size:12px; }
+  .les-dream { border:1px dashed var(--line); border-radius:8px; padding:8px 10px; margin-bottom:8px; display:flex; flex-direction:column; gap:6px; font-size:12px; }
+  .les-dream .row { display:flex; align-items:center; gap:8px; flex-wrap:wrap; } .les-dream label { display:flex; align-items:center; gap:6px; color:var(--text); margin-right:auto; }
+  .les-dream input[type=checkbox], .les input[type=checkbox] { width:auto; height:auto; margin:0; }
+  .les-dream button, .les .row button { width:auto; height:auto; white-space:nowrap; }
+  .les .row { display:flex; align-items:center; gap:6px; } .les .row select { width:auto; }
+  .les-intro { font-size:12px; margin:-2px 0 8px; }
+  .les-list { display:flex; flex-direction:column; gap:8px; max-height:60vh; overflow:auto; }
+  .les { border:1px solid var(--line); border-radius:8px; padding:8px; display:flex; flex-direction:column; gap:6px; font-size:12px; }
+  .les.off { opacity:.55; } .les-hd { display:flex; gap:8px; align-items:center; } .les-hd input { flex:1; font-weight:600; }
+  #modal .les textarea, .les textarea { width:100%; box-sizing:border-box; resize:vertical; font:12px/1.4 inherit; font-family:inherit; min-height:0; height:auto; padding:6px; }
+  #modal .les-dream label { display:flex; flex-direction:row; align-items:center; gap:6px; }
+  #modal .les-dream input[type=checkbox] { width:auto; flex:none; margin:0; }
+  #modal .les-dream .row, #modal .les .row { border:0; padding:0; margin:0; justify-content:flex-start; }
+  #modal .les-dream label { margin-right:auto; }
   .set-grid label { color:var(--muted); }
   .set-grid textarea { min-height:70px !important; }
   .set-grid input, .set-grid select, .set-grid textarea { width:100%; background:var(--bg); color:var(--text); border:1px solid var(--line); border-radius:6px; padding:6px; font:inherit; }
@@ -920,6 +935,7 @@
   <span id="mv-msg" class="ms-msg"></span>
   <div class="ms-right">
     <button class="btn" id="mv-unlock" title="Clear the Alarm ($X); home before moving">Unlock</button>
+    <button class="btn pri" id="mv-recover" title="Back to a known state in one step: abort what was running, unlock, Control on, home (Z first)">Recover</button>
     <button class="btn" id="ms-pause" title="Finish the moves in hand, then stop">Pause</button>
     <button class="btn pri" id="ms-resume">Resume</button>
     <button class="btn" id="ms-abort" title="Stop the program and the spindle (the machine stays homed)">Stop program</button>
@@ -1119,8 +1135,10 @@
       <optgroup label="Inside corner (pocket)"><option value="inside_back_left">Inside corner · back left</option><option value="inside_back_right">Inside corner · back right</option><option value="inside_front_right">Inside corner · front right</option><option value="inside_front_left">Inside corner · front left</option></optgroup>
       <optgroup label="Centre"><option value="pocket_center">Pocket / bore centre</option><option value="boss_center">Boss centre</option></optgroup></select></div>
     <div class="row"><span class="inp" style="width:74px"><b>X</b><input type="number" id="mv-p3-x" value="20" min="0" max="80" step="1"></span><span class="inp" style="width:74px"><b>Y</b><input type="number" id="mv-p3-y" value="20" min="0" max="80" step="1"></span>
-      <span class="inp" style="width:96px"><b>depth</b><input type="number" id="mv-p3-d" value="2" min="0.5" max="10" step="0.5"></span><span class="inp" style="width:86px"><b>Ø</b><input type="number" id="mv-p3-dia" value="2" min="0.5" max="10" step="0.1"></span>
+      <span class="inp" style="width:96px"><b>depth</b><input type="number" id="mv-p3-d" value="2" min="0.5" max="10" step="0.5"></span><span class="inp" style="width:96px" title="the probe's ball diameter"><b>ball Ø</b><input type="number" id="mv-p3-dia" value="2" min="0.5" max="6" step="0.1"></span>
+      <span class="inp" style="width:96px" id="mv-p3-hole-w" title="pocket / bore centre: the hole's diameter (sizes the search)"><b>hole Ø</b><input type="number" id="mv-p3-hole" min="1" max="160" step="0.1" placeholder="–"></span>
       <button class="btn sm pri" data-act="p3m">Probe</button></div>
+    <div class="row"><span class="muted sm">Probe down (G38.3, stops on contact)</span><button class="btn sm" data-act="pdsurf" title="Find the surface below (up to 20 mm) and back off 5 mm above it">Find the surface</button><button class="btn sm" data-act="pdhole" title="Go down to the depth below Z0 inside a hole; stops (and backs off) if it touches on the way">Into the hole</button></div>
     <p class="muted sm" id="mm-p3-hint"></p></div>
   <div class="mcard"><div class="h">Console</div>
     <div class="row"><input id="mm-con" class="inp mono" placeholder="one line, e.g. G0 X10 Y10" spellcheck="false" style="flex:1"><button class="btn sm" id="mm-con-send" data-act="console">Send…</button></div>
@@ -1128,7 +1146,8 @@
   <div class="mcard"><div class="h">Run a file</div>
     <div class="row"><button class="btn sm" data-act="file">Choose a .nc file…</button><span class="muted sm">same checks as a CAM program; Air cut (Run step) applies</span></div>
     <input type="file" id="mm-filepick" accept=".nc,.gcode,.ngc,.tap,.txt" style="display:none"></div>
-  <div class="mcard"><div class="h">Limits</div><div class="row"><span class="muted">Z floor</span><span class="inp" style="width:84px"><input type="number" id="mv-zfloor" step="0.5" min="0" max="100">mm</span><span class="muted sm">jogging Z down never goes below this above work Z0</span></div></div>
+  <div class="mcard"><div class="h">Limits</div><div class="row"><span class="muted">Z floor</span><span class="inp" style="width:84px"><input type="number" id="mv-zfloor" step="0.5" min="0" max="100">mm</span><span class="muted sm">jogging Z down never goes below this above work Z0</span></div>
+    <label class="row" style="gap:6px" title="Ask the spindle for its drive effort (M957) twice a second while it runs; recorded with runs as the real load signal (rpm hides load until the drive saturates)"><input type="checkbox" id="mv-loadpoll"> Record spindle load (M957)<span class="muted sm">experimental: watch the first run</span></label></div>
   <div class="mcard"><div class="h">Log</div><div id="mv-log" class="mv-log"></div></div>
 </div>
 </div></div>
@@ -5510,7 +5529,7 @@ renderer.domElement.addEventListener('pointerup', ev => {
 
 // ------------------------------------------------------------------ settings (model, effort, MCP servers)
 document.getElementById('settings-btn').onclick = () => openSettings();
-const SET_TABS = [['general', 'General'], ['mcp', 'MCP servers'], ['ext', 'Extensions'], ['output', 'Drawings & printing'], ['machines', 'Machines'], ['fixtures', 'Fixtures'], ['tools', 'Tools'], ['phone', 'Phone control']];
+const SET_TABS = [['general', 'General'], ['mcp', 'MCP servers'], ['ext', 'Extensions'], ['output', 'Drawings & printing'], ['machines', 'Machines'], ['fixtures', 'Fixtures'], ['tools', 'Tools'], ['lessons', 'Lessons'], ['phone', 'Phone control']];
 let lastSetTab = 'general';
 async function openSettings(tab) {
   const [{ settings, models }, status] = await Promise.all([fetch('/api/settings').then(r => r.json()), fetch('/api/agent/status').then(r => r.json())]);
@@ -5560,6 +5579,7 @@ async function openSettings(tab) {
   <div class="set-pane" data-pane="machines"></div>
   <div class="set-pane" data-pane="fixtures"></div>
   <div class="set-pane" data-pane="tools"></div>
+  <div class="set-pane" data-pane="lessons"></div>
   <div class="set-pane" data-pane="phone"></div>
   <div class="set-err" id="s-err"></div>`;
   const showTab = k => { lastSetTab = k; for (const b of d.querySelectorAll('[data-tab]')) b.classList.toggle('on', b.dataset.tab === k); for (const p of d.querySelectorAll('[data-pane]')) p.classList.toggle('on', p.dataset.pane === k); };
@@ -5568,6 +5588,7 @@ async function openSettings(tab) {
   const libEd = libraryEditor(d.querySelector('[data-pane=machines]'), d.querySelector('[data-pane=tools]'));
   renderFixturesPane(d.querySelector('[data-pane=fixtures]'));
   renderPhonePane(d.querySelector('[data-pane=phone]'));
+  renderLessonsPane(d.querySelector('[data-pane=lessons]'));
   const extPane = d.querySelector('[data-pane=ext]');
   const renderExt = () => {
     extPane.innerHTML = `<div class="set-h">Extensions<span class="muted">Python files that extend the app: ribbon panels, agent tools, script helpers, build checks</span></div>`;
@@ -6184,6 +6205,7 @@ function connect() {
         if (codeWhich === 'cam' && (!codeDirty || m.source === 'user')) { codeEl.value = camCode; codeDirty = false; }
         document.getElementById('codeerr').textContent = '';
         if (m.source === 'user') addMsg('system', 'CAM program rebuilt from Code panel');
+        if (m.source === 'fit_feeds' && m.program) addMsg('system', `Feeds fitted to the engagement: ${m.program.time.toFixed(1)} min (per-op Load in the CAM tab's Cut panel goes softer or harder)`);
         if (m.source === 'agent' && m.program) addMsg('system', `CAM program built: ${m.program.ops.length} ops · ${m.program.time.toFixed(1)} min` + (m.program.warnings.length ? ` · ${m.program.warnings.length} warning(s), see CAM tab` : ''));
         break;
       case 'cam_error': for (const k of Object.keys(fxPending)) delete fxPending[k];
@@ -6195,6 +6217,12 @@ function connect() {
       case 'build_error': document.getElementById('codeerr').textContent = m.text; break;
       case 'status': busy = m.busy; setBusy(busy); if (m.agent_ready) setStatus('agent ready'); else if (m.auth_required) showAuthBanner(m.auth_required); else if (m.agent_ready === false) setStatus('agent not connected'); break;
       case 'agent_ready': setStatus('agent ready'); break;
+      case 'chat_history':                       // a relaunch: the conversation the assistant resumes (only into an empty chat)
+        if (!messagesEl.children.length && m.items && m.items.length) {
+          for (const it of m.items) { if (it.role === 'user') addUserMsg(it.text, { faces: [], bodies: [] }); else addMsg('assistant', it.text); }
+          addMsg('muted', 'Earlier conversation: the assistant still has it and carries on from here.');
+        }
+        break;
       case 'chat_reset':                         // File ▸ New: a clean conversation
         messagesEl.innerHTML = ''; toolEls.clear(); currentBubble = null; currentText = '';
         thinkingEl.style.display = 'none';
@@ -6411,6 +6439,57 @@ function hideFixturePreview() { if (fixturePreview) { stageGroup.remove(fixtureP
 function loadQrLib() {
   if (window.qrcode) return Promise.resolve();
   return new Promise((res, rej) => { const sc = document.createElement('script'); sc.src = 'https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js'; sc.onload = res; sc.onerror = () => rej(new Error('could not load the QR code library')); document.head.appendChild(sc); });
+}
+// lessons learnt: what the assistant reads before CAM and machine work (it adds them after failures; edit, retire, add here)
+async function renderLessonsPane(pane, data) {
+  data = data || await fetch('/api/lessons').then(r => r.json()).catch(() => ({ lessons: [], checks: [] }));
+  const rows = data.lessons || [], act = rows.filter(r => r.status === 'active').length;
+  const opt = (cur) => ['', ...(data.checks || [])].map(c => `<option value="${c}" ${c === (cur || '') ? 'selected' : ''}>${c || 'no check'}</option>`).join('');
+  pane.innerHTML = `<div class="set-h">Lessons learnt<span class="muted">${act} active</span><button class="btn small" data-a="new" style="margin-left:auto">+ Add</button></div>
+    <div class="muted les-intro">The assistant gets the ones that apply with the CAM context, every CAM build and a new conversation on the machine, and adds its own after a failure. A lesson with a check is named when the simulation catches it broken.</div>
+    <div class="les-dream" id="les-dream"></div>
+    <div class="les-list">${rows.slice().reverse().map(r => `<div class="les ${r.status === 'retired' ? 'off' : ''}" data-id="${r.id}">
+      <div class="les-hd"><b>${r.id}</b><input data-f="title" value="${esc(r.title)}"><span class="muted sm">${esc(r.source)} · ${esc(r.updated)}</span></div>
+      <textarea data-f="rule" rows="2">${esc(r.rule)}</textarea>
+      <textarea data-f="why" rows="2" class="muted">${esc(r.why)}</textarea>
+      <div class="row"><input data-f="tags" value="${esc((r.tags || []).join(', '))}" title="where it applies: cam, machine, probe, tabs, chamfer, flip, a machine, a material" style="flex:1">
+        <select data-f="check" title="the simulation check that catches it">${opt(r.check)}</select>
+        <button class="btn small" data-a="save">Save</button><button class="btn small" data-a="${r.status === 'retired' ? 'activate' : 'retire'}">${r.status === 'retired' ? 'Use again' : 'Retire'}</button><button class="btn small" data-a="delete" title="delete for good">✕</button></div></div>`).join('') || '<div class="muted">No lessons yet.</div>'}</div>`;
+  const post = async b => { const r = await fetch('/api/lessons', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(r => r.json());
+    if (r.error) return addMsg('error', r.error); renderLessonsPane(pane, { ...data, lessons: r.lessons }); };
+  pane.querySelectorAll('.les [data-a]').forEach(b => b.onclick = () => {
+    const el = b.closest('.les'), id = el.dataset.id, a = b.dataset.a, v = f => el.querySelector(`[data-f=${f}]`).value;
+    if (a === 'save') return post({ action: 'update', id, title: v('title'), rule: v('rule'), why: v('why'), tags: v('tags'), check: v('check') });
+    if (a === 'delete' && !confirm(`Delete ${id} for good? Retire keeps it out of use but on record.`)) return;
+    post({ action: a, id });
+  });
+  renderDreams(pane.querySelector('#les-dream'), () => renderLessonsPane(pane));
+  pane.querySelector('[data-a=new]').onclick = async () => {
+    const d = document.createElement('div');
+    d.innerHTML = `<div class="set-grid"><label>Title</label><input id="ln-t" placeholder="Short name"><label>Rule</label><textarea id="ln-r" rows="3" placeholder="What to do, so it doesn't happen again"></textarea>
+      <label>Why</label><textarea id="ln-w" rows="2" placeholder="The evidence: date, run, what happened"></textarea><label>Tags</label><input id="ln-g" value="cam" placeholder="cam, machine, probe, tabs, chamfer, flip, makera-z1, aluminium">
+      <label>Check</label><select id="ln-c">${opt('')}</select></div>`;
+    const ok = await openModal('Add a lesson', d, [['Cancel', null], ['Add', () => true, true]]);
+    if (ok) post({ action: 'add', title: d.querySelector('#ln-t').value, rule: d.querySelector('#ln-r').value, why: d.querySelector('#ln-w').value, tags: d.querySelector('#ln-g').value, check: d.querySelector('#ln-c').value });
+  };
+}
+// the background consolidation of the lessons ("dreaming", dream.py): when it last ran, what it changed, run / undo / off
+async function renderDreams(el, refresh) {
+  const d = await fetch('/api/dreams').then(r => r.json()).catch(() => null);
+  if (!d) { el.innerHTML = ''; return; }
+  const last = (d.log || [])[0], when = t => new Date(t * 1000).toLocaleString();
+  const ch = last ? (last.changes || []).filter(c => !c.skipped) : [];
+  const desc = c => c.op === 'merge' ? `merged ${c.ids.join(' + ')} into ${c.into}` : c.op === 'rewrite' ? `reworded ${c.id}` : c.op === 'retire' ? `retired ${c.id}` : `added ${c.id}`;
+  el.innerHTML = `<div class="row" style="gap:8px;flex-wrap:wrap">
+      <label class="row" style="gap:6px" title="Once after every CNC run, when the app has been quiet for about 10 minutes: Claude reads the run (outcome, findings, load events), the refusals and what was said about it, draws the lessons out and folds them into these - adds, merges, sharpens, retires; at most 10 changes, nothing deleted, undoable."><input type="checkbox" data-d="auto" ${d.enabled ? 'checked' : ''}> Learn from each CNC run (in the background, after it)</label>
+      <button class="btn small" data-d="run" ${d.running ? 'disabled' : ''} title="Run the pass now: the runs it hasn't looked at yet, or everything since the last pass">${d.running ? 'Learning…' : 'Run it now'}</button>
+      <button class="btn small" data-d="undo" ${last && !last.undone ? '' : 'disabled'}>Undo last</button></div>
+    <div class="muted sm">${last ? `Last pass ${when(last.t)}${(last.runs || []).length ? ' after ' + last.runs.length + ' run' + (last.runs.length > 1 ? 's' : '') : ''}${last.undone ? ' (undone)' : ''}: ${esc(last.summary || last.error || 'no changes')}${ch.length ? ' · ' + ch.map(desc).join(', ') : ''}` : 'No run looked at yet.'}${d.last_check && !d.last_check.due ? ` · next check: ${esc(d.last_check.why)}` : ''}</div>`;
+  const post = async action => { const r = await fetch('/api/dreams', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action }) }).then(r => r.json());
+    if (r.error) addMsg('error', r.error); refresh(); };
+  el.querySelector('[data-d=auto]').onchange = e => post(e.target.checked ? 'enable' : 'disable');
+  el.querySelector('[data-d=run]').onclick = e => { e.target.disabled = true; e.target.textContent = 'Learning…'; post('run'); };
+  el.querySelector('[data-d=undo]').onclick = () => { if (confirm('Put the lessons back as they were before the last pass?')) post('undo'); };
 }
 async function renderPhonePane(pane) {
   const st = await fetch('/api/remote').then(r => r.json()).catch(() => null);
@@ -6634,6 +6713,7 @@ function mvStrip(st) {
   mvEl('mv-halt').disabled = !conn;
   const show = (id, on) => { mvEl(id).style.display = on ? '' : 'none'; };
   show('mv-unlock', conn && s.state === 'Alarm');
+  show('mv-recover', conn && !jobOn && ['Alarm', 'Hold'].includes(s.state));
   show('ms-pause', jobOn && job.stage === 'running'); show('ms-resume', jobOn && job.stage === 'paused'); show('ms-abort', jobOn);
   show('mv-hold', conn && !jobOn); show('mv-resume', conn && !jobOn && (s.state === 'Hold' || s.state === 'Pause'));
   mvEl('mv-resume').disabled = !st.armed;
@@ -6940,6 +7020,8 @@ function mvManual(st) {
   mvEl('mm-arow').style.display = st.fourth ? '' : 'none';            // A0 / Shrink A / 4th-axis Z probe: machines with the module only
   if (st.fourth) mvEl('mstep-manual').querySelector('[data-act=rotz]').disabled = !(ready && s.tool && s.tool.number === 0 && st.tool_ok && st.rotary && st.rotary.offset);
   mvEl('mm-p3-hint').textContent = MV_P3_HINT[mvEl('mv-p3-kind').value.split('_')[0]];
+  mvEl('mv-p3-hole-w').style.display = mvEl('mv-p3-kind').value === 'pocket_center' ? '' : 'none';
+  const lp = mvEl('mv-loadpoll'); if (lp && st.spindle_load_poll) lp.checked = !!st.spindle_load_poll.on;
   const zf = mvEl('mv-zfloor'); if (document.activeElement !== zf) zf.value = st.z_floor;
   const log = mvEl('mv-log'), stick = log.scrollTop + log.clientHeight >= log.scrollHeight - 4;
   log.textContent = [...(st.events || []), ...(st.log || []).slice(-12).map(l => '  ' + l)].join('\n');
@@ -6954,14 +7036,14 @@ function mvRender(st) {
 const MV_P3_HINT = {
   outside: 'Start about 5 mm above the stock and 5 mm in from that corner. The machine touches the top, steps out past each edge by X / Y, drops to the depth and probes back in: the corner becomes work X0 Y0, the top Z0.',
   inside: 'Start about 5 mm above the top surface, just outside the pocket corner (diagonally). It moves in by X / Y, drops to the depth and probes back to the two walls: the corner becomes X0 Y0, the top Z0.',
-  pocket: 'Start inside the pocket or bore, near the middle, at least 2 mm below its edge. X / Y: more than half the width (0 skips that axis). The centre becomes X0 Y0; Z is not set.',
+  pocket: 'Over the middle of the hole: Lower to 5, then Into the hole (down to the depth, stopping if it touches), then Probe with the hole Ø. The centre becomes X0 Y0; Z is not set.',
   boss: 'Start about 5 mm above the middle of the boss. X / Y: more than half its width plus clearance (0 skips that axis). The centre becomes X0 Y0, the top Z0.' };
-async function mvProbe(kind, x, y, depth, dia) {
+async function mvProbe(kind, x, y, depth, dia, hole_dia) {
   const label = kind.replace(/_/g, ' ');
   if (!await mvAsk('3D probe', `<div><b>Makera's 3D probe: ${esc(label)}</b> (X ${x} · Y ${y} · depth ${depth} · ball Ø${dia})</div>
     <div>The machine moves and probes on its own from where the head is now and overwrites the work origin.</div>
     <div class="warn">Keep a hand on the e-stop. STOP here halts it at once.</div>`, 'Probe')) return;
-  mvPost({ action: 'probe_3d', kind, x, y, depth, dia });
+  mvPost({ action: 'probe_3d', kind, x, y, depth, dia, ...(kind === 'pocket_center' && hole_dia ? { hole_dia } : {}) });
 }
 async function mvRunOps() {
   const ops = [...MVP.sel].sort((a, b) => a - b), air = mvEl('mvp-air').checked ? +mvEl('mvp-air-mm').value : 0;
@@ -7009,6 +7091,7 @@ async function mvRunFile(file) {
   mvEl('mv-hold').onclick = () => mvPost({ action: 'hold' });
   mvEl('mv-resume').onclick = () => mvPost({ action: 'resume' });
   mvEl('mv-unlock').onclick = () => mvPost({ action: 'unlock' });
+  mvEl('mv-recover').onclick = async () => { if (await mvAsk('Recover', '<div>Back to a known state in one step: abort whatever was running, clear the alarm ($X), turn Control on and home (Z goes up first, then X and Y).</div><div class="warn">Make sure nothing is in the way of Z going up. Not for an e-stop or a cover alarm: fix those first.</div>', 'Recover')) mvPost({ action: 'recover' }); };
   mvEl('ms-pause').onclick = () => mvPost({ action: 'job_pause' });
   mvEl('ms-resume').onclick = () => mvPost({ action: 'job_resume' });
   mvEl('ms-abort').onclick = () => mvPost({ action: 'job_abort' });
@@ -7029,6 +7112,7 @@ async function mvRunFile(file) {
   mvEl('mv-cam-on').onchange = e => { MV.camOn = e.target.checked; mvCamera(); };
   mvEl('mv-cam-img').onerror = () => { const img = mvEl('mv-cam-img'); delete img.dataset.on; setTimeout(mvCamera, 2000); };
   mvEl('mv-zfloor').onchange = e => mvPost({ action: 'z_floor', z: +e.target.value });
+  mvEl('mv-loadpoll').onchange = e => mvPost({ action: 'spindle_load_poll', on: e.target.checked });
   mvEl('mv-p3-kind').onchange = () => MV.st && mvRender(MV.st);
   mvEl('mvp-air').onchange = mvEl('mvp-air-mm').onchange = () => MV.st && mvRender(MV.st);
   mvEl('mvp-run').onclick = () => mvRunOps();
@@ -7053,9 +7137,11 @@ async function mvRunFile(file) {
     }
     if (a === 'goto-corner') { if (await mvAsk('Go to the corner', `<div>Move to machine X ${(+b.dataset.x).toFixed(2)} Y ${(+b.dataset.y).toFixed(2)} at 300 mm/min. Z goes up to the top of travel first if it isn't there.</div><div class="muted">This is where the CAM setup places the block. Check on the camera that the probe ends up over the block, 5 mm in from the corner.</div>`, 'Go')) mvPost({ action: 'goto_xy_raised', x: +b.dataset.x, y: +b.dataset.y, feed: 300 }); return; }
     if (a === 'lower' || a === 'mlower') { const h = a === 'lower' ? +b.dataset.h : num('mm-lower');
-      if (await mvAsk('Lower Z', `<div>Lower Z only (X/Y stay) to <b>${h} mm above work Z0</b>, at 300 mm/min.</div><div class="muted">Watch the camera; Hold or STOP if it looks wrong.</div>`, 'Lower')) mvPost({ action: 'lower_to', z: h }); return; }
+      if (await mvAsk('Lower Z', `<div>Lower Z only (X/Y stay) to <b>${h} mm above work Z0</b>: 300 mm/min to 10 mm above that, the last 10 mm at 100 mm/min. Only on a Z0 probed or touched off this session.</div><div class="muted">Watch the camera; Hold or STOP if it looks wrong.</div>`, 'Lower')) mvPost({ action: 'lower_to', z: h }); return; }
     if (a === 'p3') { const [kind] = CORNERS[MV.corner]; return mvProbe(kind, +b.dataset.x, +b.dataset.y, num('mz-depth'), num('mz-dia')); }
-    if (a === 'p3m') return mvProbe(mvEl('mv-p3-kind').value, num('mv-p3-x'), num('mv-p3-y'), num('mv-p3-d'), num('mv-p3-dia'));
+    if (a === 'p3m') return mvProbe(mvEl('mv-p3-kind').value, num('mv-p3-x'), num('mv-p3-y'), num('mv-p3-d'), num('mv-p3-dia'), opt('mv-p3-hole'));
+    if (a === 'pdsurf') { if (await mvAsk('Find the surface', '<div>The 3D probe goes straight down (G38.3, up to 20 mm) until it touches, then backs off 5 mm above the surface. No alarm if it finds nothing.</div><div class="warn">The 3D probe must be fitted and over the part.</div>', 'Probe down')) mvPost({ action: 'probe_descend', dist: 20 }); return; }
+    if (a === 'pdhole') { const d = num('mv-p3-d'); if (await mvAsk('Into the hole', `<div>The 3D probe goes down to <b>${d} mm below work Z0</b> (G38.3). If it touches anything on the way it stops and backs off 1 mm: it isn't over the hole.</div>`, 'Go down')) mvPost({ action: 'probe_descend', to_z: -d, dist: d + 10 }); return; }
     if (a === 'anchor') { if (await mvAsk('Origin = Anchor 1', '<div>Work X0 Y0 = Anchor 1, the L-bracket\'s inside corner (G10 L2 P0, as MakeraStudio does). Z is not touched. Nothing moves.</div>', 'Set')) mvPost({ action: 'origin_anchor' }); return; }
     if (a === 'autoz') { if (await mvAsk('Auto Z probe', '<div>Makera\'s auto Z probe (M495) here: the wired probe (T0) goes down until it touches, and work Z0 is set on that surface.</div><div class="warn">The probe must be over the stock.</div>', 'Probe')) mvPost({ action: 'auto_z_probe' }); return; }
     if (a === 'x0y0' || a === 'z0' || a === 'settyped') {
