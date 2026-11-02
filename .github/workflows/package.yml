@@ -48,7 +48,7 @@ jobs:
         run: |
           want=$([ "${{ matrix.arch }}" = x64 ] && echo x86_64 || echo arm64)
           bad=$(find build/agenticcad/macos/app \( -name '*.so' -o -name '*.dylib' \) | while read -r f; do
-            a=" $(lipo -archs "$f" 2>/dev/null) "; case "$a" in *" $want "*) ;; *) echo "$f:$a";; esac; done)
+            lipo -archs "$f" 2>/dev/null | grep -qw "$want" || echo "$f: $(lipo -archs "$f" 2>/dev/null)"; done)
           [ -z "$bad" ] || { echo "not built for $want:"; echo "$bad"; exit 1; }; echo "all modules include $want"
       - name: rename with architecture
         run: for f in dist/*.pkg; do mv "$f" "${f%.pkg}-macOS-${{ matrix.arch }}.pkg"; done; ls -la dist
