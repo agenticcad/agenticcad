@@ -19,7 +19,7 @@ from typing import Any
 
 import numpy as np
 
-VERSION = 1
+VERSION = 2
 SPECIFIC_ENERGY = {"aluminium": 0.7, "brass": 1.4, "mild-steel": 2.7, "acrylic": 0.15, "hdpe": 0.1, "delrin": 0.15,
                    "plywood": 0.08, "mdf": 0.08, "hardwood": 0.1, "softwood": 0.06, "foam": 0.02, "fr4": 0.4,
                    "carbon-fibre": 0.6}
@@ -101,7 +101,8 @@ def estimate(run_dir: Path, workspace: Path, model_code: str | None = None, conf
     if not code:
         return {"error": "the run's design isn't saved with it and no design is open to rebuild it"}
     try:
-        model = ck.run_script(code, workspace=workspace, config=meta_cfg if own.exists() else (meta_cfg or config))
+        # draft threads: a thread's flanks don't change what any move removes, and the real ones took 40 of the 57 s
+        model = ck.run_script(code, workspace=workspace, config=meta_cfg if own.exists() else (meta_cfg or config), threads="draft")
         lib = Library(workspace)
         ns = {"__name__": "__cam__"}
         exec("from cam_kernel import *\nimport math\nfrom math import *\nimport cam_kernel as cam\n", ns)

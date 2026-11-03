@@ -937,15 +937,17 @@ def _section_any(shape: Shape, z: float, tol: float) -> MultiPolygon:
     return _section(shape, z, tol)
 
 
-def _mesh_of(shape: Shape) -> tuple[np.ndarray, np.ndarray]:
-    """The shape's slicing triangulation: vertices (n x 3) and triangles (m x 3), kept per shape."""
+def _mesh_of(shape: Shape, angular: float = 0.2) -> tuple[np.ndarray, np.ndarray]:
+    """The shape's slicing triangulation: vertices (n x 3) and triangles (m x 3), kept per shape. angular: the angular
+    deflection (rad) - 0.2 is plenty for flat-walled sections, a 3D finish over a curved surface needs the display
+    "fine" 0.03 (at 0.2 the chords of a R20 dome sat 0.024 mm inside it and the tool followed them in)."""
     def make():
         from OCP.BRep import BRep_Tool
         from OCP.BRepMesh import BRepMesh_IncrementalMesh
         from OCP.BRepTools import BRepTools
         from OCP.TopLoc import TopLoc_Location
         BRepTools.Clean_s(shape.wrapped)
-        BRepMesh_IncrementalMesh(shape.wrapped, MESH_DEFLECTION, False, 0.2, True)
+        BRepMesh_IncrementalMesh(shape.wrapped, MESH_DEFLECTION, False, angular, True)
         P: list[tuple[float, float, float]] = []
         I: list[tuple[int, int, int]] = []
         for f in shape.faces():
@@ -962,7 +964,7 @@ def _mesh_of(shape: Shape) -> tuple[np.ndarray, np.ndarray]:
                 a, b, c = tri.Triangle(i).Get()
                 I.append((base + a - 1, base + b - 1, base + c - 1))
         return np.array(P, dtype=float).reshape(-1, 3), np.array(I, dtype=np.int64).reshape(-1, 3)
-    return _cached(_MESH_CACHE, (hash(shape), "mesh"), shape, make, 32)
+    return _cached(_MESH_CACHE, (hash(shape), "mesh", float(angular)), shape, make, 32)
 
 
 def _slice_mesh(P: np.ndarray, I: np.ndarray, z: float) -> np.ndarray:
@@ -3612,7 +3614,7 @@ def parallel3d(setup: Setup, tool: Tool, shape: Shape | None = None, model: ck.M
     nx = int((maxx - minx) / res) + 2; ny = int((maxy - miny) / res) + 2
     zmap = np.full((ny, nx), z_bottom, dtype=np.float64)
     for _, sh in ck.coerce_bodies(shape):               # the slicing mesh (0.01 mm, kept per shape): a display-quality
-        P, I = _mesh_of(sh)                             # build_model("fine") re-meshed and measured the part on every call
+        P, I = _mesh_of(sh, 0.03)                       # build_model("fine") re-meshed and measured the part on every call
         _raster_triangles(P, I, zmap, minx, miny, res)
     zmap = np.clip(zmap, z_bottom, None)
     # drop-cutter on the height map: the tip sits as low as it can with no part of the tool (cutting shape, neck,
