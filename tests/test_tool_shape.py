@@ -229,3 +229,18 @@ def test_vcarve_follows_the_centreline_as_deep_as_the_shape_is_wide(z1):
     assert capped.params["z_bottom"] == pytest.approx(-0.4) and capped.params["flat_rings"] > 0
     stepped = cam.vcarve(st, v90, cam.rect(-8, -1, 8, 1), z_top=0, max_depth=0.4, stepdown=0.1, name="V stepped")
     assert stepped.params["levels"] == 4                         # never more than a stepdown of new depth per level
+
+
+def test_knot_profile_matches_the_full_table():
+    """cut_height searches the profile's radius knots (1 for an endmill, ~R/0.002 for a ball): the same heights, bit for
+    bit, as the full 6001-sample search it replaced."""
+    rng = np.random.default_rng(3)
+    for kw in (dict(type="flat", diameter=3.175), dict(type="ball", diameter=6), dict(type="bull", diameter=6, corner_radius=1),
+               dict(type="vbit", diameter=3.175, angle=30, tip_diameter=0.1, flute_length=3), dict(type="taper_ball", diameter=3.175, tip_diameter=0.5, taper=5),
+               dict(type="flat", diameter=0.3, flute_length=1, shank_diameter=3.175)):
+        sh = T(**kw).shape
+        d = rng.uniform(0.0, sh.max_radius + 0.5, 20000)
+        legacy = ts._lookup(sh._t["zc"], sh._t["cumc"], d)
+        knots = ts._lookup_knots(sh.knots, d)
+        assert np.array_equal(np.isfinite(legacy), np.isfinite(knots)) and np.array_equal(legacy[np.isfinite(legacy)], knots[np.isfinite(knots)]), kw
+        assert len(sh.knots[0]) == (1 if kw["type"] == "flat" else len(sh.knots[0])) and len(sh.knots[0]) <= len(sh._t["cumc"])

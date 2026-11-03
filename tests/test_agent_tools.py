@@ -289,3 +289,19 @@ async def test_extension_open_reports_a_panel_that_did_not_open(ag):
     assert not ok(r) and "did not open" in text(r) and "no panel" in text(r)
     r = await T["extension"]({"action": "open", "panel": "hole_report.hole_report"})
     assert ok(r) and "opened" in text(r)
+
+
+async def test_user_build_drafts_threads_then_realises_them_in_the_background(ag):
+    """A build outside an agent turn shows the draft at once; the real helices land later, from the background."""
+    code = "result = {'S': kit.socket_screw('M3', 10, real=True), 'P': Pos(20, 0, 0) * Box(10, 10, 5)}"
+    ag._agent_turn = False
+    m = await ag.build(code, source="user")
+    assert m.draft_threads >= 1 and ag._threads_task is not None
+    await ag.wait_for_threads()
+    assert ag.model.draft_threads == 0 and any(f.kind == "BSPLINE" for f in ag.model.faces) and ag.model.code == code
+    assert any(e["type"] == "model" and e.get("source") == "threads" for e in ag.rec.events)
+    # a newer build supersedes the one in flight: its result never replaces the newer design
+    m2 = await ag.build(code.replace("Box(10, 10, 5)", "Box(12, 10, 5)"), source="user")
+    m3 = await ag.build(code.replace("Box(10, 10, 5)", "Box(14, 10, 5)"), source="user")
+    await ag.wait_for_threads()
+    assert ag.model.code == m3.code and ag.model.draft_threads == 0

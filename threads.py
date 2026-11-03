@@ -346,11 +346,10 @@ def _bolt_solid(size: str, length: float, head: str, real: bool, tl: float) -> P
             from OCP.BRep import BRep_Builder
             from OCP.BRepTools import BRepTools
             from OCP.TopoDS import TopoDS_Shape
-            from build123d.topology.shape_core import downcast
             sh = TopoDS_Shape()
             if BRepTools.Read_s(sh, str(path), BRep_Builder()) and not sh.IsNull():
-                out = Part(downcast(sh))
-                if out.solids():
+                out = b3d.Shape.cast(sh)                   # a Solid comes back a Solid (a Part around one reports no volume)
+                if out.solids() and _vol(out) > 0:
                     return out
     except Exception:  # noqa: BLE001 - the cache is a convenience; build as before without it
         path = None

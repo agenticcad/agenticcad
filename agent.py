@@ -2216,7 +2216,7 @@ class CadAgent:
                                                              "session": self.session_id}))
 
     # ------------------------------------------------------------------ model
-    async def build(self, code: str, source: str = "agent", record: bool = True) -> ck.Model:
+    async def build(self, code: str, source: str = "agent", record: bool = True, threads: str | None = None) -> ck.Model:
         async with self.model_lock:
             if self.config:
                 try:
@@ -2224,7 +2224,7 @@ class CadAgent:
                         self.config = None
                 except (script_edit.Unsupported, SyntaxError):
                     self.config = None
-            model = await asyncio.to_thread(ck.run_script, code, self.quality, self.workspace, self.parts, self._thread_mode(), self.config)
+            model = await asyncio.to_thread(ck.run_script, code, self.quality, self.workspace, self.parts, threads or self._thread_mode(), self.config)
             self.model = model
             (self.doc_dir / "model.py").write_text(code)
             hid = None
@@ -2331,13 +2331,10 @@ class CadAgent:
             return None
         await self.emit({"type": "info", "text": f"modelling {self.model.draft_threads} real thread(s)…"})
         try:
-            self._agent_turn = True                        # build() must not start a background copy of this build
-            await self.build(self.model.code, source="agent", record=False)
+            await self.build(self.model.code, source="agent", record=False, threads="real")
             return None
         except Exception as e:  # noqa: BLE001
             return str(e)
-        finally:
-            self._agent_turn = False
 
     def _kit_used(self, code: str) -> None:
         """Count Design Kit components this successfully built script calls (feeds the workspace kit's TOC)."""

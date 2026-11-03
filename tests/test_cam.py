@@ -285,3 +285,20 @@ def test_makera_start_lifts_then_moves_over_the_part_before_the_spindle_and_any_
     first_xy = next(i for i, l in enumerate(lines) if l.startswith(("G0", "G1")) and "X" in l)
     assert not any(l.startswith(("G0 Z", "G1 Z")) for l in lines[:first_xy])
     assert "G28" in lines[-4:]
+
+
+def test_moves_travel_as_one_binary_frame(bracket, cam_setup):
+    """to_payload(moves=False) + moves_blob() carry what to_payload() carried as JSON lists (float32: 1e-4 mm here)."""
+    setup, tools, _ = cam_setup
+    p = cam.Program(setup)
+    p.add(cam.face(setup, tools[1], z_top=setup.stock.top, z_bottom=setup.stock.top - 1))
+    p.add(cam.contour(setup, tools[1], cam.rect(-10, -10, 10, 10), z_top=setup.stock.top, z_bottom=setup.stock.top - 2, tabs=2, name="C"))
+    full = p.to_payload(); lean = p.to_payload(moves=False); blob = p.moves_blob()
+    assert lean["moves_blob"] and all(o["moves"] is None and o["n_moves"] == len(f["moves"]) for o, f in zip(lean["ops"], full["ops"]))
+    assert blob[:4] == b"ACMV"
+    back = cam.Program.moves_from_blob(blob)
+    assert [len(m) for m in back] == [len(o["moves"]) for o in full["ops"]]
+    for o, mv in zip(full["ops"], back):
+        for a, b in zip(o["moves"], mv):
+            assert a[0] == b[0] and len(a) == len(b) and abs(a[4] - b[4]) <= 1e-5 * max(1.0, a[4])
+            assert max(abs(a[c] - b[c]) for c in (1, 2, 3)) <= 1.5e-4

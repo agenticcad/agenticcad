@@ -2,6 +2,8 @@
 and feature, the real metal in each tab, release tracking (held / tab-held / free) and a machine-readable verdict."""
 import json
 
+import numpy as np
+
 import pytest
 
 import cad_kernel as ck
@@ -195,3 +197,67 @@ def test_rotary_subset_chains_the_earlier_ops_on_the_same_mounting(tmp_path_fact
     fresh = cam_sim.simulate(p, ops=[1], part=shaft, resolution=0.5, res_a=3.0, history=False)
     assert chained.mode == "radial" and chained.history == ["Rough"] and fresh.history == []
     assert chained.stats["removed_cm3"] < 0.2 * fresh.stats["removed_cm3"]     # the second pass finds the work done
+
+
+def _stamp_with(backend, side=1, eng=False):
+    """A synthetic feed run stamped by the named back end (env + forced availability), returning (zhi, zlo, eng)."""
+    import os
+    import cam_stamp
+    old = os.environ.get("AGENTICCAD_SIM_BACKEND")
+    os.environ["AGENTICCAD_SIM_BACKEND"] = backend
+    cam_stamp._state["numba"] = None; cam_stamp._state["metal"] = None
+    try:
+        res, x0, y0, nx, ny = 0.25, -10.0, -10.0, 81, 81
+        zhi = np.full((ny, nx), 5.0); zlo = np.zeros((ny, nx))
+        t = np.linspace(0, 4 * np.pi, 400)
+        P = np.column_stack([6 * np.cos(t), 6 * np.sin(t), 4.0 - t / 4]); P = np.vstack([P, P + [0.1, 0.0, -0.3]])
+        K = np.ones(len(P), dtype=int); I = np.arange(len(P))
+        e = np.full((len(P), 3), -np.inf) if eng else None
+        if e is not None:
+            e[:, 1] = 0.0
+        tool = flat()
+        cam_sim._stamp_z(zhi, zlo, P, K, I, tool, side, res, x0, y0, [], "t", e)
+        return zhi, zlo, e, cam_stamp.backend()
+    finally:
+        if old is None:
+            os.environ.pop("AGENTICCAD_SIM_BACKEND", None)
+        else:
+            os.environ["AGENTICCAD_SIM_BACKEND"] = old
+        cam_stamp._state["numba"] = None; cam_stamp._state["metal"] = None
+
+
+def test_stamp_back_ends_fall_back_to_numpy(monkeypatch):
+    """Without numba / metalcompute (or when either fails) the numpy code runs: the same simulation, just slower."""
+    import cam_stamp
+    monkeypatch.setitem(cam_stamp._state, "numba", False)
+    monkeypatch.setitem(cam_stamp._state, "metal", False)
+    monkeypatch.setenv("AGENTICCAD_SIM_BACKEND", "auto")
+    assert cam_stamp.backend() == "numpy" and not cam_stamp.available()["numba"]
+    monkeypatch.setenv("AGENTICCAD_SIM_BACKEND", "numba")
+    assert cam_stamp.backend() == "numpy"
+    assert cam_stamp.stamp_run(np.zeros((2, 2)), np.zeros((2, 2)), np.zeros((1, 3)), np.ones(1, dtype=int), np.zeros(1, dtype=int), flat(), 1, 0.5, 0, 0, [], "x") is False
+    monkeypatch.setenv("AGENTICCAD_SIM_BACKEND", "numpy")
+    assert cam_stamp.backend() == "numpy"
+
+
+def test_numba_stamp_matches_numpy_bit_for_bit():
+    pytest.importorskip("numba")
+    for side in (1, -1):
+        ref = _stamp_with("numpy", side, eng=True)
+        got = _stamp_with("numba", side, eng=True)
+        assert got[3] == "numba", "numba did not take the run"
+        assert np.array_equal(ref[0], got[0]) and np.array_equal(ref[1], got[1])
+        m = np.isfinite(ref[2])
+        assert np.array_equal(m, np.isfinite(got[2])) and np.allclose(ref[2][m], got[2][m], rtol=0, atol=1e-7)
+
+
+def test_metal_stamp_matches_numpy_within_float32():
+    import cam_stamp
+    if not cam_stamp._metal():
+        pytest.skip("no Metal here")
+    for side in (1, -1):
+        ref = _stamp_with("numpy", side)
+        got = _stamp_with("metal", side)
+        assert got[3] == "metal" and cam_stamp.stats["metal_runs"] >= 1
+        assert np.array_equal(np.isfinite(ref[0]), np.isfinite(got[0]))
+        assert np.abs(ref[0] - got[0]).max() < 2e-6 and np.abs(ref[1] - got[1]).max() < 2e-6

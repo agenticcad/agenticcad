@@ -143,3 +143,29 @@ def test_countersink_is_a_90_degree_cone_widest_at_the_surface():
             sec = h & b.Pos(0, 0, at[2] + sign * depth) * b.Box(30, 30, 1e-3)
             r = math.sqrt((400 * 1e-3 - sec.volume) / 1e-3 / math.pi)
             assert abs(r - r_expected) < 0.01, (axis, depth, r)
+
+
+def test_real_bolts_come_back_from_the_cache_on_disk(tmp_path, monkeypatch):
+    """A real bolt depends on nothing but its parameters: the second process reads the BREP the first one wrote."""
+    import platformdirs
+    monkeypatch.setattr(platformdirs, "user_cache_dir", lambda *a, **k: str(tmp_path))
+    thr._bolt_solid.cache_clear()
+    a = thr._bolt_solid("M3", 8.0, "none", True, 8.0)
+    files = list((tmp_path / "threads").glob("bolt-*.brep"))
+    assert len(files) == 1 and files[0].stat().st_size > 1000
+    thr._bolt_solid.cache_clear()
+    b = thr._bolt_solid("M3", 8.0, "none", True, 8.0)
+    assert len(b.solids()) == 1 and len(b.faces()) == len(a.faces()) and abs(b.volume - a.volume) < 1e-6
+    assert any(f.geom_type.name == "BSPLINE" for f in b.faces())
+
+
+def test_through_tap_thread_is_only_as_long_as_the_part():
+    """A through tap used to build a helix the length of the part's bbox diagonal (146 turns through a 10 mm plate);
+    now it spans the part's extent along the hole plus a margin, trimmed to the material as before."""
+    from build123d import Align, Box
+    plate = Box(60, 20, 6, align=(Align.CENTER, Align.CENTER, Align.MIN))
+    x = thr.tap(plate, "M6", at=(20, 0, 6), through=True, real=True)
+    assert len(x.solids()) == 1
+    helix = [f for f in x.faces() if f.geom_type.name == "BSPLINE"]
+    assert helix and all(-0.1 <= f.bounding_box().min.Z and f.bounding_box().max.Z <= 6.1 for f in helix)
+    assert x.volume < plate.volume and x.volume > plate.volume - math.pi * 3 ** 2 * 6

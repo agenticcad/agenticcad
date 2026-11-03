@@ -271,3 +271,32 @@ def test_tool_photo_upload_attach_and_serve(client):
     t = dict(lib["tools"][0]); t.pop("shape", None); t["photo"] = name
     assert client.post("/api/cam/tool", json={"tool": t}).status_code == 200
     assert next(x for x in client.get("/api/cam/library").json()["tools"] if x["number"] == t["number"])["photo"] == name
+
+
+def test_cam_program_moves_as_a_binary_frame(client):
+    """A page that connects with ?bin=1 gets each program's moves as one binary frame just before the 'cam' event; a
+    plain connection still gets the JSON lists."""
+    import cam_kernel as cam
+    code = ("part = bodies['Bracket']\nstock = Stock.from_model(part, margin=2, top=1)\n"
+            "setup = Setup(machines['Makera Z1'], stock)\nprogram = Program(setup)\n"
+            "program.add(face(setup, tools[1], z_top=stock.top, z_bottom=stock.top - 1))\n")
+    with client.websocket_connect("/ws?bin=1") as ws:
+        ws.send_json({"type": "run_cam", "code": code})
+        prev, m = None, None
+        for _ in range(60):
+            r = ws.receive()
+            if "bytes" in r and r["bytes"] is not None:
+                prev = r["bytes"]; continue
+            m = json.loads(r["text"])
+            if m["type"] == "cam" and m.get("program") and m["source"] != "load":
+                break
+            if m["type"] in ("error", "cam_error"):
+                raise AssertionError(m.get("text"))
+            prev = None
+        assert m and m["program"]["moves_blob"] and m["program"]["ops"][0]["moves"] is None
+        assert prev is not None and prev[:4] == b"ACMV"
+        back = cam.Program.moves_from_blob(prev)
+        assert len(back) == 1 and len(back[0]) == m["program"]["ops"][0]["n_moves"] > 2
+    with client.websocket_connect("/ws") as ws:
+        m = wait_for(ws, "cam")
+        assert m["program"] and not m["program"]["moves_blob"] and len(m["program"]["ops"][0]["moves"]) == len(back[0])
