@@ -19,8 +19,11 @@ patch bumps fix things, a major bump changes something scripts or workspaces rel
     two solids); the copy skips build123d's Python-side deep copy (0.65 s a thread);
   - real bolts are read back from a BREP cache in the user's cache folder after the first build on a machine
     (the latch's four sizes were 9 s of every launch).
-- **Simulating is 2-3x faster** (latch 11.8 → 4 s with fitted feeds, the 88-op latch script 17.8 → 8 s, the obsidian
-  sheet 33 → 14 s), the same height maps bit for bit and the same verdicts:
+  The real M10 thread through the cam arm now starts at the plate (its helix used to start 25 mm above it), so the
+  latch program's ops around that hole are clocked differently; the same verdicts, the same ops elsewhere.
+- **Simulating is up to 2x faster** (with fitted feeds and the program sent back: the boat latch 11.8 → 6.7 s, the
+  88-op latch script 17.8 → 9.5 s, the obsidian sheet 33 → 17 s; without numba 8.8 / 13.9 / 25 s), the same height
+  maps bit for bit, the same verdicts and the same G-code:
   - the stamping (every sample's tool footprint into the stock, with the per-sample engagement the fitted feeds use)
     runs as one compiled numba pass where numba is installed (Apple silicon and Windows builds; `cam_stamp.py`,
     `AGENTICCAD_SIM_BACKEND=numpy` turns it off), falling back to the numpy code anywhere else or on any failure;

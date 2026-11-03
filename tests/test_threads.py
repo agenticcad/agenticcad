@@ -154,6 +154,7 @@ def test_real_bolts_come_back_from_the_cache_on_disk(tmp_path, monkeypatch):
     files = list((tmp_path / "threads").glob("bolt-*.brep"))
     assert len(files) == 1 and files[0].stat().st_size > 1000
     thr._bolt_solid.cache_clear()
+    monkeypatch.setattr(thr, "_bolt_build", lambda *a: (_ for _ in ()).throw(AssertionError("rebuilt instead of read from the cache")))
     b = thr._bolt_solid("M3", 8.0, "none", True, 8.0)
     assert len(b.solids()) == 1 and len(b.faces()) == len(a.faces()) and abs(b.volume - a.volume) < 1e-6
     assert any(f.geom_type.name == "BSPLINE" for f in b.faces())
