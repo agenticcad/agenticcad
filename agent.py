@@ -739,6 +739,7 @@ class CadAgent:
         self.slice_layers: dict[str, Any] | None = None       # its parsed G-code, viewer payload
         self.program: cam.Program | None = None
         self._cam_stop = None                       # threading.Event of the CAM build in progress (Stop sets it)
+        self._gcode_stop = None                     # threading.Event of the G-code line count posting in the background
         cam_path = self.doc_dir / "cam.py"
         if cam_path.exists():
             self.cam_code = cam_path.read_text()
@@ -885,6 +886,8 @@ class CadAgent:
         # a Stop (interrupt) ends the build at its next stop point instead of leaving a thread running for minutes;
         # the program's payload and summary are worked out in the thread too, not on the event loop
         import threading
+        if self._gcode_stop is not None:                  # the last program's line count still posting: not wanted now
+            self._gcode_stop.set()
         ev = self._cam_stop = threading.Event()
         tok = cam.STOP.set(ev)
         try:
@@ -904,10 +907,19 @@ class CadAgent:
         return prog
 
     async def _count_gcode(self, prog: cam.Program) -> None:
+        import threading
+        ev = self._gcode_stop = threading.Event()        # the post stops at its next stop point when a new build starts
+        tok = cam.STOP.set(ev)                            # (to_thread carries the context into the worker)
         try:
             n = await asyncio.to_thread(lambda: prog.gcode().count("\n"))
-        except Exception:  # noqa: BLE001 - a post that fails is reported when the G-code is asked for
+        except asyncio.CancelledError:
+            ev.set(); raise
+        except Exception:  # noqa: BLE001 - a post that fails (or was stopped) is reported when the G-code is asked for
             return
+        finally:
+            cam.STOP.reset(tok)
+            if self._gcode_stop is ev:
+                self._gcode_stop = None
         prog.gcode_lines = n
         if self.program is prog:
             await self.emit({"type": "cam_gcode_lines", "gcode_lines": n})
@@ -1551,8 +1563,8 @@ class CadAgent:
             raise cam.CamError("no CAM program built")
         res = await asyncio.to_thread(cam_sim.simulate, self.program, ops, self.model, resolution)
         fit = self.program.after_simulation(res)          # feeds follow the engagement (Program load / per-op "load")
-        if fit:
-            res = await asyncio.to_thread(cam_sim.simulate, self.program, ops, self.model, resolution)   # times and MRR at the fitted feeds
+        if fit:                                            # times and MRR at the fitted feeds (the cuts themselves are the same)
+            res = await asyncio.to_thread(cam_sim.refit, res, self.program, ops, self.model, resolution)
             await self.emit({"type": "cam", "code": self.cam_code, "source": "fit_feeds", "program": self.program.to_payload(),
                              "summary": self.program.summary()})
         self.sim = res

@@ -78,6 +78,7 @@ class SimResult:
     final: dict = field(default_factory=dict)            # name -> np.ndarray (final state)
     masks: dict = field(default_factory=dict)            # gouge / left masks (bool arrays)
     per_move: dict = field(default_factory=dict)         # op index -> {"mrr": np.ndarray, "ap": np.ndarray} per move (zmap)
+    _refit: list = field(default_factory=list, repr=False)   # per op with bite stats: (op index, op, samples, move ids, kinds, engagement)
     # zmap with a part: material left per body and feature [{body, area_mm2, max_mm, volume_mm3, features: [{kind, z_lo,
     # z_hi, area_mm2, max_mm, at}]}] (kind: flat | sloped | edge, "underside ..." for a flipped setup's side)
     leftover: list = field(default_factory=list)
@@ -330,6 +331,44 @@ def simulate(program: cam.Program, ops: list[int] | None = None, part=None, reso
 FINISHING_KINDS = ("parallel3d", "contour", "rotary_finish", "rotary_profile")   # ops planned as skims: a buried pass is a surprise
 
 
+def _op_stats(program, op, mv, src, pts, idx, kinds, eng, rapid_rate) -> tuple[dict, dict]:
+    """An op's bite / rate statistics and per-move numbers; with tiles, each op move gets its worst over the tiles."""
+    b, per_move = _bite_stats(op, mv, pts, idx, kinds, eng, rapid_rate, src if len(mv) != len(op.moves) else None)
+    if len(mv) != len(op.moves):
+        sa = np.asarray(src); keep_ = sa >= 0
+        fold = {}
+        for k, arr in per_move.items():
+            f = np.zeros(len(op.moves)); np.maximum.at(f, sa[keep_], np.asarray(arr)[keep_]); fold[k] = f
+        per_move = fold
+        b["tiles"] = int(len(program.op_tiles(op)))
+        for key in ("move", "mrr_move"):
+            j = b[key] - 1
+            b[key] = int(src[j]) + 1 if 0 <= j < len(src) and src[j] >= 0 else b[key]
+    return b, per_move
+
+
+def refit(res: SimResult, program: cam.Program, ops=None, part=None, resolution=None) -> SimResult:
+    """The simulation again at the program's current feeds (after fit_feeds / limit_feeds): what every sample removes
+    and how deep it cuts do not depend on the feeds, so only the rates, times and the per-move numbers are worked out
+    again from the engagement kept in `res` - a full re-simulation took as long as the first one. A result that has
+    none (a 4th-axis simulation) is simulated again."""
+    if res.mode != "zmap" or not res._refit:
+        return simulate(program, ops, part, resolution)
+    bites = res.stats.get("bites") or []
+    for k, (i, op, pts, idx, kinds, eng) in enumerate(res._refit):
+        st = program.setup_of(op)
+        tm, src = cam.tile_moves(op, program.op_tiles(op), st.clearance_z)
+        P = st.to_model(np.array([m[1:4] for m in tm], dtype=float)) if tm else np.zeros((0, 3))
+        mv = [[m[0], *p, m[4]] for m, p in zip(tm, P)]
+        b, per_move = _op_stats(program, op, mv, src, pts, idx, kinds, eng, res._rapid_rate)
+        if k < len(bites):
+            bites[k] = b
+        res.per_move[i] = per_move
+    if hasattr(res, "_feeds_at_sim"):                     # fit_feeds' record of the feeds these rates were measured at
+        del res._feeds_at_sim
+    return res
+
+
 def _bite_stats(op, mv, pts, idx, kinds, eng, rapid_rate, src=None) -> tuple[dict, dict]:
     """Per operation: the deepest axial engagement of one pass (and where) against the tool's stepdown, the highest
     material removal rate (mm3/min: volume a sample removes / its step x the move's feed) against the tool's rated
@@ -558,18 +597,9 @@ def _sim_zmap(program, order, part, resolution, frames, tol, machine_model=None,
             if next_mark is not None and end_move_done(idx, end, done, next_mark):
                 snap(next_mark); mark_i += 1
         done += len(mv)
-        b, per_move = _bite_stats(op, mv, pts, idx, kinds, eng, rapid_rate, src if len(mv) != len(op.moves) else None)
-        if len(mv) != len(op.moves):                       # tiles: each op move gets its worst over the tiles
-            sa = np.asarray(src); keep_ = sa >= 0
-            fold = {}
-            for k, arr in per_move.items():
-                f = np.zeros(len(op.moves)); np.maximum.at(f, sa[keep_], np.asarray(arr)[keep_]); fold[k] = f
-            per_move = fold
-            b["tiles"] = int(len(program.op_tiles(op)))
-            for key in ("move", "mrr_move"):
-                j = b[key] - 1
-                b[key] = int(src[j]) + 1 if 0 <= j < len(src) and src[j] >= 0 else b[key]
+        b, per_move = _op_stats(program, op, mv, src, pts, idx, kinds, eng, rapid_rate)
         bites.append(b); out.per_move[i] = per_move
+        out._refit.append((i, op, pts, idx, kinds, eng))
         if rel is not None:
             rel.check_cut(op.name, before, zhi, zlo, out.violations)
             if op.kind == "contour" and (op.params or {}).get("tabs"):
@@ -590,6 +620,7 @@ def _sim_zmap(program, order, part, resolution, frames, tol, machine_model=None,
     remaining = vol()
     out.stats = {"moves": total, "ops": len(sel), "removed_cm3": round((initial - remaining - silent_removed) / 1000.0, 3),
                  "rapid_hits": rapid_hits[:50], "bites": bites}
+    out._rapid_rate = rapid_rate
     if machine_model is not None or fix_hi is not None or collisions:
         out.stats["collisions"] = _collision_stats(collisions)
         if machine_model is not None:

@@ -2176,28 +2176,44 @@ def _trim_floor_finishes(prog, new_op: Op) -> None:
             if not (new_op.kind in ("pocket", "rest") and (zt_new + above_new >= plan["z"] + plan["leave"] - 1e-6)):
                 continue
             z = plan["z"]
-            bx = g["dom"].buffer(plan["r"] + new_op.tool.radius).bounds
+            m_ = plan["r"] + new_op.tool.radius
+            bx = g["dom"].bounds
+            bx = (bx[0] - m_, bx[1] - m_, bx[2] + m_, bx[3] + m_)      # = dom.buffer(m_).bounds, without the buffer
+            deep = cutting & (P[:, 2] < z - 0.02)
+            pair = deep[1:] & deep[:-1]
+            # only a deep move within the floor's reach can take anything off it: most (op, floor) pairs of a long
+            # script are in different places, and the footprint below cost 6 ms a buffer x 10,000 on the latch job
+            lo, hi = np.minimum(P[1:, :2], P[:-1, :2]), np.maximum(P[1:, :2], P[:-1, :2])
+            if not (pair & (hi[:, 0] >= bx[0]) & (lo[:, 0] <= bx[2]) & (hi[:, 1] >= bx[1]) & (lo[:, 1] <= bx[3])).any():
+                continue
             key = (z, tuple(round(v, 1) for v in bx))
             if key not in foot_cache:
-                deep = cutting & (P[:, 2] < z - 0.02)
-                pair = deep[1:] & deep[:-1]
                 inb = ((P[:, 0] >= bx[0] - 50) & (P[:, 0] <= bx[2] + 50) & (P[:, 1] >= bx[1] - 50) & (P[:, 1] <= bx[3] + 50))
                 pair &= inb[1:] | inb[:-1]
                 lines, cur = [], []
-                for i in range(1, len(P)):                      # runs of deep cutting moves -> polylines
-                    if pair[i - 1]:
+                for i in range(1, len(P)):                      # runs of deep cutting moves -> polylines, per level
+                    if pair[i - 1] and (not cur or abs(P[i, 2] - cur[1]) < 0.05):
                         if not cur:
-                            cur = [tuple(P[i - 1, :2])]
-                        cur.append(tuple(P[i, :2]))
+                            cur = [[tuple(P[i - 1, :2])], float(P[i - 1, 2])]
+                        cur[0].append(tuple(P[i, :2]))
                     elif cur:
                         lines.append(cur); cur = []
+                        if pair[i - 1]:
+                            cur = [[tuple(P[i - 1, :2]), tuple(P[i, :2])], float(P[i - 1, 2])]
                 if cur:
                     lines.append(cur)
-                # one buffer of the whole set (GEOS unions as it goes): thousands of buffers unioned afterwards took 22 s
-                # of an 88-op build
-                geo = [(g if g.length > 1e-6 else Point(l_[0])) if len(l_) > 1 else Point(l_[0])
-                       for l_ in lines for g in [LineString(l_).simplify(0.01) if len(l_) > 1 else None]]
-                foot_cache[key] = GeometryCollection(geo).buffer(new_op.tool.radius, quad_segs=6) if geo else None
+                # the footprint, buffered one level at a time then unioned: the same union as buffering every deep move
+                # together, but GEOS then noded ten levels of the same rings against each other (55 s on the live latch
+                # job's 31 footprints)
+                by_z: dict = {}
+                for l_, z_ in lines:
+                    by_z.setdefault(round(z_, 2), []).append(l_)
+                parts = []
+                for ls in by_z.values():
+                    geo = [(g if g.length > 1e-6 else Point(l_[0])) if len(l_) > 1 else Point(l_[0])
+                           for l_ in ls for g in [LineString(l_).simplify(0.01) if len(l_) > 1 else None]]
+                    parts.append(GeometryCollection(geo).buffer(new_op.tool.radius, quad_segs=6))
+                foot_cache[key] = unary_union(parts) if parts else None
             F = foot_cache[key]
             dom = g["dom"]
             if F is None or F.is_empty or not F.intersects(dom.buffer(plan["r"])):

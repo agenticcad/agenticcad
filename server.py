@@ -304,6 +304,8 @@ async def lifespan(app: FastAPI):
     _loader = _boot[next(iter(DOCS))]
     if os.environ.get("AGENTICCAD_STARTUP_SYNC") == "1":  # tests: the model exists before the first request
         await asyncio.gather(*_boot.values())
+        await asyncio.sleep(0.05)                          # and its progress / model broadcasts have gone out (to nobody) too,
+        #                                                    not into the first client's preamble as a stray `model`
     task = None
     watcher = asyncio.create_task(_watch_extensions())
     dreamer = asyncio.create_task(_dream_loop()) if os.environ.get("AGENTICCAD_NO_AGENT") != "1" else None

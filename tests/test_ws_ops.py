@@ -41,7 +41,10 @@ def reset(client, code):
     with client.websocket_connect("/ws") as ws:
         drain(ws)
         ws.send_json({"type": "run_code", "code": code})
-        return wait_for(ws, "model")["mesh"]
+        m = wait_for(ws, "model")
+        while m.get("source") != "user":                     # not a stray boot broadcast of the design loaded at startup
+            m = wait_for(ws, "model")
+        return m["mesh"]
 
 
 PLATE = ('plate_l, plate_w, plate_t = 60, 40, 8\nwith BuildPart() as plate:\n    Box(plate_l, plate_w, plate_t)\n'
