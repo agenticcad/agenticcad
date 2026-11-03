@@ -5,6 +5,37 @@ patch bumps fix things, a major bump changes something scripts or workspaces rel
 
 ## [Unreleased]
 
+### Changed
+- **The design shows at once; the real threads follow.** Every build (opening a design, a parameter change, the
+  Code panel, launch) is drawn with plain threads in under a second while the real helices are modelled in the
+  background and swapped in when they are done; a CAM build waits for them (a program built on plain threads differs
+  around them: 7 of the latch job's 26 ops). The latch design took 42 s in front of the user; the real threads now
+  take 14 s (warm) to 23 s behind the draft:
+  - the volume checks around each thread fuse are worked out once, adaptively (7.7 → 1.7 s of the build);
+  - a through hole's helix spans the part along the hole, not the part's whole diagonal (the cam arm's M10 thread was
+    146 turns through a 10 mm plate: 6.5 → 1.7 s); flush-trimmed threads go straight to the fuzzy fuse that always
+    ended up doing the job (2 s a hole);
+  - identical helices are built once and copied (OCCT's booleans adjust their inputs: a shared one left the hub in
+    two solids); the copy skips build123d's Python-side deep copy (0.65 s a thread);
+  - real bolts are read back from a BREP cache in the user's cache folder after the first build on a machine
+    (the latch's four sizes were 9 s of every launch).
+- **Simulating is 2-3x faster** (latch 11.8 → 4 s with fitted feeds, the 88-op latch script 17.8 → 8 s, the obsidian
+  sheet 33 → 14 s), the same height maps bit for bit and the same verdicts:
+  - the stamping (every sample's tool footprint into the stock, with the per-sample engagement the fitted feeds use)
+    runs as one compiled numba pass where numba is installed (Apple silicon and Windows builds; `cam_stamp.py`,
+    `AGENTICCAD_SIM_BACKEND=numpy` turns it off), falling back to the numpy code anywhere else or on any failure;
+  - the fixture collision check rejects a whole op at once instead of slicing the fixture map per sample (10.8 of the
+    obsidian sheet's 22.7 s);
+  - the machine's model is built once per machine, not once per simulation (1.6 s each);
+  - the tool profile is looked up in its radius knots (1 for an endmill) instead of a 6001-sample search.
+  An Apple-GPU (Metal) stamp is in too (`metalcompute`, 8.8 M sample-cells in 4 ms, heights within the float32 ulp)
+  but only for runs without engagement bookkeeping, so it changes little on its own: that bookkeeping is a per-cell
+  prefix over the samples in order, and its GPU version was dispatch-bound (slower than numpy on both latch jobs).
+- **The CAM program reaches the viewer as a binary frame** (float32 positions, feeds and kinds: 3.1 MB for the latch
+  job instead of 6.5 MB of JSON, 8.7 instead of 16.8 MB for the obsidian sheet), built in 0.14 s instead of 0.57 s
+  (0.4 instead of 1.3 s) and decoded in 2-3 ms instead of 15-43 ms of JSON.parse; pages of earlier versions and the
+  tests still get the JSON lists.
+
 ## [1.8.0] — 2026-11-03
 
 ### Changed

@@ -53,8 +53,12 @@ requires = [
     "uvicorn==0.52.4",
     "websockets==17.1",
     "platformdirs==4.11.12",
-    # the simulator's stamping on the Apple GPU (cam_stamp.py; optional: the numpy code runs without it)
-    "metalcompute==0.2.9; sys_platform == 'darwin'",
+    # the simulator's faster back ends (cam_stamp.py; both optional: the numpy code runs without them). numba 0.68 has
+    # wheels for numpy 2.5 on Apple silicon and Windows x86_64 only (Intel Macs stop at 0.62, Linux at 0.67 as of
+    # 2026-11); metalcompute 0.2.9 is arm64-only (Intel Macs get 0.2.5, the same API)
+    "numba==0.68.1; (sys_platform == 'darwin' and platform_machine == 'arm64') or (sys_platform == 'win32' and platform_machine == 'AMD64')",
+    "metalcompute==0.2.9; sys_platform == 'darwin' and platform_machine == 'arm64'",
+    "metalcompute==0.2.5; sys_platform == 'darwin' and platform_machine == 'x86_64'",
     "pywebview==6.2.1",
     # pure-python dependency of pywebview published only as an sdist; Briefcase installs wheels only
     "./wheels/proxy_tools-0.1.0-py3-none-any.whl",

@@ -2320,7 +2320,7 @@ class CadAgent:
     async def wait_for_threads(self) -> None:
         """Until the real threads being modelled in the background are in (a superseded build counts as done)."""
         t = self._threads_task
-        if t is not None and not t.done():
+        if t is not None and not t.done() and t is not asyncio.current_task():   # the realiser itself rebuilds the program
             await asyncio.wait([t])
 
     async def finalize_threads(self) -> str | None:
