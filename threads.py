@@ -9,8 +9,10 @@ from __future__ import annotations
 import copy
 import functools
 import math
+import os
 from contextvars import ContextVar
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import build123d as b3d
@@ -244,26 +246,61 @@ def _register(spec: ThreadSpec) -> None:
 
 # ---------------------------------------------------------------------------- geometry
 
-def _union(a, b):
+def _vol(shape) -> float:
+    """shape.volume, worked out once per object: OCCT's VolumeProperties takes 0.14-0.3 s on a threaded solid and the
+    checks below used to ask for the same one up to six times (7.7 of the latch's 43 s build)."""
+    v = shape.__dict__.get("_ac_vol")
+    if v is None:
+        from OCP.GProp import GProp_GProps
+        from OCP.BRepGProp import BRepGProp
+        props = GProp_GProps()
+        BRepGProp.VolumeProperties_s(shape.wrapped, props, 1e-3)      # adaptive: 2.4x faster, within 1e-8 of exact here
+        v = shape.__dict__["_ac_vol"] = float(props.Mass())
+    return v
+
+
+def _cleaned(r):
+    """r with same-domain faces merged, as a NEW object (Shape.clean() replaces r.wrapped in place, which made the
+    old before/after comparison compare the cleaned shape with itself)."""
+    from OCP.ShapeUpgrade import ShapeUpgrade_UnifySameDomain
+    from build123d.topology.shape_core import downcast
+    up = ShapeUpgrade_UnifySameDomain(r.wrapped, True, True, True)
+    up.AllowInternalEdges(False)
+    up.Build()
+    return type(r)(downcast(up.Shape()))
+
+
+def _located(shape, loc):
+    """A fresh copy of `shape` at `loc`, skipping build123d's Python-side deep copy of the object graph (`loc * shape`
+    on a 1168-face thread took 0.65 s). The geometry IS copied: OCCT's booleans adjust their inputs' tolerances in
+    place, and a helix shared between two taps left the second one's fuse in two solids."""
+    from OCP.BRepBuilderAPI import BRepBuilderAPI_Copy
+    from build123d.topology.shape_core import downcast
+    cls = Part if isinstance(shape, Part) else type(shape)           # an IsoThread is a Part whose constructor builds a helix
+    return cls(downcast(BRepBuilderAPI_Copy(shape.wrapped).Shape().Moved(loc.wrapped)))
+
+
+def _union(a, b, fuzzy_first: bool = False):
     """a ∪ b for thread geometry, robustly. With fine helices OCCT often fails in ways that are silent: `a + b`
     (fuse then clean) can return an EMPTY shape (seen for M2 over ~5 mm, M4, M5), and a plain fuse can leave the
-    thread as a separate solid. Try a plain fuse, then fuzzy fuses, and keep the first result that is one solid per
-    solid of `a` with a sensible volume; clean it only if cleaning keeps it intact."""
+    thread as a separate solid. Try a plain fuse, then fuzzy fuses (fuzzy first where the thread was trimmed flush
+    with the part's faces: coincident faces defeat the plain fuse every time, 2 s wasted per through hole), and keep
+    the first result that is one solid per solid of `a` with a sensible volume; clean it only if cleaning keeps it intact."""
     n_a = max(1, len(a.solids()))
-    lo = a.volume * 0.5
+    lo = _vol(a) * 0.5
     best = None
-    for tol in (None, 1e-4, 1e-3):
+    for tol in ((1e-4, None, 1e-3) if fuzzy_first else (None, 1e-4, 1e-3)):
         try:
             r = a.fuse(b, tol=tol) if tol else a.fuse(b)
         except Exception:  # noqa: BLE001
             continue
-        if not r.solids() or r.volume < lo:
+        if not r.solids() or _vol(r) < lo:
             continue
         best = best or r
         if len(r.solids()) <= n_a:
             try:
-                c = r.clean()
-                if len(c.solids()) == len(r.solids()) and abs(c.volume - r.volume) <= 1e-3 * max(1.0, abs(r.volume)):
+                c = _cleaned(r)
+                if len(c.solids()) == len(r.solids()) and abs(_vol(c) - _vol(r)) <= 1e-3 * max(1.0, abs(_vol(r))):
                     return c
             except Exception:  # noqa: BLE001
                 pass
@@ -271,7 +308,10 @@ def _union(a, b):
     return best if best is not None else a.fuse(b)
 
 
+@functools.lru_cache(maxsize=64)
 def _iso_thread(major: float, pitch: float, length: float, external: bool, end_finishes=("fade", "fade")):
+    """One helix per (size, length, kind) per process: identical taps (the hub's two M3, the plate's two M4) and every
+    bolt of a size share it; callers position it with _located and never modify it."""
     from bd_warehouse.thread import IsoThread
     return IsoThread(major_diameter=major, pitch=pitch, length=length, external=external, end_finishes=end_finishes)
 
@@ -294,7 +334,37 @@ def bolt(size: str, length: float, head: str = "hex", real: bool = False, thread
 
 @functools.lru_cache(maxsize=64)
 def _bolt_solid(size: str, length: float, head: str, real: bool, tl: float) -> Part:
-    return _bolt_build(size, length, head, real, tl)
+    """A real bolt depends on nothing but its parameters, so after the first build on a machine it is read back from a
+    BREP file in the user's cache (1.5-3.5 s of helix fusing a size -> 20-50 ms; the latch's four sizes were 9 s of every
+    launch). The key carries the thread generator's version."""
+    path = None
+    try:
+        import hashlib, platformdirs, bd_warehouse
+        key = hashlib.sha1(f"{size}|{length}|{head}|{real}|{tl}|{bd_warehouse.__version__}|{b3d.__version__}|2".encode()).hexdigest()[:20]
+        path = Path(platformdirs.user_cache_dir("AgenticCAD")) / "threads" / f"bolt-{key}.brep"
+        if path.exists():
+            from OCP.BRep import BRep_Builder
+            from OCP.BRepTools import BRepTools
+            from OCP.TopoDS import TopoDS_Shape
+            from build123d.topology.shape_core import downcast
+            sh = TopoDS_Shape()
+            if BRepTools.Read_s(sh, str(path), BRep_Builder()) and not sh.IsNull():
+                out = Part(downcast(sh))
+                if out.solids():
+                    return out
+    except Exception:  # noqa: BLE001 - the cache is a convenience; build as before without it
+        path = None
+    out = _bolt_build(size, length, head, real, tl)
+    if path is not None:
+        try:
+            from OCP.BRepTools import BRepTools
+            path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = path.with_suffix(f".{os.getpid()}.tmp")
+            BRepTools.Write_s(out.wrapped, str(tmp))
+            os.replace(tmp, path)
+        except Exception:  # noqa: BLE001
+            pass
+    return out
 
 
 def _bolt_build(size: str, length: float, head: str, real: bool, tl: float) -> Part:
@@ -316,7 +386,7 @@ def _bolt_build(size: str, length: float, head: str, real: bool, tl: float) -> P
         parts.append(Pos(0, 0, -shank_len) * Cylinder(major / 2, shank_len, align=(Align.CENTER, Align.CENTER, Align.MIN)))
     if real:
         core = Pos(0, 0, -length) * Cylinder(d["minor"] / 2 + 0.05, tl, align=(Align.CENTER, Align.CENTER, Align.MIN))
-        thr = Pos(0, 0, -length) * _iso_thread(major, pitch, tl, True, ("fade", "fade" if shank_len > 0 else "fade"))
+        thr = _located(_iso_thread(major, pitch, tl, True, ("fade", "fade" if shank_len > 0 else "fade")), Pos(0, 0, -length))
         parts.append(_union(core, thr))
     else:
         parts.append(Pos(0, 0, -length) * Cylinder(major / 2, tl, align=(Align.CENTER, Align.CENTER, Align.MIN)))
@@ -370,7 +440,10 @@ def tap(part: Part, size: str, at, depth: float | None = None, through: bool = F
     d = thread(size)
     ax = Vector(*axis).normalized()
     bb = part.bounding_box()
-    span = (bb.max - bb.min).length + 2
+    if through:                                      # as far as the part reaches along the axis from `at` (the bbox corner
+        o = Vector(*at)                              # furthest that way), not its whole diagonal: the cam arm's M10 thread
+        span = max((Vector(x, y, z) - o).dot(ax) for x in (bb.min.X, bb.max.X) for y in (bb.min.Y, bb.max.Y)
+                   for z in (bb.min.Z, bb.max.Z)) + 1.0          # was 146 helix turns over a 10 mm plate (6.5 s -> 1.7 s)
     length = span if through else float(depth or 0) + 0.3
     if not through and not depth:
         raise ThreadError("tap(): give depth= or through=True")
@@ -380,18 +453,21 @@ def tap(part: Part, size: str, at, depth: float | None = None, through: bool = F
     out = part - cutter
     if real:
         thr_len = length - 0.3 if not through else span
-        thr = pl * (Pos(0, 0, -thr_len - 0.5) * _iso_thread(d["major"], d["pitch"], thr_len, False, ("fade", "fade")))
-        # keep only the thread where the part had material (through holes, holes that break into a bore or pocket)
+        thr = _located(_iso_thread(d["major"], d["pitch"], thr_len, False, ("fade", "fade")), pl.location * Pos(0, 0, -thr_len - 0.5))
+        # keep only the thread where the part had material (through holes, holes that break into a bore or pocket).
+        # Also for blind holes wholly inside material: the common-op rebuilds the helix's topology, and the fuse of the
+        # raw helix left the hub in two solids after its pocket cut, where the trimmed one fused clean (0.2 s a hole).
+        trimmed_flush = False
         try:
             material = part & (pl * Cylinder(d["major"] / 2 + 0.3, length + 0.5, align=(Align.CENTER, Align.CENTER, Align.MAX)))
             trimmed = thr & material if material is not None and material.solids() else None
             if trimmed is not None and trimmed.solids():
-                thr = trimmed
+                thr, trimmed_flush = trimmed, through
         except Exception:  # noqa: BLE001
             pass
-        vol_before, n_before = out.volume, max(1, len(out.solids()))
-        joined = _union(out, thr)
-        if not joined.solids() or joined.volume < 0.5 * vol_before or len(joined.solids()) > n_before:
+        vol_before, n_before = _vol(out), max(1, len(out.solids()))
+        joined = _union(out, thr, fuzzy_first=trimmed_flush)
+        if not joined.solids() or _vol(joined) < 0.5 * vol_before or len(joined.solids()) > n_before:
             # Complex parts can defeat the boolean. Thread a small plug around the hole instead, then join the plug
             # back along its plain cylindrical seam, which the kernel handles reliably.
             region = pl * Pos(0, 0, -thr_len - 0.7) * Cylinder(d["major"] / 2 + 0.6, thr_len + 0.4, align=(Align.CENTER, Align.CENTER, Align.MIN))
@@ -400,7 +476,7 @@ def tap(part: Part, size: str, at, depth: float | None = None, through: bool = F
             except Exception:  # noqa: BLE001
                 pass
         out = joined
-        if not out.solids() or out.volume < 0.5 * vol_before or len(out.solids()) > n_before:
+        if not out.solids() or _vol(out) < 0.5 * vol_before or len(out.solids()) > n_before:
             raise ThreadError(f"modelling the real {d['size']} thread at {tuple(round(v, 3) for v in at)} failed in the kernel; "
                               "use real=False for this hole (cosmetic thread) or a shorter depth")
     _register(ThreadSpec(d["size"], d["pitch"], tuple(float(v) for v in at), tuple(float(v) for v in ax),

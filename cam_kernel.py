@@ -4270,8 +4270,10 @@ class Program:
             lines.append("WARNINGS: " + "; ".join(w))
         return "\n".join(lines)
 
-    def to_payload(self) -> dict[str, Any]:
-        """For the viewer: everything in MODEL coordinates (rotary moves wrapped back onto the part)."""
+    def to_payload(self, moves: bool = True) -> dict[str, Any]:
+        """For the viewer: everything in MODEL coordinates (rotary moves wrapped back onto the part). moves=False leaves
+        every op's "moves" as None and sets "moves_blob": the moves travel as one binary frame (moves_blob()) instead
+        of 6-17 MB of JSON lists."""
         self.assign_wcs()
         setups = self.setups
         st0 = self.setup
@@ -4295,33 +4297,87 @@ class Program:
         for op in self.ops:
             st = self.setup_of(op)
             si = next(i for i, x in enumerate(setups) if x is st)
-            moves = op.moves
+            mv = None
             if moves:
-                P = np.array([m[1:4] for m in moves], dtype=float)
-                if st.rotary:
-                    A = np.array([m[5] if len(m) > 5 else st.a for m in moves], dtype=float)
-                    M = np.empty_like(P)
-                    for av in np.unique(A):
-                        sel = A == av
-                        M[sel] = st.to_model(P[sel], a=float(av))
-                else:
-                    M = st.to_model(P)
-                moves = [[m[0], round(float(q[0]), 4), round(float(q[1]), 4), round(float(q[2]), 4), m[4]] + ([m[5]] if len(m) > 5 else [])
-                         for m, q in zip(op.moves, M)]
+                M, A = self._model_moves(op, st)
+                mv = [[m[0], round(float(q[0]), 4), round(float(q[1]), 4), round(float(q[2]), 4), m[4]] + ([m[5]] if len(m) > 5 else [])
+                      for m, q in zip(op.moves, M)] if op.moves else []
             ops.append({"name": op.name, "kind": op.kind, "color": op.color, "tool": tool_payload(op.tool), "setup": si,
                         "key": op.key, "overrides": op.overrides, "defaults": op.defaults,
                         "cut": {"fields": {k: list(m) for k, m in CUT_FIELDS.get(op.kind, {}).items() if k in op.cut_defaults},
                                 "values": op.cut_defaults, "overrides": op.cut_overrides},
                         "color_override": op.color_override,
                         "base_tool": asdict(op.base_tool) if op.base_tool is not None else None,
-                        "moves": moves, "time": round(self.op_minutes(op), 2), "time_one": round(op.time_minutes(self.machine), 2),
+                        "moves": mv, "n_moves": len(op.moves), "time": round(self.op_minutes(op), 2), "time_one": round(op.time_minutes(self.machine), 2),
                         "tiles": len(self.op_tiles(op)), "tile_offsets": [list(t) for t in st.tiles] if op.tiled and len(st.tiles) > 1 else None,
                         "params": op.params, "uses_a": op.uses_a})
         return {
             "name": self.name, "machine": st0.machine.name,
             "stock": st0.model_stock.to_dict(), "origin": [float(ox), float(oy), float(oz)], "safe_z": st0.safe_z,
             "time": round(self.time_minutes(), 2), "warnings": self.check(), "setups": out_setups, "ops": ops,
+            "moves_blob": not moves,
         }
+
+    def _model_moves(self, op, st) -> tuple[np.ndarray, np.ndarray | None]:
+        """An op's move end points in model coordinates (n x 3) and, for rotary moves, their A values."""
+        moves = op.moves
+        if not moves:
+            return np.zeros((0, 3)), None
+        P = np.array([m[1:4] for m in moves], dtype=float)
+        if st.rotary:
+            A = np.array([m[5] if len(m) > 5 else st.a for m in moves], dtype=float)
+            M = np.empty_like(P)
+            for av in np.unique(A):
+                sel = A == av
+                M[sel] = st.to_model(P[sel], a=float(av))
+            return M, A
+        return st.to_model(P), None
+
+    MOVES_MAGIC = b"ACMV"
+
+    def moves_blob(self) -> bytes:
+        """Every op's moves as one little-endian binary frame for the viewer (the JSON lists were 6.5 MB for the latch,
+        17 MB for the obsidian sheet, and parsed on every build and again after the feeds were fitted). Layout:
+        magic "ACMV", uint32 version 1, uint32 n_ops, per op [uint32 n, uint32 flags (1 = has A)], then per op
+        float32 xyz (n x 3, model coordinates), float32 feed (n) and float32 A (n) if flagged, and last the uint8
+        kinds of every op in order (after the floats, so every float array stays 4-byte aligned for typed-array
+        views). float32 keeps 7 significant digits: 1e-5 mm at 100 mm, within the 4 decimals the JSON path rounds to."""
+        self.assign_wcs()
+        head = [self.MOVES_MAGIC, np.array([1, len(self.ops)], dtype="<u4").tobytes()]
+        body, kinds = [], []
+        for op in self.ops:
+            st = self.setup_of(op)
+            M, A = self._model_moves(op, st)
+            has_a = bool(op.moves) and len(op.moves[0]) > 5
+            head.append(np.array([len(op.moves), 1 if has_a else 0], dtype="<u4").tobytes())
+            body.append(np.ascontiguousarray(M, dtype="<f4").tobytes())
+            body.append(np.array([m[4] for m in op.moves], dtype="<f4").tobytes())
+            if has_a:
+                body.append(np.array([m[5] for m in op.moves], dtype="<f4").tobytes())
+            kinds.append(np.array([m[0] for m in op.moves], dtype=np.uint8).tobytes())
+        return b"".join(head + body + kinds)
+
+    @staticmethod
+    def moves_from_blob(blob: bytes) -> list[list[list]]:
+        """The lists to_payload(moves=True) would carry, decoded from moves_blob() (for clients without binary frames)."""
+        if blob[:4] != Program.MOVES_MAGIC:
+            raise CamError("not a moves blob")
+        ver, n_ops = np.frombuffer(blob, dtype="<u4", count=2, offset=4)
+        hdr = np.frombuffer(blob, dtype="<u4", count=2 * int(n_ops), offset=12).reshape(-1, 2)
+        pos = 12 + 8 * int(n_ops)
+        kpos = pos + sum(int(n) * (20 if flags & 1 else 16) for n, flags in hdr)   # 12 B xyz + 4 B feed (+ 4 B A) a move
+        out = []
+        for n, flags in hdr:
+            n = int(n)
+            M = np.frombuffer(blob, dtype="<f4", count=3 * n, offset=pos).reshape(-1, 3).astype(float); pos += 12 * n
+            F = np.frombuffer(blob, dtype="<f4", count=n, offset=pos).astype(float); pos += 4 * n
+            A = None
+            if flags & 1:
+                A = np.frombuffer(blob, dtype="<f4", count=n, offset=pos).astype(float); pos += 4 * n
+            K = np.frombuffer(blob, dtype=np.uint8, count=n, offset=kpos); kpos += n
+            out.append([[int(k), round(float(x), 4), round(float(y), 4), round(float(z), 4), float(f)] + ([float(a)] if A is not None else [])
+                        for k, (x, y, z), f, a in zip(K, M, F, A if A is not None else [None] * n)])
+        return out
 
     # ---------------------------------------------------------------- post
     def limit_feeds(self, sim, floor: float = 0.25, margin: float = 2.5, finishing_factor: float = 3.0) -> dict:

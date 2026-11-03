@@ -48,11 +48,28 @@ GLOBAL_EVENTS = {"machine_link", "library", "library_parts", "extensions", "remo
 SHELL = "shell"                                   # the tab strip page (static/tabs.html)
 
 
+def _program_with_moves(program: dict[str, Any], blob: bytes) -> dict[str, Any]:
+    """A moves=False program payload with its moves put back as JSON lists (from the binary frame)."""
+    import cam_kernel as cam
+    moves = cam.Program.moves_from_blob(blob)
+    return {**program, "moves_blob": False, "ops": [{**op, "moves": mv} for op, mv in zip(program["ops"], moves)]}
+
+
+def _cam_event(a) -> dict[str, Any]:
+    """The CAM program a page gets when it connects (or the design is loaded)."""
+    ev: dict[str, Any] = {"type": "cam", "code": a.cam_code, "source": "load", "program": None, "summary": "", "gcode_lines": _gcode_lines(a.program)}
+    if a.program:
+        ev.update(a._program_event())
+        ev["summary"] = a.program.summary()
+    return ev
+
+
 class Bus:
     """Fan-out to browsers plus request/response for browser-rendered screenshots."""
 
     def __init__(self) -> None:
         self.clients: dict[WebSocket, str] = {}   # page -> the design it shows (SHELL for the tab strip)
+        self.binary: set[WebSocket] = set()       # pages that take a program's moves as a binary frame (ws?bin=1)
         self.primary: dict[str, WebSocket] = {}   # per design: the page the user last chatted from
         self.pending: dict[str, asyncio.Future] = {}
 
@@ -61,25 +78,41 @@ class Bus:
             return list(self.clients)
         return [ws for ws, d in self.clients.items() if d == doc]
 
-    async def _send(self, targets: list[WebSocket], data: str) -> None:
+    async def _send(self, targets: list[WebSocket], event: dict[str, Any]) -> None:
+        """The event as JSON to every target. A CAM program's moves ("_moves", bytes from Program.moves_blob) go as one
+        binary frame right before the event to pages that asked for binary frames, and as the JSON lists of old to the
+        others (tests, pages of earlier versions): 3 MB of float32 instead of 6.5 MB of JSON for the latch job."""
+        blob = event.get("_moves")
+        lean = {k: v for k, v in event.items() if k != "_moves"} if blob is not None else event
+        data = json.dumps(lean)
+        text = data if blob is None else None
         dead = []
         for ws in targets:
             try:
-                await ws.send_text(data)
+                if blob is not None and ws in self.binary:
+                    await ws.send_bytes(blob)
+                    await ws.send_text(data)
+                else:
+                    if text is None:
+                        text = json.dumps({**lean, "program": _program_with_moves(lean["program"], blob)})
+                    await ws.send_text(text)
             except Exception:
                 dead.append(ws)
         for ws in dead:
-            self.clients.pop(ws, None)
+            self.clients.pop(ws, None); self.binary.discard(ws)
 
     async def emit(self, event: dict[str, Any]) -> None:
         """To the pages of the design this request / task belongs to (all pages for machine and library events)."""
-        await self._send(self._targets(event, _doc_var.get()), json.dumps(event))
+        await self._send(self._targets(event, _doc_var.get()), event)
 
     async def emit_doc(self, doc: str, event: dict[str, Any]) -> None:
-        await self._send(self._targets(event, doc), json.dumps(event))
+        await self._send(self._targets(event, doc), event)
 
     async def emit_all(self, event: dict[str, Any]) -> None:
-        await self._send(list(self.clients), json.dumps(event))
+        await self._send(list(self.clients), event)
+
+    async def send(self, ws: WebSocket, event: dict[str, Any]) -> None:
+        await self._send([ws], event)
 
     async def screenshot(self, spec: dict[str, Any], doc: str | None = None, timeout: float = 20.0) -> str:
         doc = doc or _doc_var.get()
@@ -336,10 +369,8 @@ async def _load_initial() -> None:
     if agent.model:
         await bus.emit(_model_event())
         await bus.emit(agent.design_state())
-        await bus.emit({"type": "cam", "code": agent.cam_code, "source": "load",
-                        "program": agent.program.to_payload() if agent.program else None,
-                        "summary": agent.program.summary() if agent.program else "",
-                        "gcode_lines": _gcode_lines(agent.program)})
+        await bus.emit(await asyncio.to_thread(_cam_event, agent))
+        agent.start_real_threads()                       # the draft showed at once; the real threads (then the program) follow
 
 
 async def _watch_extensions() -> None:
@@ -2128,11 +2159,13 @@ async def ws_endpoint(ws: WebSocket) -> None:
         except WebSocketDisconnect:
             pass
         finally:
-            bus.clients.pop(ws, None)
+            bus.clients.pop(ws, None); bus.binary.discard(ws)
         return
     doc = doc if doc in DOCS else _default_doc()
     _doc_var.set(doc)
     bus.clients[ws] = doc
+    if ws.query_params.get("bin") == "1":
+        bus.binary.add(ws)
     try:
         if not agent.startup["done"] or agent.startup["error"]:      # still building the first design: feed the splash
             await ws.send_text(json.dumps({"type": "startup", **agent.startup_payload()}))
@@ -2144,10 +2177,7 @@ async def ws_endpoint(ws: WebSocket) -> None:
             await ws.send_text(json.dumps({"type": "chat_history", "items": hist}))
         await ws.send_text(json.dumps({"type": "library", **agent.library_payload()}))
         await ws.send_text(json.dumps({"type": "library_parts", "parts": agent.parts.list()}))
-        await ws.send_text(json.dumps({"type": "cam", "code": agent.cam_code, "source": "load",
-                                       "program": agent.program.to_payload() if agent.program else None,
-                                       "summary": agent.program.summary() if agent.program else "",
-                                       "gcode_lines": _gcode_lines(agent.program)}))
+        await bus.send(ws, await asyncio.to_thread(_cam_event, agent))
         await ws.send_text(json.dumps(agent.slicer_payload()))
         await ws.send_text(json.dumps(agent.extensions.payload()))
         if agent.slice_layers is not None:
@@ -2170,7 +2200,7 @@ async def ws_endpoint(ws: WebSocket) -> None:
     except WebSocketDisconnect:
         pass
     finally:
-        bus.clients.pop(ws, None)
+        bus.clients.pop(ws, None); bus.binary.discard(ws)
 
 
 async def _dispatch(ws: WebSocket, msg: dict) -> None:

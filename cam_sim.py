@@ -303,7 +303,7 @@ def simulate(program: cam.Program, ops: list[int] | None = None, part=None, reso
     if machine_model is None:
         try:
             import machine_models as _mm
-            machine_model = _mm.model_for(program.setup.machine)
+            machine_model = _mm.cached_model(program.setup.machine)
         except Exception:  # noqa: BLE001 - the machine model never stops a simulation
             machine_model = None
     # the run order: (op index, silent). Silent ops are the earlier ops the selection skips (stock history only)
@@ -662,9 +662,11 @@ def _runs(K):
 
 
 def _stamp_z(zhi, zlo, P, K, I, tool, side, res, x0, y0, rapid_hits, op_name, eng=None):
+    import cam_stamp
     for a, b in _runs(K):                              # in order: a rapid sees everything cut before it
-        _stamp_z_run(zhi, zlo, P[a:b], K[a:b], I[a:b], tool, side, res, x0, y0, rapid_hits, op_name,
-                     None if eng is None else eng[a:b])
+        e = None if eng is None else eng[a:b]
+        if not cam_stamp.stamp_run(zhi, zlo, P[a:b], K[a:b], I[a:b], tool, side, res, x0, y0, rapid_hits, op_name, e):
+            _stamp_z_run(zhi, zlo, P[a:b], K[a:b], I[a:b], tool, side, res, x0, y0, rapid_hits, op_name, e)
 
 
 def _stamp_z_run(zhi, zlo, P, K, I, tool, side, res, x0, y0, rapid_hits, op_name, eng=None):
@@ -1850,6 +1852,15 @@ def _level_mask(xx, yy, x, y, x0, y0, res, r, tool_r, box):
     return (d2 <= r * r) & (d2 > tool_r * tool_r)
 
 
+def _dilate_max(a: np.ndarray, w: int) -> np.ndarray:
+    """Each cell's maximum over the w x w window centred on it (-inf beyond the edges)."""
+    if w <= 1:
+        return a
+    h = w // 2
+    pad = np.pad(a, h, constant_values=-np.inf)
+    return np.lib.stride_tricks.sliding_window_view(pad, (w, w)).max(axis=(2, 3))
+
+
 def _pool_max(zhi: np.ndarray, c: int) -> np.ndarray:
     """Block-max of zhi over c×c cells (padded with -inf)."""
     ny, nx = zhi.shape
@@ -1959,7 +1970,15 @@ def _collide_fixture(hits, fix, P, K, I, tool, mm, sample_res, op_name):
         step = max(1, int(r / sample_res))
         rc = int(math.ceil(r / res))
         worst = None                                                   # the deepest hit of this level in this piece
-        for k in range(0, len(P), step):
+        # the coarse rejection for every sample at once: the fixture's highest point within the level's reach (a max
+        # filter over the coarse map, a superset of the window the exact test below uses), against the level's bottom.
+        # The per-sample slice-and-max loop was 10.8 of the obsidian sheet's 22.7 s simulation; a path that never nears
+        # the fixture now leaves nothing to test.
+        ks = np.arange(0, len(P), step)
+        ix_all = np.rint((P[ks, 0] - x0) / res).astype(np.int64); iy_all = np.rint((P[ks, 1] - y0) / res).astype(np.int64)
+        reach = _dilate_max(coarse, 2 * (rc // c + 2) + 1)
+        near = reach[np.clip(iy_all // c, 0, coarse.shape[0] - 1), np.clip(ix_all // c, 0, coarse.shape[1] - 1)] > P[ks, 2] + zb_off + 0.02
+        for k in ks[near]:
             x, y, z = P[k]; zb = z + zb_off
             ix, iy = int(round((x - x0) / res)), int(round((y - y0) / res))
             cx0, cx1 = max(0, (ix - rc) // c), min(coarse.shape[1] - 1, (ix + rc) // c)

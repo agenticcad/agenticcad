@@ -282,6 +282,24 @@ def model_for(machine, workspace: Path | None = None) -> MachineModel:
     return mm
 
 
+_MODELS: dict[str, Any] = {}
+
+
+def cached_model(machine, workspace: Path | None = None) -> MachineModel:
+    """model_for, kept per (machine, its user script's mtime, its overrides): running the model script was 1.6 s of
+    every simulation (the Z1's script subtracts a few solids), and the result is only read."""
+    import machine_script
+    ws = workspace or WORKSPACE
+    up = machine_script.user_path(machine.name, ws)
+    stamp = f"user:{up.stat().st_mtime_ns}" if up is not None and up.exists() else "builtin"
+    key = f"{machine.name}|{json.dumps(getattr(machine, 'rotary', None), sort_keys=True, default=str)}|{stamp}|{json.dumps(getattr(machine, 'model', None), sort_keys=True, default=str)}|{ws}"
+    if key not in _MODELS:
+        if len(_MODELS) > 16:
+            _MODELS.clear()
+        _MODELS[key] = model_for(machine, workspace)
+    return _MODELS[key]
+
+
 def _record(name: str, post: str = "grbl", travel=(300, 180, 45), rotary: dict | None = None):
     import cam_kernel as cam
     return cam.Machine(name=name, post=post, travel={"x": travel[0], "y": travel[1], "z": travel[2]}, rotary=rotary)

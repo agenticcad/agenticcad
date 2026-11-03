@@ -6157,11 +6157,43 @@ function splashHide() {
   splashEl.classList.add('hide'); setTimeout(() => splashEl.remove(), 400);
   if (splashTimer) { clearInterval(splashTimer); splashTimer = null; }
 }
+// A program's moves arrive as one binary frame (Program.moves_blob: "ACMV", u32 version, u32 n_ops, per op [u32 n, u32
+// flags(1 = has A)], then per op f32 xyz, f32 feed, f32 A if flagged, then every op's u8 kinds; little-endian) just before the 'cam'
+// event whose program has moves_blob set; decoded here into the [kind, x, y, z, f(, a)] lists the rest of the UI reads.
+// 3 MB instead of 6.5 MB of JSON for the latch job, parsed in a few ms instead of JSON.parse on the lists.
+let pendingMoves = null;
+function decodeMovesBlob(buf) {
+  const dv = new DataView(buf);
+  if (buf.byteLength < 12 || String.fromCharCode(dv.getUint8(0), dv.getUint8(1), dv.getUint8(2), dv.getUint8(3)) !== 'ACMV') throw new Error('not a moves frame');
+  const nOps = dv.getUint32(8, true), hdr = [];
+  let pos = 12;
+  for (let i = 0; i < nOps; i++) { hdr.push([dv.getUint32(pos, true), dv.getUint32(pos + 4, true)]); pos += 8; }
+  const ops = [];
+  let kpos = pos; for (const [n, flags] of hdr) kpos += n * (flags & 1 ? 20 : 16);   // the kinds follow every op's floats (12 B xyz + 4 B feed + 4 B A)
+  for (const [n, flags] of hdr) {
+    const xyz = new Float32Array(buf, pos, 3 * n); pos += 12 * n;
+    const f = new Float32Array(buf, pos, n); pos += 4 * n;
+    let a = null; if (flags & 1) { a = new Float32Array(buf, pos, n); pos += 4 * n; }
+    const k = new Uint8Array(buf, kpos, n); kpos += n;
+    const mv = new Array(n);
+    for (let i = 0; i < n; i++) { const j = 3 * i; mv[i] = a ? [k[i], xyz[j], xyz[j + 1], xyz[j + 2], f[i], a[i]] : [k[i], xyz[j], xyz[j + 1], xyz[j + 2], f[i]]; }
+    ops.push(mv);
+  }
+  return ops;
+}
+function attachMoves(p) {
+  if (!p || !p.moves_blob) return;
+  const mv = pendingMoves; pendingMoves = null;
+  if (!mv || mv.length !== p.ops.length) throw new Error('the program\'s moves did not arrive with it');
+  p.ops.forEach((op, i) => { op.moves = mv[i]; }); p.moves_blob = false;
+}
 function connect() {
-  ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws' + (TAB.doc ? '?doc=' + encodeURIComponent(TAB.doc) : ''));
+  ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws?bin=1' + (TAB.doc ? '&doc=' + encodeURIComponent(TAB.doc) : ''));
+  ws.binaryType = 'arraybuffer';
   ws.onopen = () => setStatus('connected');
   ws.onclose = () => { setStatus('disconnected — retrying'); if (!splashHidden) { document.getElementById('sp-sub').textContent = 'waiting for the server…'; } setTimeout(connect, 1500); };
   ws.onmessage = async ev => {
+    if (ev.data instanceof ArrayBuffer) { try { pendingMoves = decodeMovesBlob(ev.data); } catch (e) { pendingMoves = null; addMsg('error', 'CAM program: ' + e.message); } return; }
     const m = JSON.parse(ev.data);
     switch (m.type) {
       case 'startup': splashUpdate(m); break;
@@ -6174,6 +6206,7 @@ function connect() {
         if (m.source === 'user') addMsg('system', 'model rebuilt from Code panel');
         if (m.source === 'revert') addMsg('system', 'undo: reverted to previous build');
         if (m.source === 'requality') addMsg('system', `display mesh re-tessellated (${m.mesh.quality})`);
+        if (m.source === 'threads') addMsg('system', 'real threads modelled');
         if (m.source === 'open' || m.source === 'new') setView('iso');   // different part: re-fit the view
         else if (lastDiag && bbox) { const d = bbox.getSize(new THREE.Vector3()).length(); if (d > lastDiag * 1.6 || d < lastDiag * 0.6) fitCamera(); }   // size changed a lot: keep direction, refit
         lastDiag = bbox ? bbox.getSize(new THREE.Vector3()).length() : lastDiag;
@@ -6216,6 +6249,7 @@ function connect() {
       case 'machine_request_done': machineRequestDone(m); break;
       case 'machine_error': document.getElementById('codeerr').textContent = m.text; addMsg('error', `machine model script failed (${m.name}) — see Code tab`); break;
       case 'cam':
+        try { attachMoves(m.program); } catch (e) { addMsg('error', 'CAM program: ' + e.message); m.program = null; }
         camCode = m.code || ''; lastGcodeLines = m.gcode_lines || 0; loadProgram(m.program);
         if (m.program && machinePreview && machinePreview !== m.program.machine) machinePreview = null;   // a program picks its own machine
         if (machineOn) { if (m.program || machinePreview) { const was = machineRig && machineRig.name + machineRig.rotaryKey; loadMachineRig().then(() => { if (m.program) renderSim(); else poseRig(null, 0, null); if (machineRig && machineRig.name + machineRig.rotaryKey !== was) fitMachine(); }).catch(e => addMsg('error', 'Machine model: ' + e.message)); } else setMachine(false); }

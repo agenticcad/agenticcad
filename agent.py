@@ -739,6 +739,8 @@ class CadAgent:
         self.slice_layers: dict[str, Any] | None = None       # its parsed G-code, viewer payload
         self.program: cam.Program | None = None
         self._cam_stop = None                       # threading.Event of the CAM build in progress (Stop sets it)
+        self._threads_task: asyncio.Task | None = None   # the real threads being modelled in the background (_realise_threads)
+        self._program_model: ck.Model | None = None      # the model the current program was built on
         self._gcode_stop = None                     # threading.Event of the G-code line count posting in the background
         cam_path = self.doc_dir / "cam.py"
         if cam_path.exists():
@@ -883,6 +885,7 @@ class CadAgent:
             self.sim = None
             await self.emit({"type": "cam", "program": None, "code": code, "source": source})
             return None
+        await self.wait_for_threads()                     # a program built on draft threads differs around them (7 of the latch's 26 ops)
         # a Stop (interrupt) ends the build at its next stop point instead of leaving a thread running for minutes;
         # the program's payload and summary are worked out in the thread too, not on the event loop
         import threading
@@ -892,19 +895,26 @@ class CadAgent:
         tok = cam.STOP.set(ev)
         try:
             prog = await asyncio.to_thread(self._run_cam, code)
-            payload, summary = await asyncio.to_thread(lambda: (prog.to_payload(), prog.summary()))
+            payload, summary = await asyncio.to_thread(lambda: (self._program_event(prog), prog.summary()))
         finally:
             cam.STOP.reset(tok)
             if self._cam_stop is ev:
                 self._cam_stop = None
         self.program = prog
+        self._program_model = self.model
         self.sim = None                                   # a new program invalidates the old simulation
-        await self.emit({"type": "cam", "program": payload, "code": code, "source": source,
-                         "summary": summary, "gcode_lines": None})
+        await self.emit({"type": "cam", **payload, "code": code, "source": source, "summary": summary, "gcode_lines": None})
         # the G-code line count posts the whole program (the arc fitting took 20 s of a 31 s latch build): counted
         # after the program is shown, in the background; the viewer gets it when it is done
         asyncio.get_running_loop().create_task(self._count_gcode(prog))
         return prog
+
+    def _program_event(self, prog: cam.Program | None = None) -> dict[str, Any]:
+        """The program for the viewer: its JSON payload without the moves, plus the moves as one binary frame
+        ("_moves", which the server sends just before the event to pages that take binary frames and expands into
+        the JSON lists for the others). to_payload with the lists took 0.6-1.2 s and made 6-17 MB of JSON per build."""
+        prog = prog or self.program
+        return {"program": prog.to_payload(moves=False), "_moves": prog.moves_blob()}
 
     async def _count_gcode(self, prog: cam.Program) -> None:
         import threading
@@ -1565,8 +1575,8 @@ class CadAgent:
         fit = self.program.after_simulation(res)          # feeds follow the engagement (Program load / per-op "load")
         if fit:                                            # times and MRR at the fitted feeds (the cuts themselves are the same)
             res = await asyncio.to_thread(cam_sim.refit, res, self.program, ops, self.model, resolution)
-            await self.emit({"type": "cam", "code": self.cam_code, "source": "fit_feeds", "program": self.program.to_payload(),
-                             "summary": self.program.summary()})
+            ev = await asyncio.to_thread(self._program_event)
+            await self.emit({"type": "cam", "code": self.cam_code, "source": "fit_feeds", **ev, "summary": self.program.summary()})
         self.sim = res
         self.sim_ops = ops if ops is not None else list(range(len(self.program.ops)))
         await self.emit({"type": "cam_sim", "sim": res.to_payload(), "ops": self.sim_ops})
@@ -1582,7 +1592,7 @@ class CadAgent:
             raise cam.CamError("simulate the program first (simulate_cam): the feed limits come from the simulation's per-move removal rates")
         res = self.program.limit_feeds(self.sim, floor=floor, margin=margin, finishing_factor=finishing_factor)
         if res["changed"]:
-            await self.emit({"type": "cam", "program": self.program.to_payload(), "code": self.cam_code, "source": "limit_feeds"})
+            await self.emit({"type": "cam", **(await asyncio.to_thread(self._program_event)), "code": self.cam_code, "source": "limit_feeds"})
         return res
         return res
 
@@ -2230,6 +2240,7 @@ class CadAgent:
                 self._kit_used(code)
             if source == "user":
                 self.notes.append("The user edited and rebuilt the script by hand in the Code panel.")
+            self._after_draft(model)
             return model
 
     async def edit_and_build(self, edits: list[dict[str, Any]], append: str = "", source: str = "agent") -> tuple[ck.Model, str]:
@@ -2250,23 +2261,83 @@ class CadAgent:
             await self.emit(self.design_state())
             await self._after_build(model)
             self._kit_used(code)
+            self._after_draft(model)
             return model, code
 
     def _thread_mode(self) -> str:
-        """Draft threads while the agent is working (4-5x faster rebuilds with real=True screws); real otherwise."""
-        return "draft" if self._agent_turn and self.settings.get("draft_threads", True) else "real"
+        """Draft threads first, for every build: the agent's rebuilds during a turn (4-5x faster with real=True screws;
+        the real ones once the turn ends) and the user's own builds, which show in under a second while the real
+        helices are modelled in the background and swapped in (the latch's took 42 s in front of the user, 14-23 s
+        now, behind the draft). The "draft_threads" setting off builds the real ones straight away."""
+        return "draft" if self.settings.get("draft_threads", True) else "real"
+
+    def _after_draft(self, model: ck.Model) -> None:
+        """A build outside an agent turn that drafted real=True threads: model the real ones in the background."""
+        if getattr(model, "draft_threads", 0) and not self._agent_turn:
+            self.start_real_threads()
+
+    def start_real_threads(self) -> None:
+        """Model the current design's real threads in the background (nothing to do without draft ones). A build in
+        the meantime supersedes it: its result is dropped and the newer draft gets its own."""
+        m = self.model
+        if m is None or not getattr(m, "draft_threads", 0):
+            return
+        if self._threads_task is not None and not self._threads_task.done():
+            self._threads_task.cancel()
+        self._threads_task = asyncio.get_running_loop().create_task(self._realise_threads(m))
+
+    def _same_design(self, draft: ck.Model) -> bool:
+        m = self.model
+        return m is not None and m.code == draft.code and m.config == draft.config and bool(getattr(m, "draft_threads", 0))
+
+    async def _realise_threads(self, draft: ck.Model) -> None:
+        await self.emit({"type": "info", "text": f"modelling {draft.draft_threads} real thread(s) in the background…"})
+        try:
+            model = await asyncio.to_thread(ck.run_script, draft.code, self.quality, self.workspace, self.parts, "real", draft.config)
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:  # noqa: BLE001
+            if self._same_design(draft):
+                await self.emit({"type": "error", "text": f"The real threads failed to build, so the design keeps plain threads: {e}"})
+                self.notes.append(f"[App] The design's real threads (real=True) failed to build, so it keeps plain threads: {e}. "
+                                  "Fix the script so it also builds with real threads (for example make that one hole or screw real=False).")
+            return
+        async with self.model_lock:
+            if not self._same_design(draft):
+                return
+            model.stdout = draft.stdout
+            self.model = model
+            await self.emit({"type": "model", "mesh": model.mesh, "code": model.code, "summary": model.summary(6), "source": "threads",
+                             "history_id": None, "history_len": len(self._history_files())})
+            await self.emit(self.design_state())
+        rebuild = self.cam_code.strip() and (self.program is None or self._program_model is draft)
+        if rebuild:                                        # a program built on the draft (or waiting for this): built on the real model
+            try:
+                await self.set_cam_code(self.cam_code, rebuild=True, source="threads")
+            except Exception as e:  # noqa: BLE001
+                await self.emit({"type": "cam_error", "text": str(e)})
+
+    async def wait_for_threads(self) -> None:
+        """Until the real threads being modelled in the background are in (a superseded build counts as done)."""
+        t = self._threads_task
+        if t is not None and not t.done():
+            await asyncio.wait([t])
 
     async def finalize_threads(self) -> str | None:
-        """After an agent turn: if the current design was built with draft threads, build it once with the real ones.
-        Returns None when done (or nothing to do), else the build error (the design keeps its plain threads)."""
+        """If the current design was built with draft threads, build it with the real ones now (an agent turn's end
+        starts that in the background instead: start_real_threads). Returns None when done (or nothing to do), else
+        the build error (the design keeps its plain threads)."""
         if self.model is None or not getattr(self.model, "draft_threads", 0):
             return None
         await self.emit({"type": "info", "text": f"modelling {self.model.draft_threads} real thread(s)…"})
         try:
+            self._agent_turn = True                        # build() must not start a background copy of this build
             await self.build(self.model.code, source="agent", record=False)
             return None
         except Exception as e:  # noqa: BLE001
             return str(e)
+        finally:
+            self._agent_turn = False
 
     def _kit_used(self, code: str) -> None:
         """Count Design Kit components this successfully built script calls (feeds the workspace kit's TOC)."""
@@ -2287,6 +2358,7 @@ class CadAgent:
             pairs = [(b.path, b.shape) for b in m.bodies]
             new = await asyncio.to_thread(ck.build_model, pairs, m.code, quality)
             new.stdout = m.stdout
+            new.draft_threads, new.config, new.configurations, new.threads = m.draft_threads, m.config, m.configurations, m.threads
             self.model = new
             await self.emit({"type": "model", "mesh": new.mesh, "code": new.code, "summary": new.summary(6),
                              "source": "requality", "history_id": None, "history_len": len(self._history_files())})
@@ -2378,24 +2450,26 @@ class CadAgent:
         self.startup["design"] = self.design_name
         n_threads = code.count("thread(") + code.count("tap(") + code.count("bolt(")
         what = f"Building design '{self.design_name}'" if self.design_name else ("Building the current design" if not fresh else "Preparing an empty design")
-        self._startup_step(what + (" (real threads: this can take a few minutes)" if n_threads and not fresh else ""))
+        self._startup_step(what + (" (the real threads follow in the background)" if n_threads and not fresh else ""))
+        mode = self._thread_mode()
         try:
-            self.model = ck.run_script(code, self.quality, self.workspace, self.parts, config=self.config)
+            self.model = ck.run_script(code, self.quality, self.workspace, self.parts, mode, config=self.config)
         except ck.CadError:
             self.config = None
             try:
-                self.model = ck.run_script(code, self.quality, self.workspace, self.parts)
+                self.model = ck.run_script(code, self.quality, self.workspace, self.parts, mode)
             except ck.CadError:
                 code = ck.NEW_DESIGN_CODE
-                self.model = ck.run_script(code, self.quality, self.workspace, self.parts)
+                self.model = ck.run_script(code, self.quality, self.workspace, self.parts, mode)
                 self.design_name, self.saved_code = None, None
         if fresh and self.design_name is None:
             self.saved_code = code                 # an untouched empty design is not unsaved work
         (self.doc_dir / "model.py").write_text(code)
-        if self.cam_code.strip():          # rebuild the CAM program from the working copy
+        if self.cam_code.strip() and not getattr(self.model, "draft_threads", 0):   # else after the real threads (start_real_threads)
             self._startup_step("Rebuilding the CAM program")
             try:
                 self.program = self._run_cam(self.cam_code)
+                self._program_model = self.model
             except Exception:  # noqa: BLE001
                 self.program = None
         if not self._history_files():
@@ -3779,19 +3853,9 @@ class CadAgent:
                 await self.client.query(prompt)
             self._agent_turn = True
             await self._pump()
-            for attempt in range(2):                     # real threads at the end; one chance for the agent to fix a failure
-                self._agent_turn = False
-                err = await self.finalize_threads()
-                if err is None:
-                    break
-                if attempt == 1:
-                    await self.emit({"type": "error", "text": f"The real threads failed to build, so the design keeps plain threads: {err}"})
-                    break
-                self._agent_turn = True
-                await self.client.query("[App] Your builds used draft threads; the final build with the real threads (real=True) "
-                                        f"failed:\n{err}\nFix the script so it also builds with real threads (for example make "
-                                        "that one hole or screw real=False), then finish; the app rebuilds with real threads again.")
-                await self._pump()
+            self._agent_turn = False
+            self.start_real_threads()                    # the real threads behind the draft the turn ends with; a failure
+                                                         # reaches the chat and the agent's next turn (notes)
         except Exception as e:  # noqa: BLE001
             await self.emit({"type": "error", "text": f"{type(e).__name__}: {e}"})
         finally:

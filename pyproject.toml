@@ -32,7 +32,7 @@ Requires Claude Code (installed and signed in separately). Free for non-commerci
 icon = "src/agenticcad/resources/agenticcad"
 sources = [
     "src/agenticcad",
-    "server.py", "agent.py", "cad_kernel.py", "cam_kernel.py", "cam_rotary.py", "cam_sim.py", "cam_data.py", "drawing.py", "features.py", "analysis.py", "motion.py", "sketch_solver.py", "extensions.py", "ext_builtin", "machine_models.py", "machine_script.py", "machine_link.py", "run_recorder.py", "run_analysis.py", "share.py", "lessons.py", "dream.py", "power.py", "phone_push.py", "tool_shape.py", "machine_scripts", "machine_data", "fixture_lib.py", "fixture_scripts",
+    "server.py", "agent.py", "cad_kernel.py", "cam_kernel.py", "cam_rotary.py", "cam_sim.py", "cam_stamp.py", "cam_data.py", "drawing.py", "features.py", "analysis.py", "motion.py", "sketch_solver.py", "extensions.py", "ext_builtin", "machine_models.py", "machine_script.py", "machine_link.py", "run_recorder.py", "run_analysis.py", "share.py", "lessons.py", "dream.py", "power.py", "phone_push.py", "tool_shape.py", "machine_scripts", "machine_data", "fixture_lib.py", "fixture_scripts",
     "gears.py", "library.py", "script_edit.py", "slicer.py", "threads.py", "units.py", "version.py", "designkit",
     "static", "CHANGELOG.md",
 ]
@@ -53,6 +53,8 @@ requires = [
     "uvicorn==0.52.4",
     "websockets==17.1",
     "platformdirs==4.11.12",
+    # the simulator's stamping on the Apple GPU (cam_stamp.py; optional: the numpy code runs without it)
+    "metalcompute==0.2.9; sys_platform == 'darwin'",
     "pywebview==6.2.1",
     # pure-python dependency of pywebview published only as an sdist; Briefcase installs wheels only
     "./wheels/proxy_tools-0.1.0-py3-none-any.whl",
