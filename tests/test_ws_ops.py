@@ -166,7 +166,8 @@ def test_ws_cam_and_gcode_endpoints(client):
         drain(ws)
         ws.send_json({"type": "run_cam", "code": code})
         m = wait_for(ws, "cam")
-        assert m["program"] and len(m["program"]["ops"]) == 2 and m["gcode_lines"] > 10
+        assert m["program"] and len(m["program"]["ops"]) == 2 and m["gcode_lines"] is None   # counted after the build, in the background
+        assert wait_for(ws, "cam_gcode_lines")["gcode_lines"] > 10
         ws.send_json({"type": "run_cam", "code": "program = None\n"})
         e = ws.receive_json()
         while e["type"] != "cam_error":

@@ -383,6 +383,12 @@ class ToolShape:
         return pts
 
     def payload(self) -> dict:
+        """As the UI gets it. Cached per tool definition: the outline simplification costs ~50 ms and every program
+        payload asks for it once per op."""
+        import copy
+        return copy.deepcopy(_payload(_key(self.p)))
+
+    def _payload(self) -> dict:
         out = {"outline": self.outline(), "flute_length": self.p["fl"], "stickout": round(self.p["stickout"], 3),
                "cut_radius": round(self.cut_radius, 4), "max_radius": round(self.max_radius, 4),
                "reach": round(self.p["reach"], 3), "shank_start": round(self.p["shank_start"], 3),
@@ -391,6 +397,13 @@ class ToolShape:
             out["gear"] = {"thickness": round(self.p["thickness"], 3), "form_width": round(self.p["form_width"], 3),
                            "gullet_diameter": round(2 * self.p["gullet"], 3)}
         return out
+
+
+@lru_cache(maxsize=256)
+def _payload(key: tuple) -> dict:
+    s = ToolShape.__new__(ToolShape)
+    s.p, s._t = dict(key), _table(key)
+    return s._payload()
 
 
 @lru_cache(maxsize=256)

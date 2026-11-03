@@ -883,17 +883,13 @@ class CadAgent:
             await self.emit({"type": "cam", "program": None, "code": code, "source": source})
             return None
         # a Stop (interrupt) ends the build at its next stop point instead of leaving a thread running for minutes;
-        # the program's payload, summary and G-code line count are worked out in the thread too, not on the event loop
+        # the program's payload and summary are worked out in the thread too, not on the event loop
         import threading
         ev = self._cam_stop = threading.Event()
         tok = cam.STOP.set(ev)
         try:
             prog = await asyncio.to_thread(self._run_cam, code)
-
-            def finish():
-                prog.gcode_lines = prog.gcode().count("\n")
-                return prog.to_payload(), prog.summary()
-            payload, summary = await asyncio.to_thread(finish)
+            payload, summary = await asyncio.to_thread(lambda: (prog.to_payload(), prog.summary()))
         finally:
             cam.STOP.reset(tok)
             if self._cam_stop is ev:
@@ -901,8 +897,20 @@ class CadAgent:
         self.program = prog
         self.sim = None                                   # a new program invalidates the old simulation
         await self.emit({"type": "cam", "program": payload, "code": code, "source": source,
-                         "summary": summary, "gcode_lines": prog.gcode_lines})
+                         "summary": summary, "gcode_lines": None})
+        # the G-code line count posts the whole program (the arc fitting took 20 s of a 31 s latch build): counted
+        # after the program is shown, in the background; the viewer gets it when it is done
+        asyncio.get_running_loop().create_task(self._count_gcode(prog))
         return prog
+
+    async def _count_gcode(self, prog: cam.Program) -> None:
+        try:
+            n = await asyncio.to_thread(lambda: prog.gcode().count("\n"))
+        except Exception:  # noqa: BLE001 - a post that fails is reported when the G-code is asked for
+            return
+        prog.gcode_lines = n
+        if self.program is prog:
+            await self.emit({"type": "cam_gcode_lines", "gcode_lines": n})
 
     # ------------------------------------------------------------------ machine model scripts
     def machine_code(self, name: str) -> dict[str, Any]:

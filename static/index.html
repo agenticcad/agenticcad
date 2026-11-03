@@ -6228,6 +6228,9 @@ function connect() {
       case 'cam_error': for (const k of Object.keys(fxPending)) delete fxPending[k];
         if (camAddPending) { camAddPending = null; const am = document.getElementById('add-msg'); if (am) { am.className = 'wa'; am.textContent = 'Not added: ' + m.text.split('\n').filter(Boolean).slice(-2).join(' '); } break; }
         document.getElementById('codeerr').textContent = m.text; addMsg('error', 'CAM build failed — see Code tab'); break;
+      case 'cam_gcode_lines':   // the line count arrives after the program (the post runs in the background)
+        lastGcodeLines = m.gcode_lines || 0; document.getElementById('cam-gcode-meta').textContent = lastGcodeLines ? `${lastGcodeLines.toLocaleString()} lines` : '';
+        break;
       case 'cam_sim':
         if (program) { camOps.forEach((c, i) => { c.visible = m.ops.includes(i); }); applyCamVisibility(); renderCamTab(); setupSim(); startSim(m.sim); }
         break;
