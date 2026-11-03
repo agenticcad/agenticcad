@@ -36,6 +36,16 @@ def _profile(tool: cam.Tool, d: np.ndarray) -> np.ndarray:
 
 def _samples(moves, step: float, with_a: bool):
     """Points along each move (from the previous one), with the index of the move they belong to and its kind."""
+    if not with_a and len(moves) > 1:                  # flat setups: the same samples, built in numpy (2 s -> 0.1 s on 145k moves)
+        M = np.array([m[1:4] for m in moves], dtype=float)
+        K = np.array([m[0] for m in moves])
+        d = np.linalg.norm(M[1:] - M[:-1], axis=1)
+        n = np.maximum(1, np.minimum(4000, np.ceil(d / step).astype(np.int64)))
+        rep = np.repeat(np.arange(1, len(moves)), n)
+        local = np.arange(int(n.sum())) - np.repeat(np.cumsum(n) - n, n) + 1
+        t = (local / np.repeat(n, n))[:, None]
+        seg = M[rep - 1] + (M[rep] - M[rep - 1]) * t
+        return np.concatenate([M[:1], seg]), np.concatenate([[0], rep]), np.concatenate([K[:1], K[rep]])
     pts, idx, kinds = [], [], []
     prev = None
     for i, m in enumerate(moves):
@@ -785,9 +795,25 @@ def _part_maps_z(part, res, x0, y0, nx, ny):
     return top, -nbot
 
 
+_BODY_MAPS: dict = {}       # (id(part), grid) -> (part, maps): the maps of the last few (part, grid) pairs, read-only
+
+
 def _body_maps_z(part, res, x0, y0, nx, ny) -> dict:
     """Per body of the part: its top / bottom surface heights per cell (-inf / +inf where it is absent), names, and the
-    union: "top" (max), "bot" (min), "owner" (index of the body whose top is highest in each cell, -1 = no part)."""
+    union: "top" (max), "bot" (min), "owner" (index of the body whose top is highest in each cell, -1 = no part).
+    Kept per (part, grid): the simulation after fit_feeds, and every re-simulation of the same program, reuse them."""
+    key = (id(part), float(res), float(x0), float(y0), int(nx), int(ny))
+    hit = _BODY_MAPS.get(key)
+    if hit is not None and hit[0] is part:
+        return hit[1]
+    maps = _body_maps_z_build(part, res, x0, y0, nx, ny)
+    if len(_BODY_MAPS) >= 4:
+        _BODY_MAPS.pop(next(iter(_BODY_MAPS)))
+    _BODY_MAPS[key] = (part, maps)
+    return maps
+
+
+def _body_maps_z_build(part, res, x0, y0, nx, ny) -> dict:
     model = part if isinstance(part, ck.Model) else ck.build_model(ck.coerce_bodies(part), "", "fine")
     mbodies = model.mesh["bodies"]
     names = [b.name for b in model.bodies] if len(model.bodies) == len(mbodies) else [f"body {k + 1}" for k in range(len(mbodies))]
