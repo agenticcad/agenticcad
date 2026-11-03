@@ -5,6 +5,23 @@ patch bumps fix things, a major bump changes something scripts or workspaces rel
 
 ## [Unreleased]
 
+## [1.8.0] — 2026-11-03
+
+### Changed
+- **Building CAM is several times faster.** The boat latch job builds in 3.5 s instead of 31 s, the 88-operation latch
+  script in 15 s instead of about 100 s; simulating with fitted feeds takes about half as long. The same programs come
+  out (G-code within the same tolerance, the same simulation verdicts):
+  - the G-code is posted after the program is shown, in the background (it was posted on every build just to count
+    its lines - two thirds of the wait), with an arc fitter that no longer re-checks every point of every arc;
+  - sections of the part come from a fine mesh cut by a plane in a few ms instead of an OpenCascade boolean of
+    0.1-1 s each (106 per latch build). Where the two disagreed, an exact solid classifier sided with the mesh: the
+    booleans had misread the threaded lift ring and the cam-arm bevel. The boolean stays as the fallback;
+  - setup views no longer copy the whole part; 3D finishing height maps, the simulator's sampling and adaptive
+    clearing's probes are vectorised;
+  - after the feeds are fitted the simulation is worked out again from what it already measured (0.4 s) instead of
+    running a second time.
+- The estimated spindle power builds the run's design with plain threads (57 → 13 s a run, the same numbers).
+
 ## [1.7.0] — 2026-11-02
 
 After a two-sided job on the Z1 went badly (a cutter driven into the plate, parts released on 0.9 mm tabs, chamfers
