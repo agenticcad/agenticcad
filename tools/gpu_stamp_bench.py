@@ -1,4 +1,5 @@
-"""PROTOTYPE (not wired into the app). GPU vs numpy for the simulator's stamping (the data-parallel core of cam_sim._stamp_z_run): every sample's tool
+"""PROTOTYPE micro-benchmark (the app's version is cam_stamp.py: numba, and a Metal stamp with the exact knot profile instead of
+this kernel's linear scan, which is why this one reports 1e1 differences on some maps). GPU vs numpy for the simulator's stamping (the data-parallel core of cam_sim._stamp_z_run): every sample's tool
 footprint lowered into the height map. Workload: an .npz written by tools/gpu_stamp_dump.py (a job's flat ops, real samples).
   python tools/gpu_stamp_dump.py <workspace> <cam.py> dump.npz   (needs the app venv)
   python tools/gpu_stamp_bench.py dump.npz                       (any venv with numpy; torch / metalcompute optional)
