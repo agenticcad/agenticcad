@@ -5,6 +5,8 @@ patch bumps fix things, a major bump changes something scripts or workspaces rel
 
 ## [Unreleased]
 
+## [1.9.0] — 2026-11-04
+
 ### Changed
 - **The design shows at once; the real threads follow.** Every build (opening a design, a parameter change, the
   Code panel, launch) is drawn with plain threads in under a second while the real helices are modelled in the
@@ -38,6 +40,7 @@ patch bumps fix things, a major bump changes something scripts or workspaces rel
   job instead of 6.5 MB of JSON, 8.7 instead of 16.8 MB for the obsidian sheet), built in 0.14 s instead of 0.57 s
   (0.4 instead of 1.3 s) and decoded in 2-3 ms instead of 15-43 ms of JSON.parse; pages of earlier versions and the
   tests still get the JSON lists.
+- Interference and motion checks while the real threads are still building run on the plain ones, and say so.
 
 ## [1.8.0] — 2026-11-03
 

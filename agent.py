@@ -970,6 +970,8 @@ class CadAgent:
         if self.model is None:
             raise ck.CadError("no model built")
         m = self.model
+        if m.draft_threads:                              # real threads asked for, still building: the check is the same
+            return m, "real threads were checked as plain cylinders (fast); a bolt in a tapped hole shows as thread engagement"
         if not (any(getattr(t, "real", False) for t in m.threads) and not m.draft_threads):
             return m, None
         key = (m.code, self.quality)
