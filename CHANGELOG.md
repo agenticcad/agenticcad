@@ -5,6 +5,16 @@ patch bumps fix things, a major bump changes something scripts or workspaces rel
 
 ## [Unreleased]
 
+## [1.9.2] — 2026-11-04
+
+### Fixed
+- **A CAM build that never finished.** After a multi-setup program was built, finding an untouched spot on the
+  flipped setup's top for the Z touch merged every cutting move into one shapely polygon; on the 88-op latch sheet
+  GEOS fell back to snap-rounding and ran for over an hour, on the server's event loop, so the whole app froze with
+  the `build_cam` card still running. The spot is now found on a grid (0.7 s for that sheet; exactly clear of every
+  cut, the register holes and the stock edge, with a 0.4 mm margin the polygon method didn't have), and the build's
+  summary and alignment advice run in a worker thread so the app stays live while they do.
+
 ## [1.9.1] — 2026-11-04
 
 ### Added

@@ -3,6 +3,8 @@ contours in one full-depth pass, pocket rings lobe by lobe with stay-down links,
 engagement (Program.fit_feeds) and a real rating for chamfer tools."""
 import math
 
+import numpy as np
+
 import pytest
 
 import cad_kernel as ck
@@ -446,3 +448,44 @@ def test_adaptive_depth_is_its_own_machine_setting(machines):
     st2 = cam.Setup(m2, cam.Stock.block(80, 60, 10, bottom=0, material="aluminium"))
     op2 = cam.adaptive(st2, t, cam.rect(-10, -8, 10, 8), z_top=10, z_bottom=4, stepover=0.12, stepdown=5.0)
     assert op2.params["stepdown"] == pytest.approx(2.0) and any("adaptive_stepdown" in w for w in op2.warnings)
+
+
+def test_alignment_spot_on_a_busy_sheet_is_quick_and_clear(machines):
+    """The Z-touch spot is worked out on a grid: buffering every cutting move into one polygon sent GEOS into its
+    snap-rounding fallback for over an hour on an 88-op sheet (and froze the app). Dense linework on both sides; the
+    spot must still be clear of every cut (exactly, against the moves), the holes and the stock's edge."""
+    import time
+    from shapely.geometry import MultiLineString, Point
+    m = machines["Makera Z1"]
+    stock = cam.Stock.block(160, 120, 10, bottom=0)
+    a = cam.Setup(m, stock, origin="stock-top-center", orient="bottom", name="A")
+    b = cam.Setup(m, stock, origin="stock-top-center", name="B")
+    t = flat(stepover=0.05)
+    holes = cam.register_holes(a, cam.rect(-50, -30, 50, 30), later=b, tool=t)
+    prog = cam.Program(a, name="busy")
+    prog.add(cam.register_hole_ops(a, t, holes, dia=8.0))
+    for i in range(6):
+        x = -60 + 22 * i
+        prog.add(cam.pocket(a, t, cam.rect(x, -40, x + 14, 40), z_top=10, z_bottom=8, finish=False))
+        prog.add(cam.pocket(b, t, cam.rect(x, -45, x + 14, 45), z_top=10, z_bottom=8, finish=False))
+    t0 = time.time()
+    feats = prog.alignment_features()
+    assert time.time() - t0 < 10
+    sx, sy = feats[0]["surface"]
+    ox, oy, _ = b.origin_point()
+    p = Point(sx + ox, sy + oy)
+    for op in prog.ops:
+        if prog.setup_of(op) is b:
+            segs = [(tuple(u[1:3]), tuple(v[1:3])) for u, v in zip(op.moves, op.moves[1:]) if v[0] != cam.RAPID]
+            assert MultiLineString(segs).distance(p) >= t.radius + 2.0
+    assert all(math.dist((sx, sy), (h["x"], h["y"])) >= h["dia"] / 2 + 3.0 for h in feats[0]["holes"])
+    assert b.stock.xmin + 4 <= p.x <= b.stock.xmax - 4 and b.stock.ymin + 4 <= p.y <= b.stock.ymax - 4
+
+
+def test_free_spot_nearest_to_ref_and_none_when_covered():
+    st = cam.Stock.block(40, 40, 5, bottom=0)
+    seg = (np.array([[-20.0, 0.0]]), np.array([[20.0, 0.0]]), 3.0)       # a cut along y = 0 keeps 3 mm either side
+    x, y = cam._free_spot(st, 4.0, [seg], ref=(0.0, 0.0))
+    assert abs(x) < 0.5 and 3.0 < abs(y) < 3.9
+    assert cam._free_spot(st, 4.0, [(np.array([[0.0, 0.0]]), np.array([[0.0, 0.0]]), 40.0)]) is None
+    assert cam._free_spot(st, 25.0, []) is None                          # the inset leaves nothing

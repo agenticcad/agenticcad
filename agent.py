@@ -2782,7 +2782,9 @@ class CadAgent:
                 return {"content": [{"type": "text", "text": f"CAM BUILD FAILED\n{type(e).__name__}: {e}"}], "is_error": True}
             les = agent.lessons_for(agent.cam_tags(prog), "LESSONS for this program - in your reply, say in one line each how the "
                                     "script meets it (or that it doesn't apply); fix the script first where it doesn't:")
-            return {"content": [{"type": "text", "text": prog.summary() + agent.alignment_advice(prog) + ("\n\n" + les if les else "")}]}
+            # the summary and the alignment advice are geometry work: in a thread, so the app stays live while they run
+            text = await asyncio.to_thread(lambda: prog.summary() + agent.alignment_advice(prog))
+            return {"content": [{"type": "text", "text": text + ("\n\n" + les if les else "")}]}
 
         @tool("get_cam_code", "Return the current CAM script.", {})
         async def get_cam_code(args: dict[str, Any]) -> dict[str, Any]:

@@ -3977,6 +3977,52 @@ def apply_feeds(tool: Tool, material: str, machine: Machine | None = None, **kw)
 FIT_SKIP_KINDS = ("probe", "drill", "vcarve", "chamfer", "gear_teeth")   # fit_feeds: no radial-engagement model for these
 
 
+def _free_spot(stock, inset: float, keep_out, ref=None, max_cells: int = 1200):
+    """A point on the stock's top at least `inset` in from its edges and clear of every keep-out: (A, B, r) = segments
+    A[i]-B[i] (xy rows) that nothing within r of may touch. On a grid (cell ~ the stock's size / max_cells, 0.25 mm at
+    the finest): the cells within r (+1.5 cells, so a cell centre that passes is clear of the exact segment too) of the
+    samples along each segment are blocked; the free cell nearest `ref`, or the one furthest from anything blocked when
+    no ref is given. None when nothing is free."""
+    from scipy.ndimage import distance_transform_edt
+    x0, y0, x1, y1 = stock.xmin + inset, stock.ymin + inset, stock.xmax - inset, stock.ymax - inset
+    if x1 <= x0 or y1 <= y0:
+        return None
+    cell = max(0.25, max(x1 - x0, y1 - y0) / max_cells)
+    nx, ny = int(math.ceil((x1 - x0) / cell)) + 1, int(math.ceil((y1 - y0) / cell)) + 1
+    xs, ys = x0 + np.arange(nx) * cell, y0 + np.arange(ny) * cell
+    blocked = np.zeros((ny, nx), bool)
+    by_r: dict[float, list] = {}
+    for A, B, r in keep_out:
+        by_r.setdefault(round(float(r), 3), []).append((np.asarray(A, float), np.asarray(B, float)))
+    for r, parts in by_r.items():
+        pad = int(math.ceil(r / cell)) + 2           # cuts just outside the free area still block it
+        hit = np.zeros((ny + 2 * pad, nx + 2 * pad), bool)
+        for A_, B_ in parts:
+            for c0 in range(0, len(A_), 50_000):        # samples a cell apart along each segment, a chunk at a time
+                A, B = A_[c0:c0 + 50_000], B_[c0:c0 + 50_000]
+                n = np.maximum(1, np.ceil(np.hypot(*(B - A).T) / cell).astype(int))
+                seg = np.repeat(np.arange(len(n)), n + 1)
+                t = (np.arange(len(seg)) - np.repeat(np.cumsum(n + 1) - (n + 1), n + 1)) / n[seg]
+                S = A[seg] + (B - A)[seg] * t[:, None]
+                ix = np.round((S[:, 0] - x0) / cell).astype(int) + pad
+                iy = np.round((S[:, 1] - y0) / cell).astype(int) + pad
+                ok = (ix >= 0) & (ix < nx + 2 * pad) & (iy >= 0) & (iy < ny + 2 * pad)
+                hit[iy[ok], ix[ok]] = True
+        if hit.any():
+            d = distance_transform_edt(~hit)[pad:pad + ny, pad:pad + nx] * cell
+            blocked |= d <= r + 1.5 * cell
+    if blocked.all():
+        return None
+    if ref is not None:
+        free = np.argwhere(~blocked)
+        j = int(np.argmin((xs[free[:, 1]] - ref[0]) ** 2 + (ys[free[:, 0]] - ref[1]) ** 2))
+        iy, ix = free[j]
+    else:
+        clear = distance_transform_edt(np.pad(~blocked, 1))[1:-1, 1:-1]
+        iy, ix = np.unravel_index(int(np.argmax(clear)), clear.shape)
+    return float(xs[ix]), float(ys[iy])
+
+
 class Program:
     """Operations in run order. Each op carries the Setup it was made with; consecutive ops that share a setup run
     together. A change of setup is an operator step (flip or re-clamp the part, re-zero) unless both setups are on
@@ -4217,8 +4263,10 @@ class Program:
                 if s0 is st and op.kind == "probe" and (op.params or {}).get("probe") == "hole":
                     x, y = op.params["at"]
                     add(x - ox, y - oy, op.params["diameter"], op.params.get("depth", depth))
-            # an untouched spot of this setup's top: away from its cuts, from earlier cuts that reach its top, and the holes
-            foot = []
+            # an untouched spot of this setup's top: away from its cuts, from earlier cuts that reach its top, and the holes.
+            # Worked out on a grid: buffering every cutting move into one polygon sent GEOS into its snap-rounding fallback
+            # for over an hour on the 88-op latch sheet (and froze the app: it ran on the event loop)
+            keep_out = []                                 # (xy samples along the cuts, clearance radius)
             for op in self.ops:
                 s0 = self.setup_of(op)
                 if op.kind == "probe" or not op.moves or not any(s0 is e for e in flat[:k + 1]):
@@ -4228,22 +4276,15 @@ class Program:
                 if s0 is not st:
                     P = st.to_setup(s0.to_model(P))
                 near_top = P[:, 2] >= ztop - 0.5 if s0 is not st else np.ones(len(P), bool)
-                segs = [(tuple(P[i - 1, :2]), tuple(P[i, :2])) for i in range(1, len(P))
-                        if cut[i] and (near_top[i] or near_top[i - 1])]
-                if segs:
-                    from shapely.geometry import MultiLineString
-                    foot.append(MultiLineString(segs).buffer(op.tool.radius + 2.0, quad_segs=4))
+                seg = cut[1:] & (near_top[1:] | near_top[:-1])
+                if seg.any():
+                    keep_out.append((P[:-1, :2][seg], P[1:, :2][seg], op.tool.radius + 2.0))
             for h in holes:
-                foot.append(Point(h["x"] + ox, h["y"] + oy).buffer(h["dia"] / 2 + 3.0))
-            free = st.stock.rect().buffer(-4.0, join_style=2)
-            if foot:
-                free = free.difference(unary_union(foot))
-            surf = None
-            if not free.is_empty:
-                from shapely.ops import nearest_points
-                ref = Point(holes[0]["x"] + ox, holes[0]["y"] + oy) if holes else free.representative_point()
-                q = nearest_points(free, ref)[0]
-                surf = (round(q.x - ox, 3), round(q.y - oy, 3))
+                c = np.array([[h["x"] + ox, h["y"] + oy]])
+                keep_out.append((c, c, h["dia"] / 2 + 3.0))
+            ref = (holes[0]["x"] + ox, holes[0]["y"] + oy) if holes else None
+            q = _free_spot(st.stock, 4.0, keep_out, ref)
+            surf = (round(q[0] - ox, 3), round(q[1] - oy, 3)) if q is not None else None
             out.append({"setup": st.name, "wcs": st.wcs, "holes": holes, "surface": surf, "z_top": round(float(ztop - oz), 3)})
         return out
 
