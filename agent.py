@@ -885,6 +885,8 @@ class CadAgent:
             self.sim = None
             await self.emit({"type": "cam", "program": None, "code": code, "source": source})
             return None
+        if self._threads_task is not None and not self._threads_task.done():
+            await self.emit({"type": "cam_progress", "job": "build", "frac": None, "text": "waiting for the real threads"})
         await self.wait_for_threads()                     # a program built on draft threads differs around them (7 of the latch's 26 ops)
         # a Stop (interrupt) ends the build at its next stop point instead of leaving a thread running for minutes;
         # the program's payload and summary are worked out in the thread too, not on the event loop
@@ -893,10 +895,20 @@ class CadAgent:
             self._gcode_stop.set()
         ev = self._cam_stop = threading.Event()
         tok = cam.STOP.set(ev)
+        # the chat's build_cam card shows a bar: ops built against the last program's op count (or the script's
+        # .add( calls the first time; a loop adds more, so the bar stops short of the end until the build is done)
+        est = len(self.program.ops) if self.program is not None else code.count(".add(")
+        send = self._cam_progress("build")
+
+        def built(frac, text, n=None):
+            send(0.9 * n / max(est, n + 1) if n else frac, text)
+        ptok = cam.PROGRESS.set(built)
         try:
             prog = await asyncio.to_thread(self._run_cam, code)
+            send(0.93, f"{len(prog.ops)} ops built: preparing the program for the viewer", force=True)
             payload, summary = await asyncio.to_thread(lambda: (self._program_event(prog), prog.summary()))
         finally:
+            cam.PROGRESS.reset(ptok)
             cam.STOP.reset(tok)
             if self._cam_stop is ev:
                 self._cam_stop = None
@@ -908,6 +920,21 @@ class CadAgent:
         # after the program is shown, in the background; the viewer gets it when it is done
         asyncio.get_running_loop().create_task(self._count_gcode(prog))
         return prog
+
+    def _cam_progress(self, job: str):
+        """A progress callback for the CAM worker threads: sends {"type": "cam_progress", job, frac, text} to the pages
+        (the running build_cam / simulate_cam card shows it as a bar), at most ~8 a second."""
+        loop = asyncio.get_running_loop()
+        last = [0.0]
+
+        def send(frac, text, n=None, force=False):
+            now = time.monotonic()
+            if not force and now - last[0] < 0.12:
+                return
+            last[0] = now
+            ev = {"type": "cam_progress", "job": job, "frac": None if frac is None else round(float(frac), 3), "text": text}
+            loop.call_soon_threadsafe(lambda: loop.create_task(self.emit(ev)))
+        return send
 
     def _program_event(self, prog: cam.Program | None = None) -> dict[str, Any]:
         """The program for the viewer: its JSON payload without the moves, plus the moves as one binary frame
@@ -1573,10 +1600,21 @@ class CadAgent:
         import cam_sim
         if self.program is None:
             raise cam.CamError("no CAM program built")
-        res = await asyncio.to_thread(cam_sim.simulate, self.program, ops, self.model, resolution)
+        send = self._cam_progress("sim")
+        ptok = cam.PROGRESS.set(lambda frac, text, n=None: send(None if frac is None else 0.9 * frac, text))
+        try:
+            res = await asyncio.to_thread(cam_sim.simulate, self.program, ops, self.model, resolution)
+        finally:
+            cam.PROGRESS.reset(ptok)
+        send(0.9, "fitting the feeds to the load", force=True)
         fit = self.program.after_simulation(res)          # feeds follow the engagement (Program load / per-op "load")
         if fit:                                            # times and MRR at the fitted feeds (the cuts themselves are the same)
-            res = await asyncio.to_thread(cam_sim.refit, res, self.program, ops, self.model, resolution)
+            ptok = cam.PROGRESS.set(lambda frac, text, n=None: send(None if frac is None else 0.9 + 0.08 * frac, "fitting feeds: " + text))
+            try:
+                res = await asyncio.to_thread(cam_sim.refit, res, self.program, ops, self.model, resolution)
+            finally:
+                cam.PROGRESS.reset(ptok)
+            send(0.98, "sending the result to the viewer", force=True)
             ev = await asyncio.to_thread(self._program_event)
             await self.emit({"type": "cam", "code": self.cam_code, "source": "fit_feeds", **ev, "summary": self.program.summary()})
         self.sim = res

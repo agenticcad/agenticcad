@@ -147,7 +147,16 @@
   .tool summary::-webkit-details-marker { display:none; }
   .tool summary .row { display:flex; gap:8px; align-items:center; }
   .tool summary .row::before { content:"▸"; font-size:10px; } .tool[open] summary .row::before { content:"▾"; }
-  .tool .name { color:var(--accent2); font-family:ui-monospace,Menlo,monospace; }
+  .tool .name { color:var(--accent2); font-family:ui-monospace,Menlo,monospace; flex:none; }
+  .tool .args { flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .tool .state { flex:none; }
+  /* build_cam / simulate_cam: a bar with what the worker is doing (cam_progress events) while the card runs */
+  .tool .prog { display:block; margin:6px 0 1px 18px; }
+  .tool .prog .bar { display:block; height:4px; border-radius:2px; background:var(--line); overflow:hidden; }
+  .tool .prog .bar i { display:block; height:100%; width:0; background:var(--accent); border-radius:2px; transition:width .2s linear; }
+  .tool .prog.ind .bar i { width:35%; animation:sp-slide 1.1s ease-in-out infinite; }
+  .tool .prog .ptext { display:flex; gap:8px; margin-top:4px; font-size:11px; color:var(--muted); }
+  .tool .prog .ptext b { font-weight:normal; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0; flex:1; }
   .tool .state { margin-left:auto; } .tool .state.ok { color:var(--ok);} .tool .state.err { color:var(--err);} .tool .state.run { color:var(--accent); }
   .tool pre { margin:0; padding:8px 10px; background:#0f1216; max-height:260px; overflow:auto; font-size:11px; white-space:pre-wrap; border-top:1px solid var(--line); }
   .tool img { display:block; max-width:100%; border-top:1px solid var(--line); }
@@ -1857,10 +1866,29 @@ function toolChip(id, name) {
   messagesEl.appendChild(el); toolEls.set(id, el); scroll(); return el;
 }
 function summarizeInput(name, input) {
-  if (name === 'build_model') return `${(input.code || '').split('\n').length} lines`;
+  if (name === 'build_model' || name === 'build_cam') return `${(input.code || '').split('\n').length} lines`;
+  if (name === 'simulate_cam') return input.ops?.length ? 'ops ' + opRanges(input.ops) : 'all ops';
   if (name === 'edit_model') return `${(input.edits || []).length} edit(s)` + (input.append ? ` + ${input.append.split('\n').length} appended lines` : '');
   if (name === 'screenshot') return `${input.view || 'iso'}${input.highlight_faces?.length ? ' · faces ' + input.highlight_faces.join(',') : ''}`;
   return Object.entries(input || {}).map(([k, v]) => `${k}=${JSON.stringify(v)}`).join(' ').slice(0, 80);
+}
+
+function opRanges(ops) {                    // [71,72,73,75] -> "71–73, 75"
+  const a = [...new Set(ops.map(Number))].sort((x, y) => x - y), out = [];
+  for (let i = 0; i < a.length; i++) { let j = i; while (j + 1 < a.length && a[j + 1] === a[j] + 1) j++; out.push(j > i ? `${a[i]}–${a[j]}` : `${a[i]}`); i = j; }
+  return out.join(', ');
+}
+function camProgress(m) {                    // the running build_cam / simulate_cam card gets the worker's progress
+  const want = m.job === 'sim' ? 'simulate_cam' : 'build_cam';
+  const el = [...toolEls.values()].reverse().find(e => e.querySelector('.name').textContent.endsWith(want) && e.querySelector('.state.run'));
+  if (!el) return;
+  let p = el.querySelector('.prog');
+  if (!p) { p = document.createElement('span'); p.className = 'prog'; p.innerHTML = '<span class="bar"><i></i></span><span class="ptext"><b></b><span class="pct"></span></span>'; el.querySelector('summary').appendChild(p); scroll(); }
+  const det = m.frac != null;
+  p.classList.toggle('ind', !det);
+  p.querySelector('.bar i').style.width = det ? `${Math.round(m.frac * 100)}%` : '';
+  p.querySelector('b').textContent = m.text || '';
+  p.querySelector('.pct').textContent = det ? `${Math.round(m.frac * 100)}%` : '';
 }
 
 // selection chips
@@ -6290,7 +6318,8 @@ function connect() {
       case 'tool_start': finishBubble(); thinkingEl.style.display = 'none'; toolChip(m.id, m.name); break;
       case 'tool_use': { finishBubble(); const el = toolChip(m.id, m.name); el.querySelector('.args').textContent = summarizeInput(m.name, m.input);
         if (m.name === 'build_model') { const pre = document.createElement('pre'); pre.textContent = m.input.code || ''; el.appendChild(pre); } break; }
-      case 'tool_result': { const el = toolChip(m.id, m.name); const st = el.querySelector('.state');
+      case 'cam_progress': camProgress(m); break;
+      case 'tool_result': { const el = toolChip(m.id, m.name); const st = el.querySelector('.state'); el.querySelector('.prog')?.remove();
         if (m.is_error && /No such tool available/i.test(m.text || '')) {   // the model misnamed a tool; it retries by itself
           st.textContent = 'retried'; st.className = 'state'; el.classList.add('retried'); el.open = false; scroll(); break; }
         st.textContent = m.is_error ? 'error' : 'done'; st.className = 'state ' + (m.is_error ? 'err' : 'ok');

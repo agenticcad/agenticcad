@@ -413,3 +413,19 @@ async def test_set_op_override_rewrites_script_and_rebuilds(ag):
     with pytest.raises(cam.CamError, match="rrggbb"):
         await ag.set_op_override("Face", {"color": "blue"})
     assert ag.cam_code == before
+
+
+async def test_cam_build_and_simulation_report_progress(ag):
+    """build_cam / simulate_cam cards in the chat show a bar: cam_progress events from the worker threads, in order."""
+    await build(ag)
+    await ag.set_cam_code(CAM_FACE)
+    await ag.simulate()
+    await asyncio.sleep(0.05)                                    # progress is posted to the loop from the worker threads
+    ev = [e for e in ag.rec.events if e["type"] == "cam_progress"]
+    for job in ("build", "sim"):
+        mine = [e for e in ev if e["job"] == job]
+        fr = [e["frac"] for e in mine if e["frac"] is not None]
+        assert fr and all(0 <= f <= 1 for f in fr) and fr == sorted(fr), (job, mine)
+    texts = [e["text"] for e in ev]
+    assert any(t.startswith("op 1 built") for t in texts) and any("preparing the program" in t for t in texts)
+    assert any(t.startswith("cutting op 1 of 2") for t in texts) and any("fitting the feeds" in t for t in texts)

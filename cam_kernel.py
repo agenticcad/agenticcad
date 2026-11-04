@@ -48,6 +48,17 @@ def stop_point() -> None:
         raise BuildStopped("CAM build stopped")
 
 
+# set by the app around a CAM build or simulation (carried into the worker thread like STOP): called as the work goes,
+# with the fraction done (None when the total isn't known), what is happening, and for a build the ops built so far
+PROGRESS: contextvars.ContextVar = contextvars.ContextVar("cam_progress", default=None)
+
+
+def progress(frac: float | None, text: str, n: int | None = None) -> None:
+    cb = PROGRESS.get()
+    if cb is not None:
+        cb(frac, text, n)
+
+
 # Sections are the slow part of most CAM scripts (an OCCT boolean each, 0.3-1 s on a few hundred faces) and the
 # assistant rebuilds the same script against the same model many times: results are kept per (shape, z, tol). The
 # shape is held in the entry, so its hash (TShape + location) cannot be reused by another shape while cached.
@@ -3995,6 +4006,7 @@ class Program:
             op.color, op.color_override = c, True
             _OV["used"].add(op.key)
         self.ops.append(op)
+        progress(None, f"op {len(self.ops)} built: {op.name}", len(self.ops))
         return op
 
     def op_tiles(self, op: Op) -> list[tuple[float, float, float]]:

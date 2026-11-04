@@ -513,6 +513,7 @@ def _sim_zmap(program, order, part, resolution, frames, tol, machine_model=None,
             q["zlo"] = _quant(zlo, zhi, zmin, zmax, low=True)
         out.frames.append((upto, q))
 
+    cam.progress(0.01, "mapping the part")
     bodies = _body_maps_z(part, res, x0, y0, nx, ny) if part is not None else None
     pmaps = (bodies["top"], bodies["bot"]) if bodies is not None else None
     fix = _fixture_map(fix_shapes, res) if fix_shapes else None
@@ -534,8 +535,18 @@ def _sim_zmap(program, order, part, resolution, frames, tol, machine_model=None,
     def vol():
         return float(np.where(zhi > zlo, zhi - zlo, 0.0).sum()) * res * res
 
+    # progress: the earlier setups' history (cut silently) takes the first tenth, the selected ops' moves the rest
+    n_hist = sum(1 for p_ in plans if p_[5]); n_sel = len(plans) - n_hist
+    base = 0.1 if n_hist else 0.03
+    k_hist = k_sel = 0
+
+    def cutting(op, moves_done):
+        cam.progress(base + (0.93 - base) * min(1.0, moves_done / max(total, 1)), f"cutting op {k_sel} of {n_sel}: {op.name}")
+
     for i, op, side, mv, src, silent, zs in plans:
         if silent:
+            k_hist += 1
+            cam.progress(0.03 + 0.07 * (k_hist - 1) / n_hist, f"stock history {k_hist} of {n_hist}: {op.name}")
             if side == 0 or not mv or op.kind == "probe":
                 continue
             v0 = vol() if started else 0.0
@@ -560,6 +571,8 @@ def _sim_zmap(program, order, part, resolution, frames, tol, machine_model=None,
             if pmaps is not None and out.history:
                 gouged = _gouge_z(pmaps, zhi, zlo, tol, has_bottom)[0]
             gouged_start = gouged.copy()
+        k_sel += 1
+        cutting(op, done)
         if side == 0 or not mv:
             done += len(mv) if mv else len(op.moves)
             while mark_i < len(marks) and marks[mark_i] <= done:
@@ -596,6 +609,7 @@ def _sim_zmap(program, order, part, resolution, frames, tol, machine_model=None,
             start = end
             if next_mark is not None and end_move_done(idx, end, done, next_mark):
                 snap(next_mark); mark_i += 1
+            cutting(op, done + int(I[-1]) + 1)
         done += len(mv)
         b, per_move = _op_stats(program, op, mv, src, pts, idx, kinds, eng, rapid_rate)
         bites.append(b); out.per_move[i] = per_move
@@ -630,6 +644,7 @@ def _sim_zmap(program, order, part, resolution, frames, tol, machine_model=None,
         if has_bottom:
             out.notes.append("machine collisions are checked on top setups only; flipped (bottom) setups are not checked against the holder")
     if pmaps is not None:
+        cam.progress(0.94, "comparing the stock with the part")
         _compare_zmap(out, pmaps, zhi, zlo, res, x0, y0, nx, tol, has_bottom, bodies)
         out.stats["gouge"]["ops"] = gouge_ops
         out.stats["gouge"]["new_cells"] = int((out.masks["gouge"] & ~gouged_start).sum())
@@ -1309,6 +1324,7 @@ def _sim_radial(program, sel, part, resolution, frames, tol, machine_model=None,
     R = core = None
     if part is not None:
         shape = part.shape if isinstance(part, ck.Model) else part
+        cam.progress(0.01, "mapping the part")
         xs, angles, R = cam.radial_map(st, shape, res_x, res_a, (x0, x0 + (nx - 1) * res_x))
         R = R[:, :nx] if R.shape[1] >= nx else np.pad(R, ((0, 0), (0, nx - R.shape[1])))
         has = R > 0
@@ -1333,8 +1349,9 @@ def _sim_radial(program, sel, part, resolution, frames, tol, machine_model=None,
     gouge_by_op: list[dict] = []
 
     snap(0)
-    for i in sel:
+    for k_sel, i in enumerate(sel, 1):
         op = program.ops[i]; s_ = program.setup_of(op)
+        cam.progress(0.03 + 0.92 * done / max(total, 1), f"cutting op {k_sel} of {len(sel)}: {op.name}")
         if not op.moves:
             continue
         tool = op.tool

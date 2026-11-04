@@ -5,6 +5,18 @@ patch bumps fix things, a major bump changes something scripts or workspaces rel
 
 ## [Unreleased]
 
+## [1.9.1] — 2026-11-04
+
+### Added
+- **Progress in the chat for CAM builds and simulations.** The assistant's `build_cam` and `simulate_cam` cards show
+  a bar while they run, with what the worker is on: ops built so far ("op 8 built: Pocket rings", against the last
+  program's op count), then the simulation's stages ("mapping the part", the earlier setups' stock history, "cutting
+  op 12 of 18: Contour with tabs" by moves cut, "comparing the stock with the part", "fitting the feeds to the load").
+
+### Changed
+- Tool cards in the chat keep their header on one line: long arguments are cut off, `simulate_cam` shows its ops as
+  ranges ("ops 71–88") and `build_cam` the script's line count.
+
 ## [1.9.0] — 2026-11-04
 
 ### Changed
