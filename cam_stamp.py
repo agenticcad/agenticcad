@@ -237,7 +237,37 @@ def _build_numba():
                     if per > eng[s, 2]:
                         eng[s, 2] = per
 
-    return {"run": run}
+    @njit(cache=True, nogil=True)
+    def raster(Q, I, R, x0, res_x, res_a):
+        """cam_rotary._raster as one compiled pass: max-rasterise triangles of (x, a, r) into R[a, x]."""
+        na, nx = R.shape
+        for t in range(I.shape[0]):
+            ax, aa, ar = Q[I[t, 0], 0], Q[I[t, 0], 1], Q[I[t, 0], 2]
+            bx, ba, br = Q[I[t, 1], 0], Q[I[t, 1], 1], Q[I[t, 1], 2]
+            cx, ca, cr = Q[I[t, 2], 0], Q[I[t, 2], 1], Q[I[t, 2], 2]
+            ix0 = max(int(math.floor((min(ax, bx, cx) - x0) / res_x)), 0)
+            ix1 = min(int(math.ceil((max(ax, bx, cx) - x0) / res_x)), nx - 1)
+            ia0 = int(math.floor(min(aa, ba, ca) / res_a))
+            ia1 = int(math.ceil(max(aa, ba, ca) / res_a))
+            if ix1 < ix0 or ia1 < ia0:
+                continue
+            d = (ba - ca) * (ax - cx) + (cx - bx) * (aa - ca)
+            if abs(d) < 1e-12:
+                continue
+            for ia in range(ia0, ia1 + 1):
+                A = ia * res_a
+                row = ia % na
+                for ix in range(ix0, ix1 + 1):
+                    X = x0 + ix * res_x
+                    l1 = ((ba - ca) * (X - cx) + (cx - bx) * (A - ca)) / d
+                    l2 = ((ca - aa) * (X - cx) + (ax - cx) * (A - ca)) / d
+                    l3 = 1 - l1 - l2
+                    if l1 >= -1e-6 and l2 >= -1e-6 and l3 >= -1e-6:
+                        Z = l1 * ar + l2 * br + l3 * cr
+                        if Z > R[row, ix]:
+                            R[row, ix] = Z
+
+    return {"run": run, "raster": raster}
 
 
 def _run_numba(zhi, zlo, P, I, tool, side, res, x0, y0, rapid_hits, op_name, eng, rapid) -> bool:

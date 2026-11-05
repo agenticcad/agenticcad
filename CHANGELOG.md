@@ -5,6 +5,24 @@ patch bumps fix things, a major bump changes something scripts or workspaces rel
 
 ## [Unreleased]
 
+## [1.9.4] — 2026-11-06
+
+### Fixed
+- **4th-axis simulation: the part turns, not the tool.** Without the machine shown, the tool orbited a still part. Now
+  the part, stock, toolpaths and simulated bar turn on the A axis and the tool stays upright over them, as on the
+  machine, in plain and Rendered views. Design shows the part at home, and CAM picks the angle up again.
+- **The bar cuts where the tool is.** It used to change only at keyframes, so the tool ran into uncut stock between
+  them. Each move now cuts it live, matching the simulator to 0.0001 mm on flat, ball and V-bit tools at 60 fps up to
+  100×. Gear cutters still show keyframes.
+- **Turning between ops.** An indexed op's A move now plays at the rotary's speed, the short way, instead of snapping
+  (a spiral's wound-up turns are not unwound, as the post resets them).
+- **The time estimate counts the rotary's speed limit.** A small bar at a normal feed asks for more than the axis has:
+  a test job said 29.9 min and now says 50.8. The readout during playback shows where the tool is, not its point on the part.
+
+### Changed
+- **4th-axis programs build about 10× faster.** The part's radial map was rasterised one triangle at a time in Python
+  (77 s on a small shaft); it is compiled now (2.2 s, identical result), so that job builds in 14 s instead of about 2.5 minutes.
+
 ## [1.9.3] — 2026-11-06
 
 ### Fixed

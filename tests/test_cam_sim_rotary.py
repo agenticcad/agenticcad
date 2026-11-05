@@ -211,3 +211,21 @@ def test_gouges_are_attributed_to_the_op_that_made_them(machines, shaft):
     # the frames / grid honour the angular resolution parameter
     coarse = cam_sim.simulate(p, part=shaft, res_a=2.0, ops=[0])
     assert coarse.grid["na"] == 180 and coarse.grid["res_a"] == 2.0
+
+
+# ------------------------------------------------------------------ radial map speed, time estimate
+
+def test_compiled_radial_map_equals_the_python_loop(machines, shaft, monkeypatch):
+    st = cam.Setup(machines["Makera Z1 + 4th axis"], cam.Stock.cylinder(32, 62, x0=-1), rotary=True)
+    a = cam.radial_map(st, shaft.shape, res_x=1.0, res_a=4.0)[2]
+    monkeypatch.setenv("AGENTICCAD_SIM_BACKEND", "numpy")
+    b = cam.radial_map(st, shaft.shape, res_x=1.0, res_a=4.0)[2]
+    assert a.max() > 13 and (a == b).all()
+
+
+def test_time_estimate_allows_for_the_rotary_speed(machines, shaft):
+    m = machines["Makera Z1 + 4th axis"]
+    st = cam.Setup(m, cam.Stock.cylinder(32, 62, x0=-1), rotary=True)
+    op = manual_op(st, flat(), "Turn", [(cam.RAPID, 10, 0, 2, 0.0), (cam.FEED, 10, 0, 2, 3600.0)])
+    assert op.a_rate_max() > m.rotary["max_speed"]
+    assert op.time_minutes(m) == pytest.approx(3600.0 / m.rotary["max_speed"])     # ten turns at the axis' speed, not the feed's

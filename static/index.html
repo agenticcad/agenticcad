@@ -1690,7 +1690,7 @@ async function renderScreenshot(spec) {
   }
 }
 
-window.agenticcad = { renderScreenshot, get model() { return model; }, get machine() { return { on: machineOn, rig: machineRig, set: setMachine, pose: poseRig, stage: stageGroup, preview: machinePreview, doors: setDoors, get door() { return machineDoor; } }; }, get sketch() { return sk; }, get extDefs() { return extDefs; }, get extPanels() { return extPanels; }, scene, camera, renderer, send: (o) => send(o), THREE, get stockObj() { return stockObj; }, get simMesh() { return simMesh; }, get program() { return program; }, controls };
+window.agenticcad = { renderScreenshot, get model() { return model; }, get machine() { return { on: machineOn, rig: machineRig, set: setMachine, pose: poseRig, stage: stageGroup, preview: machinePreview, doors: setDoors, get door() { return machineDoor; } }; }, get sketch() { return sk; }, get extDefs() { return extDefs; }, get extPanels() { return extPanels; }, scene, camera, renderer, send: (o) => send(o), THREE, get stockObj() { return stockObj; }, get simMesh() { return simMesh; }, get sim() { return sim; }, simSeek, get simRes() { return simRes; }, get liveR() { return liveR; }, get program() { return program; }, controls };
 
 // toolbar
 document.getElementById('fit').onclick = () => fitCamera();
@@ -1979,6 +1979,7 @@ function setStatusHint(t) { const h = document.getElementById('hover'); if (t) {
 
 // ------------------------------------------------------------------ CAM: toolpaths, stock, simulation, library
 const camGroup = new THREE.Group(); stageGroup.add(camGroup);
+const toolStand = new THREE.Group(); scene.add(toolStand);   // the tool on a 4th-axis program: the stage turns under it
 let program = null, camCode = '', library = { machines: [], tools: [] };
 let camOps = [];          // [{op, cut: LineSegments, rapid: LineSegments, visible, cutCounts: Int32Array, rapidCounts: Int32Array}]
 let stockObj = null, originObj = null, toolObj = null, showTp = true, showStock = true;
@@ -1991,8 +1992,9 @@ function clearCam() {
   camOps = [];
   if (stockObj) { camGroup.remove(stockObj); stockObj = null; }
   if (originObj) { camGroup.remove(originObj); originObj = null; }
-  if (toolObj) { camGroup.remove(toolObj); toolObj = null; }
+  if (toolObj) { toolObj.removeFromParent(); toolObj = null; }
   if (fixtureObj) { camGroup.remove(fixtureObj); fixtureObj.traverse(o => o.geometry && o.geometry.dispose()); fixtureObj = null; }
+  stageTurn(null);
 }
 // tiles (Setup(tiles=...)): the server sends each op's moves once plus the setup's tile offsets; they are expanded here
 // exactly as the post runs them (tile by tile, a lift to the setup's link height and over between tiles), so drawing,
@@ -2546,7 +2548,7 @@ function setupSim() {
     if (prev) {
       const d = Math.hypot(mv[1] - prev[1], mv[2] - prev[2], mv[3] - prev[3]);
       const f = (mv[0] === 0 || mi === 0) ? rapid : Math.max(mv[4] || 1, 1);
-      const da = (mv.length > 5 && prev.length > 5) ? Math.abs(mv[5] - prev[5]) : 0;
+      const a0 = simAStart(i), a1 = simAEnd(i), da = a0 == null ? 0 : Math.abs(a1 - a0);
       acc += Math.max(d / f, da / rot) * 60;
     }
     sim.t[i + 1] = acc; prev = mv;
@@ -2571,6 +2573,20 @@ function fmtT(sec) { sec = Math.max(0, Math.round(sec)); const h = Math.floor(se
 // last point of one operation to the first of the next would cut a straight trench through the part that the program
 // never cuts (and, across setups, join points in two different frames).
 function simPrev(k) { const cur = sim.index[k]; return k > 0 && cur && cur[1] > 0 ? sim.index[k - 1] : cur; }
+// the A angle: at the end of move k (null off the 4th axis), where move k starts, and part way through it. An indexed op has
+// no A word, it sits at its setup's angle. Between ops the part turns the short way with the tool up at clearance: the post
+// resets the turns a spiral wound up, so a program never unwinds them.
+function simAEnd(k) {
+  const [oi, mi] = sim.index[k], op = camOps[oi].op, st = program.setups ? program.setups[op.setup || 0] : null;
+  if (!st || !st.rotary) return null;
+  const mv = op.moves[mi]; return mv.length > 5 ? mv[5] : st.a;
+}
+function simAStart(k) {
+  const a1 = simAEnd(k); if (a1 == null) return null;
+  const a0 = k > 0 ? simAEnd(k - 1) : null; if (a0 == null) return a1;
+  return sim.index[k][1] > 0 ? a0 : a1 + ((((a0 - a1 + 180) % 360) + 360) % 360 - 180);
+}
+function simA(k, f) { const a1 = simAEnd(k); if (a1 == null) return null; const a0 = simAStart(k); return a0 + (a1 - a0) * (f || 0); }
 function simOpAt(k) { if (!sim.total) return null; const i = Math.min(Math.max(0, k), sim.total - 1); return sim.index[i] ? sim.index[i][0] : null; }
 function applySim(k) { applySimAt(k, 0); }
 function applySimAt(k, f) {
@@ -2582,7 +2598,7 @@ function applySimAt(k, f) {
     const m = c.visible ? (k >= sim.total ? c.op.moves.length : (counts.get(c) || 0)) : 0;
     c.cut.geometry.setDrawRange(0, c.cutCounts[m] * 2); c.rapid.geometry.setDrawRange(0, c.rapidCounts[m] * 2);
   }
-  if (toolObj) { camGroup.remove(toolObj); toolObj = null; }
+  if (toolObj) { toolObj.removeFromParent(); toolObj = null; }
   simInfo.style.color = '';
   const speedTxt = sim.playing ? ` · ${sim.speed}×` : '';
   const timeTxt = `${fmtT(sim.clock)} / ${fmtT(sim.T)}`;
@@ -2593,7 +2609,7 @@ function applySimAt(k, f) {
     // interpolated tool position between the end of move k-1 and the end of move k (the real motion, not a jump per move)
     const pos = new THREE.Vector3(mv[1] + (nxt[1] - mv[1]) * f, mv[2] + (nxt[2] - mv[2]) * f, mv[3] + (nxt[3] - mv[3]) * f);
     const st = program.setups ? program.setups[c.op.setup || 0] : null;
-    const a0 = st && st.rotary ? (mv.length > 5 ? mv[5] : st.a) : 0, a1 = st && st.rotary ? (nxt.length > 5 ? nxt[5] : st.a) : 0, a = a0 + (a1 - a0) * f;
+    const a = simA(k, f) ?? 0;
     const setupTxt = st && (program.setups.length > 1 || st.rotary) ? `${st.name} · ` : '';
     const aTxt = st && st.rotary ? ` · A ${(((a % 360) + 360) % 360).toFixed(1)}°` : '';
     const opTxt = `${setupTxt}${oi + 1}/${camOps.length} ${c.op.name} · T${t.number} · move ${mi + 1}/${c.op.moves.length} · ${nxt[0] === 0 ? 'rapid' : 'F' + nxt[4]}${aTxt}`;
@@ -2607,13 +2623,19 @@ function applySimAt(k, f) {
     } else {
       if (renderedMode) toolObj = holderMesh(t);
       else toolObj = toolBody(t, null, simToolMats);
-      toolObj.position.copy(pos); toolObj.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), toolAxisFor(c.op, f < 0.5 ? mv : nxt)); camGroup.add(toolObj);
-      simTip = pos.clone();
-      simInfo.textContent = `${opTxt} · (${pos.x.toFixed(1)}, ${pos.y.toFixed(1)}, ${pos.z.toFixed(2)}) · ${timeTxt}${speedTxt}`;
+      if (st && st.rotary) {                                         // A turns the part: the tool stays upright over the axis
+        stageTurn(a, st); toolObj.position.copy(pos).applyMatrix4(stageGroup.matrix); toolStand.add(toolObj);
+      } else {
+        stageTurn(null);
+        toolObj.position.copy(pos); toolObj.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), toolAxisFor(c.op)); camGroup.add(toolObj);
+      }
+      simTip = toolObj.position.clone();
+      simInfo.textContent = `${opTxt} · (${simTip.x.toFixed(1)}, ${simTip.y.toFixed(1)}, ${simTip.z.toFixed(2)}) · ${timeTxt}${speedTxt}`;
     }
   } else {
     simInfo.textContent = `complete · ${fmtT(sim.T)}` + (program ? ` (${program.time.toFixed(1)} min est.)` : '');
     if (machineOn && machineRig) { stageFlip(false); const c0 = camOps.find(c => c.visible) || camOps[0]; poseRig(null, 0, c0 ? c0.op.tool : null); flashMachine([]); }
+    else stageTurn(null);
   }
   markCurrentOp(simOpAt(k));
   if (simRes) showSimAt(k, f);
@@ -2633,11 +2655,22 @@ function stageFlip(on) {
   if (on) M.multiply(new THREE.Matrix4().makeTranslation(c.x, c.y, c.z)).multiply(new THREE.Matrix4().makeRotationX(Math.PI)).multiply(new THREE.Matrix4().makeTranslation(-c.x, -c.y, -c.z));
   M.decompose(stageGroup.position, stageGroup.quaternion, stageGroup.scale);
 }
+// the plain view's 4th axis: the model, stock, toolpaths and simulated bar all sit on the stage in the A = 0 frame, so turning
+// the stage about the rotary axis is what A does on the machine (where the A node carries the stage). null puts it back.
+function stageTurn(aDeg, st) {
+  if (machineOn && machineRig) return;
+  stageGroup.quaternion.identity(); stageGroup.position.set(0, 0, 0);
+  if (aDeg != null) {
+    const p = new THREE.Vector3(0, st.axis[0], st.axis[1]);
+    stageGroup.quaternion.setFromAxisAngle(new THREE.Vector3(1, 0, 0), aDeg * Math.PI / 180);
+    stageGroup.position.copy(p).sub(p.clone().applyQuaternion(stageGroup.quaternion));
+  }
+  stageGroup.updateMatrix();
+}
 function flipPoint(v) { const st = program.stock; return new THREE.Vector3(v.x, (st.ymin + st.ymax) - v.y, (st.zmin + st.zmax) - v.z); }
-function toolAxisFor(op, mv) {
+function toolAxisFor(op) {
   const st = program && program.setups ? program.setups[op.setup || 0] : null;
   if (!st) return new THREE.Vector3(0, 0, 1);
-  if (st.rotary) { const a = (mv.length > 5 ? mv[5] : st.a) * Math.PI / 180; return new THREE.Vector3(0, Math.sin(a), Math.cos(a)); }
   return new THREE.Vector3(...st.tool_axis).normalize();
 }
 simRange.oninput = () => { sim.clock = +simRange.value / 1000 * sim.T; renderSim(); };
@@ -2672,7 +2705,7 @@ function ghostPart(on) {                       // see the simulated stock throug
   material.transparent = on; material.opacity = on ? 0.18 : 1; material.depthWrite = !on; material.needsUpdate = true;
 }
 function clearSim() {
-  ghostPart(false); live = null; voxDropOld();
+  ghostPart(false); live = liveR = null; voxDropOld();
   for (const m of [simMesh, simLow]) if (m) { camGroup.remove(m); m.traverse(o => o.geometry && o.geometry.dispose()); }
   simMesh = simLow = null; simRes = null; simFrameShown = -1; simCache.clear();
   document.getElementById('cam-simres').style.display = 'none';
@@ -2720,10 +2753,17 @@ function showSimAt(k, frac) {
   const fr = simRes.frames; let i = 0;
   for (let j = 0; j < fr.length; j++) if (fr[j] <= k) i = j;
   if (k >= sim.total) i = fr.length - 1;
-  if (simRes.mode !== 'zmap') {                       // radial (4th axis): keyframes only
-    if (i === simFrameShown) return;
-    const want = i; simFetch = want;
-    getSimFrame(want).then(f => { if (simFetch === want && simRes) { drawSimFrame(f, want === fr.length - 1); simFrameShown = want; } });
+  if (simRes.mode !== 'zmap') {                       // radial (4th axis): forward, the moves cut the bar live; a keyframe for seeks and the end
+    const L = liveR, final = k >= sim.total, f0 = frac || 0;
+    if (L && !final && i <= L.kf + 1 && (k > L.lastK || (k === L.lastK && f0 >= L.lastF))) { radialStampTo(k, f0); return; }
+    if (i === simFrameShown && (final || !L)) return;
+    if (simFetch === i && simFrameShown === -1) return;                       // that keyframe is on its way
+    const want = i; simFetch = want; simFrameShown = -1;
+    getSimFrame(want).then(f => {
+      if (simFetch !== want || !simRes) return;
+      drawSimFrame(f, want === fr.length - 1); simFrameShown = want; radialReset(f, want);
+      const now = simK(); if (now.k < sim.total) radialStampTo(now.k, now.f);
+    });
     return;
   }
   const final = k >= sim.total;
@@ -2749,6 +2789,85 @@ function showSimAt(k, frac) {
     if (voxFinal && live && live.vox) { showSimAt(k, frac); return; }   // re-enter: stamps to the end and fetches the tints
     if (!final) liveStampTo(k, frac || 0);
   });
+}
+// ---- live bar (radial mode): a keyframe's radius map, cut by each move as it plays (cam_sim._stamp_r_run per sample, in the
+// setup frame at that A), so material leaves where the tool is. Keyframes stay the truth: every seek and the end load one.
+let liveR = null;                                     // {kf, r, grid, lastK, lastF, step, lo, hi}
+function radialReset(f, kf) {
+  const g = f.grid, N = g.nx * g.na, r = new Float32Array(N);
+  for (let n = 0; n < N; n++) r[n] = f.r[n] / 65534 * g.rmax;
+  liveR = { kf, r, grid: g, lastK: f.upto, lastF: 0, step: Math.min(g.res / 2, 0.25), lo: new Int32Array(g.na).fill(g.nx), hi: new Int32Array(g.na).fill(-1) };
+}
+function radialStamp(L, xt, yt, zt, at, t) {          // one sample of the tool: (x, y, z) in the setup frame at A = at
+  const { nx, na, x0, res, res_a } = L.grid, r = L.r, R = t.diameter / 2, ball = t.type === 'ball', fl = +t.flute_length || 1e6;
+  const kx = Math.ceil(R / res) + 1, ix0 = Math.floor((xt - x0) / res), rad = Math.PI / 180;
+  const ka = Math.min(Math.ceil(Math.asin(Math.min(1, (R + 0.5) / Math.max(Math.hypot(yt, zt), R, 0.5))) / rad / res_a) + 2, na >> 2);
+  const ic = Math.round((Math.atan2(yt, zt) / rad + at) / res_a);
+  for (let da = -ka; da <= ka; da++) {
+    const ia = (((ic + da) % na) + na) % na, phi = (ia * res_a - at) * rad, sp = Math.sin(phi), cp = Math.cos(phi), front = cp > 1e-9;
+    for (let ix = Math.max(0, ix0 - kx); ix <= Math.min(nx - 1, ix0 + kx + 1); ix++) {
+      const dx = x0 + ix * res - xt; if (Math.abs(dx) >= R - 1e-4) continue;
+      const rho = Math.sqrt(Math.max(R * R - dx * dx, 0)), zc = zt + (ball ? R : toolProfile(t, Math.abs(dx)));
+      const ylo = yt - rho, yhi = yt + rho, through = ylo <= 0 && yhi >= 0, thin = Math.abs(sp) <= 1e-9;
+      const t1 = thin ? (through ? -Infinity : Infinity) : ylo / sp, t2 = thin ? (through ? Infinity : -Infinity) : yhi / sp;
+      let s1 = Math.max(front ? zc / cp : Infinity, Math.min(t1, t2), 0), sh = Math.min(Math.max(t1, t2), front ? (zt + fl) / cp : Infinity);
+      let ok = front && s1 < sh;
+      if (ball) {                                     // the sphere joins the shank's interval at its equator
+        const b = yt * sp + zc * cp, disc = b * b - (dx * dx + yt * yt + zc * zc - R * R);
+        if (disc > 0) { const q = Math.sqrt(disc), sa = b - q, sb = b + q; if (ok) { s1 = Math.min(sa, s1); sh = Math.max(sb, sh); } else { s1 = sa; sh = sb; ok = sb > 0; } s1 = Math.max(s1, 0); }
+      }
+      if (!ok) continue;
+      const n = ia * nx + ix, cur = r[n];
+      if (sh >= cur - 1e-3 && s1 < cur) { r[n] = s1; if (ix < L.lo[ia]) L.lo[ia] = ix; if (ix > L.hi[ia]) L.hi[ia] = ix; }
+    }
+  }
+}
+function setupPoint(mv, st) {                         // a move's end in the setup frame: model coordinates turned to its A
+  const a = (mv.length > 5 ? mv[5] : st.a) * Math.PI / 180, y = mv[2] - st.axis[0], z = mv[3] - st.axis[1], c = Math.cos(a), s = Math.sin(a);
+  return [mv[1], y * c - z * s, y * s + z * c, mv.length > 5 ? mv[5] : st.a];
+}
+function radialMove(L, gi, f0, f1) {                  // the samples of move gi between fractions f0 and f1, spaced as the simulator's
+  const [oi, mi] = sim.index[gi], op = camOps[oi].op, st = program.setups[op.setup || 0], t = op.tool;
+  if (!st || !st.rotary || t.type === 'gear_cutter') return;
+  const b = setupPoint(op.moves[mi], st);
+  if (mi === 0) { if (f1 >= 1) radialStamp(L, b[0], b[1], b[2], b[3], t); return; }
+  const a = setupPoint(op.moves[mi - 1], st), rr = Math.max(Math.hypot(a[1], a[2]), Math.hypot(b[1], b[2]), 1);
+  const d = Math.max(Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2]), Math.abs(b[3] - a[3]) * Math.PI / 180 * rr), n = Math.max(1, Math.min(4000, Math.ceil(d / L.step)));
+  for (let j = Math.floor(f0 * n) + 1; j <= Math.floor(f1 * n); j++) {
+    const u = j / n; radialStamp(L, a[0] + (b[0] - a[0]) * u, a[1] + (b[1] - a[1]) * u, a[2] + (b[2] - a[2]) * u, a[3] + (b[3] - a[3]) * u, t);
+  }
+}
+function radialRefresh(L) {                           // the cells cut since the last refresh: new positions, then their normals
+  if (!simMesh || !simMesh.geometry) return;
+  const { nx, na, res_a, axis } = L.grid, geo = simMesh.geometry, P = geo.attributes.position, Nn = geo.attributes.normal, p = P.array, nn = Nn.array, N = nx * na, rad = Math.PI / 180;
+  const rows = []; for (let ia = 0; ia < na; ia++) if (L.hi[ia] >= 0) rows.push(ia);
+  if (!rows.length) return;
+  for (const ia of rows) {
+    const sp = Math.sin(ia * res_a * rad), cp = Math.cos(ia * res_a * rad);
+    for (let ix = L.lo[ia]; ix <= L.hi[ia]; ix++) {
+      const n = ia * nx + ix; p[n * 3 + 1] = axis[0] + L.r[n] * sp; p[n * 3 + 2] = axis[1] + L.r[n] * cp;
+      if (ix === 0 || ix === nx - 1) { const v = N + 2 + (ix ? na : 0) + ia; p[v * 3 + 1] = p[n * 3 + 1]; p[v * 3 + 2] = p[n * 3 + 2]; }
+    }
+  }
+  const at = (ia, ix) => (((ia % na) + na) % na * nx + Math.max(0, Math.min(nx - 1, ix))) * 3;
+  for (const ia0 of rows) for (let ia = ia0 - 1; ia <= ia0 + 1; ia++) for (let ix = L.lo[ia0] - 1; ix <= L.hi[ia0] + 1; ix++) {
+    if (ix < 0 || ix >= nx) continue;
+    const u0 = at(ia - 1, ix), u1 = at(ia + 1, ix), v0 = at(ia, ix - 1), v1 = at(ia, ix + 1), n = at(ia, ix);
+    const ax = p[u1] - p[u0], ay = p[u1 + 1] - p[u0 + 1], az = p[u1 + 2] - p[u0 + 2], bx = p[v1] - p[v0], by = p[v1 + 1] - p[v0 + 1], bz = p[v1 + 2] - p[v0 + 2];
+    const cx = ay * bz - az * by, cy = az * bx - ax * bz, cz = ax * by - ay * bx, m = Math.hypot(cx, cy, cz) || 1;
+    nn[n] = cx / m; nn[n + 1] = cy / m; nn[n + 2] = cz / m;
+  }
+  L.lo.fill(nx); L.hi.fill(-1); P.needsUpdate = Nn.needsUpdate = true;
+}
+function radialStampTo(k, f) {                        // cut from where the bar is up to fraction f of move k; a frame stops at its budget and catches up on the next
+  const L = liveR; if (!L || !sim.total) return;
+  const t0 = performance.now();
+  while (L.lastK < k) {
+    radialMove(L, L.lastK, L.lastF, 1); L.lastK++; L.lastF = 0;
+    if (performance.now() - t0 > 12) { radialRefresh(L); return; }
+  }
+  if (L.lastK === k && f > L.lastF && k < sim.total) { radialMove(L, k, L.lastF, f); L.lastF = f; }
+  radialRefresh(L);
 }
 const VOX_RESTAMP = 250000;                           // moves the voxel worker restamps (≈40k moves/s) rather than loading a keyframe, whose walls are only as good as the height map's cells
 // ---- live height map + mesh (zmap mode)
@@ -3022,8 +3141,7 @@ function hudUpdate(k, f) {
     if (performance.now() - hudToolAt < 1800) cap = `Tool change · T${t.number} ${t.name}`;
     else if (st && (program.setups.length > 1 || st.rotary)) cap = `${st.name} · ${cap}`;
     if (st && st.rotary && performance.now() - hudToolAt >= 1800) {                  // rotary programs: the A angle in progress
-      const [oip, mip] = simPrev(k), mv = camOps[oip].op.moves[mip], nxt = c.op.moves[sim.index[k][1]];
-      const a0 = mv.length > 5 ? mv[5] : st.a, a1 = nxt.length > 5 ? nxt[5] : st.a, a = a0 + (a1 - a0) * (f || 0);
+      const a = simA(k, f);
       cap += ` · A ${(((a % 360) + 360) % 360).toFixed(1)}°`;
     }
     bl.textContent = cap;
@@ -3345,8 +3463,7 @@ function drawSimFrame(f, final) {
   } else {
     // 4th axis: the (angle, x) radius map as a closed tube about the rotary axis, with end caps (fans to the axis) so the bar
     // reads as a solid. Rendered mode uses the metallic stock material (vertex colours carry the gouge / left marks).
-    // TODO: a live voxel rotary stock (like liveReset for zmap) would give smooth walls and A-synchronous cutting; the
-    // keyframe tube is what the simulator returns today.
+    // radialStampTo cuts this mesh live between keyframes.
     const { nx, na, x0, res, res_a, rmax, axis } = g;
     const N = nx * na, pos = new Float32Array((N + 2 + 2 * na) * 3), col = new Float32Array((N + 2 + 2 * na) * 3);
     const bMode = renderedMode ? new THREE.Color(0xcfd3d8) : base;
@@ -6440,7 +6557,8 @@ var wsMachineWas = false;   // var: setRibbonTab runs (and calls onWorkspace) be
 function onWorkspace(ws) {                      // (called by setRibbonTab, also during start-up)
   document.body.dataset.ws = ws;
   // Design shows the part alone: toolpaths, stock, fixtures and the machine belong to CAM (and come back there)
-  camGroup.visible = ws !== 'design';
+  camGroup.visible = toolStand.visible = ws !== 'design';
+  if (ws !== 'cam') stageTurn(null); else if (program) renderSim();
   if (ws === 'design' && machineOn) { wsMachineWas = true; setMachine(false); }
   else if (ws === 'cam' && wsMachineWas) { wsMachineWas = false; if (!machineOn) setMachine(true); }
   if (window.__shellReady) showPane(wsSide[ws] || 'inspect');

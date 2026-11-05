@@ -105,7 +105,13 @@ def _subdivide_polar(P: np.ndarray, I: np.ndarray, max_deg: float, max_dx: float
 
 
 def _raster(Q: np.ndarray, I: np.ndarray, R: np.ndarray, x0: float, res_x: float, res_a: float) -> None:
-    """Max-rasterise triangles of (x, a, r) into R[a, x] (a wraps every 360 degrees)."""
+    """Max-rasterise triangles of (x, a, r) into R[a, x] (a wraps every 360 degrees). A fine mesh split by angle is
+    millions of triangles: compiled when numba is there (cam_stamp), the same arithmetic here when it is not."""
+    import cam_stamp
+    k = cam_stamp._numba() if cam_stamp.requested() != "numpy" else None
+    if k:
+        k["raster"](np.ascontiguousarray(Q, dtype=np.float64), np.ascontiguousarray(I, dtype=np.int64), R, float(x0), float(res_x), float(res_a))
+        return
     na, nx = R.shape
     for tri in I:
         a, b, c = Q[tri[0]], Q[tri[1]], Q[tri[2]]

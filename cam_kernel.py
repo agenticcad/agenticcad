@@ -795,17 +795,19 @@ class Op:
         return cut, rapid
 
     def time_minutes(self, machine: Machine) -> float:
-        """Feed moves at their feed; rapids at the machine's rapid rate, their Z part no faster than its Z limit."""
+        """Feed moves at their feed; rapids at the machine's rapid rate, their Z part no faster than its Z limit; either
+        no faster than the 4th axis can turn (a small bar at a normal feed asks for far more than it has)."""
         t = 0.0
         prev = None
         zmax = min(machine.rapid, (machine.max_feed or {}).get("z", machine.rapid)) or machine.rapid
+        a_max = float((machine.rotary or {}).get("max_speed") or 0.0)
         for m in self.moves:
             if prev is not None:
                 d = self._seg(prev, m)
-                if m[0] == RAPID:
-                    t += max(d / machine.rapid, abs(m[3] - prev[3]) / zmax)
-                else:
-                    t += d / max(m[4], 1.0)
+                dt = max(d / machine.rapid, abs(m[3] - prev[3]) / zmax) if m[0] == RAPID else d / max(m[4], 1.0)
+                if a_max and len(m) > 5 and len(prev) > 5:
+                    dt = max(dt, abs(m[5] - prev[5]) / a_max)
+                t += dt
             prev = m
         return t
 
@@ -4202,7 +4204,7 @@ class Program:
                 ar = op.a_rate_max()
                 if ar > float(m.rotary["max_speed"]) * 1.001:
                     w.append(f"{op.name}: asks the 4th axis for {ar:.0f} deg/min, above its {m.rotary['max_speed']:.0f} deg/min: "
-                             "the controller will slow those moves (the time estimate is short)")
+                             "the controller will slow those moves (the time estimate allows for it)")
             if op.kind == "probe":
                 cut_before = [o.name for o in self.ops[:self.ops.index(op)] if self.setup_of(o) is st and o.kind != "probe"]
                 if op.params.get("sets") and cut_before:
