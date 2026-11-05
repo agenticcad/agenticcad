@@ -5,6 +5,16 @@ patch bumps fix things, a major bump changes something scripts or workspaces rel
 
 ## [Unreleased]
 
+## [1.9.3] — 2026-11-06
+
+### Fixed
+- **The window going black after a display change (macOS).** WebKit applies each visibility change through a one-shot
+  callback. Around a display sleep or unplug that callback can be lost, and every later change is then dropped, so a
+  window that was covered at the time stays frozen as hidden. Once the page has suspended (about 4 minutes hidden),
+  input hides its content while it waits for a frame that never comes, and the window shows black with only the title
+  bar. The app now watches for a page that says it is hidden in a window that is on screen and wakes it: a black
+  packaged window came back in 1.6 s with the viewer rendering. Covered windows still sleep as before.
+
 ## [1.9.2] — 2026-11-04
 
 ### Fixed

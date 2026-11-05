@@ -45,6 +45,71 @@ def test_designs_from_the_tabs_test_build_are_copied_once(tmp_path):
     assert launcher._import_tabs_test_build(tabs, data) == [] and not (data / "designs" / "later.py").exists()   # once
     assert launcher._import_tabs_test_build(tmp_path / "none", tmp_path / "fresh") == []
 
+class _FakeNative:
+    """Stands in for the NSWindow and the WKWebView of the frozen-page watch; ticks run when the test says so."""
+    def __init__(self):
+        self.on_screen, self.page, self.woken, self.looks, self.next = True, "visible", 0, 0, None
+
+    def isVisible(self):
+        return self.on_screen
+
+    def occlusionState(self):
+        return 8194 if self.on_screen else 8192
+
+    def evaluateJavaScript_completionHandler_(self, _js, done):
+        self.looks += 1
+        done(self.page, None)
+
+    def _prepareForMoveToWindow_completionHandler_(self, _window, _done):
+        self.woken += 1
+        self.page = "visible"
+
+    def later(self, _seconds, fn):
+        self.next = fn
+
+    def ticks(self, n):
+        for _ in range(n):
+            self.next()
+
+
+def test_frozen_page_in_a_visible_window_is_woken_after_two_looks():
+    n = _FakeNative()
+    launcher._watch_for_frozen_page(n, n, lambda: True, n.later)
+    n.ticks(3)
+    assert n.woken == 0                             # a healthy page is left alone
+    n.page = "hidden"
+    n.ticks(1)
+    assert n.woken == 0                             # one look may be an update still on its way
+    n.ticks(1)
+    assert n.woken == 1 and n.page == "visible"
+    n.ticks(3)
+    assert n.woken == 1
+
+
+def test_a_covered_window_may_sleep_and_is_not_woken_or_touched():
+    n = _FakeNative()
+    launcher._watch_for_frozen_page(n, n, lambda: True, n.later)
+    n.page = "hidden"
+    n.ticks(1)                                      # one hidden look, then the window is covered
+    n.on_screen = False
+    looks = n.looks
+    n.ticks(5)
+    assert n.woken == 0 and n.looks == looks        # asking would wake a suspended page
+    n.on_screen = True
+    n.ticks(1)
+    assert n.woken == 0                             # the count started again
+
+
+def test_frozen_page_watch_stops_with_the_window():
+    n = _FakeNative()
+    alive = [True]
+    launcher._watch_for_frozen_page(n, n, lambda: alive[0], n.later)
+    alive[0] = False
+    n.next, tick = None, n.next
+    tick()
+    assert n.next is None
+
+
 def test_find_claude_cli_env_override_and_candidates(tmp_path, monkeypatch):
     fake = tmp_path / "claude"; fake.write_text("#!/bin/sh\n"); fake.chmod(0o755)
     monkeypatch.setenv("AGENTICCAD_CLAUDE", str(fake))

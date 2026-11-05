@@ -76,6 +76,49 @@ def _import_tabs_test_build(tabs_dir: Path, data: Path) -> list[str]:
     return copied
 
 
+def _watch_for_frozen_page(view, window, alive, later, every: float = 1.5) -> None:
+    """macOS: WKWebView applies each visibility change through a one-shot callback (a Core Animation post-commit handler
+    or a run-loop observer). Around a display sleep or unplug that callback can be lost, and WebKit then drops every later
+    change because it still thinks one is scheduled. A page that was hidden at that moment stays frozen, and the window
+    shows black while it is on screen (the unified log shows activityStateDidChange with no dispatchActivityStateChange).
+    So: when a page says it is hidden in a window that is on screen, push the state through WebKit's one immediate path,
+    its move-to-window preparation. Runs on the main thread; `later(seconds, fn)` schedules the next look."""
+    hidden = 0
+
+    def seen(state, error=None) -> None:
+        nonlocal hidden
+        hidden = hidden + 1 if state == "hidden" else 0
+        if hidden >= 2:                             # twice in a row: a slow but healthy update lands well inside this
+            hidden = 0
+            print("AgenticCAD: page frozen in a visible window, waking it", flush=True)
+            view._prepareForMoveToWindow_completionHandler_(window, lambda: None)
+
+    def tick() -> None:
+        nonlocal hidden
+        if not alive():
+            return
+        if window.isVisible() and window.occlusionState() & 2:      # NSWindowOcclusionStateVisible
+            view.evaluateJavaScript_completionHandler_("document.visibilityState", seen)
+        else:                                       # covered or minimised: hidden is right, and the page may sleep
+            hidden = 0
+        later(every, tick)
+
+    tick()
+
+
+def _start_frozen_page_watch(window) -> None:
+    import objc
+    from PyObjCTools import AppHelper
+    from webview.platforms.cocoa import BrowserView
+    objc.registerMetaDataForSelector(b"WKWebView", b"_prepareForMoveToWindow:completionHandler:",
+                                     {"arguments": {3: {"callable": {"retval": {"type": b"v"}, "arguments": {0: {"type": b"^v"}}}}}})
+    native = BrowserView.instances.get(window.uid)
+    if native is None or not native.webview.respondsToSelector_(b"_prepareForMoveToWindow:completionHandler:"):
+        return
+    AppHelper.callAfter(_watch_for_frozen_page, native.webview, native.window,
+                        lambda: window.uid in BrowserView.instances, AppHelper.callLater)
+
+
 def main() -> None:
     root = _repo_root()
     sys.path.insert(0, str(root))
@@ -118,6 +161,11 @@ def main() -> None:
         if window is not None:
             say("Opening the workspace")
             window.load_url(state["url"])
+            if sys.platform == "darwin":
+                try:
+                    _start_frozen_page_watch(window)
+                except Exception as e:              # private WebKit API: without it the app still runs as before
+                    print(f"AgenticCAD: no frozen-page watch: {e}", flush=True)
             smoke = os.environ.get("AGENTICCAD_SMOKE")
             if smoke:                               # test runs: close the window after N seconds
                 time.sleep(float(smoke)); window.destroy()
