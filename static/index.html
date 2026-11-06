@@ -2767,10 +2767,10 @@ document.getElementById('sim-run').onclick = async () => {
 function startSim(payload) {
   clearSim(); simRes = payload;
   const el = document.getElementById('cam-simres'); el.style.display = '';
-  const bad = payload.summary.split('\n').filter(l => /^(GOUGES|RAPIDS|COLLISIONS)/.test(l));
+  const bad = payload.summary.split('\n').filter(l => /^(GOUGES|RAPIDS|COLLISIONS|JAWS)/.test(l));
   document.getElementById('sr-sum').innerHTML = bad.length ? `<span style="color:var(--err)">${esc(bad[0])}</span>` : esc(payload.summary.split('\n')[0] || '');
   document.getElementById('cam-simres-body').innerHTML = payload.summary.split('\n').map(l =>
-    `<div style="${/^(GOUGES|RAPIDS|COLLISIONS)/.test(l) ? 'color:var(--red,#ff6b6b);font-weight:600' : ''}">${l.replace(/&/g, '&amp;').replace(/</g, '&lt;')}</div>`).join('');
+    `<div style="${/^(GOUGES|RAPIDS|COLLISIONS|JAWS)/.test(l) ? 'color:var(--red,#ff6b6b);font-weight:600' : ''}">${l.replace(/&/g, '&amp;').replace(/</g, '&lt;')}</div>`).join('');
   if (stockObj) stockObj.visible = false;
   ghostPart(true);
   showSimAt(simK().k);
@@ -3322,18 +3322,24 @@ async function loadMachineRig() {
 function placeRig() {   // the machine origin (table top centre) in model coordinates: stock centred on the table, or on the 4th axis chuck_gap off the chuck face
   const d = machineRig.data, o = machineRig.origin;
   const tailShift = (dx) => { for (const pt of machineRig.parts) if (/tailstock/i.test(pt.name)) { pt.mesh.position.x = pt.lines.position.x = dx; } };
-  if (!program) { o.set(0, 0, 0); machineRig.root.position.copy(o); tailShift(0); return; }   // preview: the model sits at the machine origin
+  // the jaws ("chuck jaw +Y" ... "-Z") slide out radially from where the script drew them (its stock_diameter) to the program's bar
+  const jawShift = (dr) => { for (const pt of machineRig.parts) { const m = /^chuck jaw ([+-])([yz])/i.exec(pt.name); if (!m) continue;
+    const s = (m[1] === '-' ? -1 : 1) * dr, v = m[2].toLowerCase() === 'y' ? [0, s, 0] : [0, 0, s]; pt.mesh.position.set(...v); pt.lines.position.set(...v); } };
+  if (!program) { o.set(0, 0, 0); machineRig.root.position.copy(o); tailShift(0); jawShift(0); return; }   // preview: the model sits at the machine origin
   const st = program.stock, rs = (program.setups || []).find(x => x.rotary);
   if (rs && d.rotary) {
     // the rotary dict places the axis (axis_y from the bed centre, axis_z above it) and the chuck body face; the stock's near end
-    // sits chuck_gap in front of the face, inside the jaws. The live centre's tip goes to the stock's far end (+ tail_gap): the
-    // tailstock parts slide along X from where the script drew them (tail_x) — the simulator checks them there too
-    const gap = +(d.rotary.chuck_gap ?? 5);
+    // sits chuck_gap in front of the face, inside the jaws — never further in than its seat (the step reversed jaws hold it on).
+    // The live centre's tip goes to the stock's far end (+ tail_gap): the tailstock parts slide along X from where the script
+    // drew them (tail_x) — the simulator checks them there too
+    const rBar = st.radius != null ? +st.radius : +(rs.max_radius || 0), jp = jawPlace(d.rotary, rBar), jp0 = jawPlace(d.rotary, (+(d.rotary.stock_diameter || 0)) / 2);
+    const gap = d.rotary.chuck_gap == null ? jp.seat : Math.max(+d.rotary.chuck_gap, jp.seat);
     o.set(st.xmin - d.rotary.chuck_face_x - gap, rs.axis[0] - d.rotary.axis_y, rs.axis[1] - d.rotary.axis_z);
     const tipWant = (st.xmax - o.x) + (+(d.rotary.tail_gap || 0));
     tailShift(d.rotary.tail && d.rotary.tail_x != null ? tipWant - d.rotary.tail_x : 0);
+    jawShift(jp.ref - jp0.ref);
   } else {
-    tailShift(0);
+    tailShift(0); jawShift(0);
     const fx = (program.setups || [])[0] && program.setups[0].fixture;
     if (fx && fx.name) {                                        // machine origin = stock bottom-centre − (fixture_at + Rz(rot)·work_origin)
       const a = (fx.rot || 0) * Math.PI / 180, wo = fx.work_origin || [0, 0, 0], at = fx.at || [0, 0];
@@ -3347,6 +3353,17 @@ function placeRig() {   // the machine origin (table top centre) in model coordi
     for (const pt of machineRig.parts) if (/spoilboard/i.test(pt.name)) { pt.mesh.visible = pt.lines.visible = !rs; }
   }
   machineRig.root.position.copy(o);
+}
+function jawPlace(r, rBar) {   // machine_script.jaw_envelope's ref (the serrated faces' radius) and seat (how far in the bar can go) for a bar
+  const prof = r.jaw_profile || [];
+  if (r.jaws === 'reversed' && prof.length) {
+    const hs = [...new Set(prof.map(s => Math.min(...s.slice(2))))].sort((a, b) => a - b), top = hs[hs.length - 1];
+    const risers = hs.filter(h => h < top - 1e-6).length ? hs.filter(h => h < top - 1e-6) : hs, lim = +(r.jaw_r_out_closed || 0) + +(r.jaw_travel ?? 10);
+    let hg = [...risers].sort((a, b) => b - a).find(h => rBar + h <= lim + 1e-6); if (hg == null) hg = Math.min(...risers);
+    let seat = 0; for (const s of prof) { if (s[2] <= hg + 1e-6) { seat = s[0]; break; } if (s[s.length - 1] <= hg + 1e-6) { seat = s[1]; break; } }
+    return { ref: Math.max(+(r.jaw_r_out_closed || 0), rBar + hg), seat, riser: hg };
+  }
+  return { ref: Math.max(+(r.jaw_r_in || 0), rBar), seat: 0, riser: null };
 }
 function attachStage() { machineRig.stockNode.add(stageGroup); machineRig.flip = false; stageGroup.position.copy(machineRig.origin).negate(); stageGroup.quaternion.identity(); stageGroup.scale.set(1, 1, 1); }
 function stickoutFor(t) {
@@ -6255,11 +6272,13 @@ function libraryEditor(mPane, tPane) {
         <div>Travel</div><div>${d.travel.join(' × ')} mm · nose ${d.clearance} mm above the table at Z top</div>
         <div>Home</div><div>spindle at (${d.home[0]}, ${d.home[1]}) from the table centre</div>
         <div>Above the tool</div><div>${d.nose.map(l => (l.boxes || l.box) ? `${esc(l.name)} ${(l.boxes || [l.box]).map(b => `${(b[1] - b[0]).toFixed(1)} × ${(b[3] - b[2]).toFixed(1)}`).join(' + ')} (off the axis) × ${l.h}` : `${esc(l.name)} Ø${(2 * l.r).toFixed(1)} × ${l.h}`).join(' → ')}${d.stickout ? ` · stickout ${d.stickout} mm` : ' · stickout = flute length + 6'}</div>
-        ${d.rotary ? `<div>4th axis</div><div>chuck Ø${2 * d.rotary.chuck_r} body, jaws ${(+d.rotary.jaw_reach || 0).toFixed(0)} mm proud (ring r ${(+d.rotary.jaw_r || d.rotary.chuck_r).toFixed(1)}) · up to Ø${d.rotary.max_diameter} × ${d.rotary.max_length}${d.rotary.tail ? ` · live centre ${d.rotary.tail_cone ? d.rotary.tail_cone.half_angle + '° cone' : ''}, Ø${2 * d.rotary.tail_r}` : ' · no tailstock'}</div>
+        ${d.rotary ? `<div>4th axis</div><div>chuck Ø${2 * d.rotary.chuck_r}, jaws ${(+d.rotary.jaw_reach || 0).toFixed(1)} mm proud${d.rotary.jaw_profile ? ` (stepped ${d.rotary.jaw_profile.map(s => '+' + s[2]).join(' / ')}, ${d.rotary.jaws === 'reversed' ? 'fitted teeth out: the bar sits on a step' : 'teeth in'}, placed from the program's bar)` : ` (ring r ${(+d.rotary.jaw_r || d.rotary.chuck_r).toFixed(1)})`} · up to Ø${d.rotary.max_diameter} × ${d.rotary.max_length}${d.rotary.tail ? ` · live centre ${d.rotary.tail_cone ? d.rotary.tail_cone.half_angle + '° cone' : ''}, Ø${2 * d.rotary.tail_r}` : ' · no tailstock'}${(d.rotary.fixed_boxes || []).length ? ` · ${d.rotary.fixed_boxes.length} fixed solids (housing, motor, rail) checked` : ''}</div>
         <div>Rotary axis</div><div data-a="rot-fields" style="display:flex;flex-wrap:wrap;gap:6px 12px;align-items:center">
           <label style="display:flex;gap:4px;align-items:center">Y <input data-r="axis_y" type="number" step="0.01" value="${d.rotary.axis_y}" style="width:72px" title="bed frame: mm from the bed centre, + towards the back"> mm from centre</label>
           <label style="display:flex;gap:4px;align-items:center">Z <input data-r="axis_z" type="number" step="0.01" value="${d.rotary.axis_z}" style="width:72px" title="height of the axis above the bed top"> mm above the bed</label>
-          <label style="display:flex;gap:4px;align-items:center">chuck gap <input data-r="chuck_gap" type="number" step="0.5" min="0" value="${d.rotary.chuck_gap ?? 5}" style="width:56px" title="the stock's end face this far in front of the chuck body face (the jaws grip the rest of their reach)"> mm</label>
+          ${d.rotary.jaw_profile ? `<label style="display:flex;gap:4px;align-items:center">jaws <select data-r="jaws" title="how the jaws are fitted: teeth inward (the bar between the serrated faces, up to the body face) or turned over, teeth outward (the bar held on a step wall, its end on the step)"><option value="standard" ${d.rotary.jaws === 'standard' ? 'selected' : ''}>standard: teeth in</option><option value="reversed" ${d.rotary.jaws === 'reversed' ? 'selected' : ''}>reversed: teeth out, bar on a step</option></select></label>` : ''}
+          <label style="display:flex;gap:4px;align-items:center">grip <input data-r="grip" type="number" step="0.5" min="0" value="${(() => { const ro = (cur.m.model || {}).rotary || {}; if (ro.grip != null) return ro.grip; const reach = +(d.rotary.jaw_reach || 0); return d.rotary.chuck_gap == null ? '' : (reach - +d.rotary.chuck_gap).toFixed(1); })()}" placeholder="all the way" style="width:56px" title="how much bar is inside the jaws, measured from their tips (chuck gap = jaw reach − grip). Empty: the bar as far in as the jaws allow — the body face, or the step reversed jaws hold it on"> mm of bar in the jaws</label>
+          ${d.rotary.jaw_profile && d.rotary.jaws === 'reversed' ? `<span class="muted" style="font-size:11.5px">reversed jaws hold the bar on a step: its end ${d.rotary.jaw_profile.filter(s => s[s.length - 1] < Math.max(...d.rotary.jaw_profile.map(q => q[2])) - 1e-6).map(s => `${(s[s.length - 1] <= s[2] ? s[1] : s[0]).toFixed(0)} mm`).filter((v, i, a) => a.indexOf(v) === i).join(' or ')} in front of the body face, the serrated faces ${(+d.rotary.jaw_r_out_closed).toFixed(1)} mm off the axis closed, ${(+d.rotary.jaw_travel || 10).toFixed(0)} mm of travel</span>` : ''}
           <label style="display:flex;gap:4px;align-items:center;white-space:nowrap"><input data-r="tail" type="checkbox" ${d.rotary.tail ? 'checked' : ''}> tailstock fitted</label>
           <span class="muted" data-a="rot-src" style="font-size:11.5px">${(() => { const ro = (cur.m.model || {}).rotary || {}, s = d.rotary.source || 'reference'; return s === 'probed' ? `probed on ${esc(ro.probed || 'the machine')}` : s === 'config' ? 'from the machine\'s config' + (ro.axis_my != null ? ` (machine Y ${(+ro.axis_my).toFixed(2)}${ro.axis_mz != null ? `, Z ${(+ro.axis_mz).toFixed(2)}` : ''})` : '') : s === 'manual' ? 'set here' : 'reference model — probe it on the Machine page or measure and type it here'; })()}</span>
         </div>` : ''}
@@ -6267,7 +6286,7 @@ function libraryEditor(mPane, tPane) {
       <div class="muted" style="margin:8px 0 3px">Where the numbers come from</div>
       <div style="font-size:12px;line-height:1.65">${Object.entries(d.sources).map(([k, v]) => `<div>${tier(v)} <b>${esc(k)}</b> <span class="muted">— ${esc(String(v).replace(/^\w+:\s*/, ''))}</span></div>`).join('')}</div>
       ${d.notes ? `<div class="muted" style="margin-top:6px;font-size:12px">${esc(d.notes)}</div>` : ''}
-      <div class="muted" style="margin-top:10px">Overrides (JSON): <code>nose</code> [{name, r, h}…] from the nose bottom up, <code>spoilboard</code>, <code>clearance</code>, <code>stickout</code> in mm${d.rotary ? '; <code>rotary</code> {axis_y, axis_z (bed frame) or axis_my, axis_mz (machine coordinates, converted with the anchor), chuck_gap, jaw_reach, tail, tail_gap, stock_length}' : ''}. Measure your machine and put the real numbers here; Save writes them to the library.</div>
+      <div class="muted" style="margin-top:10px">Overrides (JSON): <code>nose</code> [{name, r, h}…] from the nose bottom up, <code>spoilboard</code>, <code>clearance</code>, <code>stickout</code> in mm${d.rotary ? '; <code>rotary</code> {axis_y, axis_z (bed frame) or axis_my, axis_mz (machine coordinates, converted with the anchor), chuck_gap or grip, jaws ("standard" | "reversed"), jaw_reach, tail, tail_gap, stock_length, stock_diameter}' : ''}. Measure your machine and put the real numbers here; Save writes them to the library.</div>
       <textarea data-a="model-json" spellcheck="false" style="width:100%;box-sizing:border-box;min-height:56px;margin-top:4px;background:#0f1216;color:var(--text);border:1px solid var(--line);border-radius:6px;font:12px/1.4 ui-monospace,Menlo,monospace;padding:6px">${esc(JSON.stringify(cur.m.model || {}))}</textarea>
       <div data-a="model-err" style="color:var(--red,#ff6b6b);font-size:12px"></div>`;
     el.querySelector('[data-a=show-machine]').onclick = () => { if (modal.__close) modal.__close(null); setMachine(true, cur.m.name); };
@@ -6279,7 +6298,9 @@ function libraryEditor(mPane, tPane) {
     el.querySelectorAll('[data-a=rot-fields] [data-r]').forEach(inp => inp.onchange = () => {
       const model = cur.m.model = cur.m.model || {}, ro = model.rotary = model.rotary || {}, k = inp.dataset.r;
       if (k === 'tail') ro.tail = inp.checked;
-      else { const v = parseFloat(inp.value); if (!Number.isFinite(v)) return; ro[k] = v; if (k === 'axis_y') delete ro.axis_my; if (k === 'axis_z') delete ro.axis_mz; if (k === 'axis_y' || k === 'axis_z') { ro.source = 'manual'; delete ro.probed; } }
+      else if (k === 'jaws') { ro.jaws = inp.value; }
+      else if (k === 'grip' && inp.value.trim() === '') { delete ro.grip; delete ro.chuck_gap; }
+      else { const v = parseFloat(inp.value); if (!Number.isFinite(v)) return; ro[k] = v; if (k === 'grip') delete ro.chuck_gap; if (k === 'chuck_gap') delete ro.grip; if (k === 'axis_y') delete ro.axis_my; if (k === 'axis_z') delete ro.axis_mz; if (k === 'axis_y' || k === 'axis_z') { ro.source = 'manual'; delete ro.probed; } }
       ta.value = JSON.stringify(model); markDirty();
       const src = el.querySelector('[data-a=rot-src]'); if (src && (k === 'axis_y' || k === 'axis_z')) src.textContent = 'set here (unsaved)';
     });

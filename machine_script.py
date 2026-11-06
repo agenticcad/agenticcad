@@ -18,14 +18,22 @@ A script runs in the design-script namespace (build123d, `import_step`, maths) p
     machine(home=(x, y, nose_z), travel=(x, y, z), clearance=mm, nose=[{name, r, h}...], table={x, y, t, ...},
             (a level that is not round about the spindle — an off-centre head — is {name, box: [x0, x1, y0, y1], h} in
              the machine's X / Y about the spindle axis, or boxes: [[...], [...]] for a union, e.g. a head + a probe on its side)
-            rotary=None | {axis_y, axis_z, chuck_face_x, chuck_r, [chuck_gap=5, jaw_reach=0, jaw_r=chuck_r, jaw_w, jaw_count=4,
+            rotary=None | {axis_y, axis_z, chuck_face_x, chuck_r, [chuck_len, chuck_gap=5, jaw_reach=0, jaw_r=chuck_r, jaw_w, jaw_count=4,
+                           jaw_r_in, jaw_profile=[[x0, x1, r_above_inner(, r_at_x1)], ...], jaws="standard"|"reversed",
+                           jaw_r_out_closed, jaw_travel=10, stock_diameter, fixed_boxes=[{name, x, y, z}],
                            tail=True, tail_x, tail_r, tail_gap=0, tail_cone={half_angle: 30, length}, tail_barrel=0,
-                           tail_block={half_w, z0, z1, length} (bed-frame z), max_diameter, max_length, source]},
+                           tail_block={half_w, z0, z1, length} (bed-frame z), tail_boxes=[...], max_diameter, max_length, source]},
             spoilboard=0, stickout=None, sources={number: "verified|reference|estimated: where"}, notes="", key=None)
-        rotary: the simulator's solids. chuck_face_x = the chuck BODY face; the jaws stand jaw_reach proud of it (a ring of
-        radius jaw_r); the stock's end face sits chuck_gap in front of the body face (inside the jaws). The tailstock's live
-        centre: tip at tail_x (cone of half_angle opening to length), then a barrel of radius tail_r for tail_barrel, then
-        the block. The viewer and the simulator put the tip at the program's stock end + tail_gap.
+        rotary: the simulator's solids. chuck_face_x = the chuck BODY face: a cylinder of chuck_r behind it (chuck_len long,
+        or all the way); the jaws stand jaw_reach proud of it — a ring of radius jaw_r, or, with jaw_r_in + jaw_profile, a
+        stepped ring that slides out with the bar: each step [x0, x1] (from the face) reaches r_above_inner past the jaws'
+        inner face (a 4th number: it tapers to that by x1), which sits at max(jaw_r_in, the stock's radius); jaws="reversed"
+        turns them over (teeth outward, the bar held on a step wall with its end on the step: see jaw_envelope). The
+        stock's end face sits chuck_gap in front of the body face (None: as far in as the jaws allow — the body face, or
+        the step the bar sits on). fixed_boxes: what else the module has that does not move with the stock — housing, motor,
+        rail — as boxes with x from the chuck body face, y from the axis, z in the bed frame. The tailstock's live centre: tip
+        at tail_x (cone of half_angle opening to length), then a barrel of radius tail_r for tail_barrel, then the block and
+        tail_boxes (x from the tip). The viewer and the simulator put the tip at the program's stock end + tail_gap.
     helpers: box(x, y, z, at=(cx, cy, cz), zmin=None), cyl_z(r, h, at=(x, y), zmin), cyl_x(r, length, y, z, xmin),
              cyl_y(r, length, x, z, ymin), shell(outer, inner, at, zmin, inner_zmin, opening=("front", w, h)),
              bed_holes(key), import_step("file.step") (workspace/imports/), IN = 25.4, HAAS (spec table),
@@ -139,8 +147,77 @@ def normalize_rotary(rot: dict) -> dict:
             raise MachineScriptError("machine(): rotary.tail_block is {half_w, z0, z1, [length]} (bed-frame z)") from None
     else:
         out["tail_block"] = None
+    out["chuck_len"] = num("chuck_len", None, 0.0)
+    out["jaw_r_in"] = num("jaw_r_in", None, 0.0)
+    out["stock_diameter"] = num("stock_diameter", None, 0.0)
+    if out.get("chuck_gap") is None and "chuck_gap" in rot:          # None: the bar goes as far in as the jaws allow (its seat)
+        out["chuck_gap"] = None
+    jaws = out.get("jaws")
+    if jaws is not None and jaws not in ("standard", "reversed"):
+        raise MachineScriptError("machine(): rotary.jaws is 'standard' (teeth inward) or 'reversed' (teeth outward, the bar on a step)")
+    out["jaws"] = jaws
+    out["jaw_r_out_closed"] = num("jaw_r_out_closed", None, 0.0)
+    out["jaw_travel"] = num("jaw_travel", 10.0, 0.0)
+    if jaws == "reversed" and (out["jaw_r_out_closed"] is None or not out.get("jaw_profile")):
+        raise MachineScriptError("machine(): rotary.jaws='reversed' needs jaw_r_out_closed (the serrated faces' radius with the jaws closed) and jaw_profile")
+    prof = out.get("jaw_profile")
+    if prof is not None:
+        try:
+            prof = [[float(v) for v in s] for s in prof]
+        except (TypeError, ValueError):
+            raise MachineScriptError("machine(): rotary.jaw_profile is [[x0, x1, r_above_inner_face], ...] (x from the chuck body face)") from None
+        if (not prof or any(len(s) not in (3, 4) or s[1] <= s[0] or min(s[2:]) <= 0 for s in prof) or out["jaw_r_in"] is None):
+            raise MachineScriptError("machine(): rotary.jaw_profile steps are [x0, x1, r] or [x0, x1, r_at_x0, r_at_x1] with x0 < x1 and r > 0, "
+                                     "and need jaw_r_in")
+        out["jaw_profile"] = prof
+    else:
+        out["jaw_profile"] = None
+    for key in ("fixed_boxes", "tail_boxes"):
+        boxes = []
+        for i, bx in enumerate(out.get(key) or []):
+            try:
+                b = {"name": str(bx.get("name") or f"{key[:-2]} {i + 1}"), "x": [float(bx["x"][0]), float(bx["x"][1])],
+                     "y": [float(bx["y"][0]), float(bx["y"][1])], "z": [float(bx["z"][0]), float(bx["z"][1])]}
+            except (KeyError, IndexError, TypeError, ValueError, AttributeError):
+                raise MachineScriptError(f"machine(): rotary.{key}[{i}] is {{name, x: [x0, x1], y: [y0, y1], z: [z0, z1]}}") from None
+            if any(b[k][0] >= b[k][1] for k in "xyz"):
+                raise MachineScriptError(f"machine(): rotary.{key}[{i}] ({b['name']}): each of x, y, z is [lo, hi] with lo < hi")
+            boxes.append(b)
+        out[key] = boxes
     out["source"] = str(out.get("source") or "reference")
     return out
+
+
+def jaw_envelope(rot: dict, r_bar: float) -> dict:
+    """Where a chuck's stepped jaws sit for a bar of radius r_bar (the viewer draws them there, the simulator checks them
+    there). jaw_profile gives the jaws as made, teeth inward ("standard"): steps [x0, x1, h(, h at x1)], x from the chuck
+    body face, h above the serrated face. Standard: the serrated faces close on the bar at ref = max(jaw_r_in, r_bar)
+    and every step reaches ref + h; the bar can go to the body face (seat 0). Reversed (the jaws turned over, teeth
+    outward — how the Z1's are shipped): the steps face the axis, the bar is held on the deepest step wall (riser) the
+    jaws can open to (ref = r_bar + h ≤ jaw_r_out_closed + jaw_travel) and its end sits on that step's shoulder (seat =
+    the step's x); the serrated faces stand at ref, never closer than jaw_r_out_closed; a shallower step beyond the seat
+    is a ring standing ref − h off the axis, clear of the bar. Returns {orientation, ref, seat, riser, outer_r, rings:
+    [(x0, x1, inner_r, outer_r at x0, outer_r at x1)], min_r (reversed: the thinnest bar they hold)}."""
+    prof = rot.get("jaw_profile") or []
+    if rot.get("jaws") == "reversed":
+        closed, travel = float(rot["jaw_r_out_closed"]), float(rot.get("jaw_travel") or 10.0)
+        heights = sorted({min(s[2:]) for s in prof})
+        risers = [h for h in heights if h < heights[-1] - 1e-6] or heights
+        h_g = next((h for h in sorted(risers, reverse=True) if r_bar + h <= closed + travel + 1e-6), min(risers))
+        ref = max(closed, r_bar + h_g)
+        seat = 0.0
+        for s in prof:                                             # the first step the bar fits: its shoulder, or a taper's far end
+            if s[2] <= h_g + 1e-6:
+                seat = s[0]; break
+            if s[-1] <= h_g + 1e-6:
+                seat = s[1]; break
+        rings = [(s[0], s[1], (ref - min(s[2:])) if min(s[2:]) < h_g - 1e-6 else 0.0, ref, ref) for s in prof]
+        return {"orientation": "reversed", "ref": round(ref, 3), "seat": seat, "riser": h_g, "outer_r": round(ref, 3), "rings": rings,
+                "min_r": round(closed - max(risers), 3)}                # closed, the step wall stands this far off the axis: a thinner bar needs them standard
+    ref = max(float(rot.get("jaw_r_in") or 0.0), r_bar)
+    rings = [(s[0], s[1], 0.0, ref + s[2], ref + s[-1]) for s in prof]
+    return {"orientation": "standard", "ref": round(ref, 3), "seat": 0.0, "riser": None,
+            "outer_r": round(max([max(r0, r1) for _, _, _, r0, r1 in rings] or [ref]), 3), "rings": rings}
 
 
 def slug(name: str) -> str:
@@ -239,7 +316,7 @@ def run(code: str, machine, workspace: Path | None = None, filename: str = "mach
     ns = ck.script_namespace()
     ns.update({"node": node, "part": part, "machine": machine_meta, "box": mm._box, "cyl_z": mm._cyl_z, "cyl_x": mm._cyl_x,
                "cyl_y": mm._cyl_y, "shell": mm._shell, "bed_holes": mm._bed_holes, "MATERIALS": list(mm.MATERIALS), "HAAS": mm.HAAS,
-               "machine_record": machine, "fourth": _has_fourth(machine), "IN": mm.IN, "rotary_cfg": rotary_cfg})
+               "machine_record": machine, "fourth": _has_fourth(machine), "IN": mm.IN, "rotary_cfg": rotary_cfg, "jaw_envelope": jaw_envelope})
     token = ck._CTX_WORKSPACE.set(Path(workspace) if workspace else None)
     try:
         exec(compile(code, filename, "exec"), ns)
@@ -332,7 +409,9 @@ def summary(model: mm.MachineModel) -> str:
     if model.rotary:
         r = model.rotary
         lines.append(f"4th axis: axis at y {r['axis_y']}, z {r['axis_z']} ({r.get('source', 'reference')}); chuck body face x {r['chuck_face_x']} "
-                     f"(r {r['chuck_r']}), jaws {r.get('jaw_reach', 0):g} proud (r {r.get('jaw_r', r['chuck_r']):g}), stock {r.get('chuck_gap', 5):g} in front of the face; "
+                     f"(r {r['chuck_r']}), jaws {r.get('jaw_reach', 0):g} proud (r {r.get('jaw_r', r['chuck_r']):g}"
+                     + (f", {r['jaws']}" if r.get("jaws") else "") + "), stock "
+                     + (f"{r['chuck_gap']:g} in front of the face; " if r.get("chuck_gap") is not None else "as far in as the jaws allow; ")
                      + (f"tailstock tip x {r['tail_x']} (cone {r['tail_cone']['half_angle']:g}°, r {r['tail_r']})" if r.get("tail", True) else "no tailstock"))
     coll = [p.name for p in model.parts if p.collision]
     lines.append(f"collision parts: {', '.join(coll) or 'none (mark the table, spindle and anything near the work with collision=True)'}")

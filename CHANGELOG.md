@@ -5,6 +5,19 @@ patch bumps fix things, a major bump changes something scripts or workspaces rel
 
 ## [Unreleased]
 
+## [1.9.9] — 2026-11-07
+
+### Fixed
+- **Makera Z1 4th axis rebuilt.** The module is now measured from Makera's CAD and checked against photos of a real unit.
+  The old jaw tips were 16.9 mm out, the tailstock block and live centre were the wrong size, and the motor, belt cover,
+  housing and rail were never checked for collisions. All of them are now, on every move including rapids.
+- **Jaws sit where the bar puts them.** Both orientations are modelled: reversed (teeth out, as the module is shipped, the
+  bar held on a step) and standard (teeth in). The simulator and the viewer place the jaws from the program's bar.
+
+### Added
+- **Jaws and grip** in Settings ▸ Machines ▸ Model. A bar too thin for reversed jaws now stops the simulation check with
+  a message, because holding it means turning the jaws over.
+
 ## [1.9.8] — 2026-11-07
 
 ### Added

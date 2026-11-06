@@ -168,13 +168,19 @@ WORKSPACE: Path | None = None            # set by the agent; user machine script
 #                                                                             above the bed; a probed value is the MPos Z with
 #                                                                             the probing tool's tip `probe_stickout` below the nose)
 #                      anchor1_y / bed_anchor_y may be given too (the live config's anchor beats the profile's default)
-#   chuck_gap          stock end face in front of the chuck body face (the jaws grip jaw_reach - chuck_gap of the stock)
+#   chuck_gap          stock end face in front of the chuck body face (the jaws grip jaw_reach - chuck_gap of the stock);
+#                      the simulator and the viewer never put the bar further in than its seat (the body face, or the
+#                      step reversed jaws hold it on)
+#   grip               instead of chuck_gap: how much bar is inside the jaws, from their tips (chuck_gap = jaw_reach - grip,
+#                      never below 0)
+#   jaws               "standard" (teeth inward) or "reversed" (teeth outward, the bar on a step): how the jaws are fitted
 #   jaw_reach          how far the jaws stand proud of the chuck body face
 #   tail               True/False: tailstock fitted;  tail_gap: live-centre tip beyond the stock's far end (negative: in a centre hole)
 #   stock_length       nominal bar length: where the script draws the tailstock (the viewer moves it to the program's stock anyway)
+#   stock_diameter     nominal bar: where the script draws the jaws (the viewer and the simulator place them from the program's stock)
 #   source, probed     "config" | "probed" | "manual" and an ISO date, for the sources panel
 ROTARY_OVERRIDE_KEYS = ("axis_y", "axis_z", "axis_my", "axis_mz", "probe_stickout", "anchor1_y", "bed_anchor_y",
-                        "chuck_gap", "jaw_reach", "tail", "tail_gap", "stock_length", "source", "probed")
+                        "chuck_gap", "grip", "jaws", "jaw_reach", "tail", "tail_gap", "stock_length", "stock_diameter", "source", "probed")
 
 
 def _z1_anchors() -> tuple[float, float]:
@@ -191,7 +197,8 @@ def rotary_geometry(machine, clearance: float, anchors: tuple[float, float] | No
     tail, tail_gap, stock_length) with machine.model["rotary"] applied (see ROTARY_OVERRIDE_KEYS). Adds `source` (reference |
     config | probed | manual) and `source_text` (a sources-panel line) describing where the axis position came from.
     `anchors` = (anchor1_y, bed_anchor_y) for the machine-coordinate conversion; None = the Z1's when the machine is a Z1."""
-    out = {"axis_y": 0.0, "axis_z": 50.0, "chuck_gap": 5.0, "jaw_reach": 0.0, "tail": True, "tail_gap": 0.0, "stock_length": None}
+    out = {"axis_y": 0.0, "axis_z": 50.0, "chuck_gap": 5.0, "jaw_reach": 0.0, "tail": True, "tail_gap": 0.0, "stock_length": None,
+           "stock_diameter": None, "jaws": None}
     out.update(defaults)
     ov = ((getattr(machine, "model", None) or {}).get("rotary")) or {}
     src, notes = "reference", []
@@ -224,14 +231,18 @@ def rotary_geometry(machine, clearance: float, anchors: tuple[float, float] | No
         src = ov["source"]
     if ov.get("probed") and src != "reference":
         src = "probed"
-    for k in ("chuck_gap", "jaw_reach", "tail_gap", "stock_length"):
+    for k in ("chuck_gap", "jaw_reach", "tail_gap", "stock_length", "stock_diameter"):
         if ov.get(k) is not None:
             out[k] = float(ov[k])
+    if ov.get("grip") is not None:                      # the bar held from the jaw tips: the gap follows (its seat still limits it)
+        out["chuck_gap"] = round(max(0.0, out["jaw_reach"] - float(ov["grip"])), 3)
+    if ov.get("jaws") in ("standard", "reversed"):
+        out["jaws"] = ov["jaws"]
     if ov.get("tail") is not None:
         out["tail"] = bool(ov["tail"])
     out["axis_my"] = ov.get("axis_my"); out["axis_mz"] = ov.get("axis_mz")
     out["source"] = src
-    where = {"reference": "reference: community simplified model — probe yours on the Machine page",
+    where = {"reference": "reference: Makera's simplified 4-axis model — read the controller's rotation offsets or probe yours on the Machine page",
              "config": "user: from the machine's config", "manual": "user: set in Settings ▸ Machines ▸ Model",
              "probed": f"user: probed on {ov.get('probed')}" if ov.get("probed") else "user: probed on the machine"}[src]
     out["source_text"] = where + ("; " + "; ".join(notes) if notes else "")
@@ -248,15 +259,15 @@ def _apply_rotary_overrides(mm: "MachineModel", machine) -> None:
     rot = mm.rotary
     g = rotary_geometry(machine, mm.clearance, axis_y=rot.get("axis_y", 0.0), axis_z=rot.get("axis_z", 50.0),
                         chuck_gap=rot.get("chuck_gap", 5.0), jaw_reach=rot.get("jaw_reach", 0.0), tail=rot.get("tail", True),
-                        tail_gap=rot.get("tail_gap", 0.0))
-    for k in ("axis_y", "axis_z", "chuck_gap", "jaw_reach", "tail", "tail_gap"):
+                        tail_gap=rot.get("tail_gap", 0.0), jaws=rot.get("jaws"))
+    for k in ("axis_y", "axis_z", "chuck_gap", "jaw_reach", "tail", "tail_gap", "jaws"):
         rot[k] = g[k]
     rot["source"] = g["source"]
     if g["source"] != "reference":
         mm.sources["4th axis position"] = g["source_text"]
-    for k in ("chuck_gap", "jaw_reach", "tail", "tail_gap"):
+    for k in ("chuck_gap", "grip", "jaws", "jaw_reach", "tail", "tail_gap"):
         if ov.get(k) is not None:
-            mm.sources[f"4th axis {k.replace('_', ' ')}"] = "user: set in Settings ▸ Machines ▸ Model"
+            mm.sources[f"4th axis {'chuck gap' if k == 'grip' else k.replace('_', ' ')}"] = "user: set in Settings ▸ Machines ▸ Model"
 
 
 def model_for(machine, workspace: Path | None = None) -> MachineModel:

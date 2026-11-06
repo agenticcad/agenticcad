@@ -102,6 +102,8 @@ class SimResult:
         shallower bite, removal-rate spikes, feed time in air, parts cut free without tabs."""
         s = self.stats
         errors, warnings = [], []
+        if (self.stats.get("mounting") or {}).get("jaw_note"):
+            errors.append({"code": "JAWS", "message": self.stats["mounting"]["jaw_note"]})
         g = s.get("gouge")
         if g and g.get("cells"):
             new = g.get("new_cells", g["cells"])
@@ -161,6 +163,8 @@ class SimResult:
         s = self.stats
         lines = [f"Simulation ({self.mode}, {self.grid['res']:.2f} mm cells): {s.get('moves', 0)} moves in {s.get('ops', 0)} ops, "
                  f"removed {s.get('removed_cm3', 0):.2f} cm³"]
+        if (s.get("mounting") or {}).get("jaw_note"):
+            lines.append("JAWS: " + s["mounting"]["jaw_note"])
         g = s.get("gouge")
         if g and g["cells"]:
             lines.append(f"GOUGES: the tool cut up to {g['max_depth']:.2f} mm into the part over {g['area_mm2']:.1f} mm² "
@@ -1395,7 +1399,9 @@ def _sim_radial(program, sel, part, resolution, frames, tol, machine_model=None,
     if machine_model is not None:
         out.stats["machine"] = {"key": machine_model.key, "name": machine_model.name, "placement": placement}
     if mount is not None:
-        out.stats["mounting"] = {k: mount[k] for k in ("chuck_face_x", "jaw_tip_x", "jaw_ring_r", "tail_tip_x", "tail", "chuck_gap", "tail_gap")}
+        out.stats["mounting"] = {k: mount[k] for k in ("chuck_face_x", "jaw_tip_x", "jaw_ring_r", "jaw_rings", "jaws", "jaw_ref_r", "bar_seat_x",
+                                                       "grip", "tail_tip_x", "tail", "chuck_gap", "tail_gap", "jaw_note")}
+        out.stats["mounting"]["checked"] = ["chuck", "chuck jaws"] + (["tailstock"] if mount["tail"] else []) + [b["name"] for b in mount["boxes"]]
     if R is not None:
         gouge = core & (r < R - tol)
         left = core & (r > R + tol)                     # material in a corner shows up beside the step, not on it
@@ -1425,22 +1431,50 @@ def _rotary_mounting(st, mm, placement) -> dict | None:
         return None
     stock = st.stock                                     # setup frame: xmin..xmax along the axis, radius = swing
     r_st = float(getattr(stock, "radius", None) or st.max_radius)
-    gap = float(placement.get("chuck_gap", rot.get("chuck_gap", 5.0)))
+    reach = float(rot.get("jaw_reach", 0.0))
+    # the jaws as rings about the axis (machine_script.jaw_envelope): stepped jaws slid out to hold the bar, teeth in or
+    # reversed (then the bar's end sits on a step and the step beyond it is a ring standing off the bar); else one ring of
+    # jaw_r or the bar plus a 6 mm jaw wall, whichever is bigger. (x0, x1, inner r, outer r at x0, outer r at x1)
+    env = None
+    if rot.get("jaw_profile") and (rot.get("jaw_r_in") is not None or rot.get("jaws") == "reversed"):
+        import machine_script
+        env = machine_script.jaw_envelope(rot, r_st)
+    seat = float(env["seat"]) if env else 0.0            # how far in front of the body face the bar's end can go at most
+    gap = placement.get("chuck_gap", rot.get("chuck_gap"))
+    if placement.get("grip") is not None:                # the bar held from the jaw tips; the seat still limits it
+        gap = reach - float(placement["grip"])
+    gap = seat if gap is None else max(seat, float(gap))
     tgap = float(placement.get("tail_gap", rot.get("tail_gap", 0.0)))
     face = float(stock.xmin) - gap
-    reach = float(rot.get("jaw_reach", 0.0))
-    jaw_r = max(float(rot.get("jaw_r", rot["chuck_r"])), r_st + 6.0)
+    if env:
+        rings = [(round(face + x0, 3), round(face + x1, 3), round(ri, 3), round(r0, 3), round(r1, 3)) for x0, x1, ri, r0, r1 in env["rings"]]
+    else:
+        jr = round(max(float(rot.get("jaw_r", rot["chuck_r"])), r_st + 6.0), 3)
+        rings = [(round(face, 3), round(face + reach, 3), 0.0, jr, jr)] if reach > 0 else []
+    jaw_r = max([max(r0, r1) for _, x1, _, r0, r1 in rings if x1 > face + 1e-6] or [float(rot.get("jaw_r", rot["chuck_r"]))])
     tail = bool(rot.get("tail", rot.get("tail_x") is not None))
     cone = rot.get("tail_cone") or {"half_angle": 30.0, "length": float(rot.get("tail_r", 7.0)) / math.tan(math.radians(30.0))}
     blk = rot.get("tail_block")
     az = float(rot.get("axis_z", 0.0))
-    return {"chuck_face_x": round(face, 3), "chuck_r": float(rot["chuck_r"]), "chuck_gap": gap,
-            "jaw_tip_x": round(face + reach, 3), "jaw_reach": reach, "jaw_ring_r": round(jaw_r, 3),
-            "tail": tail, "tail_gap": tgap, "tail_tip_x": round(float(stock.xmax) + tgap, 3) if tail else None,
+    tip = round(float(stock.xmax) + tgap, 3) if tail else None
+
+    def boxes(key, x_ref):                               # the module's boxes in the setup frame (x from x_ref, y about the axis, z above it)
+        return [{"name": b["name"], "x": [x_ref + b["x"][0], x_ref + b["x"][1]], "y": list(b["y"]), "z": [b["z"][0] - az, b["z"][1] - az]}
+                for b in (rot.get(key) or [])]
+
+    return {"chuck_face_x": round(face, 3), "chuck_r": float(rot["chuck_r"]), "chuck_len": rot.get("chuck_len"), "chuck_gap": round(gap, 3),
+            "jaw_tip_x": round(face + reach, 3), "jaw_reach": reach, "jaw_ring_r": round(jaw_r, 3), "jaw_rings": rings,
+            "jaw_note": (f"the Ø{2 * r_st:.1f} bar is thinner than reversed jaws can hold (Ø{2 * env['min_r']:.1f} and up): fit them standard "
+                         "and set Jaws to standard in Settings ▸ Machines ▸ Model, or this check is against the wrong jaws")
+            if env and r_st < env.get("min_r", 0.0) else None,
+            "jaws": env["orientation"] if env else None, "jaw_ref_r": env["ref"] if env else None, "bar_seat_x": round(face + seat, 3),
+            "grip": round(reach - gap, 3),
+            "tail": tail, "tail_gap": tgap, "tail_tip_x": tip,
             "tail_r": float(rot.get("tail_r", 7.0)), "tail_half": float(cone.get("half_angle", 30.0)), "tail_len": float(cone.get("length", 0.0)),
             "tail_barrel": float(rot.get("tail_barrel", 0.0)),
             "tail_block": ({"half_w": float(blk["half_w"]), "z0": float(blk["z0"]) - az, "z1": float(blk["z1"]) - az,
-                            "length": float(blk.get("length", 40.0))} if blk else None)}
+                            "length": float(blk.get("length", 40.0))} if blk else None),
+            "boxes": boxes("fixed_boxes", face) + (boxes("tail_boxes", tip) if tail else [])}
 
 
 def _levels_above_flutes(mm, tool):
@@ -1502,12 +1536,14 @@ def _contact_r(hits, r, P, I, tool, mm, res_x, res_a, x0, spacing, op_name):
             ly0, ly1 = min(b[2] for b in box), max(b[3] for b in box)
         else:
             lx0, lx1, ly0, ly1 = -rl, rl, -rl, rl
-        ixa = np.clip(np.floor((xt + lx0 - x0) / res_x).astype(np.int64), 0, nx - 1)
-        ixb = np.clip(np.ceil((xt + lx1 - x0) / res_x).astype(np.int64), 0, nx - 1)
+        ixa_raw = np.floor((xt + lx0 - x0) / res_x).astype(np.int64)
+        ixb_raw = np.ceil((xt + lx1 - x0) / res_x).astype(np.int64)
+        beyond = (ixb_raw < 0) | (ixa_raw > nx - 1)              # the level is entirely past an end of the bar (clipping would test the end column)
+        ixa, ixb = np.clip(ixa_raw, 0, nx - 1), np.clip(ixb_raw, 0, nx - 1)
         z_c = zt + zb
         worst = None
         for k in range(len(Q)):
-            if ixb[k] < ixa[k]:
+            if ixb[k] < ixa[k] or beyond[k]:
                 continue
             sub = r[:, ixa[k]:ixb[k] + 1]                         # (na, w)
             if sub.max() <= z_c[k] + 0.02:                       # material is never higher than its radius: nothing reaches the level
@@ -1535,8 +1571,10 @@ def _contact_r(hits, r, P, I, tool, mm, res_x, res_a, x0, spacing, op_name):
 
 def _collide_mount_r(hits, mount, P, K, I, tool, mm, spacing, op_name):
     """Every level of the tool stack — the flutes, the body above them, the nose stack — against the chuck body (a cylinder
-    behind the chuck face), the jaw ring and the tailstock (cone, barrel, block), all solids about the rotary axis in the
-    setup frame, for every sample of every move (rapids too). One hit per level and solid per piece: the deepest."""
+    behind the chuck face), the jaw rings, the tailstock (cone, barrel, block) and the module's fixed boxes (housing, motor,
+    rail...), all in the setup frame about the rotary axis, for every sample of every move (rapids too). The chuck and
+    jaws turn with A, so they are checked as solids of revolution; the boxes do not turn. One hit per level and solid per
+    piece: the deepest."""
     if len(P) == 0:
         return
     sh = tool.shape
@@ -1544,7 +1582,12 @@ def _collide_mount_r(hits, mount, P, K, I, tool, mm, spacing, op_name):
     levels = [("tool", rr, b, t - b, None) for b, t, rr in sh.bands(0.0) if t <= fl + 1e-6] or [("tool", float(sh.cut_radius), 0.0, fl, None)]
     levels += _levels_above_flutes(mm, tool)
     face, chuck_r = mount["chuck_face_x"], mount["chuck_r"]
-    jaw_tip, jaw_r = mount["jaw_tip_x"], mount["jaw_ring_r"]
+    back = face - mount["chuck_len"] if mount.get("chuck_len") else -np.inf
+    boxes = list(mount.get("boxes") or [])
+    if mount["tail"] and mount.get("tail_block"):
+        blk = mount["tail_block"]
+        k0 = mount["tail_tip_x"] + mount["tail_len"] + mount["tail_barrel"]
+        boxes.append({"name": "tailstock", "x": [k0, k0 + blk["length"]], "y": [-blk["half_w"], blk["half_w"]], "z": [blk["z0"], blk["z1"]]})
     for name, rl, zb, h, box in levels:
         if h <= 0:
             continue
@@ -1563,15 +1606,32 @@ def _collide_mount_r(hits, mount, P, K, I, tool, mm, spacing, op_name):
         dy = np.maximum(0.0, np.maximum(ylo, -yhi)); dz = np.maximum(0.0, np.maximum(zlo, -zhi))
         dist = np.hypot(dy, dz)
         found = []
-        # chuck body: an X cylinder of radius chuck_r for x < face
-        m = (xlo < face - 0.02) & (dist < chuck_r - 0.02)
+        # chuck body: an X cylinder of radius chuck_r from chuck_len behind the face (or all the way back) to the face
+        m = (xlo < face - 0.02) & (xhi > back + 0.02) & (dist < chuck_r - 0.02)
         if m.any():
-            found.append(("chuck", np.where(m, np.minimum(chuck_r - dist, face - xlo), -1.0)))
-        # jaws: a ring (full disc) of radius jaw_r from the face to the jaw tips
-        if jaw_tip > face:
-            m = (xlo < jaw_tip - 0.02) & (xhi > face + 0.02) & (dist < jaw_r - 0.02)
+            found.append(("chuck", np.where(m, np.minimum(chuck_r - dist, np.minimum(face - xlo, xhi - back)), -1.0)))
+        # jaws: rings — each step of the jaws from x0 to x1 out to its radius, a chamfered step tapering from r0 to r1 (the
+        # widest the taper is within the level's overlap is at one end of the overlap); a ring with an inner radius (reversed
+        # jaws' outer block standing off the bar) is clear of a level that sits wholly inside its hole
+        far = np.hypot(np.maximum(np.abs(ylo), np.abs(yhi)), np.maximum(np.abs(zlo), np.abs(zhi)))   # the level's farthest corner
+        for x0, x1, ri, r0, r1 in mount["jaw_rings"]:
+            ov0, ov1 = np.maximum(xlo, x0), np.minimum(xhi, x1)
+            if r0 == r1:
+                jr = r0
+            else:
+                jr = np.maximum(r0 + (r1 - r0) * (ov0 - x0) / (x1 - x0), r0 + (r1 - r0) * (ov1 - x0) / (x1 - x0))
+            m = (ov1 > ov0 + 0.02) & (dist < jr - 0.02) & (far > ri + 0.02)
             if m.any():
-                found.append(("chuck jaws", np.where(m, np.minimum(jaw_r - dist, np.minimum(jaw_tip - xlo, xhi - face)), -1.0)))
+                depth = np.minimum(jr - dist, ov1 - ov0) if ri <= 0 else np.minimum(np.minimum(jr - dist, far - ri), ov1 - ov0)
+                found.append(("chuck jaws", np.where(m, depth, -1.0)))
+        # the module's boxes: housing, motor, belt cover, rail, the tailstock block and what rides with it
+        for bx in boxes:
+            (k0, k1), (y0, y1), (z0, z1) = bx["x"], bx["y"], bx["z"]
+            m = (xlo < k1 - 0.02) & (xhi > k0 + 0.02) & (ylo < y1 - 0.02) & (yhi > y0 + 0.02) & (zlo < z1 - 0.02) & (zhi > z0 + 0.02)
+            if m.any():
+                pen = np.minimum(np.minimum(xhi - k0, k1 - xlo), np.minimum(y1 - ylo, yhi - y0))
+                pen = np.minimum(pen, np.minimum(z1 - zlo, zhi - z0))
+                found.append((bx["name"], np.where(m, pen, -1.0)))
         if mount["tail"]:
             tip, half, L = mount["tail_tip_x"], math.radians(mount["tail_half"]), mount["tail_len"]
             # the live centre's cone: radius grows from 0 at the tip to L·tan(half) at its base
@@ -1586,16 +1646,10 @@ def _collide_mount_r(hits, mount, P, K, I, tool, mm, spacing, op_name):
                 m = (xlo < b1 - 0.02) & (xhi > b0 + 0.02) & (dist < mount["tail_r"] - 0.02)
                 if m.any():
                     found.append(("tailstock", np.where(m, np.minimum(mount["tail_r"] - dist, xhi - b0), -1.0)))
-            blk = mount["tail_block"]
-            if blk:
-                k0, k1 = b1, b1 + blk["length"]
-                m = ((xlo < k1 - 0.02) & (xhi > k0 + 0.02) & (ylo < blk["half_w"] - 0.02) & (yhi > -blk["half_w"] + 0.02)
-                     & (zlo < blk["z1"] - 0.02) & (zhi > blk["z0"] + 0.02))
-                if m.any():
-                    pen = np.minimum(np.minimum(xhi - k0, k1 - xlo), np.minimum(blk["half_w"] - ylo, yhi + blk["half_w"]))
-                    pen = np.minimum(pen, np.minimum(blk["z1"] - zlo, zhi - blk["z0"]))
-                    found.append(("tailstock", np.where(m, pen, -1.0)))
+        merged: dict[str, np.ndarray] = {}                   # the jaw rings and the boxes can name the same solid: one hit, its deepest
         for what, depth in found:
+            merged[what] = depth if what not in merged else np.maximum(merged[what], depth)
+        for what, depth in merged.items():
             j = int(np.argmax(depth))
             if depth[j] <= 0:
                 continue
