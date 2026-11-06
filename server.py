@@ -230,6 +230,8 @@ if all(k in _live for k in machine_link.ROTATION_KEYS):    # the rotary module's
 camera = machine_link.CameraRelay()
 for _a in DOCS.values():
     _a.machine, _a.camera = machine, camera
+camera.framesize = agent.settings.get("camera_resolution")
+camera.may_resize = lambda: machine.fresh() and machine._status().get("state") == "Idle"
 
 
 def _rotary_machine() -> "cam.Machine | None":
@@ -2017,6 +2019,7 @@ async def settings_set(body: SettingsBody):
         agent.save_settings(patch)
     except ValueError as e:
         return JSONResponse({"error": str(e)}, status_code=400)
+    camera.framesize = agent.settings.get("camera_resolution")
     st = agent.public_settings()
     if body.restart:
         try:

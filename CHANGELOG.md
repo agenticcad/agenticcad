@@ -5,6 +5,14 @@ patch bumps fix things, a major bump changes something scripts or workspaces rel
 
 ## [Unreleased]
 
+## [1.9.8] — 2026-11-07
+
+### Added
+- **Machine camera resolution.** Settings ▸ General ▸ Machine camera sets the Z1 camera's picture size, from 640 × 480 at
+  about 22 fps up to 1600 × 1200 at about 6 fps. The default is now 1600 × 1200, which shows far more detail. The app
+  sets it again after the machine restarts, and only while the machine is idle: a job in progress is left at its current
+  size until it finishes. The machine's own config isn't changed.
+
 ## [1.9.7] — 2026-11-06
 
 ### Fixed

@@ -5761,6 +5761,7 @@ async function openSettings(tab) {
     <label>Web tools</label><label style="color:var(--text)"><input id="s-web" type="checkbox" ${st.web !== false ? 'checked' : ''}> allow WebFetch / WebSearch</label>
     <label>Simulation stock</label><select id="s-stock"><option value="voxel" ${st.sim_stock !== 'heightmap' ? 'selected' : ''}>voxel — smooth 3D stock (walls and floors meshed from a distance field, in a worker)</option><option value="heightmap" ${st.sim_stock === 'heightmap' ? 'selected' : ''}>height map — lighter, stepped walls</option></select>
     <label>Rendered simulation</label><label style="color:var(--text)"><input id="s-dof" type="checkbox" ${st.dof !== false ? 'checked' : ''}> depth of field (cinematic focus on the cut; turn off on a weak GPU — it is also switched off automatically when the frame rate drops)</label>
+    <label>Machine camera</label><select id="s-cam" title="The picture from the machine's own camera. Applied while the machine is idle, never during a job.">${[[15, '1600 × 1200 · about 6 fps · sharpest'], [14, '1280 × 1024 · about 8 fps'], [12, '1024 × 768 · about 10 fps'], [10, '640 × 480 · about 22 fps · smoothest']].map(([v, l]) => `<option value="${v}" ${v === st.camera_resolution ? 'selected' : ''}>${l}</option>`).join('')}</select>
     <label>Extra instructions</label><textarea id="s-extra" rows="3" placeholder="house rules, your machine, preferred materials…"></textarea>
     <label>API key</label><div style="display:flex;gap:6px;align-items:center"><input id="s-key" type="password" autocomplete="off" placeholder="${st.api_key_set ? '•••••••• (set — leave blank to keep)' : 'optional: sk-ant-… instead of the Claude Code login'}" style="flex:1">${st.api_key_set ? '<button class="btn small" id="s-key-clear" type="button">Clear</button>' : ''}</div>
   </div>
@@ -5858,7 +5859,7 @@ async function openSettings(tab) {
   }
   let clearKey = false; const kc = d.querySelector('#s-key-clear'); if (kc) kc.onclick = () => { clearKey = true; kc.textContent = 'will clear'; };
   const collect = () => ({ model: sel.value === '__custom' ? custom.value.trim() : sel.value, effort: d.querySelector('#s-effort').value, max_turns: parseInt(d.querySelector('#s-turns').value) || 60,
-    thinking_display: d.querySelector('#s-think').value, web: d.querySelector('#s-web').checked, dof: d.querySelector('#s-dof').checked, sim_stock: d.querySelector('#s-stock').value, units: d.querySelector('#s-units').value, extra_prompt: d.querySelector('#s-extra').value, mcp_servers: st.mcp_servers || {},
+    thinking_display: d.querySelector('#s-think').value, web: d.querySelector('#s-web').checked, dof: d.querySelector('#s-dof').checked, sim_stock: d.querySelector('#s-stock').value, camera_resolution: +d.querySelector('#s-cam').value, units: d.querySelector('#s-units').value, extra_prompt: d.querySelector('#s-extra').value, mcp_servers: st.mcp_servers || {},
     api_key: clearKey ? '' : (d.querySelector('#s-key').value.trim() || '__keep__'),
     drawings: { material: d.querySelector('#s-dmat').value.trim(), sheet: d.querySelector('#s-dsheet').value },
     print: slicerInfo ? { machine: d.querySelector('#s-pmach').value, process: d.querySelector('#s-pproc').value, filament: d.querySelector('#s-pfil').value,

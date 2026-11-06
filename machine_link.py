@@ -10,7 +10,9 @@ First (and so far only) driver: the Makera Z1 over Wi-Fi. What it speaks, read f
     0x81  status reply  <Idle|MPos:x,y,z,a,b|WPos:x,y,z,a,b|F:cur,req,ovr|S:rpm,target,ovr,vac,...|T:tool,offset,..|...>
     0x90  console text
   UDP 3333  broadcasts "name,ip,port,busy,state" about once a second
-  WS 82 /ws_video  send "start_stream" / "stop_stream", JPEG frames (640 x 480, ~20 fps) as binary messages
+  WS 82 /ws_video  send "start_stream" / "stop_stream", JPEG frames as binary messages
+  HTTP 80 POST /api/camera/resolution {"resolution": n}: the frame size, while a stream runs, until the machine restarts
+    (measured on a Z1, idle, 2026-11-07: 10 = 640 x 480 at 22 fps, 12 = 1024 x 768 at 10, 14 = 1280 x 1024 at 8, 15 = 1600 x 1200 at 6)
 
   Machine coordinates: every axis homes to its maximum end (0) and the work area is negative, X/Y about -206..0,
   Z about -102..0 (soft_endstop.* in configZ1.default). Soft limits are OFF in the firmware (soft_endstop.enable
@@ -68,9 +70,12 @@ Safety model (MachineControl):
 from __future__ import annotations
 
 import asyncio
+import json
 import re
 import socket
+import struct
 import time
+import urllib.request
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
@@ -3552,12 +3557,33 @@ class MachineControl:
 
 
 # ------------------------------------------------------------------ camera
+CAMERA_SIZES = {10: (640, 480), 12: (1024, 768), 14: (1280, 1024), 15: (1600, 1200)}
+
+
+def jpeg_size(jpg: bytes) -> tuple[int, int] | None:
+    """Width and height from a JPEG's frame header."""
+    i = 2
+    while i + 9 <= len(jpg):
+        if jpg[i] != 0xFF:
+            i += 1
+        elif jpg[i + 1] in (0xC0, 0xC1, 0xC2):
+            h, w = struct.unpack(">HH", jpg[i + 5:i + 9])
+            return w, h
+        else:
+            i += 2 + struct.unpack(">H", jpg[i + 2:i + 4])[0]
+    return None
+
+
 class CameraRelay:
     """One upstream camera socket shared by every viewer; it runs only while someone is watching."""
 
     def __init__(self):
         self.host: str | None = None
         self.port = 82
+        self.http_port = 80
+        self.framesize: int | None = None           # a CAMERA_SIZES key: the size the frames should be
+        self.may_resize: Callable[[], bool] = lambda: False
+        self._size_t = 0.0                          # not before this time
         self.frame: bytes | None = None
         self.frame_t = 0.0
         self.viewers = 0
@@ -3592,6 +3618,7 @@ class CameraRelay:
                                 async with self._cond:
                                     self.frame, self.frame_t = bytes(m), time.time()
                                     self._cond.notify_all()
+                                await self._keep_size(m)
                     finally:
                         try:
                             await ws.send("stop_stream")
@@ -3602,6 +3629,25 @@ class CameraRelay:
             except Exception as e:  # noqa: BLE001
                 self.error = f"camera: {type(e).__name__}: {e}"
                 await asyncio.sleep(2.0)
+
+    async def _keep_size(self, jpg: bytes) -> None:
+        """Ask for the chosen size when a frame shows another one. The machine forgets it on a restart and takes it only
+        while a stream runs, so the frames are what tells. Never in a job: it has only been tried on an idle machine, and
+        the camera's board also carries the machine's network link. An app opened mid-job waits for Idle."""
+        want = CAMERA_SIZES.get(self.framesize)
+        if want is None or time.time() < self._size_t or jpeg_size(jpg) == want or not self.may_resize():
+            return
+        self._size_t = time.time() + 15.0           # the next frames may still be the old size
+        try:
+            await asyncio.to_thread(self._post_size)
+        except Exception as e:  # noqa: BLE001
+            self.error = f"camera size: {type(e).__name__}: {e}"
+            self._size_t = time.time() + 300.0      # firmware without the call: the stream carries on at its own size
+
+    def _post_size(self) -> None:
+        req = urllib.request.Request(f"http://{self.host}:{self.http_port}/api/camera/resolution", method="POST",
+                                     data=json.dumps({"resolution": self.framesize}).encode(), headers={"Content-Type": "application/json"})
+        urllib.request.build_opener(urllib.request.ProxyHandler({})).open(req, timeout=5).read()
 
     async def frames(self, max_fps: float = 12.0):
         """Async generator of JPEG frames for one viewer."""

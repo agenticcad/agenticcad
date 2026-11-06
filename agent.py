@@ -3565,6 +3565,7 @@ class CadAgent:
         "web": True,                       # allow WebFetch / WebSearch
         "dof": True,                       # rendered simulation: depth of field (post-processing; off for weak GPUs)
         "sim_stock": "voxel",              # simulation stock in the viewer: "voxel" (smooth 3D, Web Worker) or "heightmap" (lighter)
+        "camera_resolution": 15,           # machine camera frame size: a machine_link.CAMERA_SIZES key (15 = 1600 x 1200, about 6 fps)
         "mcp_servers": {},                 # name -> {type: stdio|http|sse, command, args, env, url, headers, enabled}
         "extra_prompt": "",                # appended to the system prompt (house rules, machine notes...)
         "dream": True,                     # consolidate the lessons learnt in the background while the app is idle (dream.py)
@@ -3595,6 +3596,9 @@ class CadAgent:
         if st.get("effort") not in ("", "low", "medium", "high", "xhigh", "max"):
             raise ValueError("effort must be one of low, medium, high, xhigh, max")
         st["max_turns"] = int(st.get("max_turns") or 60)
+        import machine_link
+        if st.get("camera_resolution") not in machine_link.CAMERA_SIZES:
+            raise ValueError(f"camera_resolution must be one of {sorted(machine_link.CAMERA_SIZES)}")
         if st.get("units", "") not in ("", "mm", "in"):
             raise ValueError("units must be mm, in, or empty for automatic")
         st["drawings"] = {**self.DEFAULT_SETTINGS["drawings"], **{k: v for k, v in (st.get("drawings") or {}).items() if k in self.DEFAULT_SETTINGS["drawings"]}}

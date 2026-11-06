@@ -3,6 +3,7 @@ real firmware, does not stop a jog past the end of travel; these tests prove mac
 import asyncio
 import re
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -252,6 +253,84 @@ def test_switches_and_connection_cap_and_lost_link():
             await _until(lambda: not mc.armed, timeout=4)
         finally:
             await mc.disconnect()
+    run(go())
+
+
+def _sized_relay(emu, cam, framesize=15, idle=lambda: True):
+    relay = ml.CameraRelay()
+    relay.http_port, relay.framesize, relay.may_resize = emu.http_port, framesize, idle
+    relay.set_host("127.0.0.1", cam)
+    return relay
+
+
+async def _frame_of_size(relay, size, secs=6.0):
+    g = relay.frames(max_fps=50)
+    try:
+        t0 = time.time()
+        while time.time() - t0 < secs:
+            f = await asyncio.wait_for(g.__anext__(), 5)
+            if ml.jpeg_size(f) == size:
+                return f
+        return None
+    finally:
+        await g.aclose()
+
+
+def test_camera_comes_up_at_the_chosen_size_and_again_after_a_machine_restart():
+    async def go():
+        emu = Z1Emu()
+        _, cam = await emu.start()
+        relay = _sized_relay(emu, cam)
+        try:
+            assert await _frame_of_size(relay, (1600, 1200))
+            assert emu.cam_posts == [(15, "Idle")]  # once: frames at the right size ask for nothing
+            relay._size_t = time.time() + 60
+            emu.cam_size = (640, 480)               # the machine restarted: it forgot
+            assert await _frame_of_size(relay, (640, 480))
+            relay._size_t = 0
+            assert await _frame_of_size(relay, (1600, 1200))
+            assert emu.cam_posts == [(15, "Idle")] * 2
+        finally:
+            relay.set_host(None)
+            await emu.stop()
+    run(go())
+
+
+def test_camera_size_waits_for_idle_and_a_job_is_never_touched():
+    async def go():
+        emu = Z1Emu()
+        _, cam = await emu.start()
+        idle = [False]
+        relay = _sized_relay(emu, cam, 12, lambda: idle[0])
+        try:
+            assert await _frame_of_size(relay, (640, 480))
+            await asyncio.sleep(0.5)
+            assert emu.cam_posts == [] and relay.frame     # streaming at the old size, nothing asked
+            idle[0] = True
+            assert await _frame_of_size(relay, (1024, 768)) and len(emu.cam_posts) == 1
+        finally:
+            relay.set_host(None)
+            await emu.stop()
+    run(go())
+
+
+def test_camera_stream_carries_on_when_the_firmware_has_no_size_call():
+    async def go():
+        emu = Z1Emu()
+        _, cam = await emu.start()
+        relay = _sized_relay(emu, cam)
+        relay.http_port = 9                         # nothing listens there
+        try:
+            assert await _frame_of_size(relay, (640, 480))
+            for _ in range(50):
+                if relay.error:
+                    break
+                await asyncio.sleep(0.1)
+            assert relay.error and relay.error.startswith("camera size:") and relay._size_t > time.time() + 200
+            assert await _frame_of_size(relay, (640, 480))
+        finally:
+            relay.set_host(None)
+            await emu.stop()
     run(go())
 
 

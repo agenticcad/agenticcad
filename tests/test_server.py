@@ -184,12 +184,18 @@ def test_render_save_and_motion_check_api(client):
 
 
 def test_settings_and_status_api(client):
+    import server
     s = client.get("/api/settings").json()
     assert "model" in s["settings"] and "claude-opus-5" in s["models"]
     r = client.post("/api/settings", json={"settings": {"model": "claude-sonnet-5", "effort": "high", "max_turns": 30,
                                                         "mcp_servers": {"fs": {"type": "stdio", "command": "npx", "args": ["-y", "x"], "enabled": True}}}}).json()
     assert r["settings"]["model"] == "claude-sonnet-5" and r["settings"]["mcp_servers"]["fs"]["type"] == "stdio"
     assert client.post("/api/settings", json={"settings": {"effort": "turbo"}}).status_code == 400
+    assert s["settings"]["camera_resolution"] == 15 and server.camera.framesize == 15       # 1600 x 1200 unless asked otherwise
+    assert server.camera.may_resize() is False                                               # not connected: not idle
+    assert client.post("/api/settings", json={"settings": {"camera_resolution": 12}}).status_code == 200 and server.camera.framesize == 12
+    assert client.post("/api/settings", json={"settings": {"camera_resolution": 99}}).status_code == 400 and server.camera.framesize == 12
+    client.post("/api/settings", json={"settings": {"camera_resolution": 15}})
     assert client.post("/api/settings", json={"settings": {"mcp_servers": {"bad": {"type": "http"}}}}).status_code == 400
     st = client.get("/api/agent/status").json()
     assert st["connected"] is False and st["model"] == "claude-sonnet-5"

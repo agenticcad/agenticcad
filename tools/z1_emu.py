@@ -3,7 +3,8 @@
 Speaks what machine_link.py speaks (read from MakeraZ1Firmware and checked against a real Z1): framed TCP on 2222,
 '?' status replies, $H (Z first, then XY, ends at MPos -1,-1,-1), $J relative jogs at a fraction of the axis max
 rate, '!' hold / '~' resume / 0x18 halt -> Alarm, $X unlock, M851/M852 (external output: dust collector), M821/M822
-(light), a connection cap, and the /ws_video camera on another port (test-card JPEGs). Like the real firmware it does
+(light), a connection cap, the /ws_video camera on another port (test-card JPEGs) and POST /api/camera/resolution on a
+third, which like the real one takes a size only while a stream runs and forgets it on restart. Like the real firmware it does
 NOT enforce soft limits: a jog past the end just goes there (and is recorded in `crashes`) so tests can prove the
 guard in machine_link refuses it first.
 
@@ -20,6 +21,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import io
+import json
 import math
 import re
 import sys
@@ -39,7 +41,10 @@ class Z1Emu:
               "coordinate.clearance_y": -14.6, "coordinate.clearance_z": -3.0,
               "coordinate.rotation_offset_x": -7.5, "coordinate.rotation_offset_y": 69.0, "coordinate.rotation_offset_z": 17.0}
 
+    CAM_SIZES = {10: (640, 480), 11: (800, 600), 12: (1024, 768), 13: (1280, 720), 14: (1280, 1024), 15: (1600, 1200)}
+
     def __init__(self, speed: float = 1.0, max_clients: int = 2, homed: bool = True, fourth: bool = False):
+        self.cam_size, self.cam_streams, self.cam_posts = (640, 480), 0, []
         self.speed = speed                              # >1 runs moves faster than real time (tests)
         self.max_clients = max_clients
         self.mpos = [-1.0, -1.0, -1.0] if homed else [-50.0, -40.0, -20.0]
@@ -698,14 +703,14 @@ class Z1Emu:
             writer.close()
 
     @staticmethod
-    def test_card(k: int) -> bytes:
+    def test_card(k: int, size: tuple[int, int] = (640, 480)) -> bytes:
         from PIL import Image, ImageDraw
-        im = Image.new("RGB", (640, 480), (30, 34, 40))
+        im = Image.new("RGB", size, (30, 34, 40))
         d = ImageDraw.Draw(im)
-        for x in range(0, 640, 40):
-            d.line([(x, 0), (x, 480)], fill=(60, 70, 80))
-        for y in range(0, 480, 40):
-            d.line([(0, y), (640, y)], fill=(60, 70, 80))
+        for x in range(0, size[0], 40):
+            d.line([(x, 0), (x, size[1])], fill=(60, 70, 80))
+        for y in range(0, size[1], 40):
+            d.line([(0, y), (size[0], y)], fill=(60, 70, 80))
         d.ellipse([280 + 60 * math.cos(k / 5), 200 + 60 * math.sin(k / 5), 360 + 60 * math.cos(k / 5), 280 + 60 * math.sin(k / 5)], fill=(230, 120, 40))
         d.text((12, 12), f"Z1 emulator frame {k}", fill=(220, 220, 220))
         b = io.BytesIO()
@@ -720,7 +725,7 @@ class Z1Emu:
             nonlocal k
             while True:
                 if streaming:
-                    await ws.send(self.test_card(k))
+                    await ws.send(self.test_card(k, self.cam_size))
                     k += 1
                 await asyncio.sleep(0.1)
         task = asyncio.create_task(pump())
@@ -728,20 +733,39 @@ class Z1Emu:
             async for msg in ws:
                 if msg == "start_stream":
                     streaming = True
+                    self.cam_streams += 1
                 elif msg == "stop_stream":
                     streaming = False
+                    self.cam_streams -= 1
         except Exception:  # noqa: BLE001
             pass
         finally:
             task.cancel()
+            if streaming:
+                self.cam_streams -= 1
+
+    async def camera_http(self, reader, writer):
+        head = await reader.readuntil(b"\r\n\r\n")
+        body = await reader.readexactly(int(re.search(rb"(?i)content-length: *(\d+)", head).group(1)))
+        n = json.loads(body).get("resolution")
+        self.cam_posts.append((n, self.state))
+        ok = self.cam_streams > 0 and n in self.CAM_SIZES
+        if ok:
+            self.cam_size = self.CAM_SIZES[n]
+        text = b"Resolution changed successfully" if ok else b"camera not running"
+        writer.write(b"HTTP/1.1 %s\r\nContent-Length: %d\r\nConnection: close\r\n\r\n%s" % (b"200 OK" if ok else b"500 Error", len(text), text))
+        await writer.drain()
+        writer.close()
 
     async def start(self, host="127.0.0.1", port=0, cam_port=0):
         import websockets
         tcp = await asyncio.start_server(self.handle, host, port)
         cam = await websockets.serve(self.camera, host, cam_port)
-        self.servers = [tcp, cam]
+        http = await asyncio.start_server(self.camera_http, host, 0)
+        self.servers = [tcp, cam, http]
         self.port = tcp.sockets[0].getsockname()[1]
         self.cam_port = next(iter(cam.sockets)).getsockname()[1]
+        self.http_port = http.sockets[0].getsockname()[1]
         return self.port, self.cam_port
 
     async def stop(self):
