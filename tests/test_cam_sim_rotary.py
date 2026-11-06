@@ -229,3 +229,18 @@ def test_time_estimate_allows_for_the_rotary_speed(machines, shaft):
     op = manual_op(st, flat(), "Turn", [(cam.RAPID, 10, 0, 2, 0.0), (cam.FEED, 10, 0, 2, 3600.0)])
     assert op.a_rate_max() > m.rotary["max_speed"]
     assert op.time_minutes(m) == pytest.approx(3600.0 / m.rotary["max_speed"])     # ten turns at the axis' speed, not the feed's
+
+
+def test_payload_tells_the_viewer_which_setups_share_a_mounting_and_where_clearance_is(machines, shaft):
+    """Playback walks the post's moves between ops on one mounting: it needs to know they share it, and the height to lift to."""
+    m = machines["Makera Z1 + 4th axis"]
+    stock = cam.Stock.cylinder(30.0, 60.0, x0=-5.0, material="aluminium")
+    a = cam.Setup(m, stock, rotary=True, origin=(0.0, 0.0, 0.0), name="A0")
+    b = cam.Setup(m, stock, rotary=True, a=90, origin=(0.0, 0.0, 0.0), name="A90")
+    c = cam.Setup(m, cam.Stock.cylinder(40.0, 60.0, x0=-5.0, material="aluminium"), rotary=True, origin=(0.0, 0.0, 0.0), name="Other bar")
+    prog = cam.Program(a, name="mounts")
+    for st in (a, b, c):
+        prog.add(manual_op(st, flat(6), st.name, [(cam.RAPID, 0, 0, st.safe_z)]))
+    s = prog.to_payload(moves=False)["setups"]
+    assert s[0]["mount"] == s[1]["mount"] == 0 and s[2]["mount"] == 2
+    assert s[0]["clear_z"] == pytest.approx(a.clearance_z) and s[2]["clear_z"] == pytest.approx(c.clearance_z)

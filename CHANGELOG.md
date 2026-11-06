@@ -5,6 +5,18 @@ patch bumps fix things, a major bump changes something scripts or workspaces rel
 
 ## [Unreleased]
 
+## [1.9.6] — 2026-11-06
+
+### Fixed
+- **4th-axis playback follows the G-code.** On a move that turned A, the tool cut straight across the part: a rapid with
+  a big turn dragged it up to 35 mm off, through the bar. It now runs each axis as the machine does, so it stays at its
+  height while the part turns under it. On a real 16-op job, every sampled position lies within 0.07 mm of the G-code.
+- **Between operations the tool moves as the post tells it to.** It used to jump to the next start and ride round with
+  the part while it indexed. Now it lifts, the part turns, and the tool travels over and comes down, and A turns the way
+  the program does, including the long way back when the next op starts from A0.
+- **Toolpath lines on the 4th axis.** A move with a big A turn draws as an arc around the part, not a line through it.
+- The playback clock counts A moves as the post feeds them.
+
 ## [1.9.5] — 2026-11-06
 
 ### Fixed

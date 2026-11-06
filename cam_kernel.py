@@ -4338,6 +4338,8 @@ class Program:
             o = st.to_model([st.origin_point()])[0]
             out_setups.append({"name": st.name, "wcs": st.wcs, "rotary": st.rotary, "a": st.a, "orient": st.orient if not st.rotary else None,
                                "axis": list(st.axis) if st.rotary else None, "origin": [float(v) for v in o],
+                               "mount": next(i for i, x in enumerate(setups) if x is st or self.same_mounting(x, st)),
+                               "clear_z": round(float(st.clearance_z), 4),
                                "tool_axis": list(st.tool_axis_model), "stock": st.model_stock.to_dict(),
                                "max_radius": getattr(st, "max_radius", None), "fixture": st.fixture_payload(),
                                "origin_name": st.origin if isinstance(st.origin, str) else "custom",

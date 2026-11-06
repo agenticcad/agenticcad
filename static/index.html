@@ -1690,7 +1690,7 @@ async function renderScreenshot(spec) {
   }
 }
 
-window.agenticcad = { renderScreenshot, get model() { return model; }, get machine() { return { on: machineOn, rig: machineRig, set: setMachine, pose: poseRig, stage: stageGroup, preview: machinePreview, doors: setDoors, get door() { return machineDoor; } }; }, get sketch() { return sk; }, get extDefs() { return extDefs; }, get extPanels() { return extPanels; }, scene, camera, renderer, send: (o) => send(o), THREE, get stockObj() { return stockObj; }, get simMesh() { return simMesh; }, get sim() { return sim; }, simSeek, get simRes() { return simRes; }, get liveR() { return liveR; }, get program() { return program; }, controls };
+window.agenticcad = { renderScreenshot, simPose: (k, f) => simPose(k, f), get simState() { return sim; },  get model() { return model; }, get machine() { return { on: machineOn, rig: machineRig, set: setMachine, pose: poseRig, stage: stageGroup, preview: machinePreview, doors: setDoors, get door() { return machineDoor; } }; }, get sketch() { return sk; }, get extDefs() { return extDefs; }, get extPanels() { return extPanels; }, scene, camera, renderer, send: (o) => send(o), THREE, get stockObj() { return stockObj; }, get simMesh() { return simMesh; }, get sim() { return sim; }, simSeek, get simRes() { return simRes; }, get liveR() { return liveR; }, get program() { return program; }, controls };
 
 // toolbar
 document.getElementById('fit').onclick = () => fitCamera();
@@ -2025,7 +2025,11 @@ function loadProgram(p) {
     const cutPos = [], rapPos = []; const cutCounts = new Int32Array(op.moves.length + 1), rapidCounts = new Int32Array(op.moves.length + 1);
     let prev = null, nc = 0, nr = 0;
     op.moves.forEach((m, i) => {
-      if (prev) { if (m[0] === 0) { rapPos.push(prev[1], prev[2], prev[3], m[1], m[2], m[3]); nr++; } else { cutPos.push(prev[1], prev[2], prev[3], m[1], m[2], m[3]); nc++; } }
+      if (prev) {
+        const pts = movePolyline(prev, m, p.setups ? p.setups[op.setup || 0] : null), out = m[0] === 0 ? rapPos : cutPos;
+        for (let j = 1; j < pts.length; j++) out.push(...pts[j - 1], ...pts[j]);
+        if (m[0] === 0) nr += pts.length - 1; else nc += pts.length - 1;
+      }
       cutCounts[i + 1] = nc; rapidCounts[i + 1] = nr; prev = m;
     });
     const cg = new THREE.BufferGeometry(); cg.setAttribute('position', new THREE.Float32BufferAttribute(cutPos, 3));
@@ -2539,17 +2543,23 @@ function machineRotarySpeed() { const m = (library.machines || []).find(x => x.n
 function setupSim() {
   // the move list in playback order and a time model: every move takes distance / feed (rapids at the machine's rapid rate,
   // A moves at the rotary's max speed), so playback runs like the real program, scaled by the speed control
-  sim.index = []; sim.opStart = []; let n = 0;
+  sim.index = []; sim.opStart = []; sim.enter = new Map(); let n = 0;
   camOps.forEach((c, oi) => { sim.opStart[oi] = c.visible ? n : -1; if (!c.visible) return; for (let i = 0; i < c.op.moves.length; i++) sim.index.push([oi, i]); n += c.op.moves.length; });
   sim.total = n; sim.t = new Float64Array(n + 1);
   const rapid = machineRapid(), rot = machineRotarySpeed(); let prev = null, acc = 0;
   for (let i = 0; i < n; i++) {
     const [oi, mi] = sim.index[i], mv = camOps[oi].op.moves[mi];
     if (prev) {
-      const d = Math.hypot(mv[1] - prev[1], mv[2] - prev[2], mv[3] - prev[3]);
-      const f = (mv[0] === 0 || mi === 0) ? rapid : Math.max(mv[4] || 1, 1);
-      const a0 = simAStart(i), a1 = simAEnd(i), da = a0 == null ? 0 : Math.abs(a1 - a0);
-      acc += Math.max(d / f, da / rot) * 60;
+      const st = program.setups ? program.setups[camOps[oi].op.setup || 0] : null, enter = simEnter(i, rapid, rot);
+      if (enter) { sim.enter.set(i, enter); acc += enter.t[enter.t.length - 1]; }
+      else if (st && st.rotary && mi > 0) {         // as the post feeds it: the path with the arc A sweeps, at the feed
+        const p = setupPoint(prev, st), q = setupPoint(mv, st), d = Math.hypot(q[0] - p[0], q[1] - p[1], q[2] - p[2]), da = Math.abs(q[3] - p[3]);
+        const len = mv[0] === 0 ? d / rapid : Math.hypot(d, da * Math.PI / 180 * Math.max(Math.hypot(p[1], p[2]), Math.hypot(q[1], q[2]))) / Math.max(mv[4] || 1, 1);
+        acc += Math.max(len, da / rot) * 60;
+      } else {
+        const d = Math.hypot(mv[1] - prev[1], mv[2] - prev[2], mv[3] - prev[3]);
+        acc += d / ((mv[0] === 0 || mi === 0) ? rapid : Math.max(mv[4] || 1, 1)) * 60;
+      }
     }
     sim.t[i + 1] = acc; prev = mv;
   }
@@ -2573,20 +2583,45 @@ function fmtT(sec) { sec = Math.max(0, Math.round(sec)); const h = Math.floor(se
 // last point of one operation to the first of the next would cut a straight trench through the part that the program
 // never cuts (and, across setups, join points in two different frames).
 function simPrev(k) { const cur = sim.index[k]; return k > 0 && cur && cur[1] > 0 ? sim.index[k - 1] : cur; }
-// the A angle: at the end of move k (null off the 4th axis), where move k starts, and part way through it. An indexed op has
-// no A word, it sits at its setup's angle. Between ops the part turns the short way with the tool up at clearance: the post
-// resets the turns a spiral wound up, so a program never unwinds them.
-function simAEnd(k) {
+// 4th axis: X, Y, Z and A each run linearly on the machine, so a move is a straight line in the setup frame (setupPoint),
+// and the part turning under it makes that an arc on the part: a straight line in model coordinates would drag the tool
+// through the bar on a big A move. simEnter is what the post does between two ops on one mounting: up and round the short
+// way for a new angle, over and down for a new tool, otherwise straight on to the first point at the A it asks for.
+function simEnter(k, rapid, rot) {
+  const [oi, mi] = sim.index[k]; if (mi || !k) return null;
+  const [pi, pm] = sim.index[k - 1], P = camOps[pi].op, O = camOps[oi].op, ps = program.setups && program.setups[P.setup || 0], st = program.setups && program.setups[O.setup || 0];
+  if (!ps || !st || !ps.rotary || !st.rotary || ps.mount !== st.mount) return null;
+  const from = setupPoint(P.moves[pm], ps), to = setupPoint(O.moves[0], st), newSetup = (P.setup || 0) !== (O.setup || 0), newTool = P.tool.number !== O.tool.number;
+  let a = from[3], turn = false;
+  if (newSetup || !O.uses_a) {
+    const q = (a - st.a) / 360, r = Math.abs(q % 1) === 0.5 ? 2 * Math.round(q / 2) : Math.round(q), near = st.a + 360 * r;     // Python's round: ties to even
+    turn = Math.abs(near - a) > 1e-6; if (turn) a = near;
+  }
+  const up = st.clear_z, pts = [from];
+  if (newSetup || turn || newTool) pts.push([from[0], from[1], up, from[3]]);
+  if (turn) pts.push([from[0], from[1], up, a]);
+  if (newTool) pts.push([to[0], to[1], up, a]);
+  pts.push([to[0], to[1], to[2], O.uses_a ? to[3] : a]);
+  const t = [0];
+  for (let i = 1; i < pts.length; i++) {
+    const p = pts[i - 1], q = pts[i];
+    t.push(t[i - 1] + Math.max(Math.hypot(q[0] - p[0], q[1] - p[1], q[2] - p[2]) / rapid, Math.abs(q[3] - p[3]) / rot) * 60);
+  }
+  return { pts, t };
+}
+function lerp4(p, q, u) { return [p[0] + (q[0] - p[0]) * u, p[1] + (q[1] - p[1]) * u, p[2] + (q[2] - p[2]) * u, p[3] + (q[3] - p[3]) * u]; }
+function simPose(k, f) {                            // [x, y, z, A] on the machine, part way through move k (null off the 4th axis)
   const [oi, mi] = sim.index[k], op = camOps[oi].op, st = program.setups ? program.setups[op.setup || 0] : null;
   if (!st || !st.rotary) return null;
-  const mv = op.moves[mi]; return mv.length > 5 ? mv[5] : st.a;
+  const e = sim.enter.get(k);
+  if (e) {
+    const u = (f || 0) * e.t[e.t.length - 1]; let i = 1;
+    while (i < e.t.length - 1 && e.t[i] < u) i++;
+    const d = e.t[i] - e.t[i - 1]; return lerp4(e.pts[i - 1], e.pts[i], d > 0 ? (u - e.t[i - 1]) / d : 1);
+  }
+  const b = setupPoint(op.moves[mi], st); return mi ? lerp4(setupPoint(op.moves[mi - 1], st), b, f || 0) : b;
 }
-function simAStart(k) {
-  const a1 = simAEnd(k); if (a1 == null) return null;
-  const a0 = k > 0 ? simAEnd(k - 1) : null; if (a0 == null) return a1;
-  return sim.index[k][1] > 0 ? a0 : a1 + ((((a0 - a1 + 180) % 360) + 360) % 360 - 180);
-}
-function simA(k, f) { const a1 = simAEnd(k); if (a1 == null) return null; const a0 = simAStart(k); return a0 + (a1 - a0) * (f || 0); }
+function simA(k, f) { const p = simPose(k, f); return p ? p[3] : null; }
 function simOpAt(k) { if (!sim.total) return null; const i = Math.min(Math.max(0, k), sim.total - 1); return sim.index[i] ? sim.index[i][0] : null; }
 function applySim(k) { applySimAt(k, 0); }
 function applySimAt(k, f) {
@@ -2606,10 +2641,9 @@ function applySimAt(k, f) {
     // the move in progress is move k (travelling from the end of move k-1); its op is the current op
     const [oi, mi] = sim.index[k]; const c = camOps[oi]; const nxt = c.op.moves[mi]; const t = c.op.tool;
     const [oip, mip] = simPrev(k); const mv = camOps[oip].op.moves[mip];
+    const st = program.setups ? program.setups[c.op.setup || 0] : null, pose = simPose(k, f), a = pose ? pose[3] : 0;
     // interpolated tool position between the end of move k-1 and the end of move k (the real motion, not a jump per move)
-    const pos = new THREE.Vector3(mv[1] + (nxt[1] - mv[1]) * f, mv[2] + (nxt[2] - mv[2]) * f, mv[3] + (nxt[3] - mv[3]) * f);
-    const st = program.setups ? program.setups[c.op.setup || 0] : null;
-    const a = simA(k, f) ?? 0;
+    const pos = pose ? new THREE.Vector3(...modelPoint(pose, st)) : new THREE.Vector3(mv[1] + (nxt[1] - mv[1]) * f, mv[2] + (nxt[2] - mv[2]) * f, mv[3] + (nxt[3] - mv[3]) * f);
     const setupTxt = st && (program.setups.length > 1 || st.rotary) ? `${st.name} · ` : '';
     const aTxt = st && st.rotary ? ` · A ${(((a % 360) + 360) % 360).toFixed(1)}°` : '';
     const opTxt = `${setupTxt}${oi + 1}/${camOps.length} ${c.op.name} · T${t.number} · move ${mi + 1}/${c.op.moves.length} · ${nxt[0] === 0 ? 'rapid' : 'F' + nxt[4]}${aTxt}`;
@@ -2825,6 +2859,17 @@ function radialStamp(L, xt, yt, zt, at, t) {          // one sample of the tool:
 function setupPoint(mv, st) {                         // a move's end in the setup frame: model coordinates turned to its A
   const a = (mv.length > 5 ? mv[5] : st.a) * Math.PI / 180, y = mv[2] - st.axis[0], z = mv[3] - st.axis[1], c = Math.cos(a), s = Math.sin(a);
   return [mv[1], y * c - z * s, y * s + z * c, mv.length > 5 ? mv[5] : st.a];
+}
+function modelPoint(p, st) {                          // the way back: a setup-frame point at its A, in model coordinates
+  const a = p[3] * Math.PI / 180, c = Math.cos(a), s = Math.sin(a);
+  return [p[0], st.axis[0] + p[1] * c + p[2] * s, st.axis[1] - p[1] * s + p[2] * c];
+}
+function movePolyline(a, b, st) {                     // a move's line in model coordinates: A turning makes it an arc on the part
+  const none = [[a[1], a[2], a[3]], [b[1], b[2], b[3]]];
+  if (!st || !st.rotary || a.length < 6 || b.length < 6 || Math.abs(b[5] - a[5]) <= 5) return none;
+  const p = setupPoint(a, st), q = setupPoint(b, st), n = Math.min(72, Math.ceil(Math.abs(b[5] - a[5]) / 5)), out = [];
+  for (let j = 0; j <= n; j++) out.push(modelPoint(lerp4(p, q, j / n), st));
+  return out;
 }
 function radialMove(L, gi, f0, f1) {                  // the samples of move gi between fractions f0 and f1, spaced as the simulator's
   const [oi, mi] = sim.index[gi], op = camOps[oi].op, st = program.setups[op.setup || 0], t = op.tool;
