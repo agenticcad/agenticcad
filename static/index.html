@@ -1021,7 +1021,7 @@
       </div>
     </div>
     <div id="cam-view"><div class="seg" id="cv-scope"><button data-v="sel" title="Only the selected operation's toolpath">Selected op</button><button data-v="all" class="on">All</button></div>
-      <div class="seg" id="cv-show"><button data-v="tp" class="on" title="Toolpaths">Toolpath</button><button data-v="stock" class="on" title="Stock and fixtures">Stock</button><button data-v="machine" title="The machine around the work (A)">Machine</button></div></div>
+      <div class="seg" id="cv-show"><button data-v="tp" class="on" title="Toolpaths">Toolpath</button><button data-v="stock" class="on" title="Stock and fixtures">Stock</button><button data-v="machine" title="The machine around the work (A)">Machine</button><button data-v="doors" title="Open or close the machine's doors / canopy" style="display:none">Doors</button></div></div>
     <div id="cam-dock" style="display:none">
         <div id="cam-simres" style="display:none"><div class="sr-head"><b>Simulation</b><span class="muted" id="sr-sum"></span><button class="btn small" id="sr-more">Details</button><button class="btn small" id="sim-clear" title="Hide the simulated stock">Hide</button></div><div id="cam-simres-body" style="display:none"></div></div>
       <div id="cam-sim">
@@ -1198,7 +1198,7 @@
       </div>
       <div id="lib-list" class="muted" style="flex:1;overflow:auto;padding:10px 12px">empty — save a design or body here, or import a STEP into the library</div>
     </div>
-    <div class="pane" id="pane-cam"><div id="cam-insp"></div><div style="display:none">
+    <div class="pane" id="pane-cam"><div id="cam-insp"></div><div id="cam-parked" style="display:none">
         <div class="cam-mrow" id="cam-machine" title="The design sits on the machine's bed; with a CAM program the simulation plays on the program's machine and collisions flash red.">
           <span class="cam-lbl">Machine view</span><select id="cam-machine-pick" class="btn" title="Which machine to show"></select>
           <button class="btn small" id="cam-machine-show" title="Show the machine around the design (A)">Show machine</button>
@@ -2269,6 +2269,8 @@ function o_setup(op) { return op.setup || 0; }
 function camSelSetup() { return camSel.kind === 'setup' || camSel.kind === 'add' ? camSel.si : camSel.kind === 'op' ? ((program.ops.find(o => o.key === camSel.key) || {}).setup || 0) : 0; }
 function renderCamInsp() {
   const el = document.getElementById('cam-insp'); if (!el) return;
+  const mv = document.getElementById('cam-machine');                // out first: clearing the Inspector would destroy it
+  if (mv) document.getElementById('cam-parked').appendChild(mv);
   el.innerHTML = '';
   if (!program) {
     el.innerHTML = `<div class="insp-sec"><div class="insp-h">CAM</div><div class="insp-empty"><b>No CAM program yet.</b> Ask the assistant — e.g. <i>"make the CAM program for the Z1 on the block in the L-bracket"</i> — or write <a href="#" data-a="code">cam.py</a> in Code.</div>
@@ -2297,12 +2299,14 @@ function renderCamInsp() {
         <span>Work origin</span><span>${esc(ORIGIN_TEXT[stp.origin_name] || stp.origin_name)}</span>
         <span>Safe height</span><span>${(+stp.safe_z_wcs).toFixed(1)} mm above the origin</span></div>
         <div class="muted" style="margin-top:8px;font-size:11.5px">Stock size and origin are in cam.py — ask the assistant or edit it in Code.</div></div>
-      <div class="insp-sec"><div class="insp-h">Workholding</div><div class="ci-fx"></div></div>
-      <div class="insp-sec"><div class="insp-h">Machine view</div><div class="ci-mv"></div></div>`;
+      <div class="insp-sec"><div class="insp-h">Workholding</div><div class="ci-fx"></div></div>`;
     renderFixturePanel(el.querySelector('.ci-fx'), si);
-    { const mv = document.getElementById('cam-machine'); if (mv) el.querySelector('.ci-mv').appendChild(mv); }   // moved here on first render
     el.querySelector('[data-a=send]').onclick = () => camSendToMachine(si);
     el.querySelector('[data-a=play]').onclick = () => { const o = program.ops.findIndex(x => (x.setup || 0) === si); if (o >= 0 && sim.opStart[o] >= 0) simSeek(sim.t[sim.opStart[o]], true); if (!sim.playing) document.getElementById('sim-play').click(); };
+  }
+  if (program && camSel.kind !== 'add' && mv) {                     // setups and operations alike: the view doesn't depend on what is selected
+    el.insertAdjacentHTML('beforeend', '<div class="insp-sec"><div class="insp-h">Machine view</div><div class="ci-mv"></div></div>');
+    el.querySelector('.ci-mv').appendChild(mv);
   }
   el.querySelectorAll('[data-a=chat]').forEach(b => b.onclick = e => { e.preventDefault(); showPane('chat'); inputEl.focus(); });
   el.querySelectorAll('[data-a=code]').forEach(b => b.onclick = e => { e.preventDefault(); showPane('code'); });
@@ -2513,6 +2517,7 @@ document.querySelectorAll('#cv-scope button').forEach(b => b.onclick = () => set
 document.querySelectorAll('#cv-show button').forEach(b => b.onclick = () => {
   if (b.dataset.v === 'tp') { showTp = !showTp; document.getElementById('tp-toggle').classList.toggle('active', showTp); applyCamVisibility(); }
   else if (b.dataset.v === 'stock') { showStock = !showStock; document.getElementById('stock-toggle').classList.toggle('active', showStock); applyCamVisibility(); }
+  else if (b.dataset.v === 'doors') setDoors(!machineDoorTarget);
   else setMachine(!machineOn);
   syncMachineUi();
 });
@@ -3404,7 +3409,8 @@ function syncMachineUi() {                                                     /
   if ([...pick.options].map(o => o.value).join('|') !== names.join('|')) pick.innerHTML = names.map(n => `<option value="${n.replace(/&/g, '&amp;').replace(/"/g, '&quot;')}">${n.replace(/&/g, '&amp;').replace(/</g, '&lt;')}</option>`).join('');
   if (names.includes(want)) pick.value = want;
   show.textContent = machineOn ? 'Hide machine' : 'Show machine'; show.classList.toggle('active', machineOn); show.disabled = !names.length;
-  document.querySelectorAll('#cv-show button').forEach(b => b.classList.toggle('on', b.dataset.v === 'tp' ? showTp : b.dataset.v === 'stock' ? showStock : machineOn));
+  document.querySelectorAll('#cv-show button').forEach(b => b.classList.toggle('on', b.dataset.v === 'tp' ? showTp : b.dataset.v === 'stock' ? showStock : b.dataset.v === 'doors' ? !!machineDoorTarget : machineOn));
+  document.querySelector('#cv-show [data-v=doors]').style.display = machineOn && rigHasDoors() ? '' : 'none';
   doors.disabled = !(machineOn && rigHasDoors()); doors.textContent = machineDoorTarget ? 'Close doors' : 'Open doors';
   doors.title = machineOn && !rigHasDoors() ? 'This machine model has no door nodes (node(..., door="hinge"|"slide"))' : "Open or close the machine's doors / canopy";
 }

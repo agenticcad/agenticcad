@@ -5,6 +5,16 @@ patch bumps fix things, a major bump changes something scripts or workspaces rel
 
 ## [Unreleased]
 
+## [1.9.7] — 2026-11-07
+
+### Fixed
+- **The Machine view controls stay put.** Show machine and Open doors disappeared for good after the Inspector redrew,
+  which Simulate does. They now stay there, and show for an operation as well as a setup.
+
+### Added
+- **Doors in the 3D view.** A Doors button sits beside Machine above the view while the machine is shown, so you can
+  open them during a simulation whatever is selected.
+
 ## [1.9.6] — 2026-11-06
 
 ### Fixed
