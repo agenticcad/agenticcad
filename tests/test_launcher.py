@@ -46,9 +46,13 @@ def test_designs_from_the_tabs_test_build_are_copied_once(tmp_path):
     assert launcher._import_tabs_test_build(tmp_path / "none", tmp_path / "fresh") == []
 
 class _FakeNative:
-    """Stands in for the NSWindow and the WKWebView of the frozen-page watch; ticks run when the test says so."""
+    """Stands in for pywebview's BrowserView, its NSWindow and its WKWebView in the page watch; each look is 1.5 s on its
+    clock and runs when the test says so."""
     def __init__(self):
-        self.on_screen, self.page, self.woken, self.looks, self.next = True, "visible", 0, 0, None
+        self.webview = self.window = self
+        self.on_screen, self.on_space, self.has_screen, self.page = True, True, True, "visible"
+        self.replaced, self.gave_up, self.looks, self.next = [], [], 0, None
+        self.mb, self.layout, self.now = 400, ["internal"], 1000.0
 
     def isVisible(self):
         return self.on_screen
@@ -56,54 +60,149 @@ class _FakeNative:
     def occlusionState(self):
         return 8194 if self.on_screen else 8192
 
+    def screen(self):
+        return object() if self.has_screen else None
+
+    def isOnActiveSpace(self):
+        return self.on_space
+
     def evaluateJavaScript_completionHandler_(self, _js, done):
         self.looks += 1
         done(self.page, None)
 
-    def _prepareForMoveToWindow_completionHandler_(self, _window, _done):
-        self.woken += 1
-        self.page = "visible"
-
     def later(self, _seconds, fn):
         self.next = fn
 
-    def ticks(self, n):
+    def replace(self, why):
+        self.replaced.append(why)
+        self.page, self.mb = "visible", 400
+
+    def watch(self, alive=lambda: True):
+        launcher._watch_page(self, alive, self.later, self.replace, self.gave_up.append, lambda _v: self.mb << 20,
+                             lambda: list(self.layout), lambda: self.now)
+        return self
+
+    def ticks(self, n, grow=0):
         for _ in range(n):
+            self.now += 1.5
+            self.mb += grow
             self.next()
 
+    def settle(self):
+        self.ticks(8)                               # past SCREENS_SETTLE from the start of the watch
 
-def test_frozen_page_in_a_visible_window_is_woken_after_two_looks():
-    n = _FakeNative()
-    launcher._watch_for_frozen_page(n, n, lambda: True, n.later)
-    n.ticks(3)
-    assert n.woken == 0                             # a healthy page is left alone
+
+def test_page_hidden_in_a_visible_window_is_replaced_after_four_looks_never_sooner():
+    n = _FakeNative().watch()
+    n.settle()
+    assert not n.replaced                           # a healthy page is left alone
     n.page = "hidden"
-    n.ticks(1)
-    assert n.woken == 0                             # one look may be an update still on its way
-    n.ticks(1)
-    assert n.woken == 1 and n.page == "visible"
     n.ticks(3)
-    assert n.woken == 1
+    assert not n.replaced                           # a slow update lands well inside this
+    n.ticks(1)
+    assert n.replaced == ["hidden in a visible window"] and n.page == "visible"
+    n.ticks(3)
+    assert len(n.replaced) == 1
 
 
-def test_a_covered_window_may_sleep_and_is_not_woken_or_touched():
-    n = _FakeNative()
-    launcher._watch_for_frozen_page(n, n, lambda: True, n.later)
+@pytest.mark.parametrize("away", ["on_screen", "on_space", "has_screen"])
+def test_a_window_off_screen_may_sleep_and_is_not_touched(away):
+    n = _FakeNative().watch()
+    n.settle()
     n.page = "hidden"
-    n.ticks(1)                                      # one hidden look, then the window is covered
-    n.on_screen = False
+    n.ticks(3)                                      # three hidden looks, then the window goes away
+    setattr(n, away, False)
     looks = n.looks
     n.ticks(5)
-    assert n.woken == 0 and n.looks == looks        # asking would wake a suspended page
-    n.on_screen = True
+    assert not n.replaced and n.looks == looks      # asking would wake a suspended page
+    setattr(n, away, True)
+    n.ticks(3)
+    assert not n.replaced                           # the count started again
     n.ticks(1)
-    assert n.woken == 0                             # the count started again
+    assert len(n.replaced) == 1
 
 
-def test_frozen_page_watch_stops_with_the_window():
-    n = _FakeNative()
+def test_a_monitor_change_holds_the_watch_until_the_displays_settle():
+    n = _FakeNative().watch()
+    n.settle()
+    n.page = "hidden"
+    n.ticks(3)
+    n.layout = ["internal", "external"]
+    n.ticks(6)                                      # 9 s since the change: nothing yet, and no look at a page in the middle of it
+    n.layout = ["external"]                         # the unplug comes in steps: the wait starts again
+    looks = n.looks
+    n.ticks(6)
+    assert not n.replaced and n.looks == looks
+    n.ticks(1 + 4)
+    assert len(n.replaced) == 1
+
+
+def test_a_runaway_footprint_is_stopped_wherever_the_window_is():
+    n = _FakeNative().watch()
+    n.on_space = False                              # the real one ran on with the window off screen too
+    n.ticks(8, grow=400)                            # 270 MB/s, as the real ones ran
+    assert n.replaced and n.replaced[0].startswith("footprint running away") and n.mb < 3000
+
+
+def test_a_big_model_loading_is_not_a_runaway():
+    n = _FakeNative().watch()
+    n.ticks(2, grow=2000)                           # a large jump that stops
+    n.ticks(6)
+    n.ticks(3, grow=300)                            # and steps too short to be one
+    n.ticks(1)
+    n.ticks(3, grow=300)
+    assert not n.replaced
+    m = _FakeNative().watch()
+    m.ticks(10, grow=150)                           # a steady climb below the rate of the real ones
+    assert not m.replaced
+    k = _FakeNative().watch()
+    k.ticks(4, grow=250)                            # at the rate but well under the floor
+    assert not k.replaced
+
+
+def test_a_new_page_gets_time_to_load_before_it_is_looked_at():
+    n = _FakeNative().watch()
+    n.settle()
+    n.page = "hidden"
+    n.ticks(4)
+    n.page = "hidden"
+    looks = n.looks
+    n.ticks(19)                                     # 28.5 s after the swap
+    assert n.looks == looks and len(n.replaced) == 1
+    n.ticks(1 + 4)
+    assert len(n.replaced) == 2
+
+
+def test_a_third_recovery_in_ten_minutes_gets_the_plain_page_and_the_watch_ends():
+    n = _FakeNative().watch()
+    n.settle()
+    for count in (1, 2):
+        n.page = "hidden"
+        n.ticks(24)
+        assert len(n.replaced) == count
+    n.page = "hidden"
+    n.ticks(24)
+    assert len(n.replaced) == 2 and n.gave_up == ["hidden in a visible window"]
+    looks = n.looks
+    n.next, tick = None, n.next
+    tick()
+    assert n.next is None and n.looks == looks
+
+
+def test_recoveries_hours_apart_each_get_a_new_page():
+    n = _FakeNative().watch()
+    n.settle()
+    for count in (1, 2, 3, 4):
+        n.page = "hidden"
+        n.ticks(24)
+        assert len(n.replaced) == count
+        n.now += 3600
+    assert not n.gave_up
+
+
+def test_page_watch_stops_with_the_window():
     alive = [True]
-    launcher._watch_for_frozen_page(n, n, lambda: alive[0], n.later)
+    n = _FakeNative().watch(lambda: alive[0])
     alive[0] = False
     n.next, tick = None, n.next
     tick()

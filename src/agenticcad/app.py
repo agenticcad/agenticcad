@@ -76,47 +76,132 @@ def _import_tabs_test_build(tabs_dir: Path, data: Path) -> list[str]:
     return copied
 
 
-def _watch_for_frozen_page(view, window, alive, later, every: float = 1.5) -> None:
+STUCK_HTML = """<!doctype html><html><head><meta charset="utf-8"><style>
+html,body{margin:0;height:100%;background:#14171c;color:#e6e9ee;font:14px/1.5 -apple-system,BlinkMacSystemFont,sans-serif}
+.box{position:absolute;inset:0;display:flex;align-items:center;justify-content:center}.in{width:440px;max-width:90vw}
+h1{font-size:20px;margin:0 0 8px}p{color:#8b94a1;margin:0}</style></head><body><div class="box"><div class="in">
+<h1>This window has stopped drawing</h1><p>Quit AgenticCAD and open it again. Your designs are saved, and anything running on a machine is not affected by this window.</p>
+</div></div></body></html>"""
+HIDDEN_LOOKS = 4                                    # looks in a row, 1.5 s apart: replacing the page must not answer a slow update
+SCREENS_SETTLE = 10.0                               # seconds: a monitor change comes in several steps
+RECOVERY_GAP = 30.0                                 # seconds a new page gets to load and report visible
+RUNAWAY_STEP = 200 << 20                            # the page's footprint per look: the two real runaways ran at 200-300 MB/s
+RUNAWAY_LOOKS = 4
+RUNAWAY_FLOOR = 3 << 30                             # a healthy page sits near 400 MB
+RECOVERY_WINDOW, RECOVERY_LIMIT = 600.0, 2          # a third in ten minutes: a new page is not what it needs
+
+
+def _watch_page(native, alive, later, replace, give_up, footprint, screens, clock=time.monotonic, every: float = 1.5) -> None:
     """macOS: WKWebView applies each visibility change through a one-shot callback (a Core Animation post-commit handler
     or a run-loop observer). Around a display sleep or unplug that callback can be lost, and WebKit then drops every later
-    change because it still thinks one is scheduled. A page that was hidden at that moment stays frozen, and the window
-    shows black while it is on screen (the unified log shows activityStateDidChange with no dispatchActivityStateChange).
-    So: when a page says it is hidden in a window that is on screen, push the state through WebKit's one immediate path,
-    its move-to-window preparation. Runs on the main thread; `later(seconds, fn)` schedules the next look."""
-    hidden = 0
+    change because it still thinks one is scheduled, so a page that was hidden stays frozen and the window shows black
+    (the unified log shows activityStateDidChange with no dispatchActivityStateChange). Forcing the state through WebKit's
+    immediate path does not help: the next update jams again, and twice the woken page's graphics memory ran at 200-300 MB/s
+    to WebKit's 16 GB limit. The flag lives in the page's proxy and survives a web process reload, so the way out is a new
+    WKWebView: `replace(why)` swaps one in. Two things call for it: a page that says it is hidden in a window that is
+    on screen, on the active Space, with the displays settled; and a footprint that keeps climbing at the rate of those
+    runaways, wherever the window is. A page that keeps needing it gets `give_up()`, a plain one with no WebGL.
+    Runs on the main thread; `later(seconds, fn)` schedules the next look."""
+    hidden = rising = 0
+    size = None
+    layout, moved = screens(), clock()
+    recoveries: list[float] = []
+    done = False
+
+    def recover(why: str) -> None:
+        nonlocal hidden, rising, size, done
+        hidden = rising = 0
+        size = None
+        now = clock()
+        recoveries[:] = [t for t in recoveries if now - t < RECOVERY_WINDOW] + [now]
+        if len(recoveries) > RECOVERY_LIMIT:
+            done = True
+            give_up(why)
+        else:
+            replace(why)
 
     def seen(state, error=None) -> None:
         nonlocal hidden
         hidden = hidden + 1 if state == "hidden" else 0
-        if hidden >= 2:                             # twice in a row: a slow but healthy update lands well inside this
-            hidden = 0
-            print("AgenticCAD: page frozen in a visible window, waking it", flush=True)
-            view._prepareForMoveToWindow_completionHandler_(window, lambda: None)
+        if hidden >= HIDDEN_LOOKS and not done:
+            recover("hidden in a visible window")
 
     def tick() -> None:
-        nonlocal hidden
-        if not alive():
+        nonlocal hidden, rising, size, layout, moved
+        if not alive() or done:
             return
-        if window.isVisible() and window.occlusionState() & 2:      # NSWindowOcclusionStateVisible
+        now = clock()
+        current = screens()
+        if current != layout:
+            layout, moved, hidden = current, now, 0
+        view, window = native.webview, native.window
+        was, size = size, footprint(view)
+        rising = rising + 1 if was is not None and size - was >= RUNAWAY_STEP else 0
+        if rising >= RUNAWAY_LOOKS and size >= RUNAWAY_FLOOR:
+            recover(f"footprint running away at {size >> 20} MB")
+        elif (window.isVisible() and window.occlusionState() & 2 and window.screen() is not None and window.isOnActiveSpace()
+              and now - moved >= SCREENS_SETTLE and not (recoveries and now - recoveries[-1] < RECOVERY_GAP)):
             view.evaluateJavaScript_completionHandler_("document.visibilityState", seen)
-        else:                                       # covered or minimised: hidden is right, and the page may sleep
+        else:                                       # covered, minimised, on another Space, or just moved: the page may sleep
             hidden = 0
         later(every, tick)
 
     tick()
 
 
-def _start_frozen_page_watch(window) -> None:
-    import objc
+def _footprint(view) -> int:
+    """Bytes charged to the page's web process: the number WebKit's 16 GB limit goes by, and it counts the unmapped
+    graphics memory that resident size misses. 0 if the process is gone or the private call is."""
+    import ctypes
+    info = (ctypes.c_uint64 * 64)()                 # rusage_info_v4; ri_phys_footprint is the tenth 64-bit field
+    if ctypes.CDLL(None).proc_pid_rusage(view._webProcessIdentifier(), 4, info) != 0:
+        return 0
+    return info[9]
+
+
+def _screens() -> list:
+    import AppKit
+    return [(int(s.deviceDescription()["NSScreenNumber"]), tuple(s.frame().origin), tuple(s.frame().size)) for s in AppKit.NSScreen.screens()]
+
+
+def _new_web_view(native, load) -> None:
+    """Swap the window's WKWebView for a new one on the same configuration. It goes into the window before it loads, so
+    the new page takes its visibility from the window when it is created and not through an update that can jam.
+    `load(view)` starts it. Without _close the old page's process stays up, hidden, with its WebSocket still open."""
+    from webview.platforms.cocoa import BrowserView
+    old = native.webview
+    new = BrowserView.WebKitHost.alloc().initWithFrame_configuration_(old.frame(), old.configuration())
+    new.pywebview_window = old.pywebview_window
+    new.setUIDelegate_(native._browserDelegate)
+    new.setNavigationDelegate_(native._browserDelegate)
+    old.setNavigationDelegate_(None)
+    old.setUIDelegate_(None)
+    native.webview = new
+    native.window.setContentView_(new)
+    native.window.makeFirstResponder_(new)
+    load(new)
+    old._close()
+
+
+def _start_page_watch(window, note) -> None:
+    from Foundation import NSURLRequest
     from PyObjCTools import AppHelper
     from webview.platforms.cocoa import BrowserView
-    objc.registerMetaDataForSelector(b"WKWebView", b"_prepareForMoveToWindow:completionHandler:",
-                                     {"arguments": {3: {"callable": {"retval": {"type": b"v"}, "arguments": {0: {"type": b"^v"}}}}}})
     native = BrowserView.instances.get(window.uid)
-    if native is None or not native.webview.respondsToSelector_(b"_prepareForMoveToWindow:completionHandler:"):
+    if native is None or not all(native.webview.respondsToSelector_(s) for s in (b"_webProcessIdentifier", b"_close")):
         return
-    AppHelper.callAfter(_watch_for_frozen_page, native.webview, native.window,
-                        lambda: window.uid in BrowserView.instances, AppHelper.callLater)
+
+    def replace(why: str) -> None:
+        note(f"replacing the web view: {why}; screens {_screens()}")
+        url = native.webview.URL()
+        _new_web_view(native, lambda view: view.loadRequest_(NSURLRequest.requestWithURL_(url)))
+
+    def give_up(why: str) -> None:
+        note(f"giving up, showing the quit page: {why}; screens {_screens()}")
+        _new_web_view(native, lambda view: view.loadHTMLString_baseURL_(STUCK_HTML, None))
+
+    AppHelper.callAfter(_watch_page, native, lambda: window.uid in BrowserView.instances, AppHelper.callLater,
+                        replace, give_up, _footprint, _screens)
 
 
 def main() -> None:
@@ -162,10 +247,13 @@ def main() -> None:
             say("Opening the workspace")
             window.load_url(state["url"])
             if sys.platform == "darwin":
+                def note(text: str) -> None:        # stdout goes nowhere in the app; this is what the next incident leaves behind
+                    with (data / "window.log").open("a") as f:
+                        f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} {text}\n")
                 try:
-                    _start_frozen_page_watch(window)
+                    _start_page_watch(window, note)
                 except Exception as e:              # private WebKit API: without it the app still runs as before
-                    print(f"AgenticCAD: no frozen-page watch: {e}", flush=True)
+                    note(f"no page watch: {e}")
             smoke = os.environ.get("AGENTICCAD_SMOKE")
             if smoke:                               # test runs: close the window after N seconds
                 time.sleep(float(smoke)); window.destroy()

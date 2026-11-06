@@ -5,6 +5,17 @@ patch bumps fix things, a major bump changes something scripts or workspaces rel
 
 ## [Unreleased]
 
+## [1.9.5] — 2026-11-06
+
+### Fixed
+- **macOS: the black window no longer crashes the page, and it can now recover.** 1.9.3's fix forced a stuck page
+  awake, and on real monitor changes that sent its graphics memory climbing to WebKit's 16 GB limit. The forced wake is
+  gone. When a page stays hidden in a window that is on screen, the app now waits for the displays to settle and replaces
+  the web view with a new one, which reloads your tabs; the server keeps your chat and approvals.
+- **A guard against runaway memory.** If a page's memory climbs at that rate, it is replaced at about 3 GB, wherever the
+  window is. If a window needs replacing a third time in ten minutes, it shows a page asking you to quit and reopen. Each
+  of these is recorded in `window.log` in the app's data folder.
+
 ## [1.9.4] — 2026-11-06
 
 ### Fixed
