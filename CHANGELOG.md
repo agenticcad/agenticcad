@@ -5,7 +5,7 @@ patch bumps fix things, a major bump changes something scripts or workspaces rel
 
 ## [Unreleased]
 
-## [1.9.7] — 2026-11-07
+## [1.9.7] — 2026-11-06
 
 ### Fixed
 - **The Machine view controls stay put.** Show machine and Open doors disappeared for good after the Inspector redrew,
