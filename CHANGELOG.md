@@ -5,6 +5,11 @@ patch bumps fix things, a major bump changes something scripts or workspaces rel
 
 ## [Unreleased]
 
+## [1.9.10] — 2026-11-07
+
+### Fixed
+- **Links in the chat open in your browser.** They used to load inside the tab, which left it blank with no way back.
+
 ## [1.9.9] — 2026-11-07
 
 ### Fixed

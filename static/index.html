@@ -1805,6 +1805,15 @@ const thinkingEl = document.getElementById('thinking');
 let currentBubble = null, currentText = '';
 const toolEls = new Map();
 marked.setOptions({ breaks: true });
+// a link in the chat, or to another site anywhere in the page, leaves the app: followed in place it would replace this tab
+// with a page that has no way back. The desktop window hands target=_blank links to the default browser.
+document.addEventListener('click', e => {
+  const a = e.target.closest && e.target.closest('a[href]'); if (!a) return;
+  const href = a.getAttribute('href');
+  if (href.startsWith('#') || a.hasAttribute('download') || (a.origin === location.origin && !a.closest('#messages'))) return;
+  if (!/^(https?|mailto):$/.test(a.protocol)) { e.preventDefault(); return; }
+  a.target = '_blank'; a.rel = 'noopener';
+}, true);
 
 function addMsg(cls, text) {
   const el = document.createElement('div'); el.className = 'msg ' + cls;
