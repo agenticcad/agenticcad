@@ -5,6 +5,14 @@ patch bumps fix things, a major bump changes something scripts or workspaces rel
 
 ## [Unreleased]
 
+## [1.9.12] — 2026-11-07
+
+### Fixed
+- **An API key reaches every open tab.** Each tab kept its own copy of the settings from launch, so a key saved in one
+  tab never reached the others, which went on using the Claude sign-in. Saving Settings in one of those tabs could also
+  erase the key. All tabs now share one set of settings, and a tab already running switches to a new key on its next
+  message and keeps its conversation.
+
 ## [1.9.11] — 2026-11-07
 
 ### Fixed

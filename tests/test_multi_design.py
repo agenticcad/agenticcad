@@ -1,5 +1,6 @@
 """Multiple open designs (tabs): every request and page belongs to one design, each design has its own working files,
 model, CAM program and assistant; the machine is shared and belongs to the design whose program it runs."""
+import json
 import os
 import sys
 import time
@@ -155,3 +156,32 @@ def test_close_tab_removes_its_working_copy(client):
     assert client.post("/api/docs/new", json={}).json()["id"] == "d3"
     _wait_ready(client, "d3")
     assert server.DOCS["d3"].design_name is None
+
+
+def test_settings_are_shared_and_a_new_key_reaches_a_running_tab(client):
+    """An API key saved in one tab reaches every tab; a tab that still holds the old settings must not erase it."""
+    import asyncio
+    import server
+    if len(server.DOCS) < 2:
+        client.post("/api/docs/new", json={})
+    d1, d2 = list(server.DOCS)[:2]
+    a1, a2 = server.DOCS[d1], server.DOCS[d2]
+    assert client.post("/api/settings", json={"settings": {"api_key": "sk-test"}}, headers={"X-Doc": d1}).status_code == 200
+    assert a2.settings["api_key"] == "sk-test"
+    assert client.post("/api/settings", json={"settings": {"api_key": "__keep__", "units": "mm"}}, headers={"X-Doc": d2}).status_code == 200
+    assert json.loads(a1._settings_path().read_text())["api_key"] == "sk-test" and a1.settings["units"] == "mm"
+
+    class Live:
+        stopped = False
+
+        async def disconnect(self):
+            self.stopped = True
+
+    live = Live()
+    a2.client, a2.client_key = live, "sk-test"            # started with this key: left running
+    asyncio.run(a2.chat("hello"))
+    assert a2.client is live and not live.stopped
+    a2.client_key = ""                                    # started on the old sign-in: stops, and the turn starts it again
+    asyncio.run(a2.chat("hello"))
+    assert a2.client is None and live.stopped
+    client.post("/api/settings", json={"settings": {"api_key": "", "units": ""}}, headers={"X-Doc": d1})

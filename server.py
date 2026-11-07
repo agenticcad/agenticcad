@@ -171,9 +171,9 @@ def _make_doc(doc_id: str) -> CadAgent:
     a = CadAgent(WORKSPACE, lambda ev, _i=doc_id: bus.emit_doc(_i, ev), lambda spec, _i=doc_id: bus.screenshot(spec, _i),
                  doc_dir=_doc_dir(doc_id))
     a.doc_id = doc_id
-    if DOCS:                                      # one tool / machine / part library and one set of extensions for all
+    if DOCS:                                      # one tool / machine / part library, one set of extensions and one set of settings for all
         first = next(iter(DOCS.values()))
-        a.library, a.parts, a.extensions = first.library, first.parts, first.extensions
+        a.library, a.parts, a.extensions, a.settings = first.library, first.parts, first.extensions, first.settings
         ck.LIBRARY = first.parts
     if "machine" in globals():
         a.machine, a.camera = machine, camera

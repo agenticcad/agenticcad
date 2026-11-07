@@ -716,6 +716,7 @@ class CadAgent:
         self.saved_code: str | None = None    # code as of last save/open
         self.notes: list[str] = []            # out-of-band events to tell the agent on the next turn
         self.settings = self._load_settings()
+        self.client_key = ""                   # the API key the running assistant was started with
         self.library = Library(workspace)
         self.parts = PartLibrary(workspace)
         self.extensions = ext_mod.for_workspace(workspace)   # Python files that extend the app (ext_builtin + workspace/extensions)
@@ -3615,7 +3616,8 @@ class CadAgent:
             if t in ("http", "sse") and not cfg.get("url"):
                 raise ValueError(f"MCP server '{name}': {t} servers need a url")
             cfg["type"] = t
-        self.settings = st
+        self.settings.clear()                  # in place: every open design shares this one dict (server._make_doc)
+        self.settings.update(st)
         path = self._settings_path()
         path.write_text(json.dumps(st, indent=2))
         try:
@@ -3788,6 +3790,7 @@ class CadAgent:
             options.cli_path = cli
         self.client = ClaudeSDKClient(options=options)
         await self.client.connect()
+        self.client_key = st.get("api_key") or ""
         self.auth_problem = None
 
     async def stop(self) -> None:
@@ -3847,6 +3850,9 @@ class CadAgent:
         return out
 
     async def chat(self, text: str, selection: Any = None, images: list[dict[str, Any]] | None = None) -> None:
+        if self.client is not None and not self.busy and self.client_key != (self.settings.get("api_key") or ""):
+            await self.stop()                  # started before the API key changed: the key is fixed at launch, so start
+            #                                    again, resuming this conversation, rather than answer on the old sign-in
         if self.client is None:
             if os.environ.get("AGENTICCAD_NO_AGENT") == "1":
                 await self.emit({"type": "error", "text": "The agent is disabled on this server (AGENTICCAD_NO_AGENT=1); manual tools still work."})
