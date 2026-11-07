@@ -5,6 +5,13 @@ patch bumps fix things, a major bump changes something scripts or workspaces rel
 
 ## [Unreleased]
 
+## [1.9.11] — 2026-11-07
+
+### Fixed
+- **Very large models show up.** On anything many metres across, the viewer's floor grid became a solid sheet that hid
+  everything below Z 0, so an imported aircraft looked as if it hadn't loaded. The grid now has at most 100 cells, with
+  round cell sizes. Models up to about 1 m across keep the 10 mm grid.
+
 ## [1.9.10] — 2026-11-07
 
 ### Fixed

@@ -1276,8 +1276,10 @@ const fill = new THREE.DirectionalLight(0xffffff, 0.4); fill.position.set(-80, 6
 let grid = null, axes = null;
 function makeHelpers(size) {
   if (grid) scene.remove(grid); if (axes) scene.remove(axes);
-  const s = Math.max(50, Math.ceil(size * 2 / 10) * 10);
-  grid = new THREE.GridHelper(s, s / 10, 0x3a4250, 0x262c36); grid.rotation.x = Math.PI / 2; scene.add(grid);
+  // at most 100 cells: fixed 10 mm cells on an aircraft-sized model drew 9,000 lines, a solid sheet hiding all that is below Z 0
+  const cell = [10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000, 50000, 100000].find(c => size * 2 / c <= 100) || 100000;
+  const s = Math.max(50, Math.ceil(size * 2 / cell) * cell);
+  grid = new THREE.GridHelper(s, s / cell, 0x3a4250, 0x262c36); grid.rotation.x = Math.PI / 2; scene.add(grid);
   axes = new THREE.AxesHelper(s / 4); scene.add(axes);
 }
 makeHelpers(60);
