@@ -5,6 +5,12 @@ patch bumps fix things, a major bump changes something scripts or workspaces rel
 
 ## [Unreleased]
 
+## [1.9.13] — 2026-11-13
+
+### Fixed
+- **Switching tabs is instant while the assistant is building.** Every click and key used to wait while a model built in another tab (often 1–2 s, up to 6 s). The window now handles mouse and keyboard input natively. Cut, copy, paste, select all, undo, redo and Close Window still work from the menus and their shortcuts.
+- **Tab clicks no longer go missing.** The tab strip redrew its buttons several times a second, so about a third of ordinary clicks did nothing. It now redraws only when something it shows changes.
+
 ## [1.9.12] — 2026-11-07
 
 ### Fixed
