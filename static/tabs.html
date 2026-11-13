@@ -132,15 +132,19 @@ function activate(id) {
   if (f) setTimeout(() => { try { f.contentWindow.focus(); } catch (e) {} }, 50);
 }
 
+let tabsHtml = null;
 function render() {
   const host = $('#doctabs');
-  host.innerHTML = S.order.map(id => {
+  // every page reports its status every 0.7 s: rebuild the buttons only when something shows differently, or a click
+  // that straddles a rebuild (its mousedown on the old button, mouseup on the new one) is lost
+  const html = S.order.map(id => {
     const d = S.docs.get(id); if (!d) return '';
     const st = d.pending ? `<span class="need" title="${d.pending} waiting for you">${d.pending}</span>` : d.busy ? '<i class="busy" title="the assistant is working"></i>' : d.dirty ? '<i class="dirty" title="unsaved changes"></i>' : '';
     const ws = d.ws === 'cam' ? 'CAM' : 'Design';
     return `<button class="tab ${S.active === id ? 'on' : ''}" data-tab="${id}">${d.ws === 'cam' ? ICON_CAM : ICON_DESIGN}<span class="nm">${esc(d.name || 'untitled')}</span><span class="ws">${ws}</span>
       <span class="st">${st}</span><span class="x" data-close="${id}" title="Close tab">✕</span></button>`;
   }).join('');
+  if (html !== tabsHtml) { host.innerHTML = html; tabsHtml = html; }
   $('#mtab').classList.toggle('on', S.active === 'machine');
   // the machine tab
   const m = S.mst, job = m && m.job, stage = job && job.stage, s = (m && m.status) || {};

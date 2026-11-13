@@ -307,3 +307,67 @@ def test_installer_licence_files_are_in_sync():
     assert (root / "packaging" / "macos-installer" / "LICENSE").read_text() == terms + (root / "LICENSE").read_text()
     from version import __version__  # noqa: F401  (terms mention no version, so they don't need bumping)
     assert "A$99" in terms and "terms.html" in terms and "PolyForm Noncommercial" in terms
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="Cocoa only")
+def test_clicks_and_keys_reach_the_page_without_python():
+    """The server's OCCT builds hold the GIL for seconds; a click whose path runs Python waits for them (a tab click
+    waited up to 6 s during a build). After _native_input the view and window pywebview creates handle no mouse or
+    key event in Python; the methods kept from pywebview still run (they call super(BrowserView.WebKitHost, ...))."""
+    objc = pytest.importorskip("objc")
+    import AppKit
+    import WebKit
+    import webview
+    src = (Path(webview.__file__).parent / "platforms" / "cocoa.py").read_text()   # (importing it makes an NSApplication)
+    for name in ("from objc import nil, super", "performDragOperation_", "addSubview_", "willOpenMenu_withEvent_", "mouseDown_", "keyDown_",
+                 "def _add_edit_menu", "WebKitHost.alloc()", "WindowHost.alloc()"):
+        assert name in src, f"pywebview changed: {name} (pinned in pyproject; see app._native_input)"
+
+    calls = []
+
+    class FakeWebKitHost(WebKit.WKWebView):           # stand-ins for pywebview's, with the same Python overrides
+        def mouseDown_(self, event):
+            objc.super(BrowserView.WebKitHost, self).mouseDown_(event)
+
+        def mouseDragged_(self, event):
+            objc.super(BrowserView.WebKitHost, self).mouseDragged_(event)
+
+        def keyDown_(self, event):
+            objc.super(BrowserView.WebKitHost, self).keyDown_(event)
+
+        def performDragOperation_(self, sender):
+            calls.append("drop")
+            return objc.super(BrowserView.WebKitHost, self).performDragOperation_(sender)
+
+        def addSubview_(self, view):
+            calls.append("subview")
+            objc.super(BrowserView.WebKitHost, self).addSubview_(view)
+
+        def willOpenMenu_withEvent_(self, menu, event):
+            calls.append("menu")
+
+    class FakeWindowHost(AppKit.NSWindow):
+        def canBecomeKeyWindow(self):
+            return self.focus
+
+    class BrowserView:
+        WebKitHost, WindowHost = FakeWebKitHost, FakeWindowHost
+
+        def _add_edit_menu(self, main_menu):
+            calls.append("edit menu")
+
+    launcher._native_input(BrowserView)
+    view, window = BrowserView.WebKitHost, BrowserView.WindowHost
+
+    def in_python(cls, name):
+        return any(isinstance(k.__dict__.get(name), objc.python_selector) for k in cls.__mro__ if hasattr(k, "__dict__"))
+
+    assert not [n for n in launcher.INPUT_SELECTORS if in_python(view, n)]
+    assert not in_python(window, "canBecomeKeyWindow")
+    assert all(in_python(view, n) for n in ("performDragOperation_", "addSubview_", "willOpenMenu_withEvent_"))
+    v = view.alloc().initWithFrame_configuration_(AppKit.NSMakeRect(0, 0, 10, 10), WebKit.WKWebViewConfiguration.alloc().init())
+    n, sub = len(calls), AppKit.NSView.alloc().initWithFrame_(AppKit.NSMakeRect(0, 0, 2, 2))
+    v.addSubview_(sub)                                # pywebview's body runs, its super() reaches WKWebView
+    assert calls[n:] == ["subview"] and sub.superview() == v
+    launcher._native_input(BrowserView)               # once only
+    assert BrowserView.WebKitHost is view

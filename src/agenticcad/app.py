@@ -183,6 +183,66 @@ def _new_web_view(native, load) -> None:
     old._close()
 
 
+INPUT_SELECTORS = ("mouseDown_", "mouseUp_", "mouseDragged_", "mouseMoved_", "rightMouseDown_", "scrollWheel_",
+                   "keyDown_", "keyUp_", "flagsChanged_")
+
+
+def _native_input(BrowserView=None) -> None:
+    """Clicks and keys reach the page without running Python. pywebview's WKWebView subclass handles mouseDown:,
+    mouseDragged: and keyDown: in Python (easy-drag for frameless windows, Cmd shortcuts), and its window answers
+    canBecomeKeyWindow in Python, so every click and key on the AppKit thread had to take the GIL first. The server
+    runs in this process and OCCT (build123d through OCP) holds the GIL for a whole boolean or tessellation, so while
+    an assistant built a model a click on a tab waited up to 6 s (p50 1.6 s), then arrived all at once.
+    The view and window here are plain subclasses that keep pywebview's other Python methods (file drops, the context
+    menu, subview placement); the Cmd shortcuts come from the menu bar (Undo / Redo added to pywebview's Edit menu,
+    a Window menu with Close), which AppKit handles natively. pywebview is pinned (pyproject), so the hooks below
+    are stable."""
+    import AppKit
+    import WebKit
+    if BrowserView is None:                           # (tests pass a stand-in: importing pywebview's cocoa makes an NSApplication)
+        from webview.platforms.cocoa import BrowserView
+    if getattr(BrowserView, "_agenticcad_native_input", False):
+        return
+    old = BrowserView.WebKitHost
+    keep = {n: old.__dict__[n].callable for n in ("performDragOperation_", "addSubview_", "willOpenMenu_withEvent_")}
+
+    class AgenticCADWebView(WebKit.WKWebView):
+        # pywebview's bodies call super(BrowserView.WebKitHost, self), which is this class once it is installed
+        def performDragOperation_(self, sender):
+            return keep["performDragOperation_"](self, sender)
+
+        def addSubview_(self, view):
+            keep["addSubview_"](self, view)
+
+        def willOpenMenu_withEvent_(self, menu, event):
+            keep["willOpenMenu_withEvent_"](self, menu, event)
+
+    class AgenticCADWindow(AppKit.NSWindow):
+        pass                                           # titled and focusable: AppKit's own canBecomeKeyWindow is YES
+
+    add_edit_menu = BrowserView._add_edit_menu
+
+    def edit_menu(self, main_menu) -> None:
+        add_edit_menu(self, main_menu)
+        edit = main_menu.itemAtIndex_(1).submenu()      # pywebview inserts the Edit menu at index 1
+        edit.insertItemWithTitle_action_keyEquivalent_atIndex_("Undo", "undo:", "z", 0)
+        redo = edit.insertItemWithTitle_action_keyEquivalent_atIndex_("Redo", "redo:", "z", 1)
+        redo.setKeyEquivalentModifierMask_(AppKit.NSEventModifierFlagCommand | AppKit.NSEventModifierFlagShift)
+        edit.insertItem_atIndex_(AppKit.NSMenuItem.separatorItem(), 2)
+        win = AppKit.NSMenu.alloc().initWithTitle_("Window")
+        win.addItemWithTitle_action_keyEquivalent_("Minimize", "performMiniaturize:", "m")
+        win.addItemWithTitle_action_keyEquivalent_("Close", "performClose:", "w")
+        item = AppKit.NSMenuItem.alloc().init()
+        item.setSubmenu_(win)
+        main_menu.addItem_(item)
+        BrowserView.app.setWindowsMenu_(win)
+
+    BrowserView.WebKitHost = AgenticCADWebView
+    BrowserView.WindowHost = AgenticCADWindow
+    BrowserView._add_edit_menu = edit_menu
+    BrowserView._agenticcad_native_input = True
+
+
 def _start_page_watch(window, note) -> None:
     from Foundation import NSURLRequest
     from PyObjCTools import AppHelper
@@ -272,6 +332,11 @@ def main() -> None:
             pass
     else:
         import version as _v
+        if sys.platform == "darwin":
+            try:
+                _native_input()
+            except Exception as e:                  # pywebview internals: without it the app runs as before
+                print(f"native input not installed: {e}")
         window = webview.create_window(f"{app_name} {_v.__version__}", html=SPLASH_HTML, width=1500, height=950, min_size=(1000, 650),
                                        background_color="#14171c", text_select=True)
         webview.start(boot, window, debug=bool(os.environ.get("AGENTICCAD_DEBUG")))   # blocks until the window closes
